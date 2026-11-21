@@ -12,7 +12,7 @@
 #       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2
 #
 # then run and measure the flame speed with
-#   python ../../tools/post/flame_speed.py . 2.33108
+#   mallard post flame solut/flame.vtkhdf --reference-speed 2.33108
 
 [run]
 t_stop = 0.00028170830959981072

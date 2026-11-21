@@ -487,8 +487,8 @@ TEST(DistributedMeshTest, OwnedCellsAndFacesNearThePartitionComeLast) {
     for (uint32_t l = 1; l <= layers; l++) {
         std::vector<uint32_t> next;
         for (uint32_t c : front) {
-            for (uint32_t k = global.h_offsets_cells_of_cell(c); k < global.h_offsets_cells_of_cell(c + 1); k++) {
-                const uint32_t nb = global.h_cells_of_cell(k);
+            for (uint32_t k = global.vertex_neighbors().h_offsets(c); k < global.vertex_neighbors().h_offsets(c + 1); k++) {
+                const uint32_t nb = global.vertex_neighbors().h_cells(k);
                 if (distance[nb] > l) {
                     distance[nb] = l;
                     next.push_back(nb);
@@ -587,8 +587,8 @@ TEST(DistributedMeshTest, PeriodicHaloLayersFollowVertexNeighborsAcrossSeams) {
     for (int l = 1; l <= layers; l++) {
         std::vector<uint32_t> next;
         for (uint32_t c : front) {
-            for (uint32_t k = global.h_offsets_cells_of_cell(c); k < global.h_offsets_cells_of_cell(c + 1); k++) {
-                const uint32_t nb = global.h_cells_of_cell(k);
+            for (uint32_t k = global.vertex_neighbors().h_offsets(c); k < global.vertex_neighbors().h_offsets(c + 1); k++) {
+                const uint32_t nb = global.vertex_neighbors().h_cells(k);
                 if (expected[nb] < 0) {
                     expected[nb] = l;
                     next.push_back(nb);

@@ -127,6 +127,9 @@ class FaceReconstruction {
          */
         virtual bool exchanges_partition_faces() const { return false; }
 
+        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
+        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
+
         /**
          * @brief Reconstruct the listed cells' sides of their faces, on the
          *        given execution space instance, as far as each cell can on its
@@ -329,6 +332,59 @@ static const std::unordered_map<LimiterType, std::string> LIMITER_NAMES = {
 };
 
 /**
+ * @brief The geometry of MUSCL's face-neighbor stencils, for the reconstructed
+ *        cells that take the face-neighbor fit (not tetrahedra, no face of a
+ *        characteristic boundary), have no rotational periodic face and have
+ *        all their faces (not the outermost halo layer): per face slot (in
+ *        faces_of_cell order), the gradient weights (LSQGradientFunctor::weights)
+ *        and the offset from the cell centroid to the face centroid. The
+ *        cells whose rows are equal on teno::TableStore's grid share the row
+ *        of the lowest global id, agreed over the ranks, so that a cell's
+ *        row does not depend on the partition. Boundary faces' states still
+ *        come from LSQGradientFunctor::neighbor. The cells of structured
+ *        blocks whose faces all have a neighbor take their neighbors as the
+ *        cell plus their block shape's offsets (one per face slot).
+ */
+struct MUSCLTables {
+    static constexpr uint32_t NONE = ~0u;
+    Kokkos::View<uint32_t *[2]> row;  // (cell): its weights row and offsets row, or NONE; empty if no cell has one
+    Kokkos::View<rtype *> weights;    // ((row stride + slot) N_DIM + d)
+    Kokkos::View<rtype *> offsets;    // ((row stride + slot) N_DIM + d)
+    uint32_t stride = 0;
+    teno::BlockStencils block;
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+
+    KOKKOS_INLINE_FUNCTION
+    bool has(const uint32_t c) const { return row.extent(0) && row(c, 0) != NONE; }
+
+    /** @brief Cell c's block offsets, or null if it reads its faces. */
+    KOKKOS_INLINE_FUNCTION
+    const int32_t * block_offsets(const uint32_t c) const {
+        const uint32_t k = block.shape_of(c);
+        return k == teno::BlockStencils::NONE ? nullptr : block.offsets_of(k);
+    }
+
+    /** @brief The neighbor of cell c across its face slot k, by offsets o or by its face; -1 across a boundary. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t neighbor(const uint32_t c, const uint32_t k, const int32_t * o) const {
+        if (o) return int32_t(c) + o[k];
+        const uint32_t f = faces_of_cell(offsets_faces_of_cell(c) + k);
+        const int32_t c0 = cells_of_face(f, 0);
+        return c0 == int32_t(c) ? cells_of_face(f, 1) : c0;
+    }
+
+    /** @brief Cell c's weights, (slot N_DIM + d). */
+    KOKKOS_INLINE_FUNCTION
+    const rtype * weights_of(const uint32_t c) const { return weights.data() + size_t(row(c, 0)) * stride * N_DIM; }
+
+    /** @brief Cell c's face-centroid offsets, (slot N_DIM + d). */
+    KOKKOS_INLINE_FUNCTION
+    const rtype * offsets_of(const uint32_t c) const { return offsets.data() + size_t(row(c, 1)) * stride * N_DIM; }
+};
+
+/**
  * @brief Second-order MUSCL reconstruction of W = [rho, u_x, u_y, p] using
  *        least-squares gradients and a slope limiter.
  */
@@ -355,6 +411,18 @@ class MUSCL : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
         LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
+        // The cells of structured blocks read their neighbors by offsets (MUSCLTables::block);
+        // false (tests only) reads every cell's faces
+        bool block_path = true;
+        MUSCLTables tables;
+        // Cells that could have a row per distinct row, over the ranks, below which no cell gets one: the rows
+        // would cost more memory than the per-step fit
+        static constexpr uint64_t MIN_CELLS_PER_ROW = 8;
+        uint64_t n_table_cells = 0;           // cells with a row (this rank)
+        uint64_t n_candidates_global = 0;     // owned cells that could have a row, over the ranks
+        uint64_t n_rows_global = 0;           // distinct rows over the ranks (weights or offsets, the more)
+        /** @brief The tables of the cells that have one (MUSCLTables), and the block shapes (collective). */
+        void find_tables();
         // Measured on A100s: one fused kernel per cell is faster from about 2^17 cells, separate kernels (more
         // parallel, shorter chains) below. Tests lower it to run the fused kernel on small meshes
         static inline uint32_t fused_cells = 1u << 17;
@@ -448,8 +516,6 @@ class TENO : public FaceReconstruction {
         // (teno::BlockStencils); false (tests only) reads every cell's slots
         bool block_path = true;
         teno::BlockStencils block_stencils;
-        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
-        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
         /**
          * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
          *        (after the tables are set up or rebuilt; a no-op unless block_path).
@@ -463,6 +529,11 @@ class TENO : public FaceReconstruction {
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
+        // When allocated (cell / 2, l, cell % 2, var), the reconstruction also writes there the central
+        // coefficients of the conservative variables of the cells it finds smooth, in the unscaled frame
+        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones and for those
+        // whose face values fall back to the cell mean (inadmissible at a face point)
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
 
         // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
@@ -488,7 +559,7 @@ class TENO : public FaceReconstruction {
         // Queued cells per round of the troubled passes, as a fraction of the
         // reconstructed cells (scratch slots); later rounds recompute the
         // central coefficients the smooth pass could not keep
-        rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
+        rtype troubled_capacity = N_DIM == 3 ? 0.25 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each table row's stencil search visited (host);
