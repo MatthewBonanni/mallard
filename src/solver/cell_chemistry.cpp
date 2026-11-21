@@ -653,14 +653,14 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     // this lowers the cells per SM more than it speeds each cell, so it is off unless asked for
     fast_bytes = 0;
     if (n_lanes > 1 && !wide && options.shared == 1) {
-        const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr);
+        const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr, options.reactor.method);
         const size_t room = static_cast<size_t>(TeamPolicy<false, true>::scratch_size_max(0));
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
     }
     // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels).
     // Every view of a row per cell of the chunk is labeled "chem_work*" and counted here, the audit's
     // clipped masses included
-    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr);
+    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr, options.reactor.method);
     forcing_offset = options.forced ? reactor_size : 0;
     const uint32_t work_size = reactor_size + (options.forced ? ns + 1 : 0);
     const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0 + 8.0 * ns;

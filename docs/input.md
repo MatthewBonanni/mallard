@@ -553,12 +553,22 @@ Tables and point clouds from CSV files, read by the expressions of
 | `name` | Prefix of the variables (required) |
 | `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
 | `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
-| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
-| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the coordinates, if named `x`, `y`, `z`) |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the file's metadata, else the coordinates, if named `x`, `y`, `z`) |
 | `region` | Instead of `at`, one coordinate: the signed distance to this [region](#regions) |
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
-| `units` | Units of columns, e.g. `{x = "mm"}` (default SI) |
+| `units` | Units of columns, e.g. `{x = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales: `length`, `velocity`, `density`, `temperature`, e.g. `{length = 0.02, velocity = 15}`; each column by its dimension (velocities by the velocity ratio, Reynolds stresses by its square, pressures as `rho U^2`), so every column needs a unit (`"1"` if dimensionless). Default none |
+| `reference` | With `scale`: the scales of the data, e.g. `{length = 0.01, velocity = 30}` (default: the file's metadata) |
+
+A file's metadata is a comment line `# mallard-profile {...}` before its
+header, a JSON object of `coordinates`, `at`, `units` (an object of columns
+and units), `reference` (an object of scales, numbers in SI or quantities
+such as `"10 mm"`), `source` and `transforms` (a list of strings): defaults
+of the entry's keys and a record of where the data come from. See
+[profile files](guide/boundary_conditions.md#profile-files-metadata-and-rescaling).
 
 ### `[initialize.turbulence]`
 
@@ -701,11 +711,15 @@ variable at the faces and the faces outside a table. Guide:
 | `name` | Prefix of the variables (required) |
 | `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
 | `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
-| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
-| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the coordinates, if named `x`, `y`, `z` or like a local coordinate) |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the file's metadata, else the coordinates, if named `x`, `y`, `z` (or `X`, `Y`, `Z`) or like a local coordinate) |
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
-| `units` | Units of columns, e.g. `{y = "mm"}` (default SI) |
+| `units` | Units of columns, e.g. `{y = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales, as in [`[[initialize.data]]`](#initializedata) (default none) |
+| `reference` | With `scale`: the scales of the data (default: the file's metadata) |
+| `outside` | (tables) Faces beyond a coordinate column's range: `hold` (default), the column's end values; `error`, an input error saying how many |
 
 ### Characteristic boundaries (`nscbc`)
 
@@ -790,7 +804,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: the statistics of a precursor run, the columns `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ... (missing off-diagonal covariances are zero) of the entry's [`[[boundaries.data]]`](#boundariesdata) of this name, read at the faces in any coordinates; or a CSV file of plane averages as `mallard post average --homogeneous` writes them, read as such an entry with its defaults (its first column the coordinate: `x`, `y`, `z`, `X`, `Y`, `Z` or a local coordinate such as `n_m`; linear) |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |
@@ -845,6 +859,7 @@ T = 300.0
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+| `viscous_gradients` | (`navier_stokes`) Face gradients of the viscous stress and heat flux: `least_squares` (default; the mean of the two cells' least-squares gradients, second order) or `reconstruction` (`TENO` of order 4 or more, single gas, planar, no LES, hybrid flux, curved faces or rotational periodicity; the viscous time-step limit is 2.05 times as strict): on faces between cells TENO finds smooth, the gradients of the two cells' central polynomials at each face quadrature point, averaged, plus the jump of their values over the distance of the cell centers by 4/3 (Nishikawa 2010), so order `order - 1`; other faces keep `least_squares`. See [Numerics: viscous gradients](guide/numerics.md#viscous-gradients) |
 
 ### `[numerics.error_control]`
 
@@ -883,7 +898,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, and (planar single gas) limit the convective fluxes so that every stage keeps density and pressure positive at `cfl` up to 0.5, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
-| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.5 in 3D (1 in 2D) |
+| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
 | `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
 
@@ -901,13 +916,13 @@ cell over `dt` under its chemistry plus that constant source, then lets
 the flow correct over the second half of the step with `T(U) - T(U^n)`:
 steady states of chemistry and transport stay exactly steady at any `dt`
 (see the [thermochemistry guide](guide/thermochemistry.md#finite-rate-chemistry)). The integrator
-is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, in
-double precision in every build.
+is RODAS, an adaptive Rosenbrock method with the analytical Jacobian, or a
+variable-order BDF, in double precision in every build.
 
 | Key | Description |
 |---|---|
 | `enabled` | `false` keeps the mixture non-reacting (default `true`) |
-| `integrator` | `rosenbrock` (the default and only choice so far) |
+| `integrator` | `rosenbrock` (default; RODAS) or `bdf` (variable-order BDF, orders 1-5, with the Jacobian and its factorization kept over many sub-steps; CVODE's strategy). BDF is faster where cells take one or a few sub-steps per call, as at the small time steps of detonations and compressible flames (n-dodecane and n-hexane at `dt` = 1e-8 s: 1.4-1.7 times RODAS's throughput on CPUs, up to 1.4 on an A100), and gains less at larger time steps, since every call restarts it at order 1 (1.1-1.5 times at 1e-6 s). Its error estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate than RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`, within 2e-5 at `1e-14`); see the [design notes](design/chemistry.md#bdf-integrator-issue-143) |
 | `coupling` | `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`, `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies non-dissipative operators such as the hybrid flux's central part; see the [design notes](design/chemistry.md#simpler-balanced-splitting-option)) |
 | `rtol` | Relative tolerance on the mass fractions and `T` (default `1e-6`) |
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
@@ -1538,12 +1553,13 @@ reductions = ["mean", "rms"]
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every
-step ([Triggers](guide/running.md#triggers)).
+step ([Triggers](guide/running.md#triggers)). Each number a condition compares
+`t` with is a time a step lands on.
 
 | Key | Description |
 |---|---|
 | `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
-| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
+| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set), `"stop statistics"` (they keep their values from then on), `"log <message>"` (a line of the log, `{<name>}` replaced by that value), `"set <key>=<value> ..."` (as `mallard ctl set`). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
 | `repeat` | `true` fires again each time the condition turns true after being false; default `false` (once) |

@@ -187,7 +187,7 @@ const Command * find(const std::vector<std::string> & args, size_t & words_used)
     const Command * best = nullptr;
     words_used = 0;
     for (const Command & c : commands()) {
-        const size_t n = matches(c.name, args);
+        const size_t n = std::max(matches(c.name, args), matches(c.alias, args));
         if (n > words_used) {
             best = &c;
             words_used = n;

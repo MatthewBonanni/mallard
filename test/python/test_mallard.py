@@ -2,6 +2,7 @@
 
 Needs a build with -DMallard_ENABLE_PYTHON=ON and HDF5: MALLARD_EXECUTABLE (or mallard on PATH) and its library.
 """
+import gc
 import os
 import shutil
 import subprocess
@@ -112,6 +113,26 @@ def test_mesh_files():
     g = f.geometry()
     assert f.kind == "mesh" and g.n_cells == f.mesh["cells"]
     assert np.all(g.points[:, 2] == 0) and g.offsets[-1] == g.connectivity.size
+
+
+def test_reads_view_the_readers_memory(run):
+    def owner(a):
+        while isinstance(a, np.ndarray):
+            a = a.base
+        return a
+
+    f = mallard.open(run / "snapshots_series.vtkhdf")
+    g = f.geometry(0)
+    arrays = [f.read("U", 0), f.read_all("RHO"), g.points, g.offsets, g.connectivity, g.types]
+    # A copy numpy allocated is the end of its base chain
+    assert all(owner(a) is not None for a in arrays)
+    copies = [a.copy() for a in arrays]
+    f.close()
+    del f, g
+    gc.collect()
+    mallard.open(run / "snapshots_series.vtkhdf").read("RHO", 1)
+    for a, c in zip(arrays, copies):
+        np.testing.assert_array_equal(a, c)
 
 
 def test_run_directory(run):
