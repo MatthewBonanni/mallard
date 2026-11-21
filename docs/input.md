@@ -905,7 +905,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, and (planar single gas) limit the convective fluxes so that every stage keeps density and pressure positive at `cfl` up to 0.5, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
-| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.5 in 3D (1 in 2D) |
+| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
 | `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
 
@@ -1560,12 +1560,13 @@ reductions = ["mean", "rms"]
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every
-step ([Triggers](guide/running.md#triggers)).
+step ([Triggers](guide/running.md#triggers)). Each number a condition compares
+`t` with is a time a step lands on.
 
 | Key | Description |
 |---|---|
 | `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
-| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
+| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set), `"stop statistics"` (they keep their values from then on), `"log <message>"` (a line of the log, `{<name>}` replaced by that value), `"set <key>=<value> ..."` (as `mallard ctl set`). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
 | `repeat` | `true` fires again each time the condition turns true after being false; default `false` (once) |
