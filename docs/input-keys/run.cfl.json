@@ -42,6 +42,7 @@
   "examples/isotropic_turbulence/input.toml",
   "examples/moving_heaters/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_cloud/input.toml",
   "examples/particle_vortex/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/premixed_flame/ch4/input.toml",

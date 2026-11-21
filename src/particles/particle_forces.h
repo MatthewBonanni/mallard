@@ -154,6 +154,7 @@ struct Solid {
     bool added_mass = false;
     bool lift = false;
     rtype specific_heat = 0.0;  // 0: no heat transfer
+    bool energy_state = false;  // with heat transfer: the block holds e = c_p T_p + |v|^2 / 2 in place of T_p
     Euler gas;
 
     /**
@@ -165,6 +166,48 @@ struct Solid {
                             T = 3 * N_DIM + 3, TAU_T = 3 * N_DIM + 4 };
 
     KOKKOS_INLINE_FUNCTION bool heated() const { return specific_heat > 0.0_r; }
+
+    /**
+     * @brief The temperature of a heated particle whose block values from its velocity on are y: y[N_DIM]
+     *        itself, or with energy_state (c_p T_p + |v|^2 / 2) of it.
+     */
+    KOKKOS_INLINE_FUNCTION rtype temperature(const rtype * y) const {
+        if (!energy_state) return y[N_DIM];
+        rtype v2 = 0.0_r;
+        FOR_I_DIM v2 += y[i] * y[i];
+        return (y[N_DIM] - 0.5_r * v2) / specific_heat;
+    }
+
+    /** @brief The block value after the velocity v of a heated particle at temperature Tp (inverse of temperature()). */
+    KOKKOS_INLINE_FUNCTION rtype thermal_value(const rtype * v, const rtype Tp) const {
+        if (!energy_state) return Tp;
+        rtype v2 = 0.0_r;
+        FOR_I_DIM v2 += v[i] * v[i];
+        return specific_heat * Tp + 0.5_r * v2;
+    }
+
+    /** @brief The mass of one particle. */
+    KOKKOS_INLINE_FUNCTION rtype mass() const {
+        return density * Kokkos::numbers::pi_v<rtype> / 6.0_r * diameter * diameter * diameter;
+    }
+
+    /**
+     * @brief What a particle with block values y from its velocity on, and stage rates rate (of rates()),
+     *        gives the gas per unit time: mass, momentum and total energy, out[0, N_CONSERVATIVE). The gas
+     *        receives the opposite of the particle's change less gravity's: -m (dv/dt - g) and -m (de/dt - g . v),
+     *        e = c_p T_p + |v|^2 / 2 (energy_state; without heat transfer only the kinetic part).
+     */
+    KOKKOS_INLINE_FUNCTION void exchange(const rtype * y, const rtype * rate, rtype * out) const {
+        const rtype m = mass();
+        rtype work = 0.0_r, gravity_work = 0.0_r;
+        out[0] = 0.0_r;
+        FOR_I_DIM {
+            out[1 + i] = -m * (rate[N_DIM + i] - gravity[i]);
+            work += y[i] * rate[N_DIM + i];
+            gravity_work += y[i] * gravity[i];
+        }
+        out[N_DIM + 1] = -m * ((heated() ? rate[2 * N_DIM] : work) - gravity_work);
+    }
 
     /** @brief Whether the forces read the gradients of the gas state. */
     KOKKOS_INLINE_FUNCTION bool reads_gradients() const { return pressure_gradient || added_mass || lift; }
@@ -242,8 +285,8 @@ struct Solid {
 
     /**
      * @brief The rates of a stage: dx/dt into rate[0, N_DIM), dv/dt into
-     *        rate[N_DIM, 2 N_DIM) and with heat transfer dT_p/dt into
-     *        rate[2 N_DIM], of a particle whose velocity (then temperature) is
+     *        rate[N_DIM, 2 N_DIM) and with heat transfer dT_p/dt (with
+     *        energy_state de/dt = c_p dT_p/dt + v . dv/dt) into rate[2 N_DIM], of a particle whose velocity (then temperature) is
      *        y, in gas W with gradients G, for a step dt. The first stage of a
      *        step (its start) writes start (n_start() values), which every
      *        stage reads: the relaxation times there decide which relaxations
@@ -252,7 +295,7 @@ struct Solid {
     KOKKOS_INLINE_FUNCTION void rates(const rtype * W, const rtype * G, const rtype * y, const rtype dt, const bool first,
                                       rtype * start, rtype * rate) const {
         const rtype T_gas = W[N_DIM + 1] / (W[0] * gas.R);
-        const rtype Tp = heated() ? y[N_DIM] : T_gas;
+        const rtype Tp = heated() ? temperature(y) : T_gas;
         const Response r = response(W, G, y, Tp);
         const rtype * u = W + 1;
         if (first) {
@@ -291,6 +334,11 @@ struct Solid {
                 rate[2 * N_DIM] = (e.decay * (start[T] - start[TP]) + e.forcing * (T_gas - start[T])) / dt;
             } else {
                 rate[2 * N_DIM] = (T_gas - Tp) / r.tau_T;
+            }
+            if (energy_state) {
+                rtype power = 0.0_r;
+                FOR_I_DIM power += y[i] * rate[N_DIM + i];
+                rate[2 * N_DIM] = specific_heat * rate[2 * N_DIM] + power;
             }
         }
     }

@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -27,6 +28,7 @@
 #include "common.h"
 #include "gradient.h"
 #include "input.h"
+#include "particle_coupling.h"
 #include "particle_forces.h"
 #include "particle_probes.h"
 #include "particle_quantities.h"
@@ -171,6 +173,18 @@ struct Record {
     std::vector<double> q;
 };
 
+/** @brief The diameter over cell size above which mallard check warns (W-PARTICLE-SIZE). */
+inline constexpr double SIZE_LIMIT = 0.1;
+
+/** @brief The volume fraction above which mallard check warns (W-PARTICLE-VOLUME-FRACTION). */
+inline constexpr double VOLUME_FRACTION_LIMIT = 0.01;
+
+/** @brief Where the point-particle model holds: particles larger than a limit, and their largest diameter over cell size. */
+struct Validity {
+    uint64_t n_large = 0;
+    double size_ratio = 0.0;
+};
+
 } // namespace particles
 
 /**
@@ -227,6 +241,46 @@ class Particles {
 
         /** @brief Whether the particles are solid, with a velocity of their own. */
         bool inertial() const { return is_solid; }
+
+        /** @brief Whether the particles act on the gas (coupling = "two-way"): couple() after velocity(). */
+        bool two_way() const { return coupled; }
+
+        /**
+         * @brief Add to the gas rates rhs (per volume, owned cells) what the particles gave the gas at the stage
+         *        velocity() last evaluated: per particle the opposite of its momentum and energy change less
+         *        gravity's, times the particles per parcel, summed into the particles' cells and spread over
+         *        the deposition width (particles::Deposition).
+         * @param x_stage The stage positions velocity() evaluated.
+         * @param exchange Fills the halo cells of a State from their owners.
+         */
+        void couple(const ParticleView & x_stage, const State & rhs, const std::function<void(const State &)> & exchange);
+
+        /** @brief What couple() last added, per owned cell, times the cell's measure. */
+        const State & coupling_sources() const { return deposition.result(); }
+
+        /**
+         * @brief The dispersed-phase cell fields a run with this input has, in the columns of fields():
+         *        PARTICLE_VOLUME_FRACTION, PARTICLE_NUMBER_DENSITY, PARTICLE_U_<axis> (solid particles), then
+         *        PARTICLE_SOURCE_<conservative> (two-way coupling).
+         */
+        static std::vector<std::string> field_names(const Input & input);
+
+        /**
+         * @brief The dispersed-phase fields of the current state per owned cell (field_names()): the particles'
+         *        volume and number per cell volume, their mass-weighted mean velocity, and what they give the gas
+         *        per volume and time at their present state (explicit rates), deposited as couple() deposits.
+         * @param out (cell, field), at least n_owned rows.
+         */
+        void fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                    const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients,
+                    const std::function<void(const State &)> & exchange,
+                    const Kokkos::View<rtype **, Kokkos::LayoutRight> & out);
+
+        /**
+         * @brief The solid particles whose diameter is above limit times their cell's size (its measure to the power
+         *        1 / N_DIM), and the largest such ratio, on all ranks (collective).
+         */
+        particles::Validity validity(double limit) const;
 
         /** @brief Whether solid particles have yet to take the gas velocity or temperature (start_from_gas()). */
         bool starts_at_gas() const { return start_v_at_gas || start_T_at_gas; }
@@ -354,7 +408,10 @@ class Particles {
         bool heated = false;
         bool start_v_at_gas = false;
         bool start_T_at_gas = false;
+        bool coupled = false;
+        rtype weight = 1.0_r;  // particles per parcel
         particles::Solid solid;
+        particles::Deposition deposition;
         particles::Quantities quantities;
         particles::ParticleProbes probes;
         uint64_t n_seeded = 0;

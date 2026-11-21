@@ -99,6 +99,7 @@ references do not publish.
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
 | `tracer_vortex` | Tracer particles (`[particles]`) in a steady low-Mach array of Taylor-Green vortex cells: each tracer circles on a closed streamline, so the streamfunction `sin(2 pi x) sin(2 pi y)` at its final position in `tracers.csv` measures the pathline error | 4,096 quads | seconds on a few CPU threads |
+| `particle_cloud` | A cloud of heavy particles (`coupling = "two-way"`, `weight`, `deposition_width`) falling through gas at rest: alone a particle falls at its terminal velocity 0.1, but the cloud, as heavy as the gas within it, drags that gas along, so the probe `cloud` shows it falling at 0.25 by `t = 1.7` and shedding a vortex pair; the snapshots write `PARTICLE_VOLUME_FRACTION` and the drag on the gas, `PARTICLE_SOURCE_RHOU_Y` | 4,096 quads | seconds on a few CPU threads |
 | `particle_vortex` | Heavy, heated solid particles (`type = "solid"`, `specific_heat`, `forces`) in the vortex array of `tracer_vortex`: their inertia flings them out of the vortex core, so the particle count of the probe `core` falls from 21 to 1 by `t = 8`, while their temperature `T_P` relaxes from 0.4 to the gas's 1 / 1.4 at the Ranz-Marshall rate | 4,096 quads | seconds on a few CPU threads |
 
 ## Large-eddy simulation

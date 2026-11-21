@@ -140,6 +140,7 @@ add_library(MallardCore STATIC
     parallel/halo_exchange.cpp
     parallel/lock_arrays.cpp
     parallel/partition.cpp
+    particles/particle_coupling.cpp
     particles/particle_probes.cpp
     particles/particle_quantities.cpp
     particles/particles.cpp

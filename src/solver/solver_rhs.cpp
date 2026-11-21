@@ -411,6 +411,13 @@ void Solver::add_sources(const State & solution, const State & rhs_state, const 
     source_terms->add(solution, rhs_state, stage_time);
 }
 
+void Solver::couple_particles(const State & solution, const State & rhs) {
+    particles->couple(solution.particles, rhs, [this](const State & s) { halo.exchange(s); });
+    if (run_health.ledger.on()) {
+        run_health.ledger.add_sources(LedgerSourceTerms{particles->coupling_sources().flow}, mesh->n_owned());
+    }
+}
+
 uint32_t Solver::n_gradient_cells() const {
     // The fluxes read the gradients of owned and halo layer-1 cells, the wall
     // model those of the cells holding its points, and LES models all
