@@ -1,0 +1,4 @@
+- `[particles] specific_heat` (and `temperature`): solid particles carry a temperature that convection relaxes toward the gas's at the Ranz-Marshall Nusselt number; particle expressions read it as `T_P`, the particle `file` writes it as `T_p` and restart files carry it (#757).
+- `[particles] forces = ["pressure_gradient", "added_mass", "saffman_lift"]`: the pressure-gradient (in place of buoyancy), added-mass and Saffman lift forces on solid particles, from the cell's gradients (#757).
+- `[particles] drag = "singh"`: the drag correlation of Singh et al. (2022) for compressible and rarefied gas, of the slip Reynolds and Mach numbers, the Knudsen number and the particle temperature (#757).
+- Example `particle_vortex`: heavy, heated particles flung out of a vortex core while they heat to the gas temperature (#757).

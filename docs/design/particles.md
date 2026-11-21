@@ -222,45 +222,88 @@ run continues them bit for bit; a quantity added on restart starts afresh.
 
 ## Solid particles (#757)
 
-Solid particles add their velocity to the block, after the position:
-`width = 2 N_DIM + n_integrated`. The same `particle_rhs` kernel writes
-dx/dt = v and dv/dt = (u - v) / tau + g (1 - rho / rho_p) from the stage's gas
-state at the particle (`particles::Solid`, `particle_forces.h`), so drag and
-gravity are integrated at the integrator's order with the flow, and each
-stage's drag reads that stage's gas and velocity. tau = rho_p d^2 / (18 mu f)
-with the viscosity at the particle's temperature and the drag correlation f at
-the slip Reynolds number.
+Solid particles add their velocity to the block, after the position, and with
+heat transfer their temperature: `width = 2 N_DIM + heated + n_integrated`.
+The same `particle_rhs` kernel writes dx/dt = v and dv/dt = (u - v) / tau + a
+from the stage's gas state at the particle (`particles::Solid`,
+`particle_forces.h`), so drag and the forces are integrated at the
+integrator's order with the flow, and each stage's drag reads that stage's gas
+and velocity. tau = m d^2 / (18 mu f) with m = rho_p (+ rho / 2 with added
+mass), the viscosity at the particle's temperature and the drag correlation f.
+The force per volume is rho_p g, then -rho g (buoyancy) or -grad p, then
+(rho g - grad p) / 2 for added mass, then Saffman lift, all divided by m.
+Pressure and velocity gradients come from the cell's LSQ gradient, which the
+gas evaluation copies per particle only when a force reads it. The Basset
+force needs the history of the slip, a convolution over the path, and is left
+out.
 
-**Stiff limit.** Particles of a micron in air have tau of microseconds, far
-below an acoustic step. An explicit integrator is unstable for dt / tau above
-about 2 to 2.8, and limiting dt by the particles would tie the flow's step to
-its smallest particle. A particle with tau < dt therefore takes its
-equilibrium velocity: dx/dt = u + tau g' (the first term of the expansion of
-the velocity in tau) and dv/dt = (v_eq - v) / dt, which every integrator damps
-stably (amplification 0 for FE, 3/8 for RK4 per step). The switch is per
-particle and per stage; dt is the host's step, or inside a captured step the
-device scalar the step graph computes it in (`step_dt_device`), so graphed
-steps read the step's own dt. Exponential (or implicit) integration of the
-drag would keep the order at tau ~ dt; it needs stage weights the integrators
-do not expose, and the error of the switch is O(tau / dt) only near it.
+**Drag.** Stokes and Schiller-Naumann are functions of Re_p.
+Singh et al. (2022, Appendix C) also reads the slip Mach number, the Knudsen
+number Kn = mu / (rho c d) sqrt(gamma pi / 2) and T_p / T. It is written in
+Kn rather than M / Re so that it is finite at zero slip, and its
+free-molecular term uses its Taylor series below s = 0.3, where the closed
+form cancels catastrophically. Below Mach 1 there is no shock and the
+post-shock state is the free stream; A_0 = 24 / delta_0^2.
+
+**Heat transfer.** dT_p/dt = (T - T_p) / tau_T with tau_T = rho_p c_p d^2 /
+(6 k Nu), Ranz-Marshall Nu and k = mu c_p / Pr of the gas. The temperature is
+one more integrated component, so it shares the velocity's integration below.
+
+**Exponential integration.** Particles of a micron in air have tau of
+microseconds, far below an acoustic step. An explicit integrator is unstable
+for dt / tau above about 2 to 2.8, and limiting dt by the particles would tie
+the flow's step to its smallest particle. A particle with h = dt / tau > 1
+(per particle and step, tau from the step's start) instead integrates its
+relaxation exponentially. Its stage rates are
+
+    dv = [(1 - e^-h)(v_eq0 - v0) + 2 (1 - phi1)(v_eq - v_eq0)] / dt
+    dx = v_eq0 + phi1 (v0 - v_eq0) + (1 - 2 (1 - phi1) / h)(v_eq - v_eq0)
+
+with phi1 = (1 - e^-h) / h, v0 and v_eq0 = u + tau a at the step's start and
+v_eq = u + tau a of the stage (tau frozen at the start). For any integrator
+with sum b_i = 1 and sum b_i c_i = 1/2, which every Runge-Kutta method of
+order 2 and above satisfies, these integrate to the exact solution for v_eq
+linear in time, so the scheme needs no stage weights from the integrators;
+with the explicit rates below the threshold, the order is kept on both sides
+(for FE, which has sum b_i c_i = 0, it is first order, as FE is). The
+threshold 1 is where the explicit RK4 error overtakes the exponential one in
+a decaying-forcing experiment (RK4 crossover near h = 0.9; SSPRK3 favors the
+exponential everywhere). The old stiff limit (velocity set to v_eq) was first
+order in tau / dt near the switch; at tau = 0.02, RK4 and h = 1.25 the
+trajectory error drops from 9e-4 to 3e-6.
+
+The step's start (v, u, a, tau, dt, and T_p, T, tau_T with heat transfer) is
+stored per particle in `step_start` by the first stage (c = 0 for every
+integrator), since later stages need it and dt itself: in a captured step the
+step controller overwrites the device dt before relocation. dt is the host's
+step, or inside a captured step the device scalar the step graph computes it
+in (`step_dt_device`).
 
 **Walls.** The face action table gains `STICK`, and a per-face pair of
-restitution coefficients (`[[particles.walls]]` by zone). A particle past a
-wall at the end of the step is reflected with the normal depth times e_n, and
-its velocity becomes e_t v_t - e_n v_n n if it moves into the wall; a sticking
-wall removes it and counts it in the third removal counter (deposited). The
-bounce is applied at the step's end, so its timing is first order; locating
-the crossing within the step is the same problem as in-stage crossings for
-quantities. Across rotational periodic faces the velocity rotates with the
-position (`Walker::cross`).
+restitution coefficients (`[[particles.walls]]` by zone). A sticking wall
+removes a particle that crossed it and counts it in the third removal counter
+(deposited). A rebound is located within the step: over the step the particle
+is taken to move as dv/dt = (u - v) / tau + a with u, a, tau of the step's
+start, for which position and velocity are closed form in phi functions of
+z = b / tau. The time b before the step's end at which it reached the wall is
+the root of the normal distance traveled, by a few fixed-point passes; the
+particle's normal velocity is reversed times e_n and its tangential velocity
+scaled by e_t at that time, and it relaxes on for b. That is exact for drag
+in a uniform gas and for constant acceleration, so bounce timing is
+independent of dt there. A particle with tau < dt follows the gas within the
+step and is reflected at the step's end. Across rotational periodic faces u
+and a rotate with the position and velocity (`Walker::cross` with three
+vectors).
 
-**Starting velocity.** Seeded particles start at the gas velocity at their
-seed unless `velocity` is given: before the first step the solver samples the
-gas at the particles (`update_cell_W`, `Particles::start_velocity`), once, on
-the host's step path rather than in a captured step.
+**Starting state.** Seeded particles start at the gas velocity (and with heat
+transfer the gas temperature) at their seed unless `velocity` (`temperature`)
+is given: before the first step the solver samples the gas at the particles
+(`update_cell_W`, `Particles::start_from_gas`), once, on the host's step path
+rather than in a captured step.
 
-Restart files carry the velocities as `PARTICLE_V` and three removal counts
-(older files with two are read with zero deposited).
+Restart files carry the velocities as `PARTICLE_V`, the temperatures as
+`PARTICLE_T` and three removal counts (older files with two are read with zero
+deposited).
 
 ## Particle probes (#756)
 
@@ -280,7 +323,7 @@ every few steps of a large run.
 Restart files carry the particles as named arrays (version 6), written by rank
 0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
 holding each particle), `PARTICLE_X` (positions, exact in double precision),
-`PARTICLE_V` (velocities of solid particles), `PARTICLE_Q_<name>` (quantities)
+`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_Q_<name>` (quantities)
 and `PARTICLE_REMOVED` (the counts of particles that left the domain, that
 were lost, and that stuck to walls). The device copies them into pinned host mirrors with the other restart
 data (`Particles::stage_output`, capturable), so a restart staged by the step
@@ -311,9 +354,9 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   particles (or sorting them by cell, for memory locality) matters at the
   scale of #291 and comes with injection.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
-- **Further forces and models** (#757 follow-ups): Saffman lift, added mass,
-  pressure gradient and Basset forces, drag correlations beyond
-  Schiller-Naumann, splashing, heat and mass transfer, and drag in mixtures.
+- **Further models** (#757 follow-ups): thermophoresis, the Basset force,
+  splashing, mass transfer (evaporation), drag and heat transfer in mixtures,
+  and validation against DNS of particle-laden flow.
 - **Two-way coupling** (#758): the particles' forces on the gas.
 - **Of #756:** probes through surfaces (fluxes of particles), histograms, the
   residence time per visit and visit counts, crossings located within a stage,
