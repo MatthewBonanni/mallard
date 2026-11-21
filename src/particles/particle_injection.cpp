@@ -765,7 +765,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
             const double a = Kokkos::fmax(t0, p.start), b = Kokkos::fmin(t1, p.end);
             const double due = frac(j) + (b > a ? p.rate * (b - a) : 0.0);
             // A parcel due but for the rounding of the step times enters now
-            const double slack = 1e-9 + 4.0 * p.rate * Kokkos::fabs(t1) * Kokkos::Experimental::epsilon_v<rtype>;
+            const double slack = 1e-9 + 4.0 * p.rate * Kokkos::fabs(t1) * static_cast<double>(Kokkos::Experimental::epsilon_v<rtype>);
             const double whole = Kokkos::floor(Kokkos::fmin(due + slack, 0x1.0p52));
             frac(j) = due - whole;
             info(j) = total;
