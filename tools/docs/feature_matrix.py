@@ -184,6 +184,7 @@ OTHER_GUARDS = [
     ("src/solver/solver.cpp", "is not available with the hybrid convective flux yet"),
     ("src/solver/solver.cpp", "is not available on curved meshes yet"),
     ("src/solver/solver.cpp", "is not available with rotational periodicity yet"),
+    ("src/particles/particles.cpp", "the drag of mixtures is not available yet"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")
 
