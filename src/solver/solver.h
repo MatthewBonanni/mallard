@@ -885,6 +885,20 @@ class Solver {
         void check_settings(CheckReport & report) const;
         /** @brief The periodic pairs as the mesh joined them (report.periodic). Collective. */
         void check_periodic(CheckReport & report) const;
+        /** @brief The entries of the input a check set up again without (check_past_errors). */
+        struct PrunedSetup {
+            std::vector<std::string> entries;  // "write_data[2]", with the indices of the input
+            bool complete = false;             // the setup without them ran to the end
+        };
+        /**
+         * @brief After the setup stopped on errors of independent entries ([[boundaries]], [[write_data]],
+         *        [[probes]], [[forces]], [[sponges]], [[sources]]), sets up again from original without them (a
+         *        failed boundary entry, or a zone none covers, as a symmetry plane), until the setup ends or stops
+         *        on another error: report gets the errors and warnings of each setup, at their keys in original.
+         */
+        PrunedSetup check_past_errors(CheckReport & report, const Input & original, const std::string & file);
+        /** @brief The boundary zones that no [[boundaries]] entry names, for a setup that stopped before them. */
+        std::vector<CheckUnassigned> zones_not_named() const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();

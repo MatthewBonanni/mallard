@@ -300,7 +300,12 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
 ```
 
 When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings.
+listed under it as possible misspellings. `mallard check` then goes on past
+the errors of independent entries (see [`E-INPUT`](#e-input)), and of the keys
+the setup never reached it reports only those Mallard does not know: not in
+the key catalog (`docs/input-keys/`, which `mallard list keys` lists), named
+like none of its keys, and not a species or data column of a table such as `Y`
+or `units`.
 
 ## Error messages
 
@@ -484,9 +489,9 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 
 | Code | What it means | What to do |
 |---|---|---|
-| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key. The errors of independent entries (every `[[boundaries]]` entry, with the zones none covers, and every `[[write_data]]` entry) are reported together, one diagnostic each | Fix the key; the report covers only what the setup got to |
+| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key. The errors of independent entries (every `[[boundaries]]` entry, with the zones none covers, and every `[[write_data]]` entry) are reported together, one diagnostic each. When such entries stop the setup (also `[[probes]]`, `[[forces]]`, `[[sponges]]` and `[[sources]]`), the check sets up again without them (a failed boundary entry, or a zone none covers, as a symmetry plane) and reports the errors of what follows too | Fix the key; the report covers only what the setup got to |
 | <a id="e-setup"></a>`E-SETUP` | The setup stopped on another error: a file it cannot read, a mesh it cannot partition, memory it cannot allocate | The message says what failed |
-| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up | Fix or remove it. A run rejects the same keys |
+| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up. If an error stopped the setup, only the keys Mallard does not know at all ([Unknown and unused keys](#unknown-and-unused-keys)) | Fix or remove it. A run rejects the same keys |
 | <a id="w-key-deprecated"></a>`W-KEY-DEPRECATED` | A key renamed or replaced in a later release, still read for now | `mallard input upgrade input.toml` rewrites it ([Inputs from older releases](#inputs-from-older-releases)) |
 | <a id="e-catalog-write"></a>`E-CATALOG-WRITE` | `--catalog FILE` cannot be written | Check the path and its permissions |
 | <a id="e-ranks"></a>`E-RANKS` | `--ranks N` in a check run under `mpirun` on another number of ranks | Check serially (memory is then scaled to N ranks) or on N ranks |
@@ -519,11 +524,11 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | Member | Holds |
 |---|---|
 | `version`, `status` (`ok`, `warning`, `error`), `errors`, `warnings`, `input_file` (`null` without an input), `setup_done`, `dim` | The result |
-| `diagnostics` | `[{severity, code, message, key, line, column, docs}]`, in the order found. `key` is the full path of the input key the diagnostic is about, with the index of each entry of an array of tables (`boundaries[1].T`, `write_data[0].interval`, `mesh.Nx`; a table, `numerics.error_control`, or an array of tables, `boundaries`, when it is about the whole); `line` and `column` are where it is in the input file (`column` where the value starts; a key the input leaves out has its table's line). Each is `null` where unknown or where the diagnostic is about no key (mesh quality, memory, the environment); a syntax error has a line and column but no key |
+| `diagnostics` | `[{severity, code, message, key, line, column, docs}]`, in the order found. `key` is the full path of the input key the diagnostic is about, with the index of each entry of an array of tables (`boundaries[1].T`, `write_data[0].interval`, `mesh.Nx`; a table, `numerics.error_control`, or an array of tables, `boundaries`, when it is about the whole); `line` and `column` are where it is in the input file (`column` where the value starts; a key the input leaves out has its table's line and column; an entry given by name, `boundaries[name = "inlet"].T`, is given by its index). Each is `null` where unknown or where the diagnostic is about no key (mesh quality, memory, the environment); a syntax error has a line and column but no key |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `unassigned` | `[{zone, faces}]`: the boundary zones with faces that have no condition, and how many; given also when the setup stopped on them (`E-INPUT`) |
-| `periodic` | `[{zones, map, translation, angle, center, faces, area, node_offset_max, node_offset_relative}]`, one per periodic direction of the mesh: the two zones it joins (`null` if it joins several pairs), `map` (`translation` or `rotation`) with its `translation` (m) or `angle` (degrees) and `center` (m), the face pairs and the area of one side (2D: its length), the largest distance of a node from its partner's image (m) and that over the shortest edge of the pair's faces (the mesh matches nodes within 10<sup>-6</sup> of it in double precision, 10<sup>-3</sup> in single). The node offsets are left out where the nodes' periodic classes are not kept (a mesh distributed over several ranks) |
+| `unassigned` | `[{zone, faces}]`: the boundary zones with faces that have no condition, and how many; given also when the setup stopped on them (`E-INPUT`) or before the boundaries, once it read the mesh (then the zones no entry names) |
+| `periodic` | `[{zones, map, translation, angle, center, faces, area, node_offset_max, node_offset_relative}]`, one per periodic direction of the mesh: the two zones it joins (`null` if it joins several pairs), `map` (`translation` or `rotation`) with its `translation` (m) or `angle` (degrees) and `center` (m), the face pairs and the area of one side (2D: its length), the largest distance of a node from its partner's image (m) and that over the shortest edge of the pair's faces (the mesh matches nodes within 10<sup>-6</sup> of it in double precision, 10<sup>-3</sup> in single). The node offsets are left out where the nodes' periodic classes are not kept (a mesh distributed over several ranks). Given whenever the setup read the mesh, also if it stopped later |
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |

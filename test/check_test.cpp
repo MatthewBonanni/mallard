@@ -1477,3 +1477,21 @@ TEST(CheckBoundaries, ReportsEachPeriodicPairWithItsMapFacesAreaAndNodeOffset) {
         EXPECT_LT(moved.periodic[1].node_offset_max, 0.05 * eps);
     }
 }
+
+TEST(CheckBoundaries, ReportsZonesWithoutAConditionAndPeriodicPairsWheneverTheMeshIsRead) {
+    std::vector<std::string> zones = {"bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const std::string periodic = "[[periodic]]\nzones = [\"left\", \"right\"]\n";
+    const std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", periodic, zones);
+    // Stopped by the zone itself, and before the boundaries, by [physics]
+    for (const std::string & text : {input, std::string(input).replace(input.find("type = \"euler\""), 14, "type = \"eulerr\"")}) {
+        const CheckReport r = check(text);
+        EXPECT_FALSE(r.setup_done);
+        ASSERT_EQ(r.unassigned.size(), 1u) << check_text(r, false);
+        EXPECT_EQ(r.unassigned[0].zone, "top");
+        EXPECT_EQ(r.unassigned[0].faces, N_DIM == 3 ? 32u : 16u);
+        ASSERT_EQ(r.periodic.size(), 1u) << check_text(r, false);
+        EXPECT_EQ(r.periodic[0].zone_a, "left");
+        EXPECT_EQ(r.periodic[0].faces, N_DIM == 3 ? 16u : 8u);
+    }
+}

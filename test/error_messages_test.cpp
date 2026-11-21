@@ -578,3 +578,65 @@ TEST(ErrorMessages, CheckReportsTheWarningsOfTheSetupAtTheirKey) {
     ASSERT_EQ(outside.size(), 1u) << check_text(report, false);
     expect_at(outside[0], "probes[0]", size_t(line_number(input, "[[probes]]")));
 }
+
+namespace {
+
+std::vector<std::string> keys_of(const std::vector<CheckDiagnostic> & diagnostics) {
+    std::vector<std::string> keys;
+    for (const CheckDiagnostic & d : diagnostics) keys.push_back(d.where.key);
+    return keys;
+}
+
+} // namespace
+
+TEST(ErrorMessages, CheckThatStopsEarlyReportsOnlyUnknownKeysAsUnused) {
+    // [physics] stops the setup before it reads the boundaries, initial state or writers
+    std::string input = replaced(box("t_stop = 0.5\ncfl = 0.8\ncfll = 0.9\n"), "type = \"euler\"", "type = \"eulerr\"");
+    input = replaced(input, "T = 1.0\n", "T = 1.0\nrhoo = 1.0\n[initialize.Y]\nC3H8 = 1.0\n");
+    input += "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 5\n";
+    const CheckReport early = check_of(input);
+    ASSERT_FALSE(early.setup_done);
+    EXPECT_EQ(keys_of(of_code(early, diagnostic_code::INPUT)), std::vector<std::string>{"physics.type"});
+    EXPECT_EQ(keys_of(of_code(early, diagnostic_code::KEY_UNUSED)),
+              (std::vector<std::string>{"run.cfll", "initialize.rhoo"}))
+        << check_text(early, false);
+
+    // A trigger stops it after the initial state's table was looked up, but not its keys
+    const std::string late = box("t_stop = 0.5\ncfl = 0.8\ncfll = 0.9\n") + "[[triggers]]\nwhen = \"t > 0.1\"\ndo = \"explode\"\n";
+    const CheckReport stopped = check_of(late);
+    ASSERT_FALSE(stopped.setup_done);
+    EXPECT_EQ(keys_of(of_code(stopped, diagnostic_code::KEY_UNUSED)), std::vector<std::string>{"run.cfll"})
+        << check_text(stopped, false);
+}
+
+TEST(ErrorMessages, CheckReportsTheErrorsOfIndependentEntriesPastTheFirstThatStopsTheSetup) {
+    const std::string z = N_DIM == 3 ? ", 0.1" : "";
+    std::string input = replaced(box("t_stop = 0.5\ncfl = 0.8\ncfll = 0.9\ngamma = 1.4\n"), "name = \"left\"\ntype = \"symmetry\"",
+                                 "name = \"left\"\ntype = \"wal\"");
+    input += "[[probes]]\nname = \"a\"\nfields = [\"P\"]\npoint = [5.0, 0.5" + z + "]\n"
+             "[[probes]]\nname = \"b\"\nfields = [\"P\"]\npoint = [0.5, 0.5" + z + "]\n"
+             "[[probes]]\nname = \"c\"\nfields = [\"P\"]\npoint = [6.0, 0.5" + z + "]\n"
+             "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 5\n"
+             "[[write_data]]\nprefix = \"b\"\nfields = [\"P\"]\ninterval = 0\nprefixx = \"c\"\n";
+    const CheckReport report = check_of(input);
+    EXPECT_FALSE(report.setup_done);
+    const std::vector<CheckDiagnostic> errors = of_code(report, diagnostic_code::INPUT);
+    EXPECT_EQ(keys_of(errors),
+              (std::vector<std::string>{"boundaries[0].type", "probes[0]", "probes[2]", "write_data[1].interval"}))
+        << check_text(report, false);
+    for (const CheckDiagnostic & d : errors) EXPECT_GT(d.where.line, 0u) << d.message;
+    // Past the errors, the setup read every other key: unread ones are errors, and unknown ones in failed entries
+    EXPECT_EQ(keys_of(of_code(report, diagnostic_code::KEY_UNUSED)),
+              (std::vector<std::string>{"run.cfll", "run.gamma", "write_data[1].prefixx"}))
+        << check_text(report, false);
+}
+
+TEST(ErrorMessages, CheckLocatesAMissingKeyOfAnEntryGivenByName) {
+    const std::string input = replaced(box(), "name = \"left\"\ntype = \"symmetry\"", "name = \"left\"\ntype = \"farfield\"");
+    const CheckReport report = check_of(input);
+    const std::vector<CheckDiagnostic> errors = of_code(report, diagnostic_code::INPUT);
+    ASSERT_EQ(errors.size(), 1u) << check_text(report, false);
+    EXPECT_NE(errors[0].message.find("boundaries[name = \"left\"]."), std::string::npos) << errors[0].message;
+    EXPECT_EQ(errors[0].where.key.rfind("boundaries[0].", 0), 0u) << errors[0].where.key;
+    expect_at(errors[0], errors[0].where.key, size_t(line_number(input, "[[boundaries]]")), 1);
+}
