@@ -272,3 +272,15 @@ void Solver::chemistry_reductions(step_queue::Chemistry * out) {
         for (int i = 0; i < 2; i++) out->substeps[i] = counted ? substeps(i) : 0;
     });
 }
+
+double Solver::chemistry_explicit_marked() const {
+    const comm::SelfScope scope = communication_scope();
+    uint64_t marked = 0;
+    if (reacting) {
+        const Kokkos::View<rtype *> h = chem_h;
+        Kokkos::parallel_reduce(
+            "chemistry_explicit_marked", mesh->n_owned(),
+            KOKKOS_LAMBDA(const uint32_t c, uint64_t & m) { if (h(c) < 0.0_r) m++; }, marked);
+    }
+    return comm::allreduce(double(marked), comm::Op::SUM);
+}
