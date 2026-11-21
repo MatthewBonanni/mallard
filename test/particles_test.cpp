@@ -818,7 +818,7 @@ TEST(SolidParticlesTest, VelocitiesTurnAcrossRotationalPeriodicSides) {
     std::ostringstream input;
     input.precision(17);
     input << "[run]\nn_steps = 50\ndt = 0.01\n"
-          << "[mesh]\ntype = \"annulus\"\nNtheta = 12\nNr = 6\nNz = 2\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\n"
+          << "[mesh]\ntype = \"annulus\"\nNtheta = 12\nNr = 6\nNz = 3\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\n"
           << "angle = 90.0\n[[periodic]]\nzones = [\"start\", \"end\"]\n"
           << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
           << "[initialize]\ntype = \"constant\"\nu = " << numbers(0.0, 0.0, 0.0) << "\np = 1.0\nT = 1.0\n"
