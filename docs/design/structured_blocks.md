@@ -328,6 +328,31 @@ distinct row (hexahedra); on meshes where fewer than 8 cells share each row
 (no lattice), MUSCL keeps no rows and fits every step as before. Its block shapes add 4 B per cell with a row
 when the mesh has blocks.
 
+**Block face geometry (#965).** Of a TENO5 hexahedron's 2.01 kB of mesh and
+geometry in a $64^3$ box (Navier-Stokes), the face quadrature points take 658 B,
+their weights 219 B, the vertex-gradient weights of the viscous fluxes 604 B,
+and the faces' normals, centroids and areas 170 B. Only what is bitwise equal
+from face to face can be shared without changing results:
+
+| per-face data, $64^3$ box | faces | distinct values |
+|---|---:|---:|
+| quadrature weights (rows of 9) | 798,720 | 1,826 |
+| normals | 798,720 | 132 |
+| areas | 798,720 | 23 |
+| quadrature points relative to the face centroid | 798,720 | 516,466 |
+
+The weights are shared: a table of distinct rows and a row index per face
+(`FaceWeights`), 207 B per cell less at TENO5 and 84 B at TENO3, results
+bitwise unchanged. The points differ from face to face by the round-off of the
+nodes' coordinates, so one set per direction would change the reconstruction
+in the last bits; computing them in the kernels from the nodes would round
+differently on the device than in the host's setup. Normals and areas could
+share rows the same way, but `face_normals` and `face_area` have about a
+hundred readers. Fusing reconstruction and flux on block faces is still open:
+the troubled passes overwrite the smooth pass's face states of some cells after
+it, and the boundary, sponge, partition-face and species reconstructions read
+`face_solution` too.
+
 ## Documentation
 
 The block path is automatic: no input keys, nothing to turn on. Once it is

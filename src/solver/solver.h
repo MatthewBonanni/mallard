@@ -1264,7 +1264,7 @@ class Solver {
 
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
-        Kokkos::View<rtype **> flux_weights;
+        FaceWeights<> flux_weights;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;

@@ -1572,7 +1572,7 @@ struct TENOFunctor {
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;   // 3D: (face, q, dim)
-    Kokkos::View<rtype **> face_quad_weights;   // 3D: (face, q), zero on padding points
+    FaceWeights<> face_quad_weights;   // 3D: (face, q), zero on padding points
     BoundaryData boundaries;
 
     Kokkos::View<rtype *> scale;

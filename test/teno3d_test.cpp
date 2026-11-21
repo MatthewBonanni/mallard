@@ -28,6 +28,7 @@
 #include "gmsh_fixtures.h"
 #include "lattice_symbol.h"
 #include "face_reconstruction.h"
+#include "flux_functor.h"
 #include "physics.h"
 #include "solver.h"
 #include "teno_sharing.h"
@@ -104,7 +105,7 @@ double reconstruction_error(std::shared_ptr<Mesh> mesh, int order, double margin
     teno->calc_face_values(W, face_W);
     auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
     auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+    auto h_weights = teno->face_quad_weights.host();
 
     double err = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
@@ -1028,6 +1029,54 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
             EXPECT_GE(n_block, uint64_t(std::pow(12 - 2 * depth, 3))) << at;
             EXPECT_LT(n_block, uint64_t(mesh->n_cells)) << at;
             EXPECT_TRUE(block == unstructured) << at;
+        }
+    }
+}
+
+TEST(TENO3DSetup, FacesShareTheirQuadratureWeightsAndGiveThePerFaceWeightsFaceValuesAndFluxesBitwise) {
+    // Hexahedra of a box, and tetrahedra and prisms whose faces have padding points
+    for (const auto & [type, n] : {std::pair<std::string, uint32_t>{"cartesian", 12}, {"cartesian_mixed", 6}}) {
+        auto mesh = make_mesh_3d(type, n, n, n);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            double r2 = 0.0;
+            for (int d = 0; d < 3; d++) r2 += std::pow(double(mesh->h_cell_coords(c, d)) - 0.45, 2);
+            const bool inside = r2 < 0.06;
+            h_W(c, 0) = inside ? 1.0_r : 0.125_r;
+            for (int d = 0; d < 3; d++) h_W(c, 1 + d) = static_cast<rtype>(0.1 * std::sin(3.0 * double(mesh->h_cell_coords(c, d))));
+            h_W(c, 4) = inside ? 1.0_r : 0.1_r;
+        }
+        Kokkos::deep_copy(W, h_W);
+        for (const int order : {3, 5}) {
+            auto results = [&](const bool share) {
+                auto teno = std::make_unique<TENO>();
+                teno->set_mesh(mesh);
+                teno->set_boundaries(bd);
+                teno->share_weights = share;
+                teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+                const uint8_t n_quad = teno->n_face_quadrature_points();
+                Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+                teno->calc_face_values(W, face_W);
+                Kokkos::View<rtype *[N_CONSERVATIVE]> F("F", mesh->n_faces);
+                const ConvectiveFluxFunctor<riemann::HLLC> flux{mesh->face_normals, mesh->face_area, mesh->cells_of_face,
+                                                                teno->quadrature_face.weights, teno->face_quad_weights,
+                                                                face_W, bd, F, GAMMA, 1.0_r, {}, {}, {}};
+                Kokkos::parallel_for("flux", mesh->n_faces, flux);
+                auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+                auto h_F = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), F);
+                std::vector<rtype> out(h.data(), h.data() + h.span());
+                out.insert(out.end(), h_F.data(), h_F.data() + h_F.span());
+                return std::make_pair(out, teno->face_quad_weights.table.extent(0));
+            };
+            const auto [own, n_own] = results(false);
+            const auto [shared, n_shared] = results(true);
+            const std::string at = type + ", order " + std::to_string(order);
+            EXPECT_EQ(n_own, mesh->n_faces) << at;
+            // A few rows per direction, not one per face
+            EXPECT_LT(n_shared, mesh->n_faces / 10) << at;
+            EXPECT_TRUE(shared == own) << at;
         }
     }
 }
