@@ -636,6 +636,12 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
+        /**
+         * @brief Read the options, choose the rows and fill gather_depth from the stencil searches alone,
+         *        without setting up any table: the halo depth a distributed run needs, found before its setup.
+         */
+        void find_gather_depth(const Input & input);
+
         // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
