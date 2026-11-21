@@ -194,7 +194,7 @@ struct ScalarLimiterFunctor {
 
         // Physical bounds at every face, 0 <= Y_k <= 1: a mass fraction whose cut is small scales its
         // own slope, and the most abundant species takes what they give up, so that the slopes still
-        // sum to zero; a larger cut (see OWN_CUT_MAX) limits all scalars. gamma, e0 and the face density
+        // sum to zero; a larger cut limits all scalars (see shared_cut_weight). gamma, e0 and the face density
         // follow the change of composition at the cell's p and T, so that the face state stays the
         // state of the face composition
         uint32_t major = 0;
@@ -222,10 +222,15 @@ struct ScalarLimiterFunctor {
             }
             if (phi_k >= phi) continue;
             const rtype s_k = Kokkos::fmax(phi_k, 0.0_r) / phi;
-            if ((1.0_r - s_k) * phi * d_max > OWN_CUT_MAX) {
+            const rtype w_k = shared_cut_weight((1.0_r - s_k) * phi * d_max);
+            if (w_k >= 1.0_r) {
                 shared_cut = Kokkos::fmin(shared_cut, s_k);
                 continue;
             }
+            // The shared value scales by sigma_k and the species' own slope by the rest, s_k / sigma_k
+            const rtype sigma_k = 1.0_r - (1.0_r - s_k) * w_k;
+            shared_cut = Kokkos::fmin(shared_cut, sigma_k);
+            const rtype own_k = s_k / sigma_k;
             if (!any_cut) {
                 any_cut = true;
                 double sum = 0.0;
@@ -238,12 +243,12 @@ struct ScalarLimiterFunctor {
             double d_k[3];
             composition_derivatives(k, powers, R, cv, gamma_d, d_k);
             FOR_I_DIM {
-                const double given = static_cast<double>((1.0_r - s_k) * g[i]);
+                const double given = static_cast<double>((1.0_r - own_k) * g[i]);
                 moved[i] += given;
                 given_d[0][i] -= d_k[0] * given;
                 given_d[1][i] -= d_k[1] * given;
                 given_d[2][i] -= d_k[2] * given;
-                gradients(c, k, i) = s_k * g[i];
+                gradients(c, k, i) = own_k * g[i];
             }
         }
         FOR_I_DIM density_slope(c, i) = 0.0_r;
