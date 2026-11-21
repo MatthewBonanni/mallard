@@ -777,6 +777,13 @@ class Solver {
             const comm::SelfScope scope = communication_scope();
             return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
         }
+        /** @brief Cell integrations done by an accepted explicit step so far ([chemistry] explicit_step). */
+        double chemistry_explicit_steps() const {
+            const comm::SelfScope scope = communication_scope();
+            return comm::allreduce(double(cell_chemistry.statistics().explicit_steps), comm::Op::SUM);
+        }
+        /** @brief Owned cells whose last explicit step failed ([chemistry] explicit_step; collective). */
+        double chemistry_explicit_marked() const;
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
