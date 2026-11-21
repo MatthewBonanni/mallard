@@ -81,7 +81,7 @@ struct BoundaryFrame {
     std::string shape;                  // "curve" (2D), "four-sided", "ring" or "disk"
     std::array<double, 3> origin{};     // 2D: the end u starts from; 3D: the face center nearest to u = v = 0
     std::array<double, 3> u_direction{};  // unit vector along which u grows at origin, tangent to the boundary
-    std::array<double, 3> normal{};     // the area-weighted mean of the inward unit normals
+    std::array<double, 3> normal{};     // the inward unit normal at the origin
     double length = 0.0;                // 2D: the length of the curve; 3D: the largest u_m of a face center
     double width = 0.0;                 // 3D: the largest v_m of a face center; 2D: 0
 };
