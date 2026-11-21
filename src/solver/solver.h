@@ -648,6 +648,12 @@ class Solver {
          *        dt_chem; heat release rate of every cell for output.
          */
         void init_chemistry();
+
+        /** @brief gas = "flamelet": refuse the models it does not combine with (yet): [chemistry], [radiation], [les]. */
+        void check_flamelet_input() const;
+
+        /** @brief gas = "flamelet": the table's source of rho C at each owned cell's state, added to rhoY's rates. */
+        void add_progress_source(SpeciesView rhs);
         void allocate_chemistry();
         void advance_chemistry(double dt_chem, bool audited = true);
         /**

@@ -161,6 +161,7 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                               const bool viscous) {
     Settings s;
     s.mixture = mixture != nullptr;
+    s.tabulated = mixture && mixture->tabulated();
     s.viscous = viscous;
     if (!mixture) {
         s.cp = physics.cp;
@@ -183,6 +184,14 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                                     .message = "describes the streams and species of a gas mixture, and this case "
                                                "is a perfect gas",
                                     .fix = "Remove [output.mixture], or set physics.gas = \"mixture\"",
+                                    .docs = DOCS});
+    }
+    if (s.tabulated) {
+        throw InputError(Diagnostic{.key = "output.mixture",
+                                    .line = line_of(*output, "mixture"),
+                                    .message = "describes the streams and species of a gas mixture, and a flamelet "
+                                               "gas transports Z and C, which the output holds as Y_Z and Y_C",
+                                    .fix = "Remove [output.mixture]",
                                     .docs = DOCS});
     }
     const chemistry::Mechanism & mech = mixture->mechanism();
@@ -249,6 +258,7 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
 bool Settings::available(const Field f) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
+    if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) return false;
     return !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
            !(needs(need::VISCOUS) && !viscous) && !(needs(need::REFERENCE) && !reference) &&
            !(needs(need::STREAMS) && !streams) && !(needs(need::PROGRESS) && progress == Progress::NONE) &&
@@ -267,7 +277,10 @@ void Settings::require(const Field f, const Input & input) const {
             if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "fields");
         }
     }
-    if (needs(need::THREE_D) && N_DIM != 3) {
+    if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) {
+        d.message = name + " needs the species of a gas mixture, and a flamelet gas has a table in their place";
+        d.fix = "Remove " + name;
+    } else if (needs(need::THREE_D) && N_DIM != 3) {
         d.message = name + " is zero in 2D, where the vorticity is normal to the velocity";
         d.fix = "Run the case with mallard3d, or remove " + name;
     } else if (needs(need::MIXTURE) && !mixture) {
