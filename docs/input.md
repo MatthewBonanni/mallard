@@ -33,15 +33,15 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L`; `particles.velocity` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
-| Acceleration (m/s^2) | `source.gravity` |
+| Acceleration (m/s^2) | `source.gravity`; `particles.gravity` |
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
@@ -859,6 +859,7 @@ T = 300.0
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
 | `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+| `viscous_gradients` | (`navier_stokes`) Face gradients of the viscous stress and heat flux: `least_squares` (default; the mean of the two cells' least-squares gradients, second order) or `reconstruction` (`TENO` of order 4 or more, single gas, planar, no LES, hybrid flux, curved faces or rotational periodicity; the viscous time-step limit is 2.05 times as strict): on faces between cells TENO finds smooth, the gradients of the two cells' central polynomials at each face quadrature point, averaged, plus the jump of their values over the distance of the cell centers by 4/3 (Nishikawa 2010), so order `order - 1`; other faces keep `least_squares`. See [Numerics: viscous gradients](guide/numerics.md#viscous-gradients) |
 
 ### `[numerics.error_control]`
 
@@ -897,7 +898,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, and (planar single gas) limit the convective fluxes so that every stage keeps density and pressure positive at `cfl` up to 0.5, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
-| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.5 in 3D (1 in 2D) |
+| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
 | `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
 
@@ -1549,15 +1550,91 @@ format = "vtp"
 reductions = ["mean", "rms"]
 ```
 
+## `[particles]`
+
+Lagrangian particles: massless tracers or solid spheres
+([Particles](guide/particles.md)). Restart files carry them and their
+quantities: a run restarted from a file with particles continues them and does
+not seed; a file without particles (or a `remap` start) seeds them from these
+keys.
+
+| Key | Description |
+|---|---|
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag and gravity accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
+| `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
+| `density` | Material density (`"solid"`). Required for solid particles |
+| `drag` | `"stokes"` or `"schiller_naumann"` (`"solid"`), default `"schiller_naumann"` |
+| `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
+| `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
+| `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, then the quantities, by id), default none |
+| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
+
+### `[particles.lattice]`
+
+Seeds on a lattice, after the `points` in id order (`x` varying fastest).
+
+| Key | Description |
+|---|---|
+| `lo`, `hi` | Opposite corners. Required |
+| `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
+### `[[particles.walls]]`
+
+How solid particles interact with walls and symmetry planes, per boundary zone
+([Solid particles](guide/particles.md#solid-particles)); by default they
+rebound elastically.
+
+| Key | Description |
+|---|---|
+| `zones` | Wall or symmetry boundary zones. Required |
+| `interaction` | `"rebound"` or `"stick"` (removed, counted as deposited), default `"rebound"` |
+| `restitution` | Normal restitution coefficient in [0, 1] (rebound), default 1 |
+| `tangential_restitution` | Tangential restitution coefficient in [0, 1] (rebound), default 1 |
+
+### `[[particles.quantities]]`
+
+A value each particle follows along its path
+([Per-particle quantities](guide/particles.md#per-particle-quantities)).
+Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
+`U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
+`V_Z`, the quantities before this one, and `in(name)` of a region of
+`[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
+`winding`.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `integral` | Expression whose time integral along the path it is, at the time integrator's order |
+| `max`, `min` | Expression whose largest (smallest) value at the steps' starts it is |
+| `first_time` | Condition: the first step start's `t` at which it holds, `nan` until then |
+| `winding` | Table `point`, `axis` (3D only): the signed turns about the axis through the point |
+| `while` | Condition gating the quantity: it integrates or samples only where this holds, default none |
+
+### `[[particles.probes]]`
+
+Statistics of particle expressions over the particles in a region
+([Particle probes](guide/particles.md#particle-probes)): per row `step`, `t`,
+`count`, and each field's mean, standard deviation, min and max.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | A filled region of primitives that does not move, or its name, default every particle |
+| `fields` | Expressions as in `[[particles.quantities]]`, the quantities among their variables, default none (the count only) |
+| `interval` | Steps between rows, default 1 |
+| `file` | Its CSV file, default `particle_probe_<name>.csv` |
+
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every
-step ([Triggers](guide/running.md#triggers)).
+step ([Triggers](guide/running.md#triggers)). Each number a condition compares
+`t` with is a time a step lands on.
 
 | Key | Description |
 |---|---|
 | `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
-| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set). Required |
+| `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set), `"stop statistics"` (they keep their values from then on), `"log <message>"` (a line of the log, `{<name>}` replaced by that value), `"set <key>=<value> ..."` (as `mallard ctl set`). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
 | `repeat` | `true` fires again each time the condition turns true after being false; default `false` (once) |

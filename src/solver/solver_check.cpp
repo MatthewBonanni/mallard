@@ -52,15 +52,6 @@ constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'0
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
-/** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
-double cfl_limit(const TimeIntegratorType type) {
-    switch (type) {
-        case TimeIntegratorType::SSPRK3: return 1.2;
-        case TimeIntegratorType::RK4: return 1.35;
-        default: return std::numeric_limits<double>::infinity();
-    }
-}
-
 } // namespace
 
 void Solver::report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const {
@@ -598,6 +589,22 @@ void Solver::check_settings(CheckReport & r) const {
         r.warning(diagnostic_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
                                                          "limit of %s for smooth flow: lower run.cfl (or run.dt)",
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
+    }
+    const double t0 = static_cast<double>(t);
+    const double t_end = t_stop > 0 ? static_cast<double>(t_stop) : std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const std::string which = "triggers[" + std::to_string(i) + "] (" + trigger.name + ")";
+        if (trigger.hold > t_end - t0) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + " must hold for " + logging::real(trigger.hold) + " s, longer than the run's " +
+                          logging::real(t_end - t0) + " s to t_stop: lower its for, or raise run.t_stop");
+        } else if (triggers.never_true(i, t0, t_end)) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + ": \"" + trigger.when + "\" is false at every t from " + logging::real(t0) +
+                          (std::isfinite(t_end) ? " s to t_stop = " + logging::real(t_end) + " s" : " s on") +
+                          ": check its numbers and their units (seconds)");
+        }
     }
 }
 
