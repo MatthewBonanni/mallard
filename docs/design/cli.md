@@ -12,7 +12,7 @@ Inspect   mallard check [input.toml] | info <file> | list fields|species|templat
 Mesh      mallard mesh convert | extrude
 Post      mallard post extract|derive|average|convergence|render
 Share     mallard pack
-Maintain  mallard test | completion | --version
+Maintain  mallard test | completion | version
 ```
 
 | Command | Group | Status |
@@ -36,7 +36,7 @@ Maintain  mallard test | completion | --version
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack`, `pack --verify` | Share | available; on the run record (the files a run read, the output records) |
-| `test`, `completion`, `--version` | Maintain | available |
+| `test`, `completion`, `version` (`--version`) | Maintain | available |
 
 ## Rules
 

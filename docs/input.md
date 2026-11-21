@@ -553,12 +553,22 @@ Tables and point clouds from CSV files, read by the expressions of
 | `name` | Prefix of the variables (required) |
 | `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
 | `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
-| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
-| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the coordinates, if named `x`, `y`, `z`) |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the file's metadata, else the coordinates, if named `x`, `y`, `z`) |
 | `region` | Instead of `at`, one coordinate: the signed distance to this [region](#regions) |
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
-| `units` | Units of columns, e.g. `{x = "mm"}` (default SI) |
+| `units` | Units of columns, e.g. `{x = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales: `length`, `velocity`, `density`, `temperature`, e.g. `{length = 0.02, velocity = 15}`; each column by its dimension (velocities by the velocity ratio, Reynolds stresses by its square, pressures as `rho U^2`), so every column needs a unit (`"1"` if dimensionless). Default none |
+| `reference` | With `scale`: the scales of the data, e.g. `{length = 0.01, velocity = 30}` (default: the file's metadata) |
+
+A file's metadata is a comment line `# mallard-profile {...}` before its
+header, a JSON object of `coordinates`, `at`, `units` (an object of columns
+and units), `reference` (an object of scales, numbers in SI or quantities
+such as `"10 mm"`), `source` and `transforms` (a list of strings): defaults
+of the entry's keys and a record of where the data come from. See
+[profile files](guide/boundary_conditions.md#profile-files-metadata-and-rescaling).
 
 ### `[initialize.turbulence]`
 
@@ -701,11 +711,15 @@ variable at the faces and the faces outside a table. Guide:
 | `name` | Prefix of the variables (required) |
 | `file` | CSV file: a header of column names, rows of numbers, `#` comments (required) |
 | `type` | `table` (default): on a grid of 1-3 coordinates, interpolated, end values outside; `points`: scattered, by nearest points |
-| `coordinates` | Names of the coordinate columns (default: the first column for tables, `x`, `y` (`z`) for points) |
-| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the coordinates, if named `x`, `y`, `z` or like a local coordinate) |
+| `coordinates` | Names of the coordinate columns (default: the file's metadata, else the first column for tables, `x`, `y` (`z`) for points) |
+| `columns` | Names of the value columns to read (default: every column but the coordinates) |
+| `at` | One expression of `x`, `y`, `z` and the [local coordinates](#local-coordinates) per coordinate, not of `t` (default: the file's metadata, else the coordinates, if named `x`, `y`, `z` (or `X`, `Y`, `Z`) or like a local coordinate) |
 | `interpolation` | (tables) `linear` (default) or `cubic` (4-point Lagrange per axis) |
 | `neighbors` | (points) Nearest points weighted by inverse distance squared, 1 to 16 (default 1: the nearest) |
-| `units` | Units of columns, e.g. `{y = "mm"}` (default SI) |
+| `units` | Units of columns, e.g. `{y = "mm"}` (default: the file's metadata, else SI) |
+| `scale` | Rescale the data to these scales, as in [`[[initialize.data]]`](#initializedata) (default none) |
+| `reference` | With `scale`: the scales of the data (default: the file's metadata) |
+| `outside` | (tables) Faces beyond a coordinate column's range: `hold` (default), the column's end values; `error`, an input error saying how many |
 
 ### Characteristic boundaries (`nscbc`)
 
@@ -790,7 +804,7 @@ the [guide](guide/boundary_conditions.md#synthetic-turbulence-turbulence).
 | Key | Description |
 |---|---|
 | `reynolds_stress` | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions in `x`, `y`, `z` (not `t`, even when `u` depends on `t`), positive semidefinite |
-| `profile` | Instead of `u` and `reynolds_stress`: a CSV file of plane averages as `mallard post average --homogeneous` writes them (a first column `x`, `y` or `z`, then `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ...; missing off-diagonal covariances are zero), interpolated linearly along that coordinate: the statistics of a precursor run |
+| `profile` | Instead of `u` and `reynolds_stress`: the statistics of a precursor run, the columns `MEAN_U_X`, `MEAN_U_Y`(, `MEAN_U_Z`) and `COV_U_X_U_X`, ... (missing off-diagonal covariances are zero) of the entry's [`[[boundaries.data]]`](#boundariesdata) of this name, read at the faces in any coordinates; or a CSV file of plane averages as `mallard post average --homogeneous` writes them, read as such an entry with its defaults (its first column the coordinate: `x`, `y`, `z`, `X`, `Y`, `Z` or a local coordinate such as `n_m`; linear) |
 | `length_scale` | Integral length scales: a number, `[L_x, L_y, L_z]` (along each direction, for all components), or one such list per velocity component. The one along the inlet normal sets the integral time scale `L / U_c` |
 | `convection_velocity` | `U_c` of Taylor's hypothesis (default the area-averaged mean inflow speed); with a `u` of `t`, that of `t = 0`, so set it when the mean starts at rest or varies widely |
 | `seed` | Random seed, a non-negative integer (default 1); inlets also differ by their position in `[[boundaries]]` |

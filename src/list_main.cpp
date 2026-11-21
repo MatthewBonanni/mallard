@@ -25,6 +25,7 @@
 #include "diagnostic_code.h"
 #include "field_units.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh_quality.h"
@@ -471,6 +472,7 @@ int list_keys_main(const cli::Args & args) {
         json::Object selected;
         for (const std::string & key : keys) selected.raw(key, value_text(catalog[key]));
         json::Object out;
+        out.add("schema", interfaces::KEY_CATALOG.name).add("version", interfaces::KEY_CATALOG.version);
         out.raw("input", null_or(input_file)).raw("section", null_or(section)).raw("keys", selected.str());
         if (per_case) {
             out.add("complete", listed.complete)
