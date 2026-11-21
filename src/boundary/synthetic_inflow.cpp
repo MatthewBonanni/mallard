@@ -271,11 +271,10 @@ std::array<double, N_STRESS> InletProfile::stress_at(const FacePoint & x) const 
     return s;
 }
 
-SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream_,
-                                 const Mesh & mesh, const std::vector<uint32_t> & faces,
-                                 const std::vector<FacePoint> & points, const std::vector<int32_t> & char_index) {
+SyntheticInflow::Settings SyntheticInflow::read(const Input & boundary, const std::string & where) {
+    Settings s;
     const std::string tw = where + ".turbulence";
-    const InletProfile profile(boundary, where);
+    s.where = tw;
     const Input & turbulence = boundary.at("turbulence");
     static const std::vector<std::string> KEYS = {"reynolds_stress",     "profile",       "length_scale",
                                                   "seed",                "zero_net_flux", "points_per_length",
@@ -287,20 +286,18 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
             throw InputError(tw + ": unknown key " + entry.first + " (keys: " + list + ").");
         }
     }
-    stream = stream_;
-    timed_mean = boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where);
+    s.timed_mean = boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where);
     if (turbulence.contains("seed")) {
-        const int64_t s = find_value<int64_t>(turbulence, "seed");
-        if (s < 0) throw InputError(tw + ".seed must be non-negative.");
-        seed = static_cast<uint64_t>(s);
+        const int64_t seed = find_value<int64_t>(turbulence, "seed");
+        if (seed < 0) throw InputError(tw + ".seed must be non-negative.");
+        s.seed = static_cast<uint64_t>(seed);
     }
-    zero_net_flux = find_value_or<bool>(turbulence, "zero_net_flux", true);
-    const double points_per_length = find_double_or(turbulence, "points_per_length", dim::none, 6.0);
-    if (!(points_per_length >= 2.0)) throw InputError(tw + ".points_per_length must be at least 2.");
+    s.zero_net_flux = find_value_or<bool>(turbulence, "zero_net_flux", true);
+    s.points_per_length = find_double_or(turbulence, "points_per_length", dim::none, 6.0);
+    if (!(s.points_per_length >= 2.0)) throw InputError(tw + ".points_per_length must be at least 2.");
 
-    // Integral length scales: (velocity component, direction)
     if (!turbulence.contains("length_scale")) throw InputError(tw + ": missing length_scale.");
-    double L[N_DIM][N_DIM];
+    auto & L = s.L;
     {
         const Input & v = turbulence.at("length_scale");
         const std::string key = tw + ".length_scale";
@@ -329,6 +326,22 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
             }
         }
     }
+    if (turbulence.contains("convection_velocity")) {
+        s.convection_velocity = find_double(turbulence, "convection_velocity", dim::velocity);
+        if (!(s.convection_velocity > 0.0) || !std::isfinite(s.convection_velocity)) {
+            throw InputError(tw + ".convection_velocity must be positive.");
+        }
+    }
+    return s;
+}
+
+SyntheticInflow::SyntheticInflow(const Settings & settings, const InletProfile & profile, uint64_t stream_,
+                                 const Mesh & mesh, const std::vector<uint32_t> & faces,
+                                 const std::vector<FacePoint> & points, const std::vector<int32_t> & char_index)
+    : seed(settings.seed), stream(stream_), zero_net_flux(settings.zero_net_flux), timed_mean(settings.timed_mean) {
+    const std::string & tw = settings.where;
+    const double points_per_length = settings.points_per_length;
+    const auto & L = settings.L;
 
     // Geometry: a plane normal to a coordinate axis
     n_faces = static_cast<uint32_t>(faces.size());
@@ -408,10 +421,8 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         n_axis[normal_axis] = 1.0;
         flux += area_global[i] * std::abs(profile.velocity(x_global[i], n_axis)[normal_axis]);
     }
-    U_c = turbulence.contains("convection_velocity") ? find_double(turbulence, "convection_velocity", dim::velocity)
-                                                     : flux / area;
+    U_c = settings.convection_velocity > 0.0 ? settings.convection_velocity : flux / area;
     if (!(U_c > 0.0) || !std::isfinite(U_c)) {
-        if (turbulence.contains("convection_velocity")) throw InputError(tw + ".convection_velocity must be positive.");
         throw InputError(tw + ": the convection velocity, by default the area-averaged mean inflow speed" +
                          (timed_mean ? " at t = 0" : "") + ", is not positive: set " + tw +
                          ".convection_velocity to the flow's typical speed.");

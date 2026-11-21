@@ -254,16 +254,9 @@ MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_i
     return block;
 }
 
-MeshBlock annulus_block(const Input & input, int r, int p) {
-    const double angle = double(find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r));
-    if (!(angle > 0.0 && angle <= 360.0)) throw InputError("[mesh] angle must be in (0, 360] degrees.");
-    const double r_in = double(find_real_or(input, "mesh", "r_inner", dim::length, 1.0_r));
-    const double r_out = double(find_real_or(input, "mesh", "r_outer", dim::length, 2.0_r));
-    if (!(r_in > 0.0 && r_out > r_in)) throw InputError("[mesh] annulus needs 0 < r_inner < r_outer.");
-    return annulus_block(find_value_or<uint32_t>(input, "mesh", "Ntheta", 64),
-                         find_value_or<uint32_t>(input, "mesh", "Nr", 16), find_value_or<uint32_t>(input, "mesh", "Nz", 16),
-                         r_in, r_out, angle * std::numbers::pi / 180.0,
-                         double(find_real_or(input, "mesh", "Lz", dim::length, 1.0_r)), r, p);
+MeshBlock annulus_block(const MeshInput & mesh, int r, int p) {
+    return annulus_block(mesh.n[0], mesh.n[1], mesh.n[2], mesh.r_inner, mesh.r_outer, mesh.angle,
+                         double(mesh.length[2]), r, p);
 }
 
 namespace {
@@ -461,39 +454,68 @@ bool is_hdf5_mesh(const std::string & filename) {
     return ext == ".h5" || ext == ".hdf5";
 }
 
+MeshInput read_mesh_input(const Input & input) {
+    MeshInput m;
+    const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
+    m.type = find_option(MESH_TYPES, "mesh.type", type,
+                         input.contains("mesh") ? line_of(input.at("mesh"), "type") : size_t(0))->second;
+    m.transform = mesh_transform(input);
+    m.stretching = mesh_stretching(input);
+    if (m.type == MeshType::FROM_FILE) {
+        m.filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
+        if (m.stretching != Stretching{}) {
+            throw InputError({.key = "mesh.stretching",
+                              .line = line_of(input.at("mesh"), "stretching"),
+                              .message = "applies only to generated meshes, not to a mesh file",
+                              .fix = "Remove stretching and grade the mesh in the program that made the file",
+                              .docs = "docs/guide/meshes.md#stretching"});
+        }
+        return m;
+    }
+    if (m.type == MeshType::ANNULUS) {
+        const double angle = double(find_real_or(input, "mesh", "angle", dim::angle_degrees, 360.0_r));
+        if (!(angle > 0.0 && angle <= 360.0)) throw InputError("[mesh] angle must be in (0, 360] degrees.");
+        m.angle = angle * std::numbers::pi / 180.0;
+        m.r_inner = double(find_real_or(input, "mesh", "r_inner", dim::length, 1.0_r));
+        m.r_outer = double(find_real_or(input, "mesh", "r_outer", dim::length, 2.0_r));
+        if (!(m.r_inner > 0.0 && m.r_outer > m.r_inner)) throw InputError("[mesh] annulus needs 0 < r_inner < r_outer.");
+        m.n = {find_value_or<uint32_t>(input, "mesh", "Ntheta", 64), find_value_or<uint32_t>(input, "mesh", "Nr", 16),
+               find_value_or<uint32_t>(input, "mesh", "Nz", 16)};
+        m.length[2] = find_real_or(input, "mesh", "Lz", dim::length, 1.0_r);
+        return m;
+    }
+    m.n[0] = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
+    m.n[1] = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
+    m.length[0] = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
+    m.length[1] = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
+    if constexpr (N_DIM == 3) {
+        m.n[2] = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
+        m.length[2] = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
+        if (m.type == MeshType::CARTESIAN_TRI || m.type == MeshType::WEDGE) throw mesh_type_dimension_error(input, type);
+    } else if (m.type != MeshType::CARTESIAN && m.type != MeshType::CARTESIAN_TRI && m.type != MeshType::WEDGE) {
+        throw mesh_type_dimension_error(input, type);
+    }
+    return m;
+}
+
 MeshBlock read_mesh_block(const Input & input) {
-    const std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
-    const auto it = find_option(MESH_TYPES, "mesh.type", type_str,
-                                input.contains("mesh") ? line_of(input.at("mesh"), "type") : size_t(0));
-    const MeshType type = it->second;
-    const MeshTransform transform = mesh_transform(input);
-    if (type == MeshType::FROM_FILE) {
+    const MeshInput m = read_mesh_input(input);
+    if (m.type == MeshType::FROM_FILE) {
         const std::string filename = mesh_filename(input);
         MeshBlock block = is_hdf5_mesh(filename) ? read_mesh_h5(filename) : read_file_block(filename);
-        transform_block(block, transform);
+        transform_block(block, m.transform);
         return block;
     }
-    if (type == MeshType::ANNULUS) return annulus_block(input, comm::rank(), comm::size());
-    const uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
-    const uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
-    const rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
-    const rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
+    if (m.type == MeshType::ANNULUS) return annulus_block(m, comm::rank(), comm::size());
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
-        if (type == MeshType::CARTESIAN_TRI || type == MeshType::WEDGE) {
-            throw mesh_type_dimension_error(input, type_str);
-        }
-        const auto [n_cells, n_nodes] = cartesian_3d_size(Nx, Ny, Nz, type);
+        const auto [n_cells, n_nodes] = cartesian_3d_size(m.n[0], m.n[1], m.n[2], m.type);
         const int r = comm::rank(), p = comm::size();
-        return cartesian_3d_block(Nx, Ny, Nz, Lx, Ly, Lz, type, block_begin(n_cells, r, p),
-                                  block_begin(n_cells, r + 1, p), block_begin(n_nodes, r, p),
-                                  block_begin(n_nodes, r + 1, p), mesh_stretching(input));
+        return cartesian_3d_block(m.n[0], m.n[1], m.n[2], m.length[0], m.length[1], m.length[2], m.type,
+                                  block_begin(n_cells, r, p), block_begin(n_cells, r + 1, p), block_begin(n_nodes, r, p),
+                                  block_begin(n_nodes, r + 1, p), m.stretching);
     }
-    if (type != MeshType::CARTESIAN && type != MeshType::CARTESIAN_TRI && type != MeshType::WEDGE) {
-        throw mesh_type_dimension_error(input, type_str);
-    }
-    return cartesian_2d_block(Nx, Ny, Lx, Ly, type, comm::rank(), comm::size(), mesh_stretching(input));
+    return cartesian_2d_block(m.n[0], m.n[1], m.length[0], m.length[1], m.type, comm::rank(), comm::size(),
+                              m.stretching);
 }
 
 std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axisymmetric) {

@@ -110,8 +110,25 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
 MeshBlock annulus_block(uint32_t n_theta, uint32_t n_r, uint32_t n_z, double r_in, double r_out, double angle,
                         double Lz, int r, int p);
 
-/** @brief annulus_block from the [mesh] table (type = "annulus"), for rank r of p. */
-MeshBlock annulus_block(const Input & input, int r, int p);
+/**
+ * @brief The [mesh] table, read and checked without the mesh file: its type and
+ *        the keys of that type. Mesh::init and read_mesh_block make the mesh it describes.
+ */
+struct MeshInput {
+    MeshType type = MeshType::FROM_FILE;
+    std::string filename;                 // a mesh file's, which is not opened
+    std::array<uint32_t, 3> n{};          // cells per direction; an annulus: theta, r, z
+    std::array<rtype, 3> length{};        // a box's sides; an annulus: Lz third
+    double angle = 0.0, r_inner = 0.0, r_outer = 0.0;  // an annulus' sweep (radians) and radii
+    Stretching stretching{};
+    MeshTransform transform;
+};
+
+/** @brief The [mesh] table of the input (see MeshInput). */
+MeshInput read_mesh_input(const Input & input);
+
+/** @brief annulus_block of the [mesh] table (type = "annulus"), for rank r of p. */
+MeshBlock annulus_block(const MeshInput & mesh, int r, int p);
 
 std::array<uint64_t, 2> cartesian_3d_size(uint32_t nx, uint32_t ny, uint32_t nz, MeshType kind);
 

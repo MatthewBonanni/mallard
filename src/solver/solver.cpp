@@ -225,15 +225,12 @@ void Solver::setup_from_input() {
     run_health.setup_phases.clear();
 
     logging::section("Setup");
-    init_run_parameters();
+    timed_phase("input", [&] { read_input(); });
     timed_phase("mesh", [&] {
         init_mesh();
         record_mesh_provenance();
     });
-    timed_phase("physics and boundaries", [&] {
-        init_physics();
-        init_boundaries();
-    });
+    timed_phase("boundaries", [&] { init_boundaries(); });
     timed_phase("numerics", [&] { init_numerics(); });
     while (halo_too_shallow()) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
@@ -282,6 +279,36 @@ void Solver::setup_from_input() {
 #endif
     logging::begin_phase("total");
     logging::end_phase(t_wall_setup);
+}
+
+void Solver::read_input() {
+    init_run_parameters();
+    init_physics();
+    read_mesh_keys();
+    read_boundaries();
+}
+
+void Solver::read_mesh_keys() {
+    read_mesh_input(input);
+    // Read in every run, so that an input runs unchanged on any number of ranks
+    partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
+    record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
+    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
+        throw not_accepted(input.at("parallel"), "parallel.partitioner", partitioner, {"graph", "hilbert", "multijagged"});
+    }
+    const std::string exchange =
+        find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
+    record_options("parallel.halo_exchange", {"nccl", "mpi"});
+    if (exchange != "nccl" && exchange != "mpi") {
+        throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
+    }
+    nccl_exchange = exchange == "nccl";
+    // The mesh phase builds what these describe
+    Mesh::periodic_pairs(input);
+    cell_numbering_of_input(input);
+    curved::read_shapes(input);
+    curved::enabled(input);
+    axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
 }
 
 void Solver::record_mesh_provenance() const {
@@ -429,18 +456,6 @@ bool writes_variable(const Input & input, const std::string & name) {
 
 void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
-    // Read in every run, so that an input runs unchanged on any number of ranks
-    partitioner = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
-    record_options("parallel.partitioner", {"graph", "hilbert", "multijagged"});
-    if (partitioner != "graph" && partitioner != "hilbert" && partitioner != "multijagged") {
-        throw not_accepted(input.at("parallel"), "parallel.partitioner", partitioner, {"graph", "hilbert", "multijagged"});
-    }
-    const std::string exchange =
-        find_value_or<std::string>(input, "parallel", "halo_exchange", comm::nccl_available() ? "nccl" : "mpi");
-    record_options("parallel.halo_exchange", {"nccl", "mpi"});
-    if (exchange != "nccl" && exchange != "mpi") {
-        throw not_accepted(input.at("parallel"), "parallel.halo_exchange", exchange, {"mpi", "nccl"});
-    }
     curved::Surfaces surfaces;
     if (!is_distributed()) {
         mesh = std::make_shared<Mesh>();
@@ -468,14 +483,14 @@ void Solver::init_mesh() {
         setup.distribute(*block_owners);
         surfaces = curved::surfaces_of_block(setup.mesh_block(), input);
         mesh = std::move(setup).build_local_mesh(halo_layers, distribution, cell_numbering_of_input(input));
-        if (exchange == "nccl" && !comm::nccl_available()) {
+        if (nccl_exchange && !comm::nccl_available()) {
             throw InputError({.key = "parallel.halo_exchange",
                               .line = line_of(input.at("parallel"), "halo_exchange"),
                               .message = "\"nccl\" needs a build with NCCL, and this one has none",
                               .fix = "Set halo_exchange = \"mpi\", or rebuild with -DMallard_ENABLE_NCCL=ON",
                               .docs = "docs/guide/parallel.md#mpi"});
         }
-        halo = HaloExchange(distribution, exchange == "nccl");
+        halo = HaloExchange(distribution, nccl_exchange);
     }
     mesh->apply_curved(surfaces);
     mesh_setup = describe_mesh(*mesh);
@@ -487,13 +502,6 @@ void Solver::init_mesh() {
     if (!transform.is_identity()) mesh_settings.emplace_back("Transform", transform.description);
     const Stretching stretching = mesh_stretching(input);
     if (stretching != Stretching{}) {
-        if (type == "file") {
-            throw InputError({.key = "mesh.stretching",
-                              .line = line_of(input.at("mesh"), "stretching"),
-                              .message = "applies only to generated meshes, not to a mesh file",
-                              .fix = "Remove stretching and grade the mesh in the program that made the file",
-                              .docs = "docs/guide/meshes.md#stretching"});
-        }
         std::string text;
         FOR_I_DIM text += (i ? ", " : "[") + logging::real(double(stretching[i]));
         mesh_settings.emplace_back("Stretching", text + "] (tanh, toward both ends)");
@@ -563,7 +571,6 @@ void Solver::init_mesh() {
         for (const auto & shape : surfaces.shapes) text += ", " + shape.zone + " projected";
         mesh_settings.emplace_back("Curved boundary", text);
     }
-    axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
         if (mesh->curved_geometry) {
             throw InputError({.key = "physics.axisymmetric",
@@ -887,6 +894,119 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
     return text;
 }
 
+void Solver::read_boundaries() {
+    const std::vector<Input> input_boundaries =
+        contains_optional(input, "boundaries") ? find_value<std::vector<Input>>(input, "boundaries")
+                                               : std::vector<Input>{};
+    boundary_entries.clear();
+    for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
+        const Input & bound = input_boundaries[i_bc];
+        BoundaryEntry & e = boundary_entries.emplace_back();
+        const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
+        if (!bound.contains("name")) {
+            throw missing_key(bound, entry + ".name",
+                              "Add name = \"...\": the mesh zone this condition applies to");
+        }
+        const std::string name = find_value<std::string>(bound, "name");
+        const std::string where_name = "boundaries[name = \"" + name + "\"]";
+        e.name = name;
+        e.where_name = where_name;
+        if (!bound.contains("type")) {
+            std::vector<std::string> types;
+            for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
+            std::sort(types.begin(), types.end());
+            Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
+            d.valid = types;
+            d.fix = "Add type = \"...\"";
+            d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
+            throw InputError(d);
+        }
+        e.profiles = std::make_shared<const BoundaryProfiles>(bound, where_name);
+        e.bc = BoundaryCondition::from_input(bound, physics);
+        if (bound.contains("wall_model")) {
+            e.wall_model = WallModelSpec::from_input(bound.at("wall_model"), e.bc, where_name + ".wall_model");
+            e.bc.modeled = true;
+        }
+        // Optional filter selecting part of the zone by face centroid
+        if (contains_optional(bound, "where")) {
+            e.where = std::make_shared<const Expression>(name + ".where", find_value<std::string>(bound, "where"));
+        }
+        if (e.bc.type == BoundaryType::DIRICHLET) {
+            for (const char * key : {"rho", "u", "p"}) {
+                if (!bound.contains(key)) throw missing_key(bound, where_name + "." + key);
+            }
+            if (!bound.at("u").is_array() || bound.at("u").as_array().size() != N_DIM) {
+                throw InputError({.key = where_name + ".u",
+                                  .line = line_of(bound, "u"),
+                                  .message = "must be an array of " + std::to_string(N_DIM) + " components",
+                                  .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
+            }
+            const auto & u = bound.at("u").as_array();
+            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
+                e.dirichlet.push_back(std::make_shared<const kexpr::Program>(
+                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound),
+                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
+            };
+            add_state(bound.at("rho"), name + ".rho", dim::density);
+            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
+            add_state(bound.at("p"), name + ".p", dim::pressure);
+        }
+        e.fields = std::make_shared<BoundaryFields>(bound, e.bc, where_name);
+        e.coordinates = local_coordinates_used(bound);
+        for (const uint16_t i : e.profiles->coordinates_used()) {
+            if (std::find(e.coordinates.begin(), e.coordinates.end(), i) == e.coordinates.end()) {
+                e.coordinates.push_back(i);
+            }
+        }
+        std::sort(e.coordinates.begin(), e.coordinates.end());
+        bool reads_n = false, reads_patch = false;
+        for (const uint16_t i : e.coordinates) {
+            const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
+            reads_n = reads_n || wall;
+            reads_patch = reads_patch || !wall;
+        }
+        auto unused_key = [&](const std::string & key, const std::string & what) {
+            return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                               .message = "no expression of the entry reads " + what + ", so " + key +
+                                          " has no effect",
+                               .fix = "Remove " + key + ", or write a value in the local coordinates",
+                               .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        };
+        if (bound.contains("walls")) {
+            if (!reads_n) throw unused_key("walls", "the wall distance n");
+            e.walls = find_value<std::vector<std::string>>(bound, "walls");
+            if (e.walls.empty()) {
+                throw InputError({.key = where_name + ".walls", .line = line_of(bound, "walls"),
+                                  .message = "the list of zones is empty",
+                                  .fix = "Name the zones n measures the distance from, or remove walls to "
+                                         "measure from every wall entry",
+                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            }
+        }
+        for (const char * key : {"corners", "origin", "toward"}) {
+            if (!bound.contains(key)) continue;
+            if (N_DIM == 2 && std::string(key) != "origin") {
+                throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
+                                  .message = std::string(key) == "corners"
+                                                 ? "a 2D boundary is a curve, which has two ends and no corners"
+                                                 : "a 2D boundary is a curve: origin alone says which end u "
+                                                   "starts from",
+                                  .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
+                                         "the end nearest to origin = [x, y] if that is given",
+                                  .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+            }
+            if (!reads_patch) throw unused_key(key, "u or v");
+        }
+        read_patch_points(bound, where_name);  // read again with the faces, in local_coordinates
+        e.mass_flow = read_mass_flow(bound, e.bc, where_name);
+        if (is_mixture()) read_mixture_boundary(bound, e);
+        if (e.bc.type == BoundaryType::INLET_STATE && e.bc.is_characteristic()) {
+            e.inlet = std::make_shared<const InletProfile>(bound, where_name);
+            if (InletProfile::turbulent(bound)) e.turbulence = SyntheticInflow::read(bound, where_name);
+        }
+    }
+}
+
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
     const std::vector<Input> input_boundaries =
@@ -917,23 +1037,18 @@ void Solver::init_boundaries() {
     auto default_wall_distance = [&]() -> const WallDistance & {
         if (default_walls) return *default_walls;
         std::vector<uint32_t> faces;
-        for (const Input & b : input_boundaries) {
-            if (!b.contains("name") || !b.contains("type")) continue;
-            const auto type = BOUNDARY_TYPES.find(find_value<std::string>(b, "type"));
-            if (type == BOUNDARY_TYPES.end() || (type->second != BoundaryType::WALL_ADIABATIC &&
-                                                 type->second != BoundaryType::WALL_ISOTHERMAL &&
-                                                 type->second != BoundaryType::WALL_HEAT_FLUX)) {
+        for (const BoundaryEntry & b : boundary_entries) {
+            const BoundaryType type = b.bc.type;
+            if (type != BoundaryType::WALL_ADIABATIC && type != BoundaryType::WALL_ISOTHERMAL &&
+                type != BoundaryType::WALL_HEAT_FLUX) {
                 continue;
             }
-            const FaceZone * z = mesh->get_face_zone(find_value<std::string>(b, "name"));
+            const FaceZone * z = mesh->get_face_zone(b.name);
             if (z == nullptr || z->get_type() != FaceZoneType::BOUNDARY) continue;
             std::vector<uint32_t> zone_faces(z->n_faces());
             for (uint32_t i = 0; i < z->n_faces(); i++) zone_faces[i] = z->h_faces(i);
             std::vector<double> keep(zone_faces.size(), 1.0);
-            if (b.contains("where")) {
-                const Expression w(find_value<std::string>(b, "name") + ".where", find_value<std::string>(b, "where"));
-                keep = evaluate_at({&w}, mesh->face_coords, zone_faces);
-            }
+            if (b.where) keep = evaluate_at({b.where.get()}, mesh->face_coords, zone_faces);
             for (size_t k = 0; k < zone_faces.size(); k++) {
                 if (keep[k] != 0.0) faces.push_back(zone_faces[k]);
             }
@@ -944,23 +1059,9 @@ void Solver::init_boundaries() {
 
     for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
         const Input & bound = input_boundaries[i_bc];
-        const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
-        if (!bound.contains("name")) {
-            throw missing_key(bound, entry + ".name",
-                              "Add name = \"...\": the mesh zone this condition applies to");
-        }
-        const std::string name = find_value<std::string>(bound, "name");
-        const std::string where_name = "boundaries[name = \"" + name + "\"]";
-        if (!bound.contains("type")) {
-            std::vector<std::string> types;
-            for (const auto & entry_type : BOUNDARY_TYPES) types.push_back(entry_type.first);
-            std::sort(types.begin(), types.end());
-            Diagnostic d = missing_key(bound, where_name + ".type").diagnostic;
-            d.valid = types;
-            d.fix = "Add type = \"...\"";
-            d.docs = "docs/guide/boundary_conditions.md#available-boundary-conditions";
-            throw InputError(d);
-        }
+        const BoundaryEntry & e = boundary_entries[i_bc];
+        const std::string & name = e.name;
+        const std::string & where_name = e.where_name;
         const auto & periodic = mesh->periodic_zones;
         if (std::find(periodic.begin(), periodic.end(), name) != periodic.end()) {
             throw InputError({.key = where_name,
@@ -983,42 +1084,13 @@ void Solver::init_boundaries() {
                                      "bottom, top (back, front in 3D) for generated meshes",
                               .docs = "docs/guide/boundary_conditions.md"});
         }
-        const BoundaryProfiles profiles(bound, where_name);
-        bcs.push_back(BoundaryCondition::from_input(bound, physics));
-        WallModelSpec wall_model_spec;
-        if (bound.contains("wall_model")) {
-            wall_model_spec = WallModelSpec::from_input(bound.at("wall_model"), bcs.back(),
-                                                        "boundaries[name = \"" + name + "\"].wall_model");
-            bcs.back().modeled = true;
-        }
-        wall_model_specs.push_back(wall_model_spec);
-        // Optional filter selecting part of the zone by face centroid
-        std::unique_ptr<Expression> where;
-        if (contains_optional(bound, "where")) {
-            where = std::make_unique<Expression>(name + ".where", find_value<std::string>(bound, "where"));
-        }
+        const BoundaryProfiles & profiles = *e.profiles;
+        bcs.push_back(e.bc);
+        wall_model_specs.push_back(e.wall_model);
+        const Expression * where = e.where.get();
         DirichletBoundary dirichlet;
-        if (bcs.back().type == BoundaryType::DIRICHLET) {
-            for (const char * key : {"rho", "u", "p"}) {
-                if (!bound.contains(key)) throw missing_key(bound, where_name + "." + key);
-            }
-            if (!bound.at("u").is_array() || bound.at("u").as_array().size() != N_DIM) {
-                throw InputError({.key = where_name + ".u",
-                                  .line = line_of(bound, "u"),
-                                  .message = "must be an array of " + std::to_string(N_DIM) + " components",
-                                  .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
-            }
-            const auto & u = bound.at("u").as_array();
-            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
-                dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound), BoundaryValue::hint,
-                    boundary_variable::FIRST_LOCAL));
-            };
-            add_state(bound.at("rho"), name + ".rho", dim::density);
-            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
-            add_state(bound.at("p"), name + ".p", dim::pressure);
-        }
-        auto fields = std::make_shared<BoundaryFields>(bound, bcs.back(), "boundaries[name = \"" + name + "\"]");
+        dirichlet.W = e.dirichlet;
+        const std::shared_ptr<BoundaryFields> & fields = e.fields;
         boundary_fields[i_bc] = fields;
         const bool composition = is_mixture() && bcs.back().prescribes_composition() &&
                                  MixtureModel::composition_varies(bound);
@@ -1042,7 +1114,7 @@ void Solver::init_boundaries() {
         if (where && zone) {
             std::vector<uint32_t> zone_faces(zone->n_faces());
             for (uint32_t i = 0; i < zone->n_faces(); i++) zone_faces[i] = zone->h_faces(i);
-            selected = evaluate_at({where.get()}, mesh->face_coords, zone_faces);
+            selected = evaluate_at({where}, mesh->face_coords, zone_faces);
         }
         std::string coordinates, data_summary;
         {
@@ -1050,37 +1122,13 @@ void Solver::init_boundaries() {
             for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
-            std::vector<uint16_t> used = local_coordinates_used(bound);
-            for (const uint16_t i : profiles.coordinates_used()) {
-                if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
-            }
-            std::sort(used.begin(), used.end());
-            bool reads_n = false, reads_patch = false;
-            for (const uint16_t i : used) {
-                const bool wall = i == boundary_variable::N || i == boundary_variable::N_M;
-                reads_n = reads_n || wall;
-                reads_patch = reads_patch || !wall;
-            }
-            auto unused_key = [&](const std::string & key, const std::string & what) {
-                return InputError({.key = where_name + "." + key, .line = line_of(bound, key),
-                                   .message = "no expression of the entry reads " + what + ", so " + key +
-                                              " has no effect",
-                                   .fix = "Remove " + key + ", or write a value in the local coordinates",
-                                   .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-            };
+            const std::vector<uint16_t> & used = e.coordinates;
+            bool reads_n = false;
+            for (const uint16_t i : used) reads_n = reads_n || i == boundary_variable::N || i == boundary_variable::N_M;
             std::optional<WallDistance> named;
-            if (bound.contains("walls")) {
-                if (!reads_n) throw unused_key("walls", "the wall distance n");
-                const auto wall_zones = find_value<std::vector<std::string>>(bound, "walls");
-                if (wall_zones.empty()) {
-                    throw InputError({.key = where_name + ".walls", .line = line_of(bound, "walls"),
-                                      .message = "the list of zones is empty",
-                                      .fix = "Name the zones n measures the distance from, or remove walls to "
-                                             "measure from every wall entry",
-                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-                }
+            if (!e.walls.empty()) {
                 std::vector<uint32_t> faces;
-                for (const std::string & wall : wall_zones) {
+                for (const std::string & wall : e.walls) {
                     const FaceZone * z = mesh->get_face_zone(wall);
                     if (z != nullptr && z->get_type() != FaceZoneType::BOUNDARY) z = nullptr;
                     if (comm::allreduce(uint32_t(z != nullptr), comm::Op::SUM) == 0) {
@@ -1097,20 +1145,6 @@ void Solver::init_boundaries() {
                 }
                 named = WallDistance(*mesh, faces, is_distributed());
             }
-            for (const char * key : {"corners", "origin", "toward"}) {
-                if (!bound.contains(key)) continue;
-                if (N_DIM == 2 && std::string(key) != "origin") {
-                    throw InputError({.key = where_name + "." + key, .line = line_of(bound, key),
-                                      .message = std::string(key) == "corners"
-                                                     ? "a 2D boundary is a curve, which has two ends and no corners"
-                                                     : "a 2D boundary is a curve: origin alone says which end u "
-                                                       "starts from",
-                                      .fix = "Remove " + std::string(key) + ": u runs along the boundary from 0 to 1, from "
-                                             "the end nearest to origin = [x, y] if that is given",
-                                      .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-                }
-                if (!reads_patch) throw unused_key(key, "u or v");
-            }
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
             if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
                 const WallDistance none;
@@ -1126,12 +1160,13 @@ void Solver::init_boundaries() {
             if (where && selected[i] == 0.0) continue;
             if (face_bc[i_face] != -1 && twice.empty()) {
                 const auto & first = input_boundaries[static_cast<size_t>(face_bc[i_face])];
+                const std::string & first_name = boundary_entries[static_cast<size_t>(face_bc[i_face])].name;
                 std::string at;
                 for (uint8_t d = 0; d < N_DIM; d++) {
                     at += (d ? ", " : "(") + logging::real(double(mesh->h_face_coords(i_face, d)));
                 }
                 twice = "the face at " + at + ") already has a condition, from the entry on line " +
-                        std::to_string(line_of(first)) + " (name = \"" + find_value<std::string>(first, "name") + "\")";
+                        std::to_string(line_of(first)) + " (name = \"" + first_name + "\")";
             }
             face_bc[i_face] = static_cast<int>(i_bc);
             if (directed) {
@@ -1200,7 +1235,7 @@ void Solver::init_boundaries() {
                               .docs = "docs/guide/boundary_conditions.md"});
         }
         MassFlowProfile timed_profile;
-        const std::vector<double> flux = mass_flow_inlet_fluxes(bound, dirichlet.faces, bcs.back(), timed_profile);
+        const std::vector<double> flux = mass_flow_inlet_fluxes(e, dirichlet.faces, bcs.back(), timed_profile);
         if (timed_profile.shape) mass_flow_profiles.emplace_back(i_bc, std::move(timed_profile));
         for (size_t k = 0; k < dirichlet.faces.size(); k++) {
             if (!profiled && flux.empty()) break;
@@ -1231,7 +1266,7 @@ void Solver::init_boundaries() {
         if (composition) detail("varying composition");
         if (fields->varies()) detail(fields->depends_on_time() ? "time dependent" : "varying along it");
         if (!mass_flow_profiles.empty() && mass_flow_profiles.back().first == i_bc) detail("mass flow of t");
-        if (bcs.back().modeled) detail(wall_model_spec.summary());
+        if (bcs.back().modeled) detail(e.wall_model.summary());
         if (!coordinates.empty()) detail("local coordinates: " + coordinates);
         if (!data_summary.empty()) detail(data_summary);
         boundary_summary.push_back({name, BOUNDARY_NAMES.at(bcs.back().type), n_owned_selected, details, ""});
@@ -1292,7 +1327,7 @@ void Solver::init_boundaries() {
     }
     t_characteristic = -1.0;
     characteristic_state_set = false;
-    if (is_mixture()) init_mixture_boundaries(input_boundaries, profiled_faces, bcs);
+    if (is_mixture()) init_mixture_boundaries(profiled_faces, bcs);
     boundary_data = make_boundary_data(*mesh, face_bc, bcs, physics.gamma, physics.R, is_viscous(), physics, &image_reach);
     if (is_distributed()) mesh->n_state_faces_count = count_state_faces(*mesh, boundary_data);
     boundary_data.mixture = is_mixture();
@@ -2668,6 +2703,13 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     const std::vector<std::string> on_request = on_request_fields(derived_settings);
     names.insert(names.end(), on_request.begin(), on_request.end());
     return names;
+}
+
+void Solver::read_keys(const Input & input_in) {
+    input = input_in;
+    deprecated_keys = input_upgrade::apply(input);
+    preset = numerics_preset::apply(input);
+    read_input();
 }
 
 std::vector<std::string> Solver::restart_variables() const {

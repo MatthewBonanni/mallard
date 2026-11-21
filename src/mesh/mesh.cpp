@@ -40,59 +40,42 @@ Mesh::~Mesh() {
 }
 
 void Mesh::init(const Input & input) {
-    std::string type_str = find_value_or<std::string>(input, "mesh", "type", "file");
-    set_type(find_option(MESH_TYPES, "mesh.type", type_str,
-                                input.contains("mesh") ? line_of(input.at("mesh"), "type") : size_t(0))->second);
-
+    const MeshInput m = read_mesh_input(input);
+    set_type(m.type);
     const std::vector<PeriodicPair> periodic = periodic_pairs(input);
-    const MeshTransform transform = mesh_transform(input);
     cell_order = cell_numbering_of_input(input);
     h_global_cell_id.clear();
-    if (get_type() == MeshType::FROM_FILE) {
-        this->init_file(mesh_filename(input), periodic, transform);
+    if (m.type == MeshType::FROM_FILE) {
+        this->init_file(mesh_filename(input), periodic, m.transform);
         return;
     }
-    if (get_type() == MeshType::ANNULUS) {
-        init_from_block(annulus_block(input, 0, 1), periodic);
+    if (m.type == MeshType::ANNULUS) {
+        init_from_block(annulus_block(m, 0, 1), periodic);
         return;
     }
-    uint32_t Nx = find_value_or<uint32_t>(input, "mesh", "Nx", 100);
-    uint32_t Ny = find_value_or<uint32_t>(input, "mesh", "Ny", 100);
-    rtype Lx = find_real_or(input, "mesh", "Lx", dim::length, 1.0);
-    rtype Ly = find_real_or(input, "mesh", "Ly", dim::length, 1.0);
-    const Stretching stretching = mesh_stretching(input);
+    const auto [Nx, Ny, Nz] = m.n;
+    const auto [Lx, Ly, Lz] = m.length;
     if constexpr (N_DIM == 3) {
-        const uint32_t Nz = find_value_or<uint32_t>(input, "mesh", "Nz", 100);
-        const rtype Lz = find_real_or(input, "mesh", "Lz", dim::length, 1.0);
-        if (get_type() == MeshType::CARTESIAN_TRI || get_type() == MeshType::WEDGE) {
-            throw mesh_type_dimension_error(input, type_str);
-        }
-        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, get_type(), periodic, stretching);
+        this->init_cart_3d(Nx, Ny, Nz, Lx, Ly, Lz, m.type, periodic, m.stretching);
         return;
     }
-    if (!periodic.empty() || stretching != Stretching{}) {
-        if (get_type() == MeshType::WEDGE && !periodic.empty()) {
+    if (!periodic.empty() || m.stretching != Stretching{}) {
+        if (m.type == MeshType::WEDGE && !periodic.empty()) {
             throw InputError({.key = "periodic",
                               .line = line_of(input, "periodic"),
                               .message = "the wedge mesh cannot be periodic",
                               .fix = "Remove [[periodic]], or use type = \"cartesian\"",
                               .docs = "docs/guide/meshes.md#generated-meshes"});
         }
-        if (get_type() != MeshType::CARTESIAN && get_type() != MeshType::CARTESIAN_TRI &&
-            get_type() != MeshType::WEDGE) {
-            throw mesh_type_dimension_error(input, type_str);
-        }
-        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, get_type(), 0, 1, stretching), periodic);
+        init_from_block(cartesian_2d_block(Nx, Ny, Lx, Ly, m.type, 0, 1, m.stretching), periodic);
         return;
     }
-    if (get_type() == MeshType::CARTESIAN) {
+    if (m.type == MeshType::CARTESIAN) {
         this->init_cart(Nx, Ny, Lx, Ly);
-    } else if (get_type() == MeshType::CARTESIAN_TRI) {
+    } else if (m.type == MeshType::CARTESIAN_TRI) {
         this->init_cart_tri(Nx, Ny, Lx, Ly);
-    } else if (get_type() == MeshType::WEDGE) {
-        this->init_wedge(Nx, Ny, Lx, Ly);
     } else {
-        throw mesh_type_dimension_error(input, type_str);
+        this->init_wedge(Nx, Ny, Lx, Ly);
     }
 }
 

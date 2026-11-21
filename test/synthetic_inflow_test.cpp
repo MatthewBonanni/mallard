@@ -29,6 +29,14 @@
 
 namespace {
 
+/** @brief The synthetic turbulence of an inlet entry, read and made as the solver makes it. */
+SyntheticInflow inflow_of(const Input & boundary, const std::string & where, uint64_t stream, const Mesh & mesh,
+                          const std::vector<uint32_t> & faces, const std::vector<FacePoint> & points,
+                          const std::vector<int32_t> & chars) {
+    return SyntheticInflow(SyntheticInflow::read(boundary, where), InletProfile(boundary, where), stream, mesh, faces,
+                           points, chars);
+}
+
 constexpr double U0 = 1.0;
 
 /** @brief Reynolds stress list of the input: [xx, yy, (zz,) xy(, xz, yz)]. */
@@ -86,7 +94,7 @@ Sampled sample(const std::string & boundary, Mesh & mesh, uint32_t n_t, double d
     s.faces = zone_faces(mesh, "left");
     std::vector<int32_t> chars(s.faces.size());
     for (size_t i = 0; i < chars.size(); i++) chars[i] = static_cast<int32_t>(i);
-    SyntheticInflow inflow(parse_toml(boundary), "inlet", 0, mesh, s.faces, points_of(mesh, s.faces), chars);
+    SyntheticInflow inflow = inflow_of(parse_toml(boundary), "inlet", 0, mesh, s.faces, points_of(mesh, s.faces), chars);
     Kokkos::View<rtype *[N_DIM]> target("target", s.faces.size());
     auto h_target = Kokkos::create_mirror_view(target);
     for (uint32_t k = 0; k < n_t; k++) {
@@ -304,8 +312,8 @@ TEST(SyntheticInflowTest, FluctuationsRideOnAMeanOfTime) {
     }
     for (const bool zero_net_flux : {true, false}) {
         const Input timed_input = parse_toml(inlet_with_mean(u_x, zero_net_flux));
-        SyntheticInflow steady(parse_toml(isotropic_inlet(zero_net_flux)), "steady", 0, *mesh, faces, points_of(*mesh, faces), chars);
-        SyntheticInflow timed(timed_input, "timed", 0, *mesh, faces, points_of(*mesh, faces), chars);
+        SyntheticInflow steady = inflow_of(parse_toml(isotropic_inlet(zero_net_flux)), "steady", 0, *mesh, faces, points_of(*mesh, faces), chars);
+        SyntheticInflow timed = inflow_of(timed_input, "timed", 0, *mesh, faces, points_of(*mesh, faces), chars);
         TimedInletTargets means;
         means.add(timed_input, "timed", chars, x, n_in);
         means.finish();
@@ -375,9 +383,9 @@ TEST(SyntheticInflowTest, FieldDependsOnlyOnTimeAndSeed) {
     const std::vector<uint32_t> faces = zone_faces(*mesh, "left");
     std::vector<int32_t> chars(faces.size());
     for (size_t i = 0; i < chars.size(); i++) chars[i] = static_cast<int32_t>(i);
-    SyntheticInflow a(parse_toml(isotropic_inlet(true)), "a", 0, *mesh, faces, points_of(*mesh, faces), chars);
-    SyntheticInflow b(parse_toml(isotropic_inlet(true)), "b", 0, *mesh, faces, points_of(*mesh, faces), chars);
-    SyntheticInflow c(parse_toml(isotropic_inlet(true)), "c", 1, *mesh, faces, points_of(*mesh, faces), chars);
+    SyntheticInflow a = inflow_of(parse_toml(isotropic_inlet(true)), "a", 0, *mesh, faces, points_of(*mesh, faces), chars);
+    SyntheticInflow b = inflow_of(parse_toml(isotropic_inlet(true)), "b", 0, *mesh, faces, points_of(*mesh, faces), chars);
+    SyntheticInflow c = inflow_of(parse_toml(isotropic_inlet(true)), "c", 1, *mesh, faces, points_of(*mesh, faces), chars);
     Kokkos::View<rtype *[N_DIM]> ua("ua", faces.size()), ub("ub", faces.size()), uc("uc", faces.size());
     for (double t : {0.0, 0.37, 5.0, 0.11}) a.fill(t, ua);
     b.fill(0.11, ub);

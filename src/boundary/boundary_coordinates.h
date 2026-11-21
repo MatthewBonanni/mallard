@@ -15,6 +15,7 @@
 #define BOUNDARY_COORDINATES_H
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,15 @@ std::vector<bool> variables_read(const Input & entry);
  *        outside its [[boundaries.data]].
  */
 std::vector<uint16_t> local_coordinates_used(const Input & entry);
+
+/** @brief The points of a [[boundaries]] entry that place u and v: those of origin, toward and corners it gives. */
+struct PatchPoints {
+    std::optional<Point> origin, toward;
+    std::optional<std::vector<Point>> corners;
+};
+
+/** @brief Read and check the entry's origin, toward and corners; errors name `where`. */
+PatchPoints read_patch_points(const Input & entry, const std::string & where);
 
 /**
  * @brief Distance to the nearest of a set of wall faces, gathered from every
