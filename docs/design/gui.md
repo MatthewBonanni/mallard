@@ -874,29 +874,29 @@ When a remote is added, the GUI offers to install Mallard there, versioned to
 match what the GUI needs:
 
 - **SSH clusters**, into the user's home or project space, without root:
-  1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
-     scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
-     for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
-  2. **Choose**, in this order: a prebuilt relocatable archive for the
-     architecture and backend (CPU, CUDA, HIP; a new release artifact; built
-     against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
-     `module load`),
-     downloaded by the login node from the GitHub release with its SHA-256
-     checked; the release's container image through Apptainer (`apptainer pull`)
-     for single-node runs; a Spack build in user space with the detected
-     compilers, MPI and GPU toolkits as externals, run as a batch job: the
-     fallback for clusters that need their own MPI (Open MPI); slow.
-  3. **Install** into `<root>/mallard/<version>-<variant>/` with an
-     `install.toml` (version, variant, artifact and SHA-256, how it was
-     installed), recorded in the global remote config. Versions live side by
-     side; nothing points at "current", the GUI names the path.
-  4. **Verify**: `mallard install verify` (new) as a short job on the chosen
-     partition: the environment check (`mallard check` without input) and a
-     quick template run (`mallard new <template> --quick`), with a JSON result
-     recorded with the install.
-  5. **Upgrade**: install the new version beside the old one, verify, then make
-     it the remote's default; runs record the install they used, so a restart
-     can continue on the same one. Old installs are removed only on request.
+    1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
+       scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
+       for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
+    2. **Choose**, in this order: a prebuilt relocatable archive for the
+       architecture and backend (CPU, CUDA, HIP; a new release artifact; built
+       against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
+       `module load`),
+       downloaded by the login node from the GitHub release with its SHA-256
+       checked; the release's container image through Apptainer (`apptainer pull`)
+       for single-node runs; a Spack build in user space with the detected
+       compilers, MPI and GPU toolkits as externals, run as a batch job: the
+       fallback for clusters that need their own MPI (Open MPI); slow.
+    3. **Install** into `<root>/mallard/<version>-<variant>/` with an
+       `install.toml` (version, variant, artifact and SHA-256, how it was
+       installed), recorded in the global remote config. Versions live side by
+       side; nothing points at "current", the GUI names the path.
+    4. **Verify**: `mallard install verify` (new) as a short job on the chosen
+       partition: the environment check (`mallard check` without input) and a
+       quick template run (`mallard new <template> --quick`), with a JSON result
+       recorded with the install.
+    5. **Upgrade**: install the new version beside the old one, verify, then make
+       it the remote's default; runs record the install they used, so a restart
+       can continue on the same one. Old installs are removed only on request.
 - **Kubernetes**: choose the image tag for the Mallard version and backend
   (`ghcr.io/matthewbonanni/mallard:<version>` or `:<version>-cuda`), recorded by
   digest; a short pod checks that the namespace can pull it (image pull secrets
@@ -987,20 +987,21 @@ St 0.164, Cd 1.36; sphere_re300: its mesh size and zones).
   text for touch and for beginners. Hit targets stay at least 24 px (WCAG 2.2
   2.5.8) in both. Provisional tokens:
 
-  | Token | Compact | Comfortable |
-  |---|---|---|
-  | Base unit | 4 px | 4 px |
-  | Row, input, tab height | 24 px (28 px tabs) | 32 px |
-  | Body / secondary text | 12 / 11 px | 14 / 12 px |
-  | Header bar / status bar | 36 / 24 px | 44 / 28 px |
-  | Panel padding | 8 px | 12 px |
-  | Radius | 4 px | 6 px |
-  | Divider | 1 px `border` | 1 px `border` |
-  | Accent (light / dark) | `#0f766e` / `#2dd4bf` | same |
+    | Token | Compact | Comfortable |
+    |---|---|---|
+    | Base unit | 4 px | 4 px |
+    | Row, input, tab height | 24 px (28 px tabs) | 32 px |
+    | Body / secondary text | 12 / 11 px | 14 / 12 px |
+    | Header bar / status bar | 36 / 24 px | 44 / 28 px |
+    | Panel padding | 8 px | 12 px |
+    | Radius | 4 px | 6 px |
+    | Divider | 1 px `border` | 1 px `border` |
+    | Accent (light / dark) | `#0f766e` / `#2dd4bf` | same |
 
-  Secondary text uses the `muted` color, which meets 4.5:1 on every panel; the
-  lighter `faint` is for dividers and disabled glyphs only, never for text that
-  must be read.
+    Secondary text uses the `muted` color, which meets 4.5:1 on every panel; the
+    lighter `faint` is for dividers and disabled glyphs only, never for text that
+    must be read.
+
 - **Chrome**: a toolbar with the project, breadcrumbs (project / case / node)
   and the run controls; tabs for open cases and runs; a status bar with the
   remote, the job id, step, simulated time, wall time and ETA, and transfers in
