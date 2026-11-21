@@ -61,6 +61,7 @@ constexpr Rule RULES[] = {
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
     {"teno_entry_rotations", false, C::SETUP}, {"teno_boundary_faces", false, C::SETUP},
     {"teno_", true, C::TABLES},
+    {"muscl_table_", true, C::SETUP}, {"muscl_", true, C::TABLES},
     // Mesh, geometry and quadrature
     {"node_coords", false, C::MESH}, {"nodes_of_", true, C::MESH}, {"cells_of_", true, C::MESH},
     {"faces_of_cell", false, C::MESH}, {"offsets_", true, C::MESH}, {"cell_coords", false, C::MESH},
@@ -81,7 +82,7 @@ constexpr Rule RULES[] = {
     {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     {"region_moving_", true, C::MODELS}, {"region_motions", false, C::MODELS}, {"region_steps", false, C::MODELS},
     // Chemistry, thermodynamics and transport
-    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
+    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", true, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},
     {"production", false, C::CHEMISTRY}, {"hrr", false, C::CHEMISTRY}, {"radiation_", true, C::CHEMISTRY},
     // Statistics, probes and run health

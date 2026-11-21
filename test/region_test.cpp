@@ -686,6 +686,15 @@ TEST(RegionTest, CellZonesOfMeshFilesAreRegions) {
         EXPECT_EQ(left[c] + right[c], 1.0);
     }
     EXPECT_EQ(fractions("{type = \"union\", regions = [\"left_half\", \"right_half\"]}"), fractions("\"domain\""));
+    // A shape minus another shape and a cell zone: the shapes' difference, exact where both surfaces cut a cell
+    const std::string ball = N_DIM == 2 ? "{type = \"disk\", center = [0.45, 0.5], radius = 0.3}"
+                                        : "{type = \"sphere\", center = [0.45, 0.5, 0.5], radius = 0.3}";
+    const std::string cut = N_DIM == 2 ? "{type = \"half_space\", point = [0.45, 0.55], normal = [0.3, 1]}"
+                                       : "{type = \"half_space\", point = [0.45, 0.55, 0.5], normal = [0.3, 1, 0.2]}";
+    const std::vector<double> shapes = fractions("{type = \"difference\", regions = [" + ball + ", " + cut + "]}");
+    const std::vector<double> clipped =
+        fractions("{type = \"difference\", regions = [" + ball + ", " + cut + ", \"right_half\"]}");
+    for (uint32_t c = 0; c < mesh->n_cells; c++) EXPECT_EQ(clipped[c], right[c] == 1.0 ? 0.0 : shapes[c]) << c;
     // A cell zone with the name of a boundary zone, or of the domain, is an error naming it
     for (const std::string clash : {"left", "domain"}) {
         mesh->cell_zone_names = {clash, "right_half"};

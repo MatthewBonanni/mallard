@@ -16,6 +16,7 @@
 #ifndef RUN_CONTROL_H
 #define RUN_CONTROL_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -33,6 +34,10 @@ enum Request : int { CHECKPOINT = 1, STOP = 2, COMMAND = 4, WALL_TIME = 8 };
 
 /** @brief Number of request bits, each carried by one value of the time-step reduction. */
 constexpr int N_REQUESTS = 4;
+
+/** @brief The commands the control socket takes, and the control files the run looks for. */
+inline constexpr std::array<const char *, 4> COMMANDS = {"status", "checkpoint", "stop", "set"};
+inline constexpr std::array<const char *, 2> FILES = {"STOP", "CHECKPOINT"};
 
 /** @brief Name of the control socket in the run directory. */
 inline constexpr const char * SOCKET_NAME = "mallard.sock";
