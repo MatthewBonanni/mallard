@@ -117,6 +117,17 @@ constexpr Option NEW_OPTIONS[] = {
     {"--force", "", "", "Write into a directory that is not empty."},
 };
 
+constexpr Option VERIFY_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: one row per check with its status, time and why; json: the verdict as one JSON object (schema "
+     "mallard-install-verify), for scripts and the GUI. Default: text."},
+    {"--launcher", "", "COMMAND",
+     "Run the checks under this command, split at spaces: the job's launcher (\"srun -n 2\", \"mpirun -n 2\"), "
+     "or a container runtime. Default: none, one process."},
+    {"--keep", "", "DIR", "Make the checks' cases in DIR and keep them, with their logs. Default: a temporary directory, removed."},
+    KOKKOS,
+};
+
 constexpr Option UPGRADE_OPTIONS[] = {
     {"--check", "", "", "Write nothing: list the changes, with exit status 1 if there are any."},
     {"--dim", "", "2|3",
@@ -1188,6 +1199,33 @@ constexpr Command COMMANDS[] = {
         .run = pack_main,
     },
     {
+        .name = "install verify",
+        .group = "Maintain",
+        .summary = "Check that this install works here: its environment, and a quick run of every solver",
+        .synopsis = "mallard install verify [--format text|json] [--launcher COMMAND] [--keep DIR] [Kokkos options]",
+        .description =
+            "Checks an install where it is, for each solver it has (mallard2d, mallard3d): the environment, as "
+            "mallard check without an input reports it (the build, devices, MPI), with no error; and a quick run, "
+            "the Sod shock tube of mallard new sod --quick (a slab one cell thick in 3D) to t = 0.2, which must "
+            "finish and match the exact solution: the undisturbed state ahead of the shock (rho 0.125, p 0.1, within "
+            "2%) and the largest Mach number (0.929, within 0.05), from the run log's monitors.\n"
+            "\n"
+            "Run it where the install will run, as a short job on the partition the runs use: under --launcher, "
+            "each check runs on the job's ranks. The JSON verdict holds every check with its time and why it "
+            "failed, the version and the prefix; an installer records it with the install. A few seconds per "
+            "solver on a CPU.",
+        .options = VERIFY_OPTIONS,
+        .arguments = {},
+        .examples = "$ mallard install verify\n"
+                    "$ srun -n 1 -c 4 mallard install verify --format json --kokkos-num-threads=4\n"
+                    "$ mallard install verify --launcher \"mpirun -n 2\" --keep verify",
+        .exit_status = "0  every check passed\n"
+                       "1  a check failed, or no solver is installed\n"
+                       "2  usage error",
+        .dim = Case::front_end,
+        .run = install_verify_main,
+    },
+    {
         .name = "test",
         .group = "Maintain",
         .summary = "Run the unit and regression tests",
@@ -1269,6 +1307,7 @@ constexpr Command COMMANDS[] = {
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
+    {"install", "Commands on this install of Mallard."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
