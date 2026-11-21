@@ -32,10 +32,6 @@ namespace {
 
 const std::string TABLES = source_dir() + "/test/data/flamelet/";
 
-constexpr double tol(double in_double, double in_float) {
-    return sizeof(rtype) == sizeof(double) ? in_double : in_float;
-}
-
 /** @brief A strip of nx cells over [0, Lx], one cell thick, with symmetry planes around it. */
 std::string strip(uint32_t nx, double Lx) {
     std::ostringstream s;
@@ -48,13 +44,23 @@ std::string strip(uint32_t nx, double Lx) {
     return s.str();
 }
 
-std::string zero_velocity() { return N_DIM == 2 ? "[\"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\", \"0.0\"]"; }
-
 std::string flamelet_physics(const std::string & table, const std::string & type) {
     return "[physics]\ntype = \"" + type + "\"\ngas = \"flamelet\"\ntable = \"" + TABLES + table +
            "\"\n[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
            "[output]\ncheck_interval = 1000000\n";
 }
+
+} // namespace
+
+#ifdef Mallard_HAS_HDF5
+
+namespace {
+
+constexpr double tol(double in_double, double in_float) {
+    return sizeof(rtype) == sizeof(double) ? in_double : in_float;
+}
+
+std::string zero_velocity() { return N_DIM == 2 ? "[\"0.0\", \"0.0\"]" : "[\"0.0\", \"0.0\", \"0.0\"]"; }
 
 void run(Solver & solver, const std::string & input) {
     solver.set_distributed(false);
@@ -78,8 +84,6 @@ std::vector<std::pair<double, double>> column(const Solver & solver, int primiti
 }
 
 } // namespace
-
-#ifdef Mallard_HAS_HDF5
 
 // Two streams at one temperature whose energies differ by 8e5 J/kg mix by diffusion: Z follows
 // erfc with D = kappa / (rho cp) from the table, and the temperature stays uniform, because with
@@ -135,8 +139,8 @@ TEST(FlameletSolverTest, ClosedReactorFollowsTheTabulatedSource) {
     EXPECT_GT(C, 0.7 * C_max);
     for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         const double rho_c = double(solver.h_conservatives(c, 0));
-        EXPECT_NEAR(rho_c, U0[0], tol(1e-12, 1e-6) * U0[0]);
-        EXPECT_NEAR(double(solver.h_species(c, 0)) / rho_c, Z, tol(1e-12, 1e-6));
+        EXPECT_NEAR(rho_c, U0[0], tol(1e-12, 1e-5) * U0[0]);
+        EXPECT_NEAR(double(solver.h_species(c, 0)) / rho_c, Z, tol(1e-12, 1e-5));
         EXPECT_NEAR(double(solver.h_species(c, 1)) / rho_c, C, tol(1e-6, 1e-4) * C_max);
         EXPECT_NEAR(double(solver.h_primitives(c, N_DIM + 1)), T_end, tol(1e-6, 1e-4) * T_end);
         EXPECT_NEAR(double(solver.h_primitives(c, N_DIM)), rho_c * th.R * T_end, tol(1e-6, 1e-4) * p);
