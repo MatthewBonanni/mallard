@@ -372,6 +372,8 @@ zones = ["back", "front"]
 | `T_mu_ref`, `viscosity_exponent` | (`power_law`) Reference temperature and exponent, both required |
 | `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`); `flamelet`: tabulated chemistry from a flamelet table, transporting the mixture fraction `Z` and progress variable `C` ([Tabulated chemistry](guide/flamelet.md); no `gamma`, `p_ref`, `T_ref`, `rho_ref`, `mechanism`, `transport`) |
 | `table` | (`flamelet`) The flamelet table, an FPV table in [Mallard's format](design/table_format.md) with `saghafian2015` thermodynamics, its path relative to the directory the run starts in; needs a build with HDF5 |
+| `variance` | (`flamelet`, with `[les]` only) Closure of the subgrid variance of `Z` in the table lookups: `algebraic` (default), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce & Moin 1998) with the LES filter width; see [LES of flamelets](guide/flamelet.md#les) |
+| `C_Z` | (`flamelet`, `variance = "algebraic"`) The constant of the algebraic variance, non-negative, default 0.1 |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
@@ -417,11 +419,13 @@ periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
 ## `[les]`
 
 Large-eddy simulation with an explicit subgrid-scale (SGS) model
-(`navier_stokes` only, single gases and mixtures, planar runs). The model's
-eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
-`cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to every
-species' diffusivity (mixtures: in the mixture-averaged form, so the
-diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
+(`navier_stokes` only, single gases, mixtures and the flamelet gas, planar
+runs). The model's eddy viscosity `mu_t = rho nu_t` is added to the molecular
+viscosity, with `cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to
+every species' diffusivity (mixtures: in the mixture-averaged form, so the
+diffusive fluxes still sum to zero; the flamelet gas: `mu_t / Sc_t` to `Z` and
+`C` and `mu_t / Pr_t` to the conduction of enthalpy, with the subgrid variance
+of `Z` in its lookups, [guide](guide/flamelet.md#les)). Wall faces keep the molecular fluxes. The
 eddy viscosity of each cell comes from its least-squares velocity gradient
 `g_ij = du_i/dx_j`, with the filter width `Delta` of the cell
 (`filter_width`); the time step includes it. Design, choices and validation:
@@ -433,7 +437,7 @@ the [LES guide](guide/les.md) ([design notes](design/les.md)).
 | `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
 | `Pr_t` | Turbulent Prandtl number, default 0.9 |
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
-| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
+| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity and the flamelet gas's subgrid variance only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
 | `gradients` | The models' velocity gradients: `least_squares` (the least-squares gradients on the face neighbors, as the viscous fluxes'), or `reconstruction` (`TENO` only): in the cells TENO finds smooth (`TENO_SIGMA` below `troubled_threshold`), the gradient at the centroid of the central polynomial, which the reconstruction computes with it; troubled cells keep the least-squares gradients. Decaying isotropic turbulence with TENO5 and HLLC at $32^3$: spectral error 0.091 / 0.094 against 0.112 / 0.113 with `least_squares` at $32^3$, but 0.120 / 0.156 against 0.117 / 0.140 at $64^3$: experimental, for under-resolved meshes. See the [LES guide](guide/les.md#gradients-of-the-reconstruction). Default `least_squares` |
 | `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
 

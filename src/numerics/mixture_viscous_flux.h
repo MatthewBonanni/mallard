@@ -83,17 +83,19 @@ struct MixtureTransportFunctor {
     }
 
     /**
-     * @brief A flamelet gas: mu, kappa and cp from the table. With unity Lewis
-     *        number the heat and enthalpy diffusion fluxes sum to -(kappa / cp)
-     *        grad h, so the conducted variable is h = e + p / rho in place of T,
-     *        with LAMBDA = kappa / cp, and every scalar diffuses with rho D =
-     *        kappa / cp along the gradient of its own value.
+     * @brief A flamelet gas: mu, kappa and cp from the table at the cell's Z,
+     *        subgrid variance and C. With unity Lewis number the heat and
+     *        enthalpy diffusion fluxes sum to -(kappa / cp) grad h, so the
+     *        conducted variable is h = e + p / rho in place of T, with LAMBDA =
+     *        kappa / cp, and every scalar diffuses with rho D = kappa / cp along
+     *        the gradient of its own value.
      */
     KOKKOS_INLINE_FUNCTION
     void flamelet(const uint32_t c) const {
         const ScalarMassFractions y{&scalars(c, 0)};
         const double rho = static_cast<double>(W(c, 0)), p = static_cast<double>(W(c, N_DIM + 1));
-        const flamelet::Point<3> point = gas.flamelet.locate(y(flamelet::Gas<>::Z), 0.0, y(flamelet::Gas<>::C));
+        const flamelet::Point<3> point =
+            gas.flamelet.locate(y(flamelet::Gas<>::Z), gas.flamelet.cell_variance(c), y(flamelet::Gas<>::C));
         const flamelet::Thermo th = gas.flamelet.thermo(point);
         const flamelet::Transport tr = gas.flamelet.transport(point);
         const double T = p / (rho * th.R);
@@ -132,13 +134,13 @@ struct MixtureGradientFunctor {
 
     static constexpr uint32_t CHUNK = 16;  // variables per pass over the stencil
 
-    /** @brief The conducted variable of cell c at temperature T: T, or a flamelet gas's h(T) at c's Z and C. */
+    /** @brief The conducted variable of cell c at temperature T: T, or a flamelet gas's h(T) at c's Z, Zvar and C. */
     KOKKOS_INLINE_FUNCTION
     double conducted(const uint32_t c, const double T) const {
         if (!flamelet.active()) return T;
         const double Z = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::Z));
         const double C = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::C));
-        return flamelet.thermo(flamelet.locate(Z, 0.0, C)).enthalpy(T);
+        return flamelet.thermo(flamelet.locate(Z, flamelet.cell_variance(c), C)).enthalpy(T);
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -262,7 +264,7 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
     bool axisymmetric = false;            // face_area is then the revolved area
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
-    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), else empty
+    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]; flamelet: mu_t / Sc_t), else empty
     bool sgs_only = false;                // LES budget: the SGS fluxes alone
     Kokkos::View<rtype *> face_energy_1;  // double flux: side 1's energy flux (MixtureDoubleFluxFunctor), else empty
 
@@ -439,7 +441,8 @@ struct MixtureViscousFluxFunctor {
             isothermal = bc->type == BoundaryType::WALL_ISOTHERMAL;
             if (isothermal) {
                 const ScalarMassFractions y{&scalars(c0, 0)};
-                q_f[N_DIM] = static_cast<rtype>(gas.conducted(static_cast<double>(bc->data[0]), y));
+                q_f[N_DIM] = static_cast<rtype>(
+                    gas.conducted(static_cast<double>(bc->data[0]), y, gas.flamelet.cell_variance(static_cast<uint32_t>(c0))));
             }
             for (uint8_t k = 0; k < (isothermal ? NQ : N_DIM); k++) {
                 if (k < N_DIM) q_f[k] = bc->data[1 + k];
@@ -497,10 +500,12 @@ struct MixtureViscousFluxFunctor {
                 }
                 return static_cast<double>(dot<N_DIM>(g, n));
             };
+            // A flamelet gas's scalars diffuse along their own gradients, with mu_t / Sc_t
             const double rho_D_t = static_cast<double>(sgs_coefficient(2));
             auto c_k = [&](const uint32_t k) {
                 const double c = two_cells ? 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k)) : diffusion(c0, k);
-                return les ? static_cast<double>(molecular) * c + rho_D_t * gas.transport.W(k) : c;
+                if (!les) return c;
+                return static_cast<double>(molecular) * c + (gas.tabulated() ? rho_D_t : rho_D_t * gas.transport.W(k));
             };
             auto Y_k = [&](const uint32_t k) {
                 return two_cells ? 0.5 * (static_cast<double>(scalars(G.c0, k)) + static_cast<double>(scalars(G.c1, k)))

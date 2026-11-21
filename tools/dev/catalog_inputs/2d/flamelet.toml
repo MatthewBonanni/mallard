@@ -1,5 +1,5 @@
 # For the key catalog only (tools/dev/input_catalog.py): the flamelet gas, a
-# table of the tests, with Z and C at the inlet and in a region.
+# table of the tests, with Z and C at the inlet and in a region, under LES.
 
 [run]
 n_steps = 1
@@ -52,3 +52,8 @@ preset = "second_order"
 type = "navier_stokes"
 gas = "flamelet"
 table = "../../../../test/data/flamelet/solver_reactor.h5"
+variance = "algebraic"
+C_Z = 0.1
+
+[les]
+Pr_t = 0.9

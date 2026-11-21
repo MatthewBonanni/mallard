@@ -437,6 +437,46 @@ The case then runs `gas = "flamelet"` beside the finite-rate example, with the
 targets of section 10: `T_max`, flame position and the `Y_OH` peak within 2% of
 Cantera.
 
+### 5.6 Stage 3 as built: LES with the algebraic variance
+
+`[les]` with `gas = "flamelet"` (`src/solver/solver_flamelet.cpp`,
+`src/solver/solver_les.cpp`, guide [flamelet.md](../guide/flamelet.md#les)):
+
+- **Variance.** One device view of `Zvar` per cell, held by
+  `flamelet::Gas` so that every lookup (`cell_state`, transport, the source of
+  `C`, the enthalpy conducted at walls) reads it through `cell_variance(c)`;
+  laminar runs leave it empty and read zero. The algebraic closure uses the
+  viscous least-squares stencil of `Z = rho Z / rho` and the LES filter width,
+  on owned cells only, and the halo cells receive their owners' values by an
+  exchange: a halo cell's stencil is truncated, so computing it locally would
+  make the result depend on the partition. It is recomputed wherever the
+  state's temperature is (`update_cell_states`, the stage updates, freezing
+  for step graphs), before the conversion that uses it.
+- **Initial state.** The initial fields convert at zero variance (the gradient
+  needs the conserved `Z`); the cells then reconvert at their variance to the
+  same `p`, `T`, `u`, `Z` and `C`. Restarts read the conserved state and only
+  recompute the variance.
+- **Boundaries** are laminar: their states have no gradient of their own, and
+  an inlet's `Zvar` would need a modeled inflow variance. Inlet faces of
+  `inlet_state` enter the cell gradients as the viscous fluxes' do.
+- **Eddy fluxes.** The SGS coefficients of the flamelet gas are `[mu_t, mu_t /
+  Pr_t, mu_t / Sc_t]`: enthalpy is conducted with `kappa / cp`, so its eddy
+  conductivity is `mu_t / Pr_t` (the mixtures' `cp mu_t / Pr_t` multiplies
+  `grad T`), and `Z` and `C` take `mu_t / Sc_t` without the molar mass the
+  mixtures' mixture-averaged form carries. The time step bounds use `R` and
+  `cp` of the table at the cell's variance.
+- **Variance in the table.** The FPV map's `Sz = Zvar / (Z (1 - Z))` axis
+  already ran from 0 to 1 in the stage-1 reader; the clip `Zvar <= Z (1 - Z)`
+  keeps lookups at the edge instead of relying on the map's clamp.
+
+The tests (`test/flamelet_les_test.cpp`) use a table linear in `Sz` in every
+field the solver reads, so lookups at the variance are exact: the variance of a
+linear `Z` against `C_Z h^2 |grad Z|^2`, and `p`, `T`, `rho`, `mu`, `Y_H2O`,
+the normalized `Lambda` and one step of the source at it; the decay of a cosine of
+`Z` in uniform shear at `(D + nu_t / Sc_t) k^2` with the Smagorinsky `nu_t`,
+with enthalpy mixing with `Z` only when `Pr_t = Sc_t`; and bit-for-bit
+agreement on any rank count and with step graphs.
+
 ## 6. Interaction with the existing models
 
 - **Finite-rate chemistry:** exclusive. `gas = "flamelet"` loads no mechanism
@@ -464,18 +504,18 @@ Cantera.
 - **Determinism and step graphs:** lookups are pointwise kernels without host
   work; no new reduction or exchange.
 
-## 7. Input keys (stage 2, proposed)
+## 7. Input keys
 
 ```toml
 [physics]
 gas = "flamelet"
-table = "h2_fpv.h5"          # relative to the input file
-variance = "algebraic"       # or "transported" (stage 3); ignored without [les]
+table = "h2_fpv.h5"          # relative to the directory the run starts in
+variance = "algebraic"       # with [les] only; "transported" is to come
 C_Z = 0.1                    # algebraic variance constant
 
-[[boundary]]
+[[boundaries]]
 name = "fuel"
-type = "inflow"
+type = "inlet_state"
 Z = 1.0
 C = 0.0
 ```
