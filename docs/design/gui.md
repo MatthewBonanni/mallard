@@ -460,12 +460,13 @@ shared filesystem the login node sees directly, and job-step attachment
   name every file written with its size and SHA-256, and the end record says how
   the run ended. Probes, forces and integrals are small CSV files read the same
   way. Monitoring survives the GUI closing, since it is only reading files.
-- **Control**: `STOP` and `CHECKPOINT` files work from anywhere the run
+- **Control**: `STOP`, `CHECKPOINT` and `SET` files work from anywhere the run
   directory is visible; they need `[run] control_file_interval > 0`, which is
-  0 by default, so a GUI-launched run needs a way to turn it on without editing
-  the user's input (a `--set` option, listed in [Command line](cli.md) but not
-  implemented, or a different default). `status` comes from the run log; `set`
-  needs `mallard ctl` on rank 0's node until a `SET` control file exists.
+  0 by default, so the GUI launches with `--set control_file_interval=N`
+  (#1316), which leaves the user's input alone. `status` comes from the run
+  log; `set` writes a `SET` file (written to another name, then renamed), whose
+  settings come back as `set` events of the run log, or refused ones as
+  `W-SET-REFUSED` warnings.
 
 ## Data: locations, manifest and transfers
 
@@ -1068,8 +1069,8 @@ tested like any other.
 | Programmatic API (#345) | open | not needed for the MVP: the command line with JSON is the interface |
 | `mallard check` (#321) | done: `--format json`, `--view`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON; no block metadata in the case view; no geometry-only view |
 | Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; no variants for arrays of tables; no roles for file keys; the general catalog is read from a data directory, not the binary |
-| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node; no `SET` control file |
-| Control files | done: `STOP`, `CHECKPOINT` | off by default (`control_file_interval = 0`); `--set` is listed in [Command line](cli.md) but not implemented |
+| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node |
+| Control files | done: `STOP`, `CHECKPOINT`, `SET` (#1316) | off by default (`control_file_interval = 0`); `--set control_file_interval=N` turns them on |
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
