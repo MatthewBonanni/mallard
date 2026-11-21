@@ -68,7 +68,10 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     const double rho = p0 / (thermo.gas_constant(chemistry::MassFractions{Y.data()}) * T0);
     const double e = model.energy(T0, Y);
 
-    // Trajectory samples (Y, T) at uniform times in [0, end_time)
+    // Trajectory samples (Y, T) at uniform times in [0, end_time), by RODAS whatever the integrator benchmarked,
+    // so that both integrators start from the same states
+    chemistry::ReactorOptions trajectory = options;
+    trajectory.method = chemistry::Integrator::RODAS;
     std::vector<std::vector<double>> samples;
     std::vector<double> sample_T;
     std::vector<double> work(chemistry::reactor_work_size(host_kinetics));
@@ -78,7 +81,7 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
         samples.push_back(Y);
         sample_T.push_back(T);
         const chemistry::RosenbrockResult r = chemistry::advance_reactor(
-            thermo, host_kinetics, rho, end_time / n_samples, Y.data(), T, h, options, work.data(), pivot.data());
+            thermo, host_kinetics, rho, end_time / n_samples, Y.data(), T, h, trajectory, work.data(), pivot.data());
         if (r.status != chemistry::RosenbrockStatus::SUCCESS) throw std::runtime_error("benchmark: trajectory failed.");
     }
     const double T_end = T;
@@ -142,6 +145,7 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
                                                     : std::string()) +
                           (cells.sparse_entries() > 0 ? ", sparse LU (" + std::to_string(cells.sparse_entries()) + " entries)"
                                                       : ", dense LU")},
+        {"Integrator", options.method == chemistry::Integrator::BDF ? "BDF" : "RODAS"},
         {"Tolerances", "rtol = " + brief(options.integrator.rtol) + ", atol = " + brief(options.atol_Y)},
     });
     ChemistryBenchmark result;

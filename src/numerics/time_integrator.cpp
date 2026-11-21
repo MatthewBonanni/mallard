@@ -14,6 +14,33 @@
 #include <initializer_list>
 #include <utility>
 
+namespace {
+
+/** @brief The blocks of a State, each a flat array of values. */
+enum class Block { FLOW, SPECIES, PARTICLES };
+
+constexpr Block BLOCKS[] = {Block::FLOW, Block::SPECIES, Block::PARTICLES};
+
+size_t block_size(const State & s, const Block block) {
+    switch (block) {
+        case Block::FLOW: return s.flow.span();
+        case Block::SPECIES: return s.species.span();
+        case Block::PARTICLES: return s.particles.span();
+    }
+    return 0;
+}
+
+rtype * block_data(const State & s, const Block block) {
+    if (block_size(s, block) == 0) return nullptr;
+    switch (block) {
+        case Block::FLOW: return s.flow.data();
+        case Block::SPECIES: return s.species.data();
+        case Block::PARTICLES: return s.particles.data();
+    }
+    return nullptr;
+}
+
+} // namespace
 
 void axpby(const rtype a_host, const State & x, const rtype b, const State & y, const rtype * a_device) {
     StateView x_flow = x.flow, y_flow = y.flow;
@@ -21,13 +48,17 @@ void axpby(const rtype a_host, const State & x, const rtype b, const State & y, 
         const rtype a = a_device ? *a_device : a_host;
         FOR_I_CONSERVATIVE y_flow(i_cell, i) = a * x_flow(i_cell, i) + b * y_flow(i_cell, i);
     });
-    if (x.species.span() == 0) return;
-    const rtype * x_s = x.species.data();
-    rtype * y_s = y.species.data();
-    Kokkos::parallel_for("axpby_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
-        const rtype a = a_device ? *a_device : a_host;
-        y_s[k] = a * x_s[k] + b * y_s[k];
-    });
+    for (const Block block : {Block::SPECIES, Block::PARTICLES}) {
+        const size_t n = block_size(x, block);
+        if (n == 0) continue;
+        const rtype * x_s = block_data(x, block);
+        rtype * y_s = block_data(y, block);
+        Kokkos::parallel_for(block == Block::SPECIES ? "axpby_species" : "axpby_particles", n,
+                             KOKKOS_LAMBDA(const size_t k) {
+            const rtype a = a_device ? *a_device : a_host;
+            y_s[k] = a * x_s[k] + b * y_s[k];
+        });
+    }
 }
 
 void lerp(const rtype a, const State & x, const State & y) {
@@ -35,12 +66,14 @@ void lerp(const rtype a, const State & x, const State & y) {
     Kokkos::parallel_for("lerp", x_flow.extent(0), KOKKOS_LAMBDA(const uint32_t i_cell) {
         FOR_I_CONSERVATIVE y_flow(i_cell, i) += a * (x_flow(i_cell, i) - y_flow(i_cell, i));
     });
-    if (x.species.span() == 0) return;
-    const rtype * x_s = x.species.data();
-    rtype * y_s = y.species.data();
-    Kokkos::parallel_for("lerp_species", x.species.span(), KOKKOS_LAMBDA(const size_t k) {
-        y_s[k] += a * (x_s[k] - y_s[k]);
-    });
+    for (const Block block : {Block::SPECIES, Block::PARTICLES}) {
+        const size_t n = block_size(x, block);
+        if (n == 0) continue;
+        const rtype * x_s = block_data(x, block);
+        rtype * y_s = block_data(y, block);
+        Kokkos::parallel_for(block == Block::SPECIES ? "lerp_species" : "lerp_particles", n,
+                             KOKKOS_LAMBDA(const size_t k) { y_s[k] += a * (x_s[k] - y_s[k]); });
+    }
 }
 
 namespace {
@@ -48,6 +81,18 @@ namespace {
 const rtype * scale(const rtype * dt_device, const DtScale k) { return dt_device ? dt_device + k : nullptr; }
 
 } // namespace
+
+double cfl_limit(const TimeIntegratorType type) {
+    switch (type) {
+        case TimeIntegratorType::FE: return 1.0;
+        case TimeIntegratorType::SSPRK3: return 1.2;
+        case TimeIntegratorType::RK4: return 1.35;
+        case TimeIntegratorType::SSPRK54:
+        case TimeIntegratorType::CK45:
+        case TimeIntegratorType::RDPK3SP35: return 2.2;
+    }
+    return 0.0;
+}
 
 FE::FE() {
     type = TimeIntegratorType::FE;
@@ -182,11 +227,6 @@ std::vector<rtype> coefficients(const std::initializer_list<double> values) {
     return std::vector<rtype>(values.begin(), values.end());
 }
 
-rtype * data_or_null(const State & s, const bool species) {
-    if (species) return s.species.span() > 0 ? s.species.data() : nullptr;
-    return s.flow.data();
-}
-
 } // namespace
 
 LowStorage3S::LowStorage3S(const TimeIntegratorType type_, LowStorageTableau tableau_) : tableau(std::move(tableau_)) {
@@ -208,11 +248,11 @@ void LowStorage3S::take_step(const rtype t, const rtype dt,
         calc_rhs(U, k, time_of_stage(t, tableau.c[i], dt), tableau.c[i]);
         const Stage3S st{tableau.beta[i], i ? tableau.gamma1[i] : 0.0_r, i ? tableau.gamma2[i] : 0.0_r,
                          i ? tableau.delta[i] : 0.0_r, embedded ? tableau.e[i] : 0.0_r, i == 0, s_live};
-        for (const bool species : {false, true}) {
-            const size_t n = species ? U.species.span() : U.flow.span();
+        for (const Block block : BLOCKS) {
+            const size_t n = block_size(U, block);
             if (n == 0) continue;
-            stage_3s(st, n, data_or_null(U, species), data_or_null(S, species), data_or_null(U0, species),
-                     data_or_null(k, species), embedded ? data_or_null(rhs_vec[1], species) : nullptr, dt, dt_d);
+            stage_3s(st, n, block_data(U, block), block_data(S, block), block_data(U0, block), block_data(k, block),
+                     embedded ? block_data(rhs_vec[1], block) : nullptr, dt, dt_d);
         }
         s_live = s_live || st.delta != 0.0_r;
     }
@@ -278,11 +318,11 @@ void CK45::take_step(const rtype t, const rtype dt,
     const rtype * dt_d = scale(dt_device, DT);
     for (int i = 0; i < 5; i++) {
         calc_rhs(U, k, time_of_stage(t, static_cast<rtype>(C[i]), dt), static_cast<rtype>(C[i]));
-        for (const bool species : {false, true}) {
-            const size_t n = species ? U.species.span() : U.flow.span();
+        for (const Block block : BLOCKS) {
+            const size_t n = block_size(U, block);
             if (n == 0) continue;
-            stage_2n(static_cast<rtype>(A[i]), static_cast<rtype>(B[i]), i == 0, n, data_or_null(U, species),
-                     data_or_null(D, species), data_or_null(k, species), dt, dt_d);
+            stage_2n(static_cast<rtype>(A[i]), static_cast<rtype>(B[i]), i == 0, n, block_data(U, block),
+                     block_data(D, block), block_data(k, block), dt, dt_d);
         }
     }
 }

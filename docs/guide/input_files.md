@@ -80,6 +80,7 @@ fields = ["RHO", "U_X", "P", "T"]
 | `[regions]` | no | [Named regions](geometry.md#named-regions), used by `[[sources]]`, `[[sponges]]` and `[[probes]]` |
 | `[[write_data]]`, `[output]` | no | [Output](output.md) |
 | `[[probes]]`, `[[forces]]`, `[integrals]` | no | [Probes and monitors](probes.md) |
+| `[particles]` | no | [Particles](particles.md) |
 | `[statistics]` and its subtables | no | [Statistics](statistics.md) |
 | `[parallel]` | no | [Running in parallel](parallel.md) |
 
@@ -494,10 +495,13 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="e-view-entries"></a>`E-VIEW-ENTRIES` | With `--ranks N`, the largest part holds more cells than fit in the most entries a Kokkos View of rank 2 or more addresses (from the check's View with the most entries per cell); the run would stop at setup | Run on as many times more ranks as the message says |
 | <a id="e-region-empty"></a>`E-REGION-EMPTY` | A region the case uses overlaps the domain's bounding box but touches no cell: too thin, or in a hole of the mesh | Enlarge or move it; `--view` shows it with the mesh's zones ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
 | <a id="e-region-outside"></a>`E-REGION-OUTSIDE` | A region the case uses lies outside the domain. The message gives both extents | Move it inside: often a unit or a sign ([Regions on a mesh](geometry.md#regions-on-a-mesh)) |
+| <a id="w-region-partly-outside"></a>`W-REGION-PARTLY-OUTSIDE` | A region from an STL or OBJ file reaches outside the domain; its part outside is left out. The message gives both extents | Check its placement (`translate`, `rotate`), or accept the part inside ([Regions from CAD surfaces](geometry.md#regions-from-cad-surfaces)) |
+| <a id="w-region-scale"></a>`W-REGION-SCALE` | A region from an STL or OBJ file is more than 10 times larger, or 1000 times smaller, than the domain: likely the wrong `units` | Set `units` to the unit the file was drawn in ([Regions from CAD surfaces](geometry.md#regions-from-cad-surfaces)) |
 | <a id="w-probe-outside"></a>`W-PROBE-OUTSIDE` | Part of a probe lies outside the domain: samples of a line or surface outside the mesh, or part of a filled region, which it leaves out. The message gives how much and where | Move the probe inside the domain, or accept the part it samples ([Probes](probes.md#probes-probes)) |
 | <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--mesh-fields PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
 | <a id="e-mesh-fields"></a>`E-MESH-FIELDS` | `--mesh-fields` could not write its files, or `--cells` or `--region` selects no cell: an id beyond the mesh's cells, a region that touches none | Check the path, the ids (global, from 0) and the region ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
+| <a id="w-trigger-never"></a>`W-TRIGGER-NEVER` | A `[[triggers]]` entry cannot fire before `t_stop`: its `for` is longer than the run, or its condition reads only `t`, compared with numbers, and is false at every time to `t_stop` | Check the condition's numbers and their units (seconds), or `for`; raise `run.t_stop` if the run is too short ([Triggers](running.md#triggers)) |
 | <a id="w-tfles-thickening"></a>`W-TFLES-THICKENING` | TFLES thickens the flame by more than 5 (`F = n_res Delta / delta_L`). Beyond that the flame's response to turbulence is unreliable | Refine the mesh where the flame goes, or lower `les.combustion.n_res` ([LES](les.md#thickened-flames-lescombustion)) |
 | <a id="w-wall-y-plus"></a>`W-WALL-Y-PLUS` | First cells of walls without a wall model above y+ 1, which DNS and wall-resolved LES need. The message gives the first-cell distance to aim for | Refine toward the walls, or model them (`wall_model`) ([Resolution](#resolution)) |
 | <a id="w-wall-spacing"></a>`W-WALL-SPACING` | Wall cells longer along the flow (x+) or wider across it (z+) than the regime needs: 15 and 8 for DNS, 150 and 40 for wall-resolved LES | Refine along the walls ([Resolution](#resolution)) |
@@ -512,7 +516,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 
 ### The report as JSON
 
-`--format json` prints the same report as one JSON object on stdout, and nothing else; the setup's sections are left out. The exit status is the same. Its `version` is 1: a version gains members, and changes only when an existing member changes meaning. Numbers are SI (bytes, seconds, meters) and read back exactly; a number that is not estimated is `null`, and a section that was not reached is `null`.
+`--format json` prints the same report as one JSON object on stdout, and nothing else; the setup's sections are left out. The exit status is the same. Its `schema` is `"mallard-check"` and its `version` 1: a version gains members, and changes only when an existing member changes meaning. Numbers are SI (bytes, seconds, meters) and read back exactly; a number that is not estimated is `null`, and a section that was not reached is `null`.
 
 | Member | Holds |
 |---|---|
