@@ -32,6 +32,7 @@
 #include "session/session.h"
 #include "solver/solver.h"
 #include "stencils.h"
+#include "units.h"
 
 namespace {
 
@@ -309,6 +310,28 @@ int list_species_main(const cli::Args & args) {
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < c.species.size(); i++) rows.push_back({std::to_string(i), c.species[i]});
     logging::table({"#", "species"}, rows);
+    return 0;
+}
+
+int list_units_main(const cli::Args & args) {
+    if (const int e = format_error(args, "list units")) return e;
+    const std::string catalog = units::catalog_json();
+    if (json_format(args)) {
+        std::cout << catalog << "\n";
+        return 0;
+    }
+    const json::Value c = json::parse(catalog);
+    std::vector<std::vector<std::string>> rows;
+    for (const json::Value & u : c["units"].array) {
+        rows.push_back({u["symbol"].string, u["dimension"].string, u["factor"].string,
+                        u["offset"].is_null() ? "" : u["offset"].string, u["prefixable"].boolean ? "yes" : ""});
+    }
+    logging::section("Units", logging::count(rows.size(), "unit"));
+    logging::table({"unit", "dimension", "SI value", "offset", "prefixes"}, rows);
+    std::vector<std::string> prefixes;
+    for (const json::Value & p : c["prefixes"].array) prefixes.push_back(p["symbol"].string + " " + p["factor"].string);
+    std::cout << "\nPrefixes: " << joined(prefixes) << ".\nAn absolute temperature in SI is (value + offset) * SI "
+                 "value; pi/180 and 5/9 are exact quotients. docs/input.md describes the syntax of quantities.\n";
     return 0;
 }
 

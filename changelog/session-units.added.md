@@ -1,0 +1,1 @@
+- `mallard list units` and the session's `units.catalog`: every unit an input quantity takes, with its dimension, exponents, exact SI value (`101325/760`, `pi/180`) and temperature offset, the SI prefixes and the named dimensions (schema `mallard-unit-catalog`). See [Units](docs/guide/input_files.md#units).

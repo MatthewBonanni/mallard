@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-unit-catalog.v1.schema.json",
+  "title": "The units quantities in input files take: units.catalog, and mallard list units --format json",
+  "type": "object",
+  "required": ["schema", "version", "units", "prefixes", "dimensions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "mallard-unit-catalog"},
+    "version": {"const": 1},
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["symbol", "dimension", "exponents", "factor", "value", "offset", "prefixable"],
+        "additionalProperties": false,
+        "properties": {
+          "symbol": {"type": "string", "description": "as written after a number: \"atm\", \"degC\""},
+          "dimension": {"type": "string", "description": "as the key catalog's dimension names it: \"pressure (kg m^-1 s^-2)\""},
+          "exponents": {"$ref": "#/$defs/exponents"},
+          "factor": {"type": "string", "description": "the SI value of one unit as defined, exactly: a decimal (\"0.3048\"), or a quotient of two decimals or of pi and a decimal (\"101325/760\", \"pi/180\")"},
+          "value": {"type": "number", "description": "factor as the double Mallard converts with"},
+          "offset": {"type": ["string", "null"], "description": "an absolute temperature's offset, a decimal: SI = (value + offset) * factor; null for every other unit"},
+          "prefixable": {"type": "boolean", "description": "whether it takes the SI prefixes (kPa, mm)"}
+        }
+      }
+    },
+    "prefixes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "factor"],
+        "additionalProperties": false,
+        "properties": {
+          "symbol": {"type": "string"},
+          "factor": {"type": "string", "description": "a power of ten: \"1e3\""}
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "description": "the named dimensions; a key's accepted units are those whose exponents equal its dimension's, prefixed and combined",
+      "items": {
+        "type": "object",
+        "required": ["name", "dimension", "exponents", "examples"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "dimension": {"type": "string"},
+          "exponents": {"$ref": "#/$defs/exponents"},
+          "examples": {"type": "string", "description": "units to suggest, comma-separated, or empty"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "exponents": {
+      "type": "object",
+      "required": ["mass", "length", "time", "temperature", "amount", "angle"],
+      "additionalProperties": false,
+      "properties": {
+        "mass": {"type": "integer"},
+        "length": {"type": "integer"},
+        "time": {"type": "integer"},
+        "temperature": {"type": "integer"},
+        "amount": {"type": "integer"},
+        "angle": {"type": "integer"}
+      }
+    }
+  }
+}

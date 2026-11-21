@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <numbers>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -425,6 +426,32 @@ TEST(SessionTest, BoundaryValuesAreTheBoundariesOwnWithTheInflowOfMassFlowInlets
                                               c["name"].string == "rho" || c["name"].string == "p" ||
                                               c["name"].string.rfind("u_", 0) == 0) << c["name"].string;
     }
+}
+
+TEST(SessionTest, UnitsCatalogAnswersAsListUnitsWithEachFactorAsDefined) {
+    SKIP_UNDER_MPI();
+    const Result session = run({"session"}, request(1, "units.catalog") + request(2, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-unit-catalog"}});
+    const Result one_shot = run({"list", "units", "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value catalog = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(catalog));
+    EXPECT_EQ(violations("mallard-unit-catalog", catalog), "");
+    // The exact definition is the factor Mallard converts with
+    const auto decimal = [](const std::string & text) { return text == "pi" ? std::numbers::pi : std::stod(text); };
+    for (const json::Value & u : catalog["units"].array) {
+        const std::string & factor = u["factor"].string;
+        const size_t slash = factor.find('/');
+        const double exact = slash == std::string::npos
+                                 ? decimal(factor)
+                                 : decimal(factor.substr(0, slash)) / decimal(factor.substr(slash + 1));
+        EXPECT_DOUBLE_EQ(exact, u["value"].number) << u["symbol"].string << " = " << factor;
+    }
+    const Result text = run({"list", "units"});
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_NE(text.out.find("101325/760"), std::string::npos) << text.out;
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {

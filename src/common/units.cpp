@@ -7,6 +7,9 @@
 
 #include "units.h"
 
+#include "interfaces.h"
+#include "json.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -81,7 +84,8 @@ std::string base_units(const Dimension & d, const char * power = "^") {
 
 struct UnitDef {
     std::string_view symbol;
-    double factor;  // SI value of one unit
+    double factor;            // SI value of one unit
+    std::string_view exact;   // its definition: a decimal, or a quotient of decimals and pi
     Dimension dimension;
     bool prefixable;
     double offset = 0.0;  // absolute temperatures: SI = (value + offset) * factor
@@ -91,37 +95,37 @@ struct UnitDef {
 constexpr double PI = std::numbers::pi;
 
 const UnitDef UNITS[] = {
-    {"m", 1.0, dim::length, true},
-    {"g", 1.0e-3, dim::of(1, 0, 0), true},
-    {"s", 1.0, dim::time, true},
-    {"K", 1.0, dim::temperature, true},
-    {"mol", 1.0, dim::of(0, 0, 0, 0, 1), true},
-    {"rad", 1.0, dim::of(0, 0, 0, 0, 0, 1), true},
-    {"Pa", 1.0, dim::pressure, true},
-    {"J", 1.0, dim::of(1, 2, -2), true},
-    {"W", 1.0, dim::of(1, 2, -3), true},
-    {"N", 1.0, dim::of(1, 1, -2), true},
-    {"Hz", 1.0, dim::rate, true},
-    {"bar", 1.0e5, dim::pressure, true},
-    {"L", 1.0e-3, dim::of(0, 3, 0), true},
-    {"cal", 4.184, dim::of(1, 2, -2), true},
-    {"atm", 101325.0, dim::pressure, false},
-    {"psi", 6894.757293168361, dim::pressure, false},
-    {"Torr", 101325.0 / 760.0, dim::pressure, false},
-    {"mmHg", 133.322387415, dim::pressure, false},
-    {"in", 0.0254, dim::length, false},
-    {"ft", 0.3048, dim::length, false},
-    {"min", 60.0, dim::time, false},
-    {"h", 3600.0, dim::time, false},
-    {"lb", 0.45359237, dim::of(1, 0, 0), false},
-    {"lbf", 4.4482216152605, dim::of(1, 1, -2), false},
-    {"deg", PI / 180.0, dim::of(0, 0, 0, 0, 0, 1), false},
-    {"°", PI / 180.0, dim::of(0, 0, 0, 0, 0, 1), false},
-    {"degR", 5.0 / 9.0, dim::temperature, false},
-    {"degC", 1.0, dim::temperature, false, 273.15, true},
-    {"°C", 1.0, dim::temperature, false, 273.15, true},
-    {"degF", 5.0 / 9.0, dim::temperature, false, 459.67, true},
-    {"°F", 5.0 / 9.0, dim::temperature, false, 459.67, true},
+    {"m", 1.0, "1", dim::length, true},
+    {"g", 1.0e-3, "0.001", dim::of(1, 0, 0), true},
+    {"s", 1.0, "1", dim::time, true},
+    {"K", 1.0, "1", dim::temperature, true},
+    {"mol", 1.0, "1", dim::of(0, 0, 0, 0, 1), true},
+    {"rad", 1.0, "1", dim::of(0, 0, 0, 0, 0, 1), true},
+    {"Pa", 1.0, "1", dim::pressure, true},
+    {"J", 1.0, "1", dim::of(1, 2, -2), true},
+    {"W", 1.0, "1", dim::of(1, 2, -3), true},
+    {"N", 1.0, "1", dim::of(1, 1, -2), true},
+    {"Hz", 1.0, "1", dim::rate, true},
+    {"bar", 1.0e5, "100000", dim::pressure, true},
+    {"L", 1.0e-3, "0.001", dim::of(0, 3, 0), true},
+    {"cal", 4.184, "4.184", dim::of(1, 2, -2), true},
+    {"atm", 101325.0, "101325", dim::pressure, false},
+    {"psi", 6894.757293168361, "4.4482216152605/0.00064516", dim::pressure, false},
+    {"Torr", 101325.0 / 760.0, "101325/760", dim::pressure, false},
+    {"mmHg", 133.322387415, "133.322387415", dim::pressure, false},
+    {"in", 0.0254, "0.0254", dim::length, false},
+    {"ft", 0.3048, "0.3048", dim::length, false},
+    {"min", 60.0, "60", dim::time, false},
+    {"h", 3600.0, "3600", dim::time, false},
+    {"lb", 0.45359237, "0.45359237", dim::of(1, 0, 0), false},
+    {"lbf", 4.4482216152605, "4.4482216152605", dim::of(1, 1, -2), false},
+    {"deg", PI / 180.0, "pi/180", dim::of(0, 0, 0, 0, 0, 1), false},
+    {"°", PI / 180.0, "pi/180", dim::of(0, 0, 0, 0, 0, 1), false},
+    {"degR", 5.0 / 9.0, "5/9", dim::temperature, false},
+    {"degC", 1.0, "1", dim::temperature, false, 273.15, true},
+    {"°C", 1.0, "1", dim::temperature, false, 273.15, true},
+    {"degF", 5.0 / 9.0, "5/9", dim::temperature, false, 459.67, true},
+    {"°F", 5.0 / 9.0, "5/9", dim::temperature, false, 459.67, true},
 };
 
 struct Prefix {
@@ -512,6 +516,51 @@ std::string column(const std::string & si) { return current == System::SI ? si :
 
 std::string with(const std::string & number, const std::string & si) {
     return current == System::SI && !si.empty() ? number + " " + si : number;
+}
+
+std::string catalog_json() {
+    const auto exponents = [](const Dimension & d) {
+        static const char * names[Dimension::N_BASE] = {"mass", "length", "time", "temperature", "amount", "angle"};
+        json::Object o;
+        for (size_t i = 0; i < Dimension::N_BASE; i++) o.add(names[i], static_cast<int>(d.exponent[i]));
+        return o.str();
+    };
+    std::string list = "[";
+    for (const UnitDef & u : UNITS) {
+        list += (list.size() > 1 ? "," : "") + json::Object()
+                                                   .add("symbol", std::string(u.symbol))
+                                                   .add("dimension", u.dimension.describe())
+                                                   .raw("exponents", exponents(u.dimension))
+                                                   .add("factor", std::string(u.exact))
+                                                   .add("value", u.factor)
+                                                   .raw("offset", u.affine ? json::quote(json::number(u.offset)) : "null")
+                                                   .add("prefixable", u.prefixable)
+                                                   .str();
+    }
+    std::string prefixes = "[";
+    for (const Prefix & p : PREFIXES) {
+        prefixes += (prefixes.size() > 1 ? "," : "") +
+                    json::Object()
+                        .add("symbol", std::string(p.symbol))
+                        .add("factor", "1e" + std::to_string(std::lround(std::log10(p.factor))))
+                        .str();
+    }
+    std::string dimensions = "[";
+    for (const NamedDimension & n : NAMED) {
+        dimensions += (dimensions.size() > 1 ? "," : "") + json::Object()
+                                                               .add("name", std::string(n.name))
+                                                               .add("dimension", n.dimension.describe())
+                                                               .raw("exponents", exponents(n.dimension))
+                                                               .add("examples", std::string(n.examples))
+                                                               .str();
+    }
+    return json::Object()
+        .add("schema", interfaces::UNIT_CATALOG.name)
+        .add("version", interfaces::UNIT_CATALOG.version)
+        .raw("units", list + "]")
+        .raw("prefixes", prefixes + "]")
+        .raw("dimensions", dimensions + "]")
+        .str();
 }
 
 } // namespace units

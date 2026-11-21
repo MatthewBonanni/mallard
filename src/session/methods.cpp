@@ -26,6 +26,7 @@
 #include "run_control.h"
 #include "run_ctl.h"
 #include "session.h"
+#include "units.h"
 
 namespace session {
 
@@ -191,6 +192,11 @@ std::string keys_catalog(Context &, const json::Value & params) {
     }
 }
 
+std::string units_catalog(Context &, const json::Value & params) {
+    as_options(params, {});
+    return units::catalog_json();
+}
+
 std::vector<std::string> strings_param(const json::Value & params, const std::string & name) {
     std::vector<std::string> out;
     const json::Value * v = params.find(name);
@@ -269,6 +275,7 @@ constexpr Method METHODS[] = {
      true, case_boundary_values},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
+    {"units.catalog", "mallard list units --format json", interfaces::UNIT_CATALOG.name, false, units_catalog},
     {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},
     {"run.control", "mallard ctl RUN ACTION [KEY=VALUE...] --format json", run_control::SCHEMA, false, control_run},
 };

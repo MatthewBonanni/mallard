@@ -134,6 +134,13 @@ System system();
 /** @brief The unit for a units row or column: si, or "-" in a nondimensional case. */
 std::string column(const std::string & si);
 
+/**
+ * @brief The JSON of mallard list units --format json and of the session's units.catalog: every unit with its
+ *        dimension and exact factor (a decimal, or a quotient of decimals and pi), the prefixes, and the named
+ *        dimensions the key catalog's dimension strings come from.
+ */
+std::string catalog_json();
+
 /** @brief A number with its unit, for prose: "0.02 s", or "0.02" in a nondimensional case. */
 std::string with(const std::string & number, const std::string & si);
 
