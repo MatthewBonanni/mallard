@@ -104,7 +104,7 @@
           },
           "normal": {
             "$ref": "#/$defs/vector",
-            "description": "area-weighted mean inward unit normal"
+            "description": "the inward unit normal at the origin"
           },
           "length": {
             "type": "number",

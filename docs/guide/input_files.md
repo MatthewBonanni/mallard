@@ -721,8 +721,8 @@ every block with its `kind` and `condition`, and under `frames` where each
 `[[boundaries]]` entry's [local coordinates](boundary_conditions.md#local-coordinates)
 start: its `shape` (`curve` in 2D; `four-sided`, `ring` or `disk` in 3D),
 `origin` (2D: the end where u = 0; 3D: the face center nearest to u = v = 0),
-`u_direction` (the unit vector along which u grows there), `normal` (the mean
-inward unit normal), `length` and, in 3D, `width` (the largest u_m and v_m).
+`u_direction` (the unit vector along which u grows there), `normal` (the
+inward unit normal at the origin), `length` and, in 3D, `width` (the largest u_m and v_m).
 An entry whose faces have no u (a closed curve, a zone of several pieces) has
 `shape` `null` and says why in `error`.
 

@@ -539,11 +539,12 @@ BoundaryFrame boundary_frame(const Mesh & mesh, const std::vector<uint32_t> & fa
     BoundaryFrame f;
     size_t first = 0;
     for (size_t k = 0; k < n; k++) {
-        for (size_t d = 0; d < N_DIM; d++) f.normal[d] += at(k, N_DIM + d);
         f.length = std::max(f.length, at(k, 2 * N_DIM + 1));
         f.width = std::max(f.width, at(k, 2 * N_DIM + 3));
         if (at(k, 2 * N_DIM + 1) + at(k, 2 * N_DIM + 3) < at(first, 2 * N_DIM + 1) + at(first, 2 * N_DIM + 3)) first = k;
     }
+    // At the origin: the mean normal of a curved boundary (a cylinder's) may vanish
+    for (size_t d = 0; d < N_DIM; d++) f.normal[d] = at(first, N_DIM + d);
     f.normal = unit(f.normal);
 #if N_DIM == 2
     f.shape = "curve";
@@ -559,8 +560,8 @@ BoundaryFrame boundary_frame(const Mesh & mesh, const std::vector<uint32_t> & fa
     if (second != first && (at(second, 0) - c[0]) * f.u_direction[0] + (at(second, 1) - c[1]) * f.u_direction[1] < 0.0) {
         for (double & v : f.u_direction) v = -v;
     }
-    const double half = 0.5 * std::hypot(at(first, 2), at(first, 3));
-    f.origin = {c[0] - half * f.u_direction[0], c[1] - half * f.u_direction[1], 0.0};
+    const double half_face = 0.5 * std::hypot(at(first, 2), at(first, 3));
+    f.origin = {c[0] - half_face * f.u_direction[0], c[1] - half_face * f.u_direction[1], 0.0};
 #else
     f.shape = summary.rfind("ring", 0) == 0 ? "ring" : summary.rfind("disk", 0) == 0 ? "disk" : "four-sided";
     f.origin = center(first);
@@ -597,6 +598,8 @@ BoundaryFrame boundary_frame(const Mesh & mesh, const std::vector<uint32_t> & fa
             g[col] = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
                       m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])) / det;
         }
+        const double into = g[0] * n0[0] + g[1] * n0[1] + g[2] * n0[2];
+        for (size_t d = 0; d < 3; d++) g[d] -= into * n0[d];
         f.u_direction = unit(g);
     }
 #endif
