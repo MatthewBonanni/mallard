@@ -81,7 +81,7 @@ struct Gas {
         return fpv.locate(Z_mean, Zvar, C_mean);
     }
 
-    /** @brief C of the burnt laminar flamelet state (c = 1) at Z. */
+    /** @brief C of the burnt laminar flamelet state (Lambda = 1) at Z. */
     KOKKOS_INLINE_FUNCTION double burnt(const double Z_mean) const {
         return fpv.table.at_last_node(locate(Z_mean, 0.0, 0.0), fpv.table.n_nodes[2] - 1, fpv.field_C);
     }
@@ -114,13 +114,13 @@ struct Gas {
     /** @brief Field f of the table at point p, for output. */
     KOKKOS_INLINE_FUNCTION double field(const Point<3> & p, const uint32_t f) const { return fpv.table(p, f); }
 
-    /** @brief The normalized progress variable c = (C - C_min) / (C_max - C_min) of the laminar table at Z, in [0, 1]. */
-    KOKKOS_INLINE_FUNCTION double progress(const double Z_mean, const double C_mean) const {
+    /** @brief The normalized progress variable Lambda = (C - C_min) / (C_max - C_min) of the laminar table at Z, in [0, 1]. */
+    KOKKOS_INLINE_FUNCTION double lambda(const double Z_mean, const double C_mean) const {
         const Point<3> p = locate(Z_mean, 0.0, 0.0);
         const double C_min = fpv.table.at_last_node(p, 0, fpv.field_C);
         const double span = fpv.table.at_last_node(p, fpv.table.n_nodes[2] - 1, fpv.field_C) - C_min;
-        const double c = span > 0.0 ? (C_mean - C_min) / span : 0.0;
-        return c < 0.0 ? 0.0 : (c > 1.0 ? 1.0 : c);
+        const double Lambda = span > 0.0 ? (C_mean - C_min) / span : 0.0;
+        return Lambda < 0.0 ? 0.0 : (Lambda > 1.0 ? 1.0 : Lambda);
     }
 };
 
@@ -148,7 +148,7 @@ class FlameletModel {
         /** @brief The transported scalars' names, in the order of the species block. */
         static std::vector<std::string> scalar_names() { return {"Z", "C"}; }
 
-        /** @brief The table's C at mixture fraction Z for fully burnt (c = 1) laminar (S = 0) states. */
+        /** @brief The table's C at mixture fraction Z for fully burnt (Lambda = 1) laminar (Sz = 0) states. */
         double burnt_progress(double Z) const;
 
         /** @brief Thermodynamics of the laminar table point of (Z, C). */

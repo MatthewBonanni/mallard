@@ -258,9 +258,9 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
 bool Settings::available(const Field f) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
-    if (tabulated && (f == MIXTURE_FRACTION || f == PROGRESS_VARIABLE)) return true;
+    if (tabulated && (f == MIXTURE_FRACTION || f == FPV_LAMBDA)) return true;
     if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) return false;
-    return !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
+    return !needs(need::FLAMELET) && !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
            !(needs(need::VISCOUS) && !viscous) && !(needs(need::REFERENCE) && !reference) &&
            !(needs(need::STREAMS) && !streams) && !(needs(need::PROGRESS) && progress == Progress::NONE) &&
            !(needs(need::SPECIES_PAIR) && (fuel_species < 0 || oxidizer_species < 0));
@@ -278,9 +278,13 @@ void Settings::require(const Field f, const Input & input) const {
             if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "fields");
         }
     }
-    if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) {
+    if (needs(need::FLAMELET)) {
+        d.message = name + " is a field of the flamelet table, and this case has no flamelet gas";
+        d.fix = "Remove " + name + ", or set physics.gas = \"flamelet\"";
+    } else if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) {
         d.message = name + " needs the species of a gas mixture, and a flamelet gas has a table in their place";
-        d.fix = "Remove " + name;
+        d.fix = f == PROGRESS_VARIABLE ? "Write FPV_LAMBDA, the table's normalized progress variable, in its place"
+                                       : "Remove " + name;
     } else if (needs(need::THREE_D) && N_DIM != 3) {
         d.message = name + " is zero in 2D, where the vorticity is normal to the velocity";
         d.fix = "Run the case with mallard3d, or remove " + name;
@@ -448,16 +452,16 @@ void compute(const Selection & selection, const Settings & settings, const Input
         }
         if (tabulated) {
             put(MIXTURE_FRACTION, Y(c, flamelet::Gas<>::Z));
-            if (wants(PROGRESS_VARIABLE)) {
-                put(PROGRESS_VARIABLE, static_cast<rtype>(flamelet.progress(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
-                                                                            static_cast<double>(Y(c, flamelet::Gas<>::C)))));
+            if (wants(FPV_LAMBDA)) {
+                put(FPV_LAMBDA, static_cast<rtype>(flamelet.lambda(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
+                                                                   static_cast<double>(Y(c, flamelet::Gas<>::C)))));
             }
         } else if (wants(MIXTURE_FRACTION)) {
             rtype z = z_offset;
             for (uint32_t k = 0; k < n_species; k++) z += weights(Z, k) * Y(c, k);
             put(MIXTURE_FRACTION, z);
         }
-        if (wants(PROGRESS_VARIABLE) && !tabulated) {
+        if (wants(PROGRESS_VARIABLE)) {
             rtype value = 0.0;
             if (progress_T) {
                 value = (P(c, N_DIM + 1) - T_unburnt) / (T_burnt - T_unburnt);
