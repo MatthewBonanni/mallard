@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes GCC 15, Clang 22 or Apple Clang 21 or newer ([supported platforms](../installation.md#supported-platforms)), CMake 4.2 or newer, git, and Python 3.
 
-With Mallard already installed from a container or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build-3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container, a relocatable archive or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build-3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 
@@ -105,6 +105,7 @@ Edit `input.toml` and run again:
     ```
 
     The result is identical: the preset sets exactly the keys the example spells out, and the terminal output lists them. Deleting those tables altogether gives the same again, since `high_order` is the default. `preset = "second_order"` (MUSCL, RHLL, CFL 0.5) is the one for the strongest shocks and blasts; it runs on every mesh without a stencil setup. The [Numerics](../guide/numerics.md#presets) page lists the five presets and what each is for; any key you set yourself overrides the preset.
+
 - **Scheme.** Replace the reconstruction with second-order MUSCL,
 
     ```toml
@@ -114,6 +115,7 @@ Edit `input.toml` and run again:
     ```
 
     or try `order = 3` with TENO. The contact discontinuity is where the schemes differ most. The [Numerics](../guide/numerics.md#reconstruction) page compares them on this case.
+
 - **Riemann solver.** `Rusanov`, `HLL`, `HLLC`, `Roe` or `RHLL`. With fifth-order reconstruction the choice changes the error on this case by less than 20%, Rusanov being the most dissipative. It matters more in 2D: for shocks aligned with a quadrilateral grid, use `RHLL` (see [Shu–Osher](https://matthewbonanni.github.io/mallard/validation/#shu-osher-problem)).
 
 ## 5. A 2D case

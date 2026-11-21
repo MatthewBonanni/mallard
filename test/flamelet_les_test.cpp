@@ -95,7 +95,7 @@ TEST(FlameletLESTest, AlgebraicVarianceEntersEveryLookup) {
               << zero_velocity() << "\nZ = \"0.2 + 0.6 * x\"\nC = \"0.1\"\n"
               << physics("solver_variance.h5", "C_Z = " + std::to_string(C_Z) + "\n") << smagorinsky(0.17)
               << "[[write_data]]\nprefix = \"" << prefix << "\"\nformat = \"vtu\"\ninterval = 1000000\n"
-              << "fields = [\"MIXTURE_FRACTION_VARIANCE\", \"MU\", \"Y_H2O\", \"FPV_LAMBDA\"]\n";
+              << "fields = [\"MIXTURE_FRACTION_VARIANCE\", \"MU\", \"Y_H2O\", \"C_NORM\"]\n";
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(input.str()));
@@ -103,7 +103,7 @@ TEST(FlameletLESTest, AlgebraicVarianceEntersEveryLookup) {
         solver.write_output_of_state(false);
         const output::Contents file = output::open(prefix + "_000000.vtu");
         std::map<std::string, std::vector<double>> written;
-        for (const char * name : {"MIXTURE_FRACTION_VARIANCE", "MU", "Y_H2O", "FPV_LAMBDA"}) {
+        for (const char * name : {"MIXTURE_FRACTION_VARIANCE", "MU", "Y_H2O", "C_NORM"}) {
             written[name] = output::read(file, name, 0);
         }
         const auto mesh = solver.get_mesh();
@@ -122,7 +122,7 @@ TEST(FlameletLESTest, AlgebraicVarianceEntersEveryLookup) {
             EXPECT_NEAR(rho[c], p / ((287.0 + 100.0 * Sz[c]) * T), tol(1e-12, 1e-6) * rho[c]) << Z;
             EXPECT_NEAR(written["MU"][c], 1.8e-5 * (1.0 + Sz[c]), tol(1e-12, 1e-6) * 1.8e-5) << Z;
             EXPECT_NEAR(written["Y_H2O"][c], 0.1 * Sz[c], tol(1e-12, 1e-6)) << Z;
-            EXPECT_NEAR(written["FPV_LAMBDA"][c], 0.5 / (1.0 + Sz[c]), tol(1e-12, 1e-6)) << Z;
+            EXPECT_NEAR(written["C_NORM"][c], 0.5 / (1.0 + Sz[c]), tol(1e-12, 1e-6)) << Z;
         }
         EXPECT_GT(*std::max_element(Sz.begin(), Sz.end()), 0.09);
 
