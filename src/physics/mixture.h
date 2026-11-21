@@ -48,7 +48,9 @@ struct PartialDensities {
  * With gas = "flamelet" the species block holds the transported scalars
  * [Z, C] instead of mass fractions, and the thermodynamics come from the
  * flamelet table (thermo and transport are then empty): the functions below
- * take the scalars where they take mass fractions.
+ * take the scalars where they take mass fractions. Those of a composition
+ * alone look up the laminar flamelet (zero subgrid variance: boundary
+ * states); a cell's state passes its subgrid variance Zvar.
  */
 struct Mixture {
     chemistry::ThermoTable<> thermo;
@@ -60,34 +62,35 @@ struct Mixture {
     /** @brief Whether the species block holds flamelet scalars, not mass fractions. */
     KOKKOS_INLINE_FUNCTION bool tabulated() const { return flamelet.active(); }
 
-    /** @brief Thermodynamics of the laminar table point of the scalars y = (Z, C) of a flamelet gas. */
+    /** @brief Thermodynamics of the table point of the scalars y = (Z, C) of a flamelet gas and the variance Zvar. */
     template <typename F_Y>
-    KOKKOS_INLINE_FUNCTION flamelet::Thermo table_thermo(const F_Y & y) const {
-        return flamelet.thermo(flamelet.locate(y(flamelet::Gas<>::Z), 0.0, y(flamelet::Gas<>::C)));
+    KOKKOS_INLINE_FUNCTION flamelet::Thermo table_thermo(const F_Y & y, const double Zvar = 0.0) const {
+        return flamelet.thermo(flamelet.locate(y(flamelet::Gas<>::Z), Zvar, y(flamelet::Gas<>::C)));
     }
 
-    /** @brief Gas constant of mass fractions y, or of the scalars of a flamelet gas. */
+    /** @brief Gas constant of mass fractions y, or of the scalars of a flamelet gas (and its variance Zvar). */
     template <typename F_Y>
-    KOKKOS_INLINE_FUNCTION double gas_constant(const F_Y & y) const {
-        return tabulated() ? table_thermo(y).R : thermo.gas_constant(y);
+    KOKKOS_INLINE_FUNCTION double gas_constant(const F_Y & y, const double Zvar = 0.0) const {
+        return tabulated() ? table_thermo(y, Zvar).R : thermo.gas_constant(y);
     }
 
     /** @brief Specific heat at constant pressure at T. */
     template <typename F_Y>
-    KOKKOS_INLINE_FUNCTION double cp_mass(const double T, const F_Y & y) const {
+    KOKKOS_INLINE_FUNCTION double cp_mass(const double T, const F_Y & y, const double Zvar = 0.0) const {
         if (!tabulated()) return thermo.cp_mass(T, y);
-        const flamelet::Thermo th = table_thermo(y);
+        const flamelet::Thermo th = table_thermo(y, Zvar);
         return th.cv(T) + th.R;
     }
 
     /** @brief Internal energy (formation included) and cv at T. */
     template <typename F_Y>
-    KOKKOS_INLINE_FUNCTION void e_cv(const double T, const F_Y & y, double & e, double & cv) const {
+    KOKKOS_INLINE_FUNCTION void e_cv(const double T, const F_Y & y, double & e, double & cv,
+                                     const double Zvar = 0.0) const {
         if (!tabulated()) {
             thermo.e_cv(T, y, e, cv);
             return;
         }
-        const flamelet::Thermo th = table_thermo(y);
+        const flamelet::Thermo th = table_thermo(y, Zvar);
         e = th.energy(T);
         cv = th.cv(T);
     }
@@ -105,12 +108,12 @@ struct Mixture {
     }
 
     /**
-     * @brief The conducted variable at T: T itself, or for a flamelet gas the enthalpy h(T), whose
-     *        gradient times kappa / cp is the heat flux at unity Lewis number.
+     * @brief The conducted variable at T: T itself, or for a flamelet gas the enthalpy h(T) at the
+     *        subgrid variance Zvar, whose gradient times kappa / cp is the heat flux at unity Lewis number.
      */
     template <typename F_Y>
-    KOKKOS_INLINE_FUNCTION double conducted(const double T, const F_Y & y) const {
-        return tabulated() ? h_mass(T, y) : T;
+    KOKKOS_INLINE_FUNCTION double conducted(const double T, const F_Y & y, const double Zvar) const {
+        return tabulated() ? table_thermo(y, Zvar).enthalpy(T) : T;
     }
 
     /** @brief Temperature of internal energy e (T_guess seeds the mixture's Newton iteration). */
@@ -122,11 +125,12 @@ struct Mixture {
     /**
      * @brief State of a cell from its conservatives U and contiguous partial
      *        densities rhoY: W = [rho, u, p], gamma, e0 and the temperature,
-     *        found by Newton from T_guess.
+     *        found by Newton from T_guess; a flamelet gas's at the cell's
+     *        subgrid variance Zvar (flamelet::Gas::cell_variance).
      */
     KOKKOS_INLINE_FUNCTION
-    void cell_state(const rtype * U, const CellSpecies & rhoY, const rtype T_guess, rtype * W, rtype & gamma, rtype & e0,
-                    rtype & T) const {
+    void cell_state(const rtype * U, const CellSpecies & rhoY, const rtype T_guess, const double Zvar, rtype * W,
+                    rtype & gamma, rtype & e0, rtype & T) const {
         constexpr uint8_t E = N_DIM + 1;
         const double rho = static_cast<double>(U[0]);
         W[0] = U[0];
@@ -139,7 +143,7 @@ struct Mixture {
         const PartialDensities y{rhoY, 1.0 / rho};
         double T_cell, R, cv;
         if (tabulated()) {
-            const flamelet::Thermo th = table_thermo(y);
+            const flamelet::Thermo th = table_thermo(y, Zvar);
             T_cell = th.temperature(e);
             R = th.R;
             cv = th.cv(T_cell);

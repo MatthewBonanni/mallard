@@ -63,14 +63,14 @@ struct MixtureCellFunctor {
             W_c[N_DIM + 1] = (gamma - 1.0_r) * (cons[N_DIM + 1] - cons[0] * e0 -
                                                 0.5_r * cons[0] * dot<N_DIM>(W_c + 1, W_c + 1));
         } else {
-            gas.cell_state(cons, rhoY_c, T_seed(c), W_c, gamma, e0, T);
+            gas.cell_state(cons, rhoY_c, T_seed(c), gas.flamelet.cell_variance(c), W_c, gamma, e0, T);
             if (primitives.extent(0) > 0) set_primitives(primitives, c, W_c, gamma, e0, T);
         }
         FOR_I_CONSERVATIVE W(c, i) = W_c[i];
         if (molar_mass.extent(0) > 0) {
             if (gas.tabulated()) {
                 const PartialDensities y{rhoY_c, 1.0 / static_cast<double>(cons[0])};
-                molar_mass(c) = static_cast<rtype>(chemistry::GAS_CONSTANT / gas.gas_constant(y));
+                molar_mass(c) = static_cast<rtype>(chemistry::GAS_CONSTANT / gas.gas_constant(y, gas.flamelet.cell_variance(c)));
             } else {
                 double n = 0.0;
                 for (uint32_t k = 0; k < gas.n_species; k++) n += static_cast<double>(rhoY_c[k]) * gas.thermo.inv_W(k);
@@ -98,7 +98,7 @@ struct FreezeFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), gas.flamelet.cell_variance(c), W, gamma, e0, T);
         T_seed(c) = T;
         frozen(c, 0) = gamma;
         frozen(c, 1) = e0;
@@ -143,9 +143,10 @@ struct ResetEnergyFunctor {
         const double p = (static_cast<double>(frozen(c, 0)) - 1.0) *
                          (static_cast<double>(U(c, E)) - rho * static_cast<double>(frozen(c, 1)) - kinetic);
         const PartialDensities y{cell_species(rhoY, c), 1.0 / rho};
-        const double T = p / (rho * gas.gas_constant(y));
+        const double Zvar = gas.flamelet.cell_variance(c);
+        const double T = p / (rho * gas.gas_constant(y, Zvar));
         double e, cv;
-        gas.e_cv(T, y, e, cv);
+        gas.e_cv(T, y, e, cv, Zvar);
         U(c, E) = static_cast<rtype>(rho * e + kinetic);
     }
 };
@@ -234,7 +235,7 @@ struct MixturePrimitivesFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), gas.flamelet.cell_variance(c), W, gamma, e0, T);
         set_primitives(P, c, W, gamma, e0, T);
     }
 };
@@ -251,7 +252,7 @@ struct TemperatureFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, cell_species(rhoY, c), 0.0_r, W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), 0.0_r, gas.flamelet.cell_variance(c), W, gamma, e0, T);
         T_seed(c) = T;
     }
 };
@@ -290,7 +291,7 @@ struct MixtureDiagnosticsFunctor {
         rtype cons[N_CONSERVATIVE], W[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(c, i);
         rtype gamma, e0, T;
-        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T);
+        gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), gas.flamelet.cell_variance(c), W, gamma, e0, T);
         rtype u2 = 0.0_r, sum_Y = 0.0_r;
         FOR_I_DIM u2 += W[1 + i] * W[1 + i];
         for (uint32_t k = 0; k < gas.n_species; k++) sum_Y += rhoY(c, k);
@@ -465,6 +466,7 @@ void Solver::mixture_reductions(step_queue::MixtureDiagnostics * out) {
 }
 
 void Solver::update_cell_states(const State & solution, const bool update_seed) {
+    update_flamelet_variance(solution);
     MixtureCellFunctor functor{mixture, solution.flow, solution.species, T_seed, W_cells, cell_scalars,
                                cell_molar_mass, cells_frozen ? frozen_thermo : Kokkos::View<rtype *[2]>(),
                                update_seed, {}};
@@ -477,6 +479,7 @@ void Solver::update_cell_states_and_primitives() {
         update_primitives();
         return;
     }
+    update_flamelet_variance(state());
     MixtureCellFunctor functor{mixture, conservatives, species, T_seed, W_cells, cell_scalars, cell_molar_mass,
                                Kokkos::View<rtype *[2]>(), false, primitives};
     Kokkos::parallel_for("mixture_cells", mesh->n_cells, functor);
@@ -495,6 +498,7 @@ void Solver::update_transport() {
 }
 
 void Solver::freeze_thermodynamics() {
+    update_flamelet_variance(state());
     Kokkos::parallel_for("freeze_thermodynamics", mesh->n_cells,
                          FreezeFunctor{mixture, conservatives, species, T_seed, frozen_thermo});
 }
@@ -517,6 +521,7 @@ void Solver::reset_energy() {
 }
 
 void Solver::init_temperature_seed() {
+    update_flamelet_variance(state());
     Kokkos::parallel_for("temperature_seed", mesh->n_cells, TemperatureFunctor{mixture, conservatives, species, T_seed});
 }
 
@@ -647,6 +652,7 @@ rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
 }
 
 void Solver::update_primitives_mixture() {
+    // At the subgrid variances of the last update of the cell states: computing them takes an exchange
     Kokkos::parallel_for("update_primitives", mesh->n_cells,
                          MixturePrimitivesFunctor{mixture, conservatives, species, T_seed, primitives});
 }

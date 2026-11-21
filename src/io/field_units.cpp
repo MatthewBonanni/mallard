@@ -81,6 +81,8 @@ const Entry NAMED[] = {
     {"CHEM_COST", dim::none, "chemistry sub-steps in the last step", CHEMISTRY, "a mixture with [chemistry]"},
     {"QRAD", dim::power_density, "radiative heat source", CHEMISTRY, "[radiation]"},
     {"MU_T", dim::dynamic_viscosity, "eddy viscosity", LES, "[les]"},
+    {"MIXTURE_FRACTION_VARIANCE", dim::none, "subgrid variance of the mixture fraction", LES,
+     "gas = \"flamelet\" with [les]"},
     {"TF_F", dim::none, "flame thickening factor", LES, "[les.combustion] (TFLES)"},
     {"TF_E", dim::none, "flame wrinkling efficiency", LES, "[les.combustion] (TFLES)"},
     {"TF_OMEGA", dim::none, "flame sensor", LES, "[les.combustion] (TFLES)"},

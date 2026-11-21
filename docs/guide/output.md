@@ -125,6 +125,7 @@ other fields.
 |  | `QRAD` | `kg m-1 s-3` | radiative heat source | [radiation] | write_data |
 |  | `OMEGA_<s>` | `kg m-3 s-1` | net production rate of species s | a mixture with [chemistry] | write_data |
 | LES | `MU_T` | `kg m-1 s-1` | eddy viscosity | [les] | write_data |
+|  | `MIXTURE_FRACTION_VARIANCE` | `1` | subgrid variance of the mixture fraction | gas = "flamelet" with [les] | write_data |
 |  | `TF_F` | `1` | flame thickening factor | [les.combustion] (TFLES) | write_data |
 |  | `TF_E` | `1` | flame wrinkling efficiency | [les.combustion] (TFLES) | write_data |
 |  | `TF_OMEGA` | `1` | flame sensor | [les.combustion] (TFLES) | write_data |

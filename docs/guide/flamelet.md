@@ -10,8 +10,9 @@ HDF5. Design and rationale: [design notes](../design/flamelet.md); the table
 format: [table_format.md](../design/table_format.md).
 
 Mallard does not generate tables: they come from a separate generator library
-that writes [Mallard's format](../design/table_format.md). This first stage
-runs laminar flames (no `[les]`); the subgrid variance of `Z` is zero.
+that writes [Mallard's format](../design/table_format.md). Laminar runs look
+the table up at zero subgrid variance of `Z`; with `[les]` the variance comes
+from the resolved gradient of `Z` ([LES](#les)).
 
 ```toml
 [physics]
@@ -70,6 +71,8 @@ mass fractions that sum to one).
 |---|---|---|
 | `gas = "flamelet"`, `table` | `[physics]` | The table file, an FPV table with `saghafian2015` thermodynamics |
 | `Z`, `C` | `[initialize]`, `[[initialize.regions]]`, `inlet_state` | Mixture fraction in [0, 1] (default 0) and progress variable in the table's range at `Z` (default 0); numbers, expressions, or `C = "burnt"` |
+| `variance` | `[physics]`, with `[les]` | Closure of the subgrid variance of `Z`: `algebraic` (default, the only one so far) |
+| `C_Z` | `[physics]`, with `[les]` | Constant of the algebraic variance, default 0.1, non-negative |
 
 `C` must lie between the table's `C_min` and `C_max` at its `Z`; values
 outside are clamped in lookups.
@@ -86,6 +89,9 @@ table's fields at each cell's `Z` and `C` ([[write_data]] only):
 | `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` |
 | `MIXTURE_FRACTION` | `Z` |
 | `PROGRESS_VARIABLE` | The normalized progress variable `c = (C - C_min) / (C_max - C_min)` at `Z`, in [0, 1] |
+| `MIXTURE_FRACTION_VARIANCE` | (`[les]`) The subgrid variance of `Z` of each cell's lookups |
+
+With `[les]` the table fields are those at the cell's variance.
 
 ```toml
 [[write_data]]
@@ -127,10 +133,48 @@ Walls pass no flux of `Z` or `C`. `wall_isothermal` conducts heat with
 cell's `Z` and `C`; `wall_heat_flux` passes its `q`; `wall_adiabatic`
 nothing.
 
+## LES
+
+With `[les]` every lookup (thermodynamics, transport, the source of `C` and the
+output fields) is at the cell's subgrid variance of `Z`, the table's second
+axis. The algebraic closure of Pierce & Moin (1998) sets it from the resolved
+gradient:
+
+$$
+\widetilde{Z''^2} = \min\left(C_Z \Delta^2 |\nabla \tilde Z|^2,\ \tilde Z (1 - \tilde Z)\right)
+$$
+
+with `Delta` the LES filter width (`filter_width`) and the least-squares
+gradient of the viscous fluxes. The table maps it to its normalized axis
+`S = Zvar / (Z (1 - Z))`, so the clip is the table's edge.
+
+The eddy viscosity adds `mu_t / Sc_t` to the diffusivity of `Z` and `C`, and
+`mu_t / Pr_t` to the conductivity of the enthalpy (`h` is conducted with
+`kappa / cp`, so its eddy part is `mu_t / Pr_t`, not `cp mu_t / Pr_t`). With
+`Sc_t = Pr_t` (both default 0.9) enthalpy mixes with `Z`, as the unity Lewis
+number of the table assumes; other values let the energy drift from the
+flamelets'. Wall faces keep the molecular fluxes.
+
+```toml
+[physics]
+type = "navier_stokes"
+gas = "flamelet"
+table = "h2_fpv.h5"
+C_Z = 0.1                   # variance = "algebraic" is the default
+
+[les]
+model = "sigma"
+```
+
+Inlets and the boundary states are laminar (zero variance). The initial state
+is converted at its variance: `p`, `T`, `u`, `Z` and `C` are those given, the
+density and energy those of the table at the cell's variance. `[les.combustion]`
+(thickened flames) is an input error with the flamelet gas: the table already
+represents the subgrid flame.
+
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:
-`[les]` (LES closures and the subgrid variance are the next stage),
-`[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
+`variance = "transported"`, `[les.combustion]`, `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
 mixture's other derived fields, and nondimensional units. Probes and statistics
 do not sample the table fields (`T_TABLE`, `HRR`, the table's `Y_<species>`).
