@@ -317,10 +317,10 @@ class DataWriter {
         std::string index_file() const;
         /** @brief The file written last, or empty. */
         const std::string & last_written() const { return last_file; }
-        /** @brief Changes the step interval of a writer that has one; an error message, or empty. */
-        std::string set_interval(uint64_t steps);
+        /** @brief Changes the step interval of a writer that has one (without apply: checks only); an error message, or empty. */
+        std::string set_interval(uint64_t steps, bool apply = true);
         /** @brief Changes the time interval of a writer that has one, the next file due after t. */
-        std::string set_time_interval(rtype value, rtype t);
+        std::string set_time_interval(rtype value, rtype t, bool apply = true);
 
         /** @brief Seconds the run waited for output: copying snapshots, and for the previous one to be written. */
         double blocking_seconds() const { return t_blocking; }

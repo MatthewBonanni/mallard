@@ -1,5 +1,5 @@
-# Distribution of a release: the container images (CPU for amd64 and arm64, CUDA) and
-# the Spack package, each smoke-tested by running examples and comparing them with
+# Distribution of a release: the container images (CPU for amd64 and arm64, CUDA), the
+# relocatable archives (CPU, x86_64 and aarch64) and the Spack package, each smoke-tested by running examples and comparing them with
 # reference solutions (docker/smoke/run.sh). A release is dispatched on main once the
 # release PR has landed, and creates the tag v<version> only after every image and the
 # Spack package pass, so a broken build leaves no tag behind:
@@ -7,6 +7,8 @@
 # It pushes the images to ghcr.io/matthewbonanni/mallard:
 #   <version>, latest            CPU (OpenMP + MPI), amd64 and arm64
 #   <version>-cuda, cuda         NVIDIA GPUs (CUDA + OpenMP + MPI), sm_80, 86, 89 and 90
+# and a draft GitHub release v<version> holding the archives, their .sha256 files and
+# release-manifest.json (tools/dev/release_manifest.py), which the maintainer publishes.
 # To test a branch, run it without a version; it pushes nothing unless asked:
 #   gh workflow run release.yml --ref <branch>
 name: Release
@@ -84,7 +86,8 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq apptainer
           # Ubuntu 26.04 confines unprivileged user namespaces, which apptainer exec needs
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          apptainer build mallard.sif docker-daemon://mallard:test
+          apptainer build --build-arg bootstrap=docker-daemon --build-arg image=mallard:test mallard.sif docker/mallard.def
+          apptainer test mallard.sif
           apptainer exec --bind "$PWD/docker/smoke:/smoke" mallard.sif /smoke/run.sh
       - name: Push
         if: env.PUSH == 'true'
@@ -132,6 +135,54 @@ jobs:
           docker login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
           docker tag mallard:cuda "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
+
+  # Relocatable archives (docker/archive.sh) built on glibc 2.28 (manylinux_2_28), then
+  # unpacked and smoke-tested on a newer system with nothing but Python, and run on two
+  # ranks with that system's MPICH in place of the archive's (the MPICH ABI)
+  archive:
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-26.04 }
+          - { arch: aarch64, runner: ubuntu-26.04-arm }
+    runs-on: ${{ matrix.runner }}
+    name: archive (cpu, ${{ matrix.arch }})
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --depth 1 src/external/kokkos src/external/toml11 src/external/hdf5
+      - name: Tag the checkout
+        if: env.RELEASE == 'true'
+        run: git tag "v${{ needs.meta.outputs.version }}"
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/src" quay.io/pypa/manylinux_2_28_${{ matrix.arch }} bash -c '
+            set -e
+            dnf install -y -q gcc-toolset-16-gcc-c++ mpich-devel zlib-devel
+            source /opt/rh/gcc-toolset-16/enable
+            git config --global --add safe.directory /src
+            JOBS=$(nproc) /src/docker/archive.sh /src /src/out cpu'
+          sudo chown -R "$(id -u)" out
+      - name: Smoke test
+        run: |
+          docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash -c '
+            set -e
+            apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-numpy python3-scipy python3-matplotlib python3-h5py > /dev/null
+            mkdir /t && tar -C /t -xzf /src/out/mallard-*.tar.gz && prefix=$(echo /t/mallard-*)
+            /src/docker/smoke/run.sh "$prefix"
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mpich > /dev/null
+            export LD_LIBRARY_PATH=/usr/lib/$(uname -m)-linux-gnu
+            ldd "$prefix/bin/mallard2d" | grep "libmpi.so.12 => /usr/lib"
+            cp -R "$prefix/share/mallard/examples/sod" /tmp/sod && cd /tmp/sod
+            OMP_NUM_THREADS=1 mpiexec -n 2 "$prefix/bin/mallard" -i input.toml'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.arch }}
+          path: |
+            out/*.tar.gz
+            out/*.tar.gz.sha256
+            out/*.tar.gz.json
 
   # spack install of this checkout (CPU: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D) with
   # the package in spack/, then its standalone test and the smoke test
@@ -214,7 +265,7 @@ jobs:
 
   # The version's image tags, once every image and the Spack package pass, then the git tag
   publish:
-    needs: [meta, cpu, cuda, spack]
+    needs: [meta, cpu, cuda, archive, spack]
     if: inputs.version != '' || inputs.push
     runs-on: ubuntu-26.04
     permissions:
@@ -237,3 +288,25 @@ jobs:
           V: ${{ needs.meta.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/v$V" -f sha="$GITHUB_SHA"
+      - uses: actions/checkout@v4
+        if: env.RELEASE == 'true'
+      - uses: actions/download-artifact@v4
+        if: env.RELEASE == 'true'
+        with:
+          pattern: archive-*
+          path: assets
+          merge-multiple: true
+      # TODO(#1314): --interfaces with `mallard version --format json` once it exists
+      - name: Draft the GitHub release with the archives and release-manifest.json
+        if: env.RELEASE == 'true'
+        env:
+          V: ${{ needs.meta.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          digest() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -r .digest; }
+          python3 tools/dev/release_manifest.py "$V" assets --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            --image "$IMAGE:$V=$(digest "$IMAGE:$V"):cpu:linux-x86_64,linux-aarch64" \
+            --image "$IMAGE:$V-cuda=$(digest "$IMAGE:$V-cuda"):cuda13:linux-x86_64" > assets/release-manifest.json
+          cat assets/release-manifest.json
+          gh release create "v$V" --draft --verify-tag --title "Mallard $V" --notes "Draft: notes to come" \
+            assets/*.tar.gz assets/*.tar.gz.sha256 assets/release-manifest.json

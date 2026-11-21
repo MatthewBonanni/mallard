@@ -10,9 +10,9 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 | [Commands](#commands): the solver, a 0D reactor, HDF5 meshes | `mallard -i`, `mallard reactor`, `mallard mesh convert` |
 | [Job scripts](../docs/guide/parallel.md#running-on-clusters): Slurm (one node, several nodes), PBS, Kubernetes, plain `mpirun` | `jobs/` |
 | [Meshes](#meshes): Gmsh meshes from the command line | `mesh/make_cylinder_mesh.py`, `mesh/make_annulus_mesh.py`, `mesh/plot_mesh_quality.py` |
-| [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
+| [Initial states](#initial-states-and-references): restart files to start runs from | `setup/isotropic_turbulence_restart.py`, `setup/channel_init.py`, `setup/profiles.py`, `setup/tile_restart.py`, `setup/interpolate_restart.py`, `setup/flame_restart.py`, `setup/znd_restart.py` |
 | [References](#initial-states-and-references): exact and Cantera solutions | `setup/flame_reference.py`, `setup/detonation_reference.py`, `setup/sedov.py`, `setup/cantera_mechanisms.py` |
-| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py`, `post/flame_speed.py` |
+| [Post-processing](#post-processing): readers, plots, movies, averages | `mallard/` (the [Python package](../docs/guide/python.md)), `post/plot_vtu.py`, `post/compare_png.py`, `post/animate.py`, `post/animate_cartesian.py`, `post/animate_grid.py`, `post/insitu_statistics.py`, `post/plot_channel.py` |
 | [Performance](#performance): benchmarks and baselines, work-precision study | `perf/perf_suite.py`, `perf/work_precision.py` |
 | [Case scripts](#case-scripts): set-up and analysis of one example each | in the example's directory: `examples/<case>/plot_<case>.py`, ... |
 | [Developer tools](#developer-tools): figures of these pages, CI, test reference data | `docs/`, `dev/` |
@@ -20,11 +20,11 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the mesh generators also need gmsh, the chemistry scripts cantera, HDF5 output h5py, and the 3D renders pyvista:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
+uv venv
+uv pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `uv pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -176,6 +176,17 @@ Reads the box, cell counts, stretching and gas from an input with the generated 
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-light.svg#gh-light-mode-only)
 ![Mean streamwise velocity with the perturbation's spread, and the perturbation on a cross-section](../docs/images/tools/channel_init-dark.svg#gh-dark-mode-only)
 
+### `profiles.py`: profile files for inlets
+
+```sh
+python tools/setup/profiles.py law spalding bl.csv --delta 0.02 --u-inf 30 --u-tau 1.2 --nu 1.5e-5
+python tools/setup/profiles.py describe measured.csv --coordinates y --at n_m --unit y=mm --unit u=m/s --reference length=0.02 --reference velocity=30
+python tools/setup/profiles.py transform bl.csv bl_50mm.csv --scale length=0.05 --scale velocity=12
+python tools/setup/profiles.py show bl.csv [--plot bl.png]
+```
+
+Writes and checks the [profile files](../docs/guide/boundary_conditions.md#profile-files-metadata-and-rescaling) that `[[boundaries.data]]`, `[[initialize.data]]` and `turbulence.profile` read, with their `# mallard-profile` metadata. `law` writes an analytic profile in the wall distance `n_m` (read at the inlet's `n_m`): the power law, the developed laminar channel or pipe, or Spalding's law of the wall. `describe` adds the metadata to any CSV file (a measurement, `mallard post average` output); `transform` rescales a described file as the input's `scale` does and records the step in its `transforms`; `show` prints the metadata and the columns' ranges, flags what the solver would reject, and plots the columns.
+
 ### `wmles_channel.py`: wall-modeled channel
 
 ```sh
@@ -218,11 +229,11 @@ python tools/setup/flame_reference.py --single h2 1.0 300 full/        # Cantera
 python tools/setup/flame_restart.py full/h2_phi1_T300_mix_full.csv mechanisms/h2o2.yaml ohmech 8 run/
     [--ny 48 --perturb 1.5]                                       # a 2D channel with a wrinkled front
 cd run && ../build/src/mallard -i input.toml && cd ..
-python tools/post/flame_speed.py run/ 2.332                            # consumption and displacement speeds
+build/src/mallard post flame run/solut/flame.vtkhdf --reference-speed 2.332    # consumption and displacement speeds
 python examples/premixed_flame/plot_flame.py run/ examples/premixed_flame/reference/h2_phi1.0_mix.csv out.png
 ```
 
-`flame_reference.py` computes freely propagating flames with Cantera (without `--single`, the H2/air and CH4/air sweep of [`premixed_flame`](../examples/premixed_flame)); `flame_restart.py` turns one into a Mallard run (input and restart) in the flame's frame at a given number of cells per thermal thickness, as a 1D strip or, with `--ny`, a periodic 2D channel whose front is displaced by random modes; `flame_speed.py` and `plot_flame.py` compare the run with Cantera. Used by [`premixed_flame`](../examples/premixed_flame) and [`flame_2d`](../examples/flame_2d).
+`flame_reference.py` computes freely propagating flames with Cantera (without `--single`, the H2/air and CH4/air sweep of [`premixed_flame`](../examples/premixed_flame)); `flame_restart.py` turns one into a Mallard run (input and restart) in the flame's frame at a given number of cells per thermal thickness, as a 1D strip or, with `--ny`, a periodic 2D channel whose front is displaced by random modes; `mallard post flame` and `plot_flame.py` compare the run with Cantera. Used by [`premixed_flame`](../examples/premixed_flame) and [`flame_2d`](../examples/flame_2d).
 
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-light.svg#gh-light-mode-only)
 ![The restart file's mass fractions on the cells against Cantera's profiles, and a 2D wrinkled start](../docs/images/tools/flame_restart-dark.svg#gh-dark-mode-only)
@@ -277,7 +288,7 @@ Mallard writes VTKHDF files that ParaView opens (`PREFIX.vtkhdf` holds the serie
 
 ### `mallard`: the Python package
 
-`tools/mallard` is the [Python package](../docs/guide/python.md) (`pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
+`tools/mallard` is the [Python package](../docs/guide/python.md) (`uv pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
 
 ```python
 import mallard
@@ -427,8 +438,8 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | [`detonation_1d`](../examples/detonation_1d) | `detonation_reference.py`, `znd_restart.py` | `plot_detonation.py`: front speed and induction length against CJ and ZND | |
 | [`detonation_2d`](../examples/detonation_2d) | `znd_restart.py --ny` | `soot_foil.py`: front speed, triple points, cell width, soot foil | `animate_detonation_2d.py` |
 | [`detonation_3d`](../examples/detonation_3d) | `detonation_window.py` (moving window, `extrude` from 2D) | `soot_foil_3d.py`: the four wall foils and track spacings | `animate_detonation_3d.py` |
-| [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `flame_speed.py`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
-| [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `flame_speed.py` | `animate_flame_2d.py` |
+| [`premixed_flame`](../examples/premixed_flame) | `flame_reference.py`, `flame_restart.py`, `flame_sweep.py setup` | `mallard post flame`, `plot_flame.py`, `flame_sweep.py report`: flame speeds and profiles against Cantera | |
+| [`flame_2d`](../examples/flame_2d) | `flame_restart.py --ny` | `mallard post flame` | `animate_flame_2d.py` |
 | [`counterflow_diffusion`](../examples/counterflow_diffusion) | `counterflow_reference.py`, `counterflow_setup.py` (mesh, initial state and input) | `plot_counterflow.py`: peak temperature against strain rate, profiles | |
 | [`reacting_mixing_layer`](../examples/reacting_mixing_layer) | `mixing_layer_reference.py`, `mixing_layer_setup.py` (mesh, initial state and input) | `plot_mixing_layer.py`: lift-off lengths, peaks along x and profiles against the boundary-layer reference | |
 | [`triple_flame`](../examples/triple_flame) | `triple_flame.py` | `triple_flame_analysis.py`: propagation speed against Ruetsch et al. | `animate_triple_flame.py` |

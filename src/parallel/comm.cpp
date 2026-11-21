@@ -362,6 +362,7 @@ template std::vector<double> gatherv(const std::vector<double> &);
 template std::vector<float> gatherv(const std::vector<float> &);
 template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
+template Received<uint32_t> exchange(std::vector<std::vector<uint32_t>> &&);
 template Received<uint64_t> exchange(std::vector<std::vector<uint64_t>> &&);
 template Received<double> exchange(std::vector<std::vector<double>> &&);
 template Received<float> exchange(std::vector<std::vector<float>> &&);

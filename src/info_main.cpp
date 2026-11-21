@@ -27,6 +27,7 @@
 #include "comm.h"
 #include "commands.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
@@ -619,6 +620,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
     const auto problems = check_records(dir, record, args.has("--verify"));
     if (args.value_or("--format", "text") == "json") {
         json::Object o;
+        o.add("schema", interfaces::RUN_DIRECTORY.name).add("version", interfaces::RUN_DIRECTORY.version);
         o.add("directory", dir);
         o.raw("start", record.start.type == json::Value::Type::OBJECT ? "true" : "false");
         o.raw("end", record.end.type == json::Value::Type::OBJECT ? "true" : "false");
