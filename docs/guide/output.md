@@ -893,7 +893,7 @@ memory after setup in the `start` record's `check`:
 |---|---|
 | `status`, `diagnostics` | As in [the check's JSON](input_files.md#the-report-as-json): `ok` or `warning`, and the warnings with their codes (`W-QUALITY-SKEWNESS`, `W-CFL-LIMIT`, `W-WALL-Y-PLUS`, ...) |
 | `mesh_quality`, `resolution` | As in the check's JSON, with the 3 worst cells of each metric |
-| `time_step` | `integrator`, `cfl_limit` (its stability limit for smooth flow, `null` if none is known), `set_by` (`CFL` or `fixed`), and `cfl` (`run.cfl`) when set by CFL |
+| `time_step` | `integrator`, `cfl_limit` (its stability limit for smooth flow), `set_by` (`CFL` or `fixed`), and `cfl` (`run.cfl`) when set by CFL |
 | `memory` | Bytes of the rank that uses the most, after setup: `host`, `host_peak`, `device`, `device_total` (`null` where unknown) |
 
 It costs one pass over the cells and faces, timed as the setup phase "mesh
