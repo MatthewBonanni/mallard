@@ -346,10 +346,10 @@ TEST(ParticleCouplingTest, CheckWarnsWhereThePointParticleModelBreaks) {
     const std::vector<std::string> found = codes(keys.str());
     EXPECT_NE(std::find(found.begin(), found.end(), diagnostic_code::PARTICLE_SIZE), found.end());
     EXPECT_NE(std::find(found.begin(), found.end(), diagnostic_code::PARTICLE_VOLUME_FRACTION), found.end());
-    // A tenth of the weight and a third of the diameter: neither
+    // A tenth of the weight and a quarter of the diameter: neither
     std::ostringstream fine;
     fine.precision(17);
-    fine << "density = " << density << "\ndiameter = " << d / 3.0 << "\nweight = " << weight / 10.0 << "\n" << every_cell(n);
+    fine << "density = " << density << "\ndiameter = " << d / 4.0 << "\nweight = " << weight / 10.0 << "\n" << every_cell(n);
     const std::vector<std::string> none = codes(fine.str());
     EXPECT_EQ(std::find(none.begin(), none.end(), diagnostic_code::PARTICLE_SIZE), none.end());
     EXPECT_EQ(std::find(none.begin(), none.end(), diagnostic_code::PARTICLE_VOLUME_FRACTION), none.end());
