@@ -401,8 +401,6 @@ TEST(ParticleSnapshotsTest, TheRunLogRecordsEachParticleFile) {
     EXPECT_EQ(last_snapshot, prefix + "_000010.vtkhdf");
 }
 
-#endif
-
 TEST(ParticleSnapshotsTest, InputErrorsNameTheKey) {
     auto error = [](const std::string & writer) {
         try {
@@ -426,3 +424,5 @@ TEST(ParticleSnapshotsTest, InputErrorsNameTheKey) {
                                       "}\ninterval = 1\n");
     EXPECT_NE(surface.find("[[particles.crossings]]"), std::string::npos) << surface;
 }
+
+#endif
