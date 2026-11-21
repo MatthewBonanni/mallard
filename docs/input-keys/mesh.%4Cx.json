@@ -12,6 +12,7 @@
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",
   "examples/channel_inlet/input.toml",
+  "examples/channel_inlet_data/input.toml",
   "examples/channel_les/input.toml",
   "examples/channel_les/input_590.toml",
   "examples/channel_retau180/input.toml",
@@ -71,8 +72,10 @@
   "examples/vortex_ring_3d/coarse.toml",
   "examples/vortex_ring_3d/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"

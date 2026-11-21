@@ -344,7 +344,9 @@ the axes): the central polynomial is used if
 $\gamma_K/(\gamma_K + \sum_k\gamma_k) \ge C_T$; otherwise every sector
 stencil with $\gamma_k/\sum_{k'}\gamma_{k'} \ge C_T$ is kept, with equal
 weights (the renormalization over the sector stencils alone guarantees a
-survivor). The cutoff adapts to the measure
+survivor). At order 4 the central polynomial is also not used on a face
+whose own sector is the smoothest candidate while another sector is cut
+([details](../numerics/teno_e.md#troubled-cells)). The cutoff adapts to the measure
 ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025)):
 
 $$

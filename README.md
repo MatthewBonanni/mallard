@@ -32,6 +32,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Thermally perfect mixtures and finite-rate chemistry from [Cantera](https://cantera.org) mechanism files
 - Detailed transport, Soret diffusion, optically thin radiation
 - Source terms and sponges as expressions over named [regions](https://matthewbonanni.github.io/mallard/docs/guide/geometry/#regions); arrays of copies, regions that move with `t`, regions that wrap across periodic boundaries, and regions defined by the solution (where a condition such as `T > 1500` holds, or an isosurface)
+- Regions from CAD surfaces: the solids inside closed [STL and OBJ files](https://matthewbonanni.github.io/mallard/docs/guide/geometry/#regions-from-cad-surfaces), checked to be watertight, in the units they were drawn in
 
 **Large-eddy simulation** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/les/))
 - Sigma, WALE, Vreman and Smagorinsky models; kinetic-energy-preserving hybrid flux
@@ -42,6 +43,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Walls, inlets, outlets, far field and symmetry, with composable options (NSCBC, averaging, turbulence, wall models)
 - Every value a number or an expression of x, y, z and t
 - Profiles in the boundary's own coordinates: wall distance, position along it, radius and angle
+- Boundary profiles from data files (tables or point clouds) in those coordinates
 
 **Performance** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/))
 - CPUs (OpenMP, threads) and NVIDIA and AMD GPUs; single or double precision
@@ -63,6 +65,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard post convergence` for the observed order, Richardson extrapolation and [grid convergence index](https://matthewbonanni.github.io/mallard/docs/guide/convergence/) of runs at several resolutions
   - `mallard post derive` for its derived fields
   - `mallard post extract` for probes and region integrals of existing output
+  - `mallard post flame` for the position, thermal thickness, consumption and displacement speed of a premixed flame
   - tab completion for bash, zsh and fish
 - Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
 - A [run report](https://matthewbonanni.github.io/mallard/docs/guide/output/#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](https://matthewbonanni.github.io/mallard/docs/images/guide/run_report_sample.html))

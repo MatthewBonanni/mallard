@@ -7,6 +7,7 @@
  "required": true,
  "set_in": [
   "examples/channel_inlet/input.toml",
+  "examples/channel_inlet_data/input.toml",
   "examples/flame_outflow/input.toml",
   "examples/forced_inlet/input.toml",
   "examples/heated_duct/closed.toml",
@@ -24,8 +25,10 @@
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tools/dev/catalog_inputs/3d/mesh_file.toml",

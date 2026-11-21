@@ -353,8 +353,9 @@ struct Records {
 /**
  * @brief Send each record to the rank whose block of n items holds its index
  *        (block_begin); the records this rank receives, by index (collective).
+ *        Frees records once sent.
  */
-Records to_owners(const std::vector<uint64_t> & index, const Records & records, uint64_t n);
+Records to_owners(const std::vector<uint64_t> & index, Records && records, uint64_t n);
 
 /**
  * @brief The block's nodes from this rank's part [block_begin(n_nodes, r, p),
@@ -369,9 +370,9 @@ void place_used_nodes(uint64_t n_nodes, std::vector<std::array<double, N_DIM>> x
  * @brief The block's boundary faces from the ones this rank read, each a
  *        record (zone, number of corners, corners, then the bit patterns of
  *        the N_DIM coordinates of each node of a high-order face) at
- *        position[k] of n_faces (collective).
+ *        position[k] of n_faces (collective). Frees faces once sent.
  */
-void place_faces(const std::vector<uint64_t> & position, const Records & faces, uint64_t n_faces, bool high_order,
+void place_faces(const std::vector<uint64_t> & position, Records && faces, uint64_t n_faces, bool high_order,
                  MeshBlock & block);
 
 /**
@@ -379,12 +380,12 @@ void place_faces(const std::vector<uint64_t> & position, const Records & faces, 
  *        faces, by their position in the file (face_ids), corners (records)
  *        and one or two cells (-1: none), go to the ranks whose cells they
  *        bound, each cell its corners from its faces in file order
- *        (cell_corners). Throws, naming source, for a face of a cell past
- *        n_cells (collective).
+ *        (cell_corners). Frees the faces once sent, as 32-bit words if every
+ *        cell, face id and node fits. Throws, naming source, for a face of a
+ *        cell past n_cells (collective).
  */
-void cells_of_faces(uint64_t n_cells, const std::vector<uint64_t> & face_ids, const Records & faces,
-                    const std::vector<std::array<int64_t, 2>> & face_cells, const std::string & source,
-                    MeshBlock & block);
+void cells_of_faces(uint64_t n_cells, std::vector<uint64_t> && face_ids, Records && faces,
+                    std::vector<std::array<int64_t, 2>> && face_cells, const std::string & source, MeshBlock & block);
 
 } // namespace parallel_read
 
