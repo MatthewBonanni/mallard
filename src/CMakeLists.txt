@@ -143,6 +143,7 @@ add_library(MallardCore STATIC
     particles/particle_coupling.cpp
     particles/particle_probes.cpp
     particles/particle_quantities.cpp
+    particles/particle_snapshots.cpp
     particles/particles.cpp
 )
 

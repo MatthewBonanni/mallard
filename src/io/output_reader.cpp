@@ -1071,6 +1071,11 @@ T root_scalar(hid_t file, const char * name, T fallback) {
     return value;
 }
 
+std::string root_string(hid_t file, const char * name) {
+    Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+    return string_attribute(root, name);
+}
+
 std::vector<std::string> root_strings(hid_t file, const char * name) {
     Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
     return H5Aexists(root, name) > 0 ? h5::read_strings_attribute(root, name) : std::vector<std::string>{};
@@ -1080,11 +1085,35 @@ uint64_t first_count(hid_t parent, const std::string & name) {
     return exists(parent, name) ? static_cast<uint64_t>(all<int64_t>(parent, name).at(0)) : 0;
 }
 
+/** @brief The count of step k of a series whose steps have counts of their own (particles), else the only one. */
+uint64_t count_at(hid_t parent, const std::string & name, uint64_t k) {
+    if (!exists(parent, name)) return 0;
+    const std::vector<int64_t> counts = all<int64_t>(parent, name);
+    return static_cast<uint64_t>(counts.at(k < counts.size() ? k : 0));
+}
+
+/**
+ * @brief The VTKHDF group of the mesh: the file's VTKHDF group, or in a file of the mesh and its particles (a
+ *        PartitionedDataSetCollection) the mesh's block.
+ */
+Handle vtkhdf_top(hid_t file) {
+    const bool collection = [&] {
+        Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        return string_attribute(top, "Type") == "PartitionedDataSetCollection" && exists(top, "mesh");
+    }();
+    const char * name = collection ? "VTKHDF/mesh" : "VTKHDF";
+    return Handle(H5Gopen2(file, name, H5P_DEFAULT), H5Gclose, std::string("opening ") + name);
+}
+
 Contents open_vtkhdf(const std::string & path) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     Handle file = open_file(path);
     if (!exists(file, "VTKHDF")) fail(path, "is an HDF5 file without a VTKHDF group");
-    Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    const bool collection = [&] {
+        Handle group(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        return string_attribute(group, "Type") == "PartitionedDataSetCollection" && exists(group, "mesh");
+    }();
+    Handle top = vtkhdf_top(file);
     const std::string type = string_attribute(top, "Type");
     Contents c;
     c.path = path;
@@ -1105,7 +1134,12 @@ Contents open_vtkhdf(const std::string & path) {
     } else if (type == "PolyData") {
         c.kind = Kind::probe;
         c.format = "VTKHDF";
-        if (c.version >= 0) file_format::check_version(file_format::PROBE_OUTPUT, path, c.version);
+        const bool particles = root_string(file, "content") == "particles";
+        if (c.version >= 0) {
+            file_format::check_version(particles ? file_format::PARTICLE_OUTPUT : file_format::PROBE_OUTPUT, path,
+                                       c.version);
+        }
+        if (particles) c.notes.push_back("particles: their positions and fields, each snapshot's own, with their ID");
         if (const auto s = root_strings(file, snapshot_block::PROBE_SAMPLING_ATTRIBUTE); !s.empty()) c.sampling = s[0];
         for (const char * kind : {"Vertices", "Lines", "Polygons"}) {
             const std::string group = std::string(kind) + "/NumberOfCells";
@@ -1117,6 +1151,7 @@ Contents open_vtkhdf(const std::string & path) {
         fail(path, "is a VTKHDF " + type + ", which Mallard writes only for mallard check --view");
     }
     if (c.version < 0) c.notes.push_back("no format version: not written by Mallard");
+    if (collection) c.notes.push_back("the mesh block of a file of the mesh and its particles (VTKHDF/particles)");
     Handle group(H5Gopen2(top, data.c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
     const bool series = exists(top, "Steps");
     // A series stores every snapshot's rows one after the other: a field's columns are its shape's second dimension
@@ -1144,7 +1179,7 @@ Contents open_vtkhdf(const std::string & path) {
 std::vector<double> read_vtkhdf_field(const std::string & path, const std::string & field, uint64_t k) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     Handle file = open_file(path);
-    Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    Handle top = vtkhdf_top(file);
     std::string data;
     for (const char * g : {"CellData", "PointData"}) {
         if (exists(top, std::string(g) + "/" + field)) data = g;
@@ -1156,12 +1191,12 @@ std::vector<double> read_vtkhdf_field(const std::string & path, const std::strin
     const uint64_t at = static_cast<uint64_t>(rows<int64_t>(top, offsets, k, 1).at(0));
     uint64_t n = 0;
     if (data == "PointData") {
-        n = first_count(top, "NumberOfPoints");
+        n = count_at(top, "NumberOfPoints", k);
     } else if (exists(top, "Types")) {
-        n = first_count(top, "NumberOfCells");
+        n = count_at(top, "NumberOfCells", k);
     } else {
         for (const char * kind : {"Vertices", "Lines", "Polygons"}) {
-            if (exists(top, kind)) n += first_count(top, std::string(kind) + "/NumberOfCells");
+            if (exists(top, kind)) n += count_at(top, std::string(kind) + "/NumberOfCells", k);
         }
     }
     const uint64_t total = dims(group, field).at(0);
@@ -1303,7 +1338,7 @@ std::vector<double> read_h5_field(const Contents & c, const std::string & field,
 Geometry read_vtkhdf_geometry(const std::string & path) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     Handle file = open_file(path);
-    Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    Handle top = vtkhdf_top(file);
     Geometry g;
     if (exists(top, "Points")) g.points = all<double>(top, "Points");
     auto cells = [&](hid_t group) {
@@ -1413,7 +1448,7 @@ std::vector<Snapshot> h5_member_snapshots(const std::string & path) {
     const std::vector<std::string> blocks = root_blocks(file);
     std::vector<Snapshot> out;
     if (exists(file, "VTKHDF")) {
-        Handle top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        Handle top = vtkhdf_top(file);
         Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
         const double t = exists(field_data, "TIME") ? all<double>(field_data, "TIME").at(0) : 0.0;
         const int64_t step = exists(field_data, "STEP") ? all<int64_t>(field_data, "STEP").at(0) : -1;

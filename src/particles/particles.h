@@ -28,6 +28,7 @@
 #include "common.h"
 #include "gradient.h"
 #include "input.h"
+#include "particle_cloud.h"
 #include "particle_coupling.h"
 #include "particle_forces.h"
 #include "particle_probes.h"
@@ -377,8 +378,29 @@ class Particles {
          */
         RestartArrays restart_arrays() const;
 
-        /** @brief Write the positions to the file of [particles] if any, from rank 0 (collective). */
-        void write(uint64_t step, double t) const;
+        /**
+         * @brief Add a snapshot of the particles (write_data's particle_fields): of these particle variables and
+         *        quantities, a vector by its name without _X (U, V), of the particles inside region if not null.
+         * @return Its index.
+         * @throws InputError for a name that is no particle variable or quantity, naming key and line.
+         */
+        uint32_t add_snapshot(const std::vector<std::string> & names, const region::RegionView<> * region,
+                              const std::string & key, size_t line);
+
+        /** @brief The fields of snapshot k. */
+        const std::vector<ParticleField> & snapshot_fields(uint32_t k) const { return snapshots[k].fields; }
+
+        /** @brief Whether snapshot k reads the gas at the particles: sample() before stage_snapshot(). */
+        bool snapshot_reads_gas(uint32_t k) const { return snapshots[k].gas; }
+
+        /**
+         * @brief Enqueue the values of snapshot k into its pinned mirrors, from the particles and the gas sample()
+         *        left (capturable).
+         */
+        void stage_snapshot(uint32_t k);
+
+        /** @brief This rank's particles of snapshot k as stage_snapshot() last staged them, in slot order. */
+        ParticleCloud snapshot(uint32_t k) const;
 
         /** @brief Setup lines for the log. */
         std::vector<std::pair<std::string, std::string>> settings() const;
@@ -417,7 +439,20 @@ class Particles {
         uint64_t n_seeded = 0;
         uint64_t n_restored = 0;
         bool distributed = false;
-        std::string file;
+
+        struct Snapshot {
+            std::vector<ParticleField> fields;
+            uint32_t n_columns = 0;
+            bool gas = false;
+            bool filtered = false;
+            region::RegionView<> region;
+            Kokkos::View<uint32_t *> variable;  // (column): its particle variable
+            Kokkos::View<uint64_t *> id;        // (slot): EMPTY outside the region
+            Kokkos::View<double **, Kokkos::LayoutRight> values;  // (slot, position then columns)
+            Kokkos::View<uint64_t *>::host_mirror_type h_id;
+            Kokkos::View<double **, Kokkos::LayoutRight>::host_mirror_type h_values;
+        };
+        std::vector<Snapshot> snapshots;
 
         ParticleView x;                     // (width slot + k): position, velocity (solid), temperature (heated), integrated quantities
         Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times

@@ -577,6 +577,12 @@ double largest_in_column(const Kokkos::View<rtype **, Kokkos::LayoutRight> & v, 
 } // namespace
 
 void Solver::check_particles(CheckReport & r) {
+    for (const auto & writer : data_writers) {
+        if (!writer->combines_particles()) continue;
+        r.warning(diagnostic_code::PARAVIEW_VERSION,
+                  "[[write_data]] " + writer->get_prefix() + " writes the mesh and its particles as blocks of one VTKHDF "
+                  "file, which ParaView reads from version 6.0; set particles = \"separate\" for older versions");
+    }
     if (!particles || !particles->inertial()) return;
     const particles::Validity v = particles->validity(particles::SIZE_LIMIT);
     if (v.n_large > 0) {

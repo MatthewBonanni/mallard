@@ -73,6 +73,7 @@ set(MALLARD_TEST_SOURCES
     inlet_test.cpp
     step_queue_test.cpp
     statistical_convergence_test.cpp
+    particle_output_test.cpp
     particles_coupling_test.cpp
     particles_test.cpp
     viscous_order_test.cpp

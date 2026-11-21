@@ -14,8 +14,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <limits>
 #include <stdexcept>
 #include <type_traits>
@@ -25,7 +23,6 @@
 #include "face_reconstruction.h"
 #include "log.h"
 #include "mesh.h"
-#include "provenance.h"
 #include "statistics.h"
 #include "units.h"
 
@@ -186,7 +183,6 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     const std::string type = find_value<std::string>(table, "type");
     if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
     is_solid = type == "solid";
-    file = find_value_or<std::string>(table, "file", "");
     distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
     std::array<rtype, N_DIM> v_seed{};
@@ -1010,35 +1006,6 @@ std::vector<particles::Record> Particles::gather() const {
     return records;
 }
 
-void Particles::write(const uint64_t step, const double t) const {
-    if (file.empty()) return;
-    const std::vector<particles::Record> records = gather();
-    if (!comm::is_root()) return;
-    std::ofstream out(file);
-    if (!out) throw std::runtime_error("particles: cannot write " + file);
-    out << provenance::csv_comment() << "\n";
-    out << "# step " << step << ", t = " << std::setprecision(17) << t << "\n";
-    const char * names[] = {"x", "y", "z"};
-    out << "id";
-    for (size_t d = 0; d < N_DIM; d++) out << "," << names[d];
-    if (is_solid) {
-        for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
-    }
-    if (heated) out << ",T_p";
-    for (const auto & name : quantities.names()) out << "," << name;
-    out << "\n";
-    for (const auto & r : records) {
-        out << r.id;
-        for (size_t d = 0; d < N_DIM; d++) out << "," << r.x[d];
-        if (is_solid) {
-            for (size_t d = 0; d < N_DIM; d++) out << "," << r.v[d];
-        }
-        if (heated) out << "," << r.T;
-        for (const double q : r.q) out << "," << q;
-        out << "\n";
-    }
-}
-
 void Particles::stage_output() {
     copy_to_pinned(mirrors, h_id, id);
     copy_to_pinned(mirrors, h_cell, cell);
@@ -1113,7 +1080,6 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
     std::string text = n_restored > 0 ? logging::count(n_restored, noun) + " from the restart file"
                                       : logging::count(n_seeded, noun);
     text += ", " + logging::count(capacity, "slot") + " per rank";
-    if (!file.empty()) text += ", positions at the end in " + file;
     std::vector<std::pair<std::string, std::string>> lines = {{"Particles", text}};
     if (is_solid) {
         std::string g;

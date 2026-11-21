@@ -52,7 +52,6 @@ rho_ref = 1.0
 [particles]
 type = "solid"
 coupling = "two-way"
-file = "particles.csv"
 # tau = rho_p d^2 / (18 mu) = 0.1
 diameter = 4.243e-3
 density = 100.0
@@ -77,6 +76,7 @@ interval = 25
 [[write_data]]
 prefix = "cloud"
 fields = ["U", "PARTICLE_VOLUME_FRACTION", "PARTICLE_SOURCE_RHOU_Y"]
+particle_fields = ["V"]
 time_interval = 0.5
 
 [output]

@@ -4,7 +4,8 @@
 # v = -U cos(2 pi x) sin(2 pi y), with the pressure that balances them, are a
 # steady solution of the Euler equations up to O(M^2) acoustic waves. Each tracer
 # moves along a closed streamline sin(2 pi x) sin(2 pi y) = const, so the
-# streamfunction at its final position (tracers.csv) measures the pathline error.
+# streamfunction at its final position (the last snapshot of
+# tracers_particles.vtkhdf) measures the pathline error.
 # Each tracer also counts its turns about its vortex's center, and a probe follows
 # the tracers near that center.
 [run]
@@ -48,7 +49,6 @@ rho_ref = 1.0
 
 [particles]
 type = "tracer"
-file = "tracers.csv"
 # One more tracer at the center of another vortex, where the flow is at rest
 points = [[0.75, 0.75]]
 capacity = 82
@@ -58,7 +58,7 @@ lo = [0.05, 0.05]
 hi = [0.45, 0.45]
 n = [9, 9]
 
-# Turns of each tracer about the center of its vortex, and its largest speed, in tracers.csv
+# Turns of each tracer about the center of its vortex, and its largest speed
 [[particles.quantities]]
 name = "turns"
 winding = {point = [0.25, 0.25]}
@@ -73,6 +73,12 @@ name = "core"
 region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
 fields = ["turns", "hypot(U_X, U_Y)"]
 interval = 100
+
+# Every tracer, its turns and largest speed, every unit of time and at the end
+[[write_data]]
+prefix = "tracers"
+particle_fields = ["turns", "speed_max"]
+time_interval = 1.0
 
 [output]
 check_interval = 200

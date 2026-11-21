@@ -10,21 +10,26 @@ them. Each particle can carry
 first times, turns about an axis), and [probes](#particle-probes) give
 statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas, and
-[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh. Sprays,
-injection during the run and particle output beyond the final positions follow
-in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
+[Snapshots](#particle-snapshots) write every particle, with the mesh or
+alone. Sprays and injection during the run follow in later releases
+([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 ## Tracers: `[particles]`
 
 ```toml
 [particles]
 type = "tracer"
-file = "tracers.csv"
 
 [particles.lattice]
 lo = [0.1, 0.1]
 hi = [0.9, 0.9]
 n = [9, 9]
+
+[[write_data]]
+prefix = "tracers"
+particle_fields = ["U"]
+time_interval = 0.1
 ```
 
 *Used in:*
@@ -46,7 +51,6 @@ bitwise the same on any number of ranks.
 | `type` | required | `"tracer"` |
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
-| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
 | `capacity` | the number of particles | Particles a rank can hold |
 
 Every particle is seeded at the start of the run. Ids follow the seeds: the
@@ -170,7 +174,7 @@ order.
 | `velocity` | the gas velocity at each seed | Velocity of every seeded particle |
 | `temperature` | the gas temperature at each seed | Temperature of every seeded particle (with `specific_heat`) |
 
-The other keys of [`[particles]`](#tracers-particles) (seeds, `file`,
+The other keys of [`[particles]`](#tracers-particles) (seeds,
 `capacity`) are the same. Particle expressions read the particle velocity as
 `V_X`, `V_Y`, `V_Z`. Restart files carry the velocities and temperatures;
 tracers restarted as solid particles start at the gas velocity, and particles
@@ -363,7 +367,7 @@ order. Extrema and first times sample the start of every step, where the
 state is the accepted solution, so they are exact to the step: a peak between
 two steps' starts is missed by the difference.
 
-Quantities are written as columns of `file`, continue across restarts (a
+Quantities are written by [snapshots](#particle-snapshots) that list them, continue across restarts (a
 quantity the restart file does not have starts afresh), move with their
 particles between ranks, and are bitwise the same on any number of ranks.
 
@@ -407,5 +411,30 @@ at its samples.
 - Probes count particles by their positions only, at the sampling step; the
   residence time of visits (per visit, total, visit counts) is a quantity:
   `integral = "in(name)"` gives the total.
+
+## Particle snapshots
+
+```toml
+[[write_data]]
+prefix = "flow"
+time_interval = 0.5
+fields = ["RHO", "U"]
+particle_fields = ["V", "T_P", "turns"]
+```
+
+*Used in:*
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+
+`particle_fields` in a [`[[write_data]]`](output.md#solution-snapshots-write_data)
+entry writes the particles at each of its snapshots: their positions, `ID`,
+and the variables listed (`RHO`, `U`, `P`, `T` of the gas at each particle,
+`V`, `T_P`, and quantities by name). With `fields` too, the mesh and the
+particles are two blocks of one file, which ParaView 6.0 and later open;
+`particles = "separate"` writes them as two files instead, for ParaView 5.12
+and later; `region` keeps the particles in a volume. Files, layout and
+pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
+carry every particle and quantity whatever the snapshots write.
 
 *Design notes:* [particles](../design/particles.md).
