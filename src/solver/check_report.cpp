@@ -650,11 +650,13 @@ std::string quality_json(const CheckReport & r) {
         const QualitySummary & s = r.quality[m];
         q.raw(MeshQuality::FIELDS[m], json::Object()
                                           .add("name", std::string(MeshQuality::NAMES[m]))
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("units", std::string(MeshQuality::UNITS[m]))
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", array_json(s.worst, [](const QualityCell & c) {
                                                    return json::Object()
                                                        .add("value", c.value)
@@ -733,6 +735,30 @@ std::string check_json(const CheckReport & r) {
                   .add("turbulence", b.turbulence)
                   .str();
           }));
+    o.raw("unassigned", array_json(r.unassigned, [](const CheckUnassigned & u) {
+              return json::Object().add("zone", u.zone).add("faces", u.faces).str();
+          }));
+    o.raw("periodic", array_json(r.periodic, [](const CheckPeriodic & p) {
+              auto vec = [](const std::array<double, 3> & v) {
+                  std::string out = "[";
+                  for (size_t i = 0; i < N_DIM; i++) out += (i ? ", " : "") + json::number(v[i]);
+                  return out + "]";
+              };
+              return json::Object()
+                  .raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
+                  .add("map", std::string(p.rotation ? "rotation" : "translation"))
+                  .raw("translation", p.rotation ? "null" : vec(p.translation))
+                  .raw("angle", p.rotation ? json::number(p.angle) : "null")
+                  .raw("center", p.rotation ? vec(p.center) : "null")
+                  .raw("axis", p.rotation && N_DIM == 3 ? "[" + json::number(p.axis[0]) + ", " + json::number(p.axis[1]) +
+                                                              ", " + json::number(p.axis[2]) + "]"
+                                                        : "null")
+                  .add("faces", p.faces)
+                  .add("area", p.area)
+                  .add("node_offset_max", p.node_offset_max)
+                  .add("node_offset_relative", p.node_offset_relative)
+                  .str();
+          }));
     o.raw("regions", array_json(r.regions, [](const CheckRegion & g) {
               return json::Object()
                   .add("name", g.name)
@@ -759,6 +785,7 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));
