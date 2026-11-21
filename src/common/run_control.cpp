@@ -242,9 +242,9 @@ std::vector<Command> take_commands() {
     return std::exchange(queue, {});
 }
 
-void submit(const std::string & text) {
+void submit(const std::string & text, const std::string & source) {
     std::lock_guard<std::mutex> lock(queue_mutex);
-    queue.push_back(Command{text, -1});
+    queue.push_back(Command{text, -1, source});
     requests.fetch_or(COMMAND);
 }
 
@@ -349,7 +349,7 @@ void Server::serve() {
             line.append(buffer, static_cast<size_t>(n));
         }
         line = trim(line.substr(0, line.find('\n')));
-        Command command{line, fd};
+        Command command{.text = line, .fd = fd};
         if (line == "status") {
             reply(command, status_text());
         } else if (line == "checkpoint" || line == "stop" || line.rfind("set ", 0) == 0) {
