@@ -191,7 +191,7 @@ TEST(ParticleSnapshotsTest, EverySnapshotHoldsEveryParticleAtItsStepWithItsField
         for (size_t k = 0; k < snapshots.size(); k++) {
             const Snapshot & s = snapshots[k];
             EXPECT_EQ(s.step, steps[k]);
-            EXPECT_NEAR(s.t, 0.01 * static_cast<double>(steps[k]), 1e-14);
+            EXPECT_NEAR(s.t, 0.01 * static_cast<double>(steps[k]), roundoff(1e-14));
             ASSERT_EQ(s.particles.size(), x0.size()) << "snapshot " << k;
             for (const auto & [id, v] : s.particles) {
                 ASSERT_LT(id, x0.size());
