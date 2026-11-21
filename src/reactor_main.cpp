@@ -86,6 +86,7 @@ void run(const std::string & input_file) {
     logging::items({
         {"Reactor", "adiabatic, constant volume"},
         {"Initial state", "T = " + brief(T0) + " K, p = " + brief(p0) + " Pa, rho = " + brief(rho) + " kg/m^3"},
+        {"Integrator", options.method == chemistry::Integrator::BDF ? "BDF, orders 1-5" : "RODAS"},
         {"Tolerances", "rtol = " + brief(options.integrator.rtol) + ", atol = " + brief(options.atol_Y)},
         {"Linear solver", sparse ? "sparse LU, " + std::to_string(pattern.nnz) + " entries of " +
                                        std::to_string((ns + 1) * (ns + 1)) + ", " +
@@ -111,7 +112,7 @@ void run(const std::string & input_file) {
         out << "\n";
     };
 
-    std::vector<double> work(chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr));
+    std::vector<double> work(chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr, options.method));
     std::vector<uint32_t> pivot(ns + 1);
     chemistry::IgnitionObserver observer;
     observer.index = ns;
