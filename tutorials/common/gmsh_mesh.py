@@ -1,4 +1,4 @@
-"""Read a Gmsh mesh with the gmsh Python module (pip install gmsh) for plots:
+"""Read a Gmsh mesh with the gmsh Python module (uv pip install gmsh) for plots:
 nodes, the cells of the highest dimension and the faces of each physical
 group of the dimension below (the boundary zones Mallard sees)."""
 import numpy as np

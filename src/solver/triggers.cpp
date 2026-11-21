@@ -14,13 +14,16 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
+#include <sstream>
 #include <stdexcept>
 
 #include "log.h"
 
 namespace {
 
-const std::vector<std::string> ACTIONS = {"stop", "checkpoint", "write <prefix>", "start statistics"};
+const std::vector<std::string> ACTIONS = {"stop",           "checkpoint",      "write <prefix>",       "start statistics",
+                                          "stop statistics", "log <message>", "set <key>=<value> ..."};
 
 bool is_name(const std::string & name) {
     return !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
@@ -35,6 +38,45 @@ std::string trimmed(const std::string & text) {
 }
 
 std::string attribute(const std::string & trigger, const char * what) { return "TRIGGER_" + trigger + "_" + what; }
+
+bool is_comparison(const kexpr::Op op) {
+    using kexpr::Op;
+    return op == Op::LT || op == Op::LE || op == Op::GT || op == Op::GE || op == Op::EQ || op == Op::NE;
+}
+
+/** @brief The numbers t (variable 0) is compared with, and whether t appears only in such comparisons. */
+std::pair<std::vector<double>, bool> time_comparisons(const kexpr::Program & program) {
+    using kexpr::Op;
+    const std::vector<kexpr::Instr> & code = program.code();
+    const auto is_t = [&](size_t k) { return code[k].op == Op::VAR && code[k].index == 0; };
+    std::vector<double> times;
+    size_t compared = 0, read = 0;
+    for (size_t k = 0; k < code.size(); k++) {
+        if (is_t(k)) read++;
+        if (k + 2 >= code.size() || !is_comparison(code[k + 2].op)) continue;
+        if (is_t(k) && code[k + 1].op == Op::CONST) {
+            times.push_back(code[k + 1].value);
+            compared++;
+        } else if (code[k].op == Op::CONST && is_t(k + 1)) {
+            times.push_back(code[k].value);
+            compared++;
+        }
+    }
+    std::sort(times.begin(), times.end());
+    times.erase(std::unique(times.begin(), times.end()), times.end());
+    return {times, compared == read};
+}
+
+/** @brief The {<variable>} of a log message not among names, or empty. */
+std::string unknown_placeholder(const std::string & message, const std::vector<std::string> & names) {
+    for (size_t open = message.find('{'); open != std::string::npos; open = message.find('{', open + 1)) {
+        const size_t close = message.find('}', open);
+        if (close == std::string::npos) return message.substr(open);
+        const std::string name = message.substr(open + 1, close - open - 1);
+        if (std::find(names.begin(), names.end(), name) == names.end()) return name;
+    }
+    return "";
+}
 
 } // namespace
 
@@ -104,7 +146,7 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
         }
         if (!entry.contains("do")) {
             throw missing_key(entry, where + ".do", "Add do = \"stop\" (or \"checkpoint\", \"write <prefix>\", "
-                                                    "\"start statistics\", or a list of them)");
+                                                    "\"start statistics\", \"log <message>\", ..., or a list of them)");
         }
         std::vector<std::string> texts;
         if (entry.at("do").is_array()) {
@@ -127,14 +169,42 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
                 act.action = Action::STOP;
             } else if (text == "checkpoint") {
                 act.action = Action::CHECKPOINT;
-            } else if (text == "start statistics") {
-                act.action = Action::START_STATISTICS;
+            } else if (text == "start statistics" || text == "stop statistics") {
+                act.action = text == "start statistics" ? Action::START_STATISTICS : Action::STOP_STATISTICS;
                 if (!statistics) {
                     throw InputError({.key = where + ".do",
                                       .line = line_of(entry, "do"),
-                                      .message = "\"start statistics\", but the run has no [statistics]",
+                                      .message = "\"" + text + "\", but the run has no [statistics]",
                                       .fix = "Add [statistics] with the fields to average",
                                       .docs = "docs/guide/statistics.md"});
+                }
+            } else if (text.rfind("log ", 0) == 0) {
+                act.action = Action::LOG;
+                act.message = trimmed(text.substr(4));
+                const std::string unknown = unknown_placeholder(act.message, names);
+                if (!unknown.empty()) {
+                    throw InputError({.key = where + ".do",
+                                      .line = line_of(entry, "do"),
+                                      .message = "\"" + text + "\": {" + unknown + "} is not a name conditions read",
+                                      .valid = names,
+                                      .suggestion = suggest_value(unknown, names),
+                                      .fix = "Write {<name>} with a name of t, step, dt, wall or a monitored value",
+                                      .docs = "docs/guide/running.md#triggers"});
+                }
+            } else if (text.rfind("set ", 0) == 0) {
+                act.action = Action::SET;
+                std::istringstream assignments(text.substr(4));
+                for (std::string assignment; assignments >> assignment;) {
+                    const size_t eq = assignment.find('=');
+                    if (eq == 0 || eq == std::string::npos || eq + 1 == assignment.size()) {
+                        throw InputError({.key = where + ".do",
+                                          .line = line_of(entry, "do"),
+                                          .message = "\"" + text + "\": expected <key>=<value>, got \"" + assignment + "\"",
+                                          .fix = "Write the settings as mallard ctl set takes them, e.g. "
+                                                 "\"set write_data.flow.time_interval=1e-4\"",
+                                          .docs = "docs/guide/running.md#triggers"});
+                    }
+                    act.settings.emplace_back(assignment.substr(0, eq), assignment.substr(eq + 1));
                 }
             } else if (text.rfind("write ", 0) == 0) {
                 act.action = Action::WRITE;
@@ -165,6 +235,7 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
                               .fix = "Give a duration of zero or more, e.g. for = 0.01",
                               .docs = "docs/guide/running.md#triggers"});
         }
+        std::vector<double> times = time_comparisons(*condition).first;
         Trigger trigger{.name = name,
                         .when = when,
                         .actions = actions,
@@ -176,7 +247,10 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
                         .holding = false,
                         .since = 0.0,
                         .firings = 0,
-                        .t_first = 0.0};
+                        .t_first = 0.0,
+                        .step_last = 0,
+                        .t_last = 0.0,
+                        .times = std::move(times)};
         for (uint16_t v = 0; v < names.size(); v++) {
             if (trigger.condition.uses(v)) trigger.used.push_back(v);
         }
@@ -202,7 +276,7 @@ std::string Triggers::evaluate(const std::vector<double> & values) const {
     return conditions;
 }
 
-std::vector<size_t> Triggers::advance(const std::string & conditions, double t) {
+std::vector<size_t> Triggers::advance(const std::string & conditions, const uint64_t step, double t) {
     std::vector<size_t> fired;
     for (size_t i = 0; i < triggers.size(); i++) {
         Trigger & trigger = triggers[i];
@@ -220,9 +294,63 @@ std::vector<size_t> Triggers::advance(const std::string & conditions, double t) 
         trigger.armed = false;
         if (trigger.firings == 0) trigger.t_first = t;
         trigger.firings++;
+        trigger.step_last = step;
+        trigger.t_last = t;
         fired.push_back(i);
     }
     return fired;
+}
+
+std::vector<double> Triggers::landing_times() const {
+    std::vector<double> times;
+    for (const auto & trigger : triggers) {
+        if (trigger.armed || trigger.repeat) times.insert(times.end(), trigger.times.begin(), trigger.times.end());
+    }
+    return times;
+}
+
+std::string Triggers::message(const Act & act, const std::vector<double> & values) const {
+    std::string text;
+    size_t at = 0;
+    for (size_t open = act.message.find('{'); open != std::string::npos; open = act.message.find('{', at)) {
+        const size_t close = act.message.find('}', open);
+        const auto v = std::find(names.begin(), names.end(), act.message.substr(open + 1, close - open - 1));
+        text += act.message.substr(at, open - at) + logging::real(values[static_cast<size_t>(v - names.begin())]);
+        at = close + 1;
+    }
+    return text + act.message.substr(at);
+}
+
+bool Triggers::never_true(const size_t i, const double t0, const double t_end) const {
+    const Trigger & trigger = triggers[i];
+    if (trigger.used.size() > 1 || (trigger.used.size() == 1 && trigger.used[0] != 0)) return false;
+    const auto [times, only_compared] = time_comparisons(trigger.condition);
+    if (!only_compared) return false;
+    // Constant between the numbers t is compared with: each of them and a time between each two decide
+    std::vector<double> at;
+    double previous = t0;
+    for (const double c : times) {
+        if (!(c > t0 && c < t_end)) continue;
+        at.push_back(c);
+        at.push_back(0.5 * (previous + c));
+        previous = c;
+    }
+    if (std::isfinite(t_end)) {
+        at.push_back(t_end);
+        at.push_back(0.5 * (previous + t_end));
+    } else {
+        at.push_back(previous + 1.0 + std::fabs(previous));
+    }
+    std::vector<double> values(names.size(), std::numeric_limits<double>::quiet_NaN());
+    for (const double t : at) {
+        values[0] = t;
+        try {
+            if (evaluate(values)[i] == '1') return false;
+        } catch (const std::exception &) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool Triggers::reads(const uint16_t v) const {
@@ -280,6 +408,23 @@ std::optional<double> Triggers::statistics_started() const {
     return first;
 }
 
+bool Triggers::statistics_stopped() const {
+    // The last firing of a trigger that starts or stops them, by step, then by the order triggers act in
+    bool stopped = false;
+    uint64_t last = 0;
+    bool any = false;
+    for (const auto & trigger : triggers) {
+        if (trigger.firings == 0 || (any && trigger.step_last < last)) continue;
+        for (const auto & act : trigger.actions) {
+            if (act.action != Action::START_STATISTICS && act.action != Action::STOP_STATISTICS) continue;
+            stopped = act.action == Action::STOP_STATISTICS;
+            last = trigger.step_last;
+            any = true;
+        }
+    }
+    return stopped;
+}
+
 RestartAttributes Triggers::attributes() const {
     RestartAttributes all;
     for (const auto & trigger : triggers) {
@@ -288,6 +433,8 @@ RestartAttributes Triggers::attributes() const {
         all.emplace_back(attribute(trigger.name, "HOLDING"), trigger.holding ? 1.0 : 0.0);
         all.emplace_back(attribute(trigger.name, "SINCE"), trigger.since);
         all.emplace_back(attribute(trigger.name, "T_FIRST"), trigger.t_first);
+        all.emplace_back(attribute(trigger.name, "STEP_LAST"), static_cast<double>(trigger.step_last));
+        all.emplace_back(attribute(trigger.name, "T_LAST"), trigger.t_last);
     }
     return all;
 }
@@ -307,6 +454,9 @@ void Triggers::restore(const RestartAttributes & attributes) {
         if (const double * v = find(attribute(trigger.name, "HOLDING"))) trigger.holding = *v != 0.0;
         if (const double * v = find(attribute(trigger.name, "SINCE"))) trigger.since = *v;
         if (const double * v = find(attribute(trigger.name, "T_FIRST"))) trigger.t_first = *v;
+        trigger.t_last = trigger.t_first;
+        if (const double * v = find(attribute(trigger.name, "STEP_LAST"))) trigger.step_last = static_cast<uint64_t>(*v);
+        if (const double * v = find(attribute(trigger.name, "T_LAST"))) trigger.t_last = *v;
     }
 }
 
@@ -322,6 +472,12 @@ std::string Triggers::describe(const Trigger & trigger) {
             case Action::CHECKPOINT: text += "checkpoint"; break;
             case Action::WRITE: text += "write " + act.writer; break;
             case Action::START_STATISTICS: text += "start statistics"; break;
+            case Action::STOP_STATISTICS: text += "stop statistics"; break;
+            case Action::LOG: text += "log " + act.message; break;
+            case Action::SET:
+                text += "set";
+                for (const auto & [key, value] : act.settings) text += " " + key + "=" + value;
+                break;
         }
     }
     return text;
@@ -333,6 +489,24 @@ std::vector<std::pair<std::string, std::string>> Triggers::summary() const {
         std::string state = trigger.firings == 0 ? "" : "; fired " + logging::count(trigger.firings) + "x";
         items.emplace_back(trigger.name,
                            describe(trigger) + (trigger.repeat ? " (repeat)" : " (once)") + state);
+    }
+    return items;
+}
+
+std::vector<std::pair<std::string, std::string>> Triggers::states() const {
+    std::vector<std::pair<std::string, std::string>> items;
+    for (const auto & trigger : triggers) {
+        std::string state;
+        if (trigger.firings > 0) {
+            state = "fired " + logging::count(trigger.firings) + "x, last at step " + std::to_string(trigger.step_last) +
+                    ", t = " + logging::real(trigger.t_last) + " s; ";
+        }
+        state += trigger.armed ? "armed" : trigger.repeat ? "waits for its condition to turn false" : "done";
+        if (trigger.armed && trigger.holding) {
+            state += ", condition true since t = " + logging::real(trigger.since) + " s";
+            if (trigger.hold > 0.0) state += " (fires at t = " + logging::real(trigger.since + trigger.hold) + " s)";
+        }
+        items.emplace_back(trigger.name, state);
     }
     return items;
 }
