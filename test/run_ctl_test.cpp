@@ -237,7 +237,7 @@ std::string write_case(const std::string & name, const std::string & run_extra =
     std::ofstream(name + "/input.toml")
         << "[run]\nn_steps = 100000000\nt_wall_stop = 300\ncfl = 0.25\n" << run_extra
         << "[mesh]\ntype = \"cartesian\"\nNx = 6\nNy = 5\nLx = 1.0\nLy = 1.0\n"
-        << (three ? "Nz = 2\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+        << (three ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
         << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
         << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.3 * x\"\n"
         << (three ? "u = [\"0.2\", \"0.1\", \"0.0\"]\n" : "u = [\"0.2\", \"0.1\"]\n") << "p = \"1.0\"\n"
