@@ -101,7 +101,7 @@ MixtureModel MixtureModel::flamelet_from_input(const Input & input) {
     MixtureModel model;
     model.tabulated_gas = std::make_shared<const flamelet::FlameletModel>(flamelet::FlameletModel::from_input(input));
     model.gas.flamelet = model.tabulated_gas->device();
-    model.gas.n_species = static_cast<uint32_t>(flamelet::FlameletModel::scalar_names().size());
+    model.gas.n_species = static_cast<uint32_t>(model.tabulated_gas->species_block().size());
     model.gas.viscous = model.tabulated_gas->viscous();
     model.transport_name = "flamelet table";
     return model;
@@ -140,7 +140,11 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
             C = static_cast<double>(find_real_or(table, "C", dim::none, 0.0_r));
             if (!(C >= 0.0)) throw InputError(where + ".C must not be negative.");
         }
-        return {Z, C};
+        std::vector<double> Y(n_species(), 0.0);
+        Y[flamelet::Gas<>::Z] = Z;
+        Y[flamelet::Gas<>::C] = C;
+        tabulated_gas->host().complete(Y);
+        return Y;
     }
     const bool has_X = table.contains("X"), has_Y = table.contains("Y");
     if (has_X == has_Y) {

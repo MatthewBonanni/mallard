@@ -654,13 +654,15 @@ class Solver {
 
         /**
          * @brief gas = "flamelet" in LES: the subgrid variance of Z of every cell of state s, read by every lookup;
-         *        computed on owned cells and exchanged to the halo (collective).
+         *        algebraic: computed on owned cells and exchanged to the halo (collective); transported:
+         *        Z2 - Z^2 in every cell.
          */
         void update_flamelet_variance(const State & s);
 
         /**
          * @brief gas = "flamelet" in LES: an initial state given by p, T, u, Z and C holds them at its subgrid
-         *        variance, not at the laminar flamelet's (InitialState converts them at zero variance).
+         *        variance, not at the laminar flamelet's (InitialState converts them at zero variance); a
+         *        transported second moment starts at Z2 = Z^2 of the cell averages, zero variance.
          */
         void apply_initial_variance();
 
@@ -670,7 +672,10 @@ class Solver {
          */
         void check_table_pressure() const;
 
-        /** @brief gas = "flamelet": the table's source of rho C at each owned cell's state, added to rhoY's rates. */
+        /**
+         * @brief gas = "flamelet": the table's source of rho C at each owned cell's state, and the sink of the
+         *        transported second moment rho Z2, added to rhoY's rates.
+         */
         void add_progress_source(SpeciesView rhs);
         void allocate_chemistry();
         void advance_chemistry(double dt_chem, bool audited = true);
