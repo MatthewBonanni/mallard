@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "array",
  "set_in": [
   "examples/shock_bubble_2d/input.toml",
   "examples/vortex_ring_3d/coarse.toml",

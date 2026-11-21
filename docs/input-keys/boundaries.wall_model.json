@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "table",
  "set_in": [
   "examples/channel_wmles/lm2000.toml",
   "examples/channel_wmles/lm5200.toml",

@@ -11,7 +11,8 @@ a few cells per direction (each check takes seconds; inputs whose mesh file is n
 in the repository are skipped) and
 merges what setup recorded into docs/input-keys/, one file per key path: its type,
 physical dimension (and the unit of a plain number, when not SI), default (as TOML
-text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
+text) or that it is required, the accepted values, a table's form (table, array of
+tables, or named: a table any input shows reading a key it lacks is a table), the builds (2D, 3D) whose setup
 read it, and the inputs that set it. A key's file is its path, percent-encoded
 outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
 plus .json. With --check it compares with the committed files instead of writing
@@ -38,6 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "docs" / "input-keys"
 PLAIN = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_.-")
 SIZE_KEYS = ("Nx", "Ny", "Nz")
+FORMS = ("array", "table", "named")  # a table one input reads by fixed keys is not named
 TUTORIAL_DIMS = {"wedge": 2, "cylinder": 2, "measuring": 2, "cone": 3, "channel_les": 3, "cluster": 2, "post_processing": 2}
 
 
@@ -114,6 +116,8 @@ def build(args):
                         m[field] = entry[field]
                 if "values" in entry:
                     m["values"] = sorted(set(m.get("values", [])) | set(entry["values"]))
+                if "form" in entry:
+                    m["form"] = min(m.get("form", entry["form"]), entry["form"], key=FORMS.index)
     for m in merged.values():
         m["dims"].sort()
         m["set_in"].sort()

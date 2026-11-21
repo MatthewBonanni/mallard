@@ -91,7 +91,7 @@ MeshTransform mesh_transform(const Input & input) {
     }
     const Input & table = input.at("mesh").at("transform");
     if (!table.is_table()) throw InputError("mesh.transform must be a table.");
-    for (const auto & entry : table.as_table()) {
+    for (const auto & entry : table.as_table().entries()) {
         if (entry.first != "scale" && entry.first != "rotate" && entry.first != "translate") {
             throw InputError("mesh.transform: unknown key " + entry.first + " (keys: scale, rotate, translate).");
         }

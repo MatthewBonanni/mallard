@@ -522,8 +522,12 @@ int list_keys_main(const cli::Args & args) {
     for (size_t i = 0; i < keys.size(); i++) {
         const json::Value & k = catalog[keys[i]];
         const json::Value * type = k.find("type");
-        std::vector<std::string> row = {keys[i] + only_dim(k), type ? type->string : "", key_units(k), key_default(k),
-                                        key_values(k)};
+        const json::Value * form = k.find("form");
+        const std::string kind = form ? (form->string == "array" ? "array of tables"
+                                         : form->string == "named" ? "named entries"
+                                                                   : "table")
+                                      : type ? type->string : "";
+        std::vector<std::string> row = {keys[i] + only_dim(k), kind, key_units(k), key_default(k), key_values(k)};
         if (per_case) row.insert(row.begin() + 1, k.find("set") && k["set"].boolean ? "yes" : "");
         rows.push_back(row);
         if (i + 1 == keys.size() || section_of(keys[i + 1]) != section_of(keys[i])) {
