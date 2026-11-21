@@ -110,8 +110,7 @@ FlameletModel FlameletModel::from_input(const Input & input) {
 }
 
 double FlameletModel::burnt_progress(const double Z) const {
-    const Point<3> p = host_gas.locate(Z, 0.0, 0.0);
-    return host_gas.fpv.table.at_last_node(p, host_gas.fpv.table.n_nodes[2] - 1, host_gas.fpv.field_C);
+    return host_gas.burnt(Z);
 }
 
 Thermo FlameletModel::thermo(const double Z, const double C) const {

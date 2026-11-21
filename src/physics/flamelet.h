@@ -81,6 +81,11 @@ struct Gas {
         return fpv.locate(Z_mean, Zvar, C_mean);
     }
 
+    /** @brief C of the burnt laminar flamelet state (c = 1) at Z. */
+    KOKKOS_INLINE_FUNCTION double burnt(const double Z_mean) const {
+        return fpv.table.at_last_node(locate(Z_mean, 0.0, 0.0), fpv.table.n_nodes[2] - 1, fpv.field_C);
+    }
+
     KOKKOS_INLINE_FUNCTION Thermo thermo(const Point<3> & p) const {
         double v[5];
         fpv.table.evaluate(p, thermo_fields, 5, v);
