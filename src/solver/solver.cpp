@@ -3520,6 +3520,7 @@ void Solver::update_p_max() {
 
 rtype Solver::next_target_time(const bool unstaged) const {
     rtype t_target = (t_stop > 0) ? t_stop : std::numeric_limits<rtype>::infinity();
+    t_target = std::min(t_target, next_landing_time());
     for (const auto & writer : data_writers) {
         if (!(unstaged && staged_outputs)) t_target = std::min(t_target, writer->next_time());
     }
