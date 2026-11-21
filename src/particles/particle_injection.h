@@ -140,7 +140,7 @@ struct InjectorSpec {
 enum Draw : uint32_t { ENTRY = 0, DIAMETER = 1, CONE_POLAR = 2, CONE_AZIMUTH = 3, POINT = 8 };
 
 /** @brief Attempts at a point inside an injector's region before the last one is kept. */
-inline constexpr uint32_t MAX_ATTEMPTS = 64;
+inline constexpr uint32_t MAX_ATTEMPTS = 1024;
 
 /**
  * @brief The injectors' geometry and constants on the device, by value in
@@ -161,6 +161,7 @@ struct Sampler {
     Kokkos::View<const uint32_t *> simplex_offsets;  // (local element + 1)
     Kokkos::View<const double *> simplex_cdf;      // (simplex): cumulative measure within its element
     Kokkos::View<const double *[4][N_DIM]> vertices;  // (simplex, vertex, axis)
+    Kokkos::View<const double *[N_DIM]> inside_of;    // (local element): a point in the region (rejection)
     Kokkos::View<const double *> size_log_d, size_cdf;
 
     /** @brief The element of injector j that draw ENTRY of r chooses, by weight. */
@@ -216,6 +217,7 @@ struct Sampler {
             const double q[3] = {x[0], x[1], N_DIM == 3 ? x[N_DIM - 1] : 0.0};
             if (region[j].distance(q) <= 0.0) return;
         }
+        FOR_I_DIM x[i] = inside_of(e, i);
     }
 
     /** @brief The velocity of the particle of injector j in local element e: its speed along a direction in the cone. */

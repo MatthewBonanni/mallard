@@ -209,7 +209,11 @@ centroid so it is the same on any partition; every rank draws every parcel's
 element and only the owner places it. Points use `locate_points`. Within an
 element a parcel is uniform in a simplex (a face is a fan of triangles, a cell
 of tetrahedra) chosen by volume; an analytic region rejects points outside its
-signed distance (up to 64 tries, which the fraction makes rare).
+signed distance. A cell's tries succeed at the rate of its fraction, so the
+mean cost per particle is the cut cells' volume over the region's, bounded; a
+particle whose 1024 tries all miss (cells the region barely touches) takes a
+point of the cell in the region found at setup, and cells where none of many
+points is drop out.
 
 Size distributions are tabulated on 4096 cells in ln d between their clip
 bounds and inverted by the cumulative trapezoid, linear in ln d within a cell;

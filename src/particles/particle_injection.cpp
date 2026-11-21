@@ -210,6 +210,7 @@ struct Element {
     std::vector<std::array<std::array<double, N_DIM>, 4>> simplices;
     std::vector<double> measures;
     std::array<double, 3> center{};
+    std::array<double, N_DIM> inside{};
 };
 
 double simplex_measure(const std::array<std::array<double, N_DIM>, 4> & v, const int k) {
@@ -229,6 +230,37 @@ std::string vector_text(const double * v, const size_t n) {
     std::string s = "(";
     for (size_t i = 0; i < n; i++) s += (i ? ", " : "") + logging::real(v[i]);
     return s + ")";
+}
+
+/**
+ * @brief Finds a point of element el in the region, where a particle whose MAX_ATTEMPTS draws all miss it goes:
+ *        false if none of many points is, the region taking a negligible part of the element.
+ */
+bool inside_point(Element & el, const region::Region & region, const uint32_t injector) {
+    const auto inside = [&](const std::array<double, N_DIM> & x) {
+        const double q[3] = {x[0], x[1], N_DIM == 3 ? x[N_DIM - 1] : 0.0};
+        if (!(region.distance(q) <= 0.0)) return false;
+        el.inside = x;
+        return true;
+    };
+    std::array<double, N_DIM> center{};
+    FOR_I_DIM center[i] = el.center[i];
+    if (inside(center)) return true;
+    double total = 0.0;
+    for (const double m : el.measures) total += m;
+    for (uint64_t a = 0; a < 16 * MAX_ATTEMPTS; a++) {
+        const Random r(el.cell, injector, a);
+        double target = r.uniform(0) * total;
+        size_t s = 0;
+        while (s + 1 < el.simplices.size() && target >= el.measures[s]) target -= el.measures[s++];
+        double u[N_DIM + 1];
+        double sum = 0.0;
+        for (uint32_t v = 0; v <= N_DIM; v++) sum += (u[v] = -std::log(1.0 - r.uniform(1 + v)));
+        std::array<double, N_DIM> x{};
+        for (uint32_t v = 0; v <= N_DIM; v++) FOR_I_DIM x[i] += u[v] / sum * el.simplices[s][v][i];
+        if (inside(x)) return true;
+    }
+    return false;
 }
 
 /** @brief A name fit for restart arrays: letters, digits and _. */
@@ -402,6 +434,7 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                     double volume = 0.0;
                     for (const double w : el.measures) volume += w;
                     el.weight = fractions[c] * volume;
+                    if (p.reject && !inside_point(el, region, static_cast<uint32_t>(k))) continue;
                     elements.push_back(el);
                 }
                 if (p.reject) {
@@ -612,7 +645,13 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
     for (const Element & el : local) n_simplices += el.simplices.size();
     Kokkos::View<rtype *[N_DIM]> normals("particle_injector_normals", local.size());
     Kokkos::View<double *[4][N_DIM]> vertices("particle_injector_vertices", n_simplices);
+    Kokkos::View<double *[N_DIM]> insides("particle_injector_inside", local.size());
     {
+        auto h_insides = Kokkos::create_mirror_view(insides);
+        for (size_t i = 0; i < local.size(); i++) {
+            for (uint32_t d = 0; d < N_DIM; d++) h_insides(i, d) = local[i].inside[d];
+        }
+        Kokkos::deep_copy(insides, h_insides);
         auto h_normals = Kokkos::create_mirror_view(normals);
         auto h_vertices = Kokkos::create_mirror_view(vertices);
         size_t s = 0;
@@ -635,6 +674,7 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
     }
     sampler.normal_of = normals;
     sampler.vertices = vertices;
+    sampler.inside_of = insides;
     sampler.cell_of = device(cells, "particle_injector_cells");
     sampler.simplex_offsets = device(offsets, "particle_injector_simplex_offsets");
     sampler.simplex_cdf = device(simplex_cdf, "particle_injector_simplex_cdf");

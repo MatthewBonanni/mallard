@@ -404,7 +404,8 @@ its rate, mass flow and parcels over the run) in its JSON
   per step, streams come in bunches a step's travel apart.
 - A filled region's particles are placed in the cells it covers by their
   volume fractions, which sample its edge: in cells it cuts, the density is
-  as exact as the fractions.
+  as exact as the fractions. A shape that barely touches a cell (less than about
+  a thousandth of it) may put that cell's few particles at one point of it.
 - Injectors do not take the gas's velocity or temperature: give them.
 
 ## Per-particle quantities
