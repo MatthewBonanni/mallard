@@ -221,7 +221,9 @@ void expect_same_particles(const Particles & a, const Particles & b) {
             EXPECT_EQ(ra[k].x[d], rb[k].x[d]) << "particle " << ra[k].id << ", direction " << d;
             EXPECT_EQ(ra[k].v[d], rb[k].v[d]) << "particle " << ra[k].id << ", direction " << d;
         }
-        if (!std::isnan(ra[k].T) || !std::isnan(rb[k].T)) EXPECT_EQ(ra[k].T, rb[k].T) << "particle " << ra[k].id;
+        if (!std::isnan(ra[k].T) || !std::isnan(rb[k].T)) {
+            EXPECT_EQ(ra[k].T, rb[k].T) << "particle " << ra[k].id;
+        }
     }
     EXPECT_EQ(a.removed(), b.removed());
 }

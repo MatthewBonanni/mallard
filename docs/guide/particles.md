@@ -26,7 +26,8 @@ n = [9, 9]
 ```
 
 *Used in:*
-[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex).
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
