@@ -33,15 +33,15 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L`; `particles.velocity` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
-| Acceleration (m/s^2) | `source.gravity` |
+| Acceleration (m/s^2) | `source.gravity`; `particles.gravity` |
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
@@ -1551,6 +1551,81 @@ time_interval = 1.0e-4
 format = "vtp"
 reductions = ["mean", "rms"]
 ```
+
+## `[particles]`
+
+Lagrangian particles: massless tracers or solid spheres
+([Particles](guide/particles.md)). Restart files carry them and their
+quantities: a run restarted from a file with particles continues them and does
+not seed; a file without particles (or a `remap` start) seeds them from these
+keys.
+
+| Key | Description |
+|---|---|
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag and gravity accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
+| `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
+| `density` | Material density (`"solid"`). Required for solid particles |
+| `drag` | `"stokes"` or `"schiller_naumann"` (`"solid"`), default `"schiller_naumann"` |
+| `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
+| `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
+| `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, then the quantities, by id), default none |
+| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
+
+### `[particles.lattice]`
+
+Seeds on a lattice, after the `points` in id order (`x` varying fastest).
+
+| Key | Description |
+|---|---|
+| `lo`, `hi` | Opposite corners. Required |
+| `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
+### `[[particles.walls]]`
+
+How solid particles interact with walls and symmetry planes, per boundary zone
+([Solid particles](guide/particles.md#solid-particles)); by default they
+rebound elastically.
+
+| Key | Description |
+|---|---|
+| `zones` | Wall or symmetry boundary zones. Required |
+| `interaction` | `"rebound"` or `"stick"` (removed, counted as deposited), default `"rebound"` |
+| `restitution` | Normal restitution coefficient in [0, 1] (rebound), default 1 |
+| `tangential_restitution` | Tangential restitution coefficient in [0, 1] (rebound), default 1 |
+
+### `[[particles.quantities]]`
+
+A value each particle follows along its path
+([Per-particle quantities](guide/particles.md#per-particle-quantities)).
+Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
+`U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
+`V_Z`, the quantities before this one, and `in(name)` of a region of
+`[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
+`winding`.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `integral` | Expression whose time integral along the path it is, at the time integrator's order |
+| `max`, `min` | Expression whose largest (smallest) value at the steps' starts it is |
+| `first_time` | Condition: the first step start's `t` at which it holds, `nan` until then |
+| `winding` | Table `point`, `axis` (3D only): the signed turns about the axis through the point |
+| `while` | Condition gating the quantity: it integrates or samples only where this holds, default none |
+
+### `[[particles.probes]]`
+
+Statistics of particle expressions over the particles in a region
+([Particle probes](guide/particles.md#particle-probes)): per row `step`, `t`,
+`count`, and each field's mean, standard deviation, min and max.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | A filled region of primitives that does not move, or its name, default every particle |
+| `fields` | Expressions as in `[[particles.quantities]]`, the quantities among their variables, default none (the count only) |
+| `interval` | Steps between rows, default 1 |
+| `file` | Its CSV file, default `particle_probe_<name>.csv` |
 
 ## `[[triggers]]`
 

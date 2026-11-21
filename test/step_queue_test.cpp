@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "example_inputs.h"
 #include "json.h"
+#include "particles.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -297,12 +298,20 @@ struct Outcome {
     std::vector<std::string> warnings;
 };
 
+/** @brief Distributed runs with particles step on the host, which moves the particles between ranks. */
+bool migrates_particles(const Solver & solver) { return solver.get_particles() && solver.get_particles()->migrates(); }
+
 /**
  * @brief Queued steps take the graph's step path on every backend; its capture records no fence, allocation or
  *        host copy.
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
     if (Solver::are_cuda_graphs_off()) return;
+    if (migrates_particles(solver)) {
+        EXPECT_EQ(solver.device_steps_unsupported(), "particles migrate between ranks through the host");
+        EXPECT_EQ(guard.captures(), 0u);
+        return;
+    }
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
     if (solver.get_step() > 1) {
         EXPECT_GT(guard.captures(), 0u);
@@ -1764,6 +1773,7 @@ struct ExampleOutcome {
     uint64_t step = 0, rejected = 0, queued = 0;
     rtype t = 0.0;
     std::vector<std::string> rows;
+    bool host_steps = false;
 };
 
 ExampleOutcome run_example(const ExampleCase & c, const int depth) {
@@ -1791,6 +1801,7 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
+    o.host_steps = migrates_particles(solver);
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
@@ -1813,7 +1824,11 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
     // A progress row every step, also of runs with fused chemistry
-    EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    if (queued.host_steps) {
+        EXPECT_EQ(queued.queued, 0u);
+    } else {
+        EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    }
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);
