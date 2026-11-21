@@ -32,6 +32,7 @@
 #include "diagnostic_code.h"
 #include "favre_average.h"
 #include "field_units.h"
+#include "gated.h"
 #include "homogeneous_average.h"
 #include "input.h"
 #include "input_upgrade.h"
@@ -2174,7 +2175,7 @@ int flame(const cli::Args & args) {
                 for (uint32_t j = 0; j < n_columns; j++) columns[j].values = owned_values(files[e.file], e, names[j], cells);
             } else {
                 const CellSampler sampler = solver->sample_statistics_of_state(current > 0);
-                Kokkos::parallel_for("flame_values", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+                gated::parallel_for("flame_values", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
                     for (uint32_t j = 0; j < n_columns; j++) values(c, j) = double(sampler(c, codes(j)));
                 });
                 Kokkos::deep_copy(h_values, values);
