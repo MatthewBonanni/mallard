@@ -15,7 +15,10 @@
 #include "commands.h"
 #include "front_end.h"
 #include "input_upgrade.h"
+#include "json.h"
 #include "run_control.h"
+#include "session/run_ctl.h"
+#include "session/session.h"
 #include "diagnostic_code.h"
 #include "log.h"
 
@@ -36,6 +39,11 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--detach", "", "",
+     "Start the run in the background, in a session of its own, and return once it has written its endpoint "
+     "record mallard.run.json: prints the launch as one JSON object (run ID, directory, PID). The run's output "
+     "goes to mallard.out; mallard ctl controls it. Not under mpirun: the session's run.launch starts runs on "
+     "several ranks."},
     {"--log-format", "", "text|jsonl",
      "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
      "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
@@ -99,6 +107,22 @@ constexpr Option CHECK_OPTIONS[] = {
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
      "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
     KOKKOS,
+};
+
+constexpr Option CTL_OPTIONS[] = {
+    {"--wait", "", "accepted|done",
+     "accepted: return once the run has queued the request; done: once it has acted on it (the restart written, "
+     "the settings applied). Default: done."},
+    {"--timeout", "", "SECONDS",
+     "Give up after this long. Default: 30 s for accepted, none for done (a step of a large run can take minutes)."},
+    {"--format", "", "text|json",
+     "text: the run's reply; json: the result as one JSON object (schema mallard-run-control), errors as "
+     "{\"error\": {...}}. Default: text."},
+    {"--id", "", "ID", "The request's ID, to find its control records in the run log. Default: a new UUID."},
+    {"--allow-files", "", "",
+     "If no other route reaches the run, write a STOP or CHECKPOINT file in its directory (the run must poll for "
+     "them: [run] control_file_interval)."},
+    {"--direct", "", "", "Only the socket in RUN_DIR, on this host: what the remote end of a route runs."},
 };
 
 constexpr Option SESSION_OPTIONS[] = {
@@ -405,7 +429,7 @@ constexpr Option GLOBAL_OPTIONS[] = {
 
 constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
-constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
+constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR|RUN_ID", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
@@ -425,17 +449,76 @@ int new_main(const Args & args) {
 }
 
 int ctl_main(const Args & args) {
-    const std::string & verb = args.positional[1];
-    std::string request = verb;
-    if (verb == "set") {
-        if (args.positional.size() < 3) return usage_error(*command("ctl"), "set needs KEY=VALUE");
-        for (size_t i = 2; i < args.positional.size(); i++) request += " " + args.positional[i];
-    } else if (verb != "status" && verb != "checkpoint" && verb != "stop") {
-        return usage_error(*command("ctl"), "unknown command " + verb + " (status, checkpoint, stop, set)");
-    } else if (args.positional.size() > 2) {
-        return usage_error(*command("ctl"), "unexpected argument " + args.positional[2]);
+    run_ctl::Request request;
+    request.run = args.positional[0];
+    request.action = args.positional[1];
+    request.settings.assign(args.positional.begin() + 2, args.positional.end());
+    if (request.action != "status" && request.action != "checkpoint" && request.action != "stop" &&
+        request.action != "set") {
+        return usage_error(*command("ctl"), "unknown command " + request.action + " (status, checkpoint, stop, set)");
     }
-    return run_control::ctl(args.positional[0], request);
+    if (request.action == "set" && request.settings.empty()) return usage_error(*command("ctl"), "set needs KEY=VALUE");
+    if (request.action != "set" && !request.settings.empty()) {
+        return usage_error(*command("ctl"), "unexpected argument " + request.settings[0]);
+    }
+    request.id = args.value_or("--id", "");
+    request.wait = args.value_or("--wait", "done");
+    if (request.wait != "accepted" && request.wait != "done") {
+        return usage_error(*command("ctl"), "--wait takes accepted or done, not " + request.wait);
+    }
+    if (args.has("--timeout")) {
+        try {
+            request.timeout = std::stod(args.value_or("--timeout", ""));
+        } catch (const std::exception &) {
+            return usage_error(*command("ctl"), "--timeout takes seconds");
+        }
+        if (request.timeout < 0.0) return usage_error(*command("ctl"), "--timeout takes seconds");
+    }
+    request.direct = args.has("--direct");
+    request.allow_files = args.has("--allow-files");
+    const std::string format = args.value_or("--format", "text");
+    if (format != "text" && format != "json") return usage_error(*command("ctl"), "--format takes text or json");
+    try {
+        const std::string result = run_ctl::control(request);
+        const json::Value r = json::parse(result);
+        const std::string status = r["status"].string;
+        if (format == "json") {
+            std::cout << result << std::endl;
+        } else if (status == "sent") {
+            std::cout << "sent by " << r["route"].string << "; the run log is not visible here to confirm it\n";
+        } else if (!r["replies"].array.empty()) {
+            const json::Value & last = r["replies"].array.back();
+            if (const json::Value * message = last.find("message"); message && !message->string.empty()) {
+                std::cout << message->string << (message->string.back() == '\n' ? "" : "\n");
+            } else {
+                std::cout << last["status"].string << " at step " << json::number(last["step"].number) << ", t = "
+                          << json::number(last["t"].number) << "\n";
+            }
+        }
+        std::cout << std::flush;
+        return status == "refused" ? 1 : 0;
+    } catch (const session::Error & e) {
+        if (format == "json") {
+            json::Object error;
+            error.add("code", e.code).add("message", std::string(e.what()));
+            if (!e.data.empty()) error.raw("data", e.data);
+            std::cout << json::Object().raw("error", error.str()).str() << std::endl;
+        } else {
+            std::cerr << "mallard ctl: " << e.what() << "\n";
+            if (!e.data.empty()) {
+                const json::Value data = json::parse(e.data);
+                if (const json::Value * hint = data.find("route_hint")) {
+                    std::string line;
+                    for (const json::Value & word : (*hint)["argv"].array) line += (line.empty() ? "" : " ") + word.string;
+                    std::cerr << "  run where " << (*hint)["argv"].array[0].string << " reaches the run: " << line << "\n";
+                }
+                if (const json::Value * tried = data.find("tried")) {
+                    for (const json::Value & t : tried->array) std::cerr << "  tried " << t.string << "\n";
+                }
+            }
+        }
+        return 1;
+    }
 }
 
 int upgrade_main(const Args & args) {
@@ -502,12 +585,17 @@ constexpr Command COMMANDS[] = {
     {
         .name = "ctl",
         .group = "Run",
-        .summary = "Ask a running case for its status, a restart file or a stop, or change its settings",
-        .synopsis = "mallard ctl <run-dir> status | checkpoint | stop\n"
-                    "mallard ctl <run-dir> set <key>=<value> [<key>=<value> ...]",
+        .summary = "Ask a running case for its status, a restart file or a stop, or change its settings, from anywhere",
+        .synopsis = "mallard ctl <run-dir|run-id> status | checkpoint | stop [options]\n"
+                    "mallard ctl <run-dir|run-id> set <key>=<value> [<key>=<value> ...] [options]",
         .description =
-            "Sends a request to the run started in run-dir, through its control socket mallard.sock, and "
-            "prints the reply. It must run on the node of the run's rank 0.\n"
+            "Sends a request to a run and prints its reply. The run is named by its directory or by its run ID "
+            "(the run registry finds it); its endpoint record, mallard.run.json, says where it runs, and ctl "
+            "takes the first route that reaches it: the control socket mallard.sock on the same host, srun "
+            "--overlap into its Slurm job, kubectl exec into its pod, ssh to the node of a PBS or LSF job, then, "
+            "for stop and checkpoint, a signal (SIGUSR2, SIGUSR1) by kill, scancel, qsig or bkill. Control files "
+            "only with --allow-files. Each request has an ID; the run acknowledges it (accepted), then answers "
+            "once it has acted (done), and records both in its run log as control records.\n"
             "\n"
             "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA and memory. "
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
@@ -516,13 +604,14 @@ constexpr Command COMMANDS[] = {
             "check_interval, write_data.<prefix or index>.interval or .time_interval, "
             "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
             "are refused.",
-        .options = {},
+        .options = CTL_OPTIONS,
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"
                     "$ mallard ctl runs/cylinder set t_stop=3.0 write_data.flow.time_interval=0.05\n"
-                    "$ mallard ctl . stop",
-        .exit_status = "0  the run carried out the request\n"
-                       "1  no run answers in run-dir, or the run refused the request\n"
+                    "$ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop --format json\n"
+                    "$ mallard ctl . checkpoint --wait accepted",
+        .exit_status = "0  the run accepted or carried out the request\n"
+                       "1  no route reached the run, the run ended or refused the request, or the timeout passed\n"
                        "2  usage error",
         .run = ctl_main,
     },
@@ -811,9 +900,11 @@ constexpr Command COMMANDS[] = {
             "Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON object per line, on "
             "standard input; responses and notifications go to standard output, one per line, and nothing else "
             "does (the setup's text goes to standard error). Requests: initialize, case.open, case.update, "
-            "case.close, case.check, case.keys, keys.catalog and shutdown; $/cancel stops a request at its next "
-            "setup phase. Each request that has a one-shot command runs the same code: case.check is mallard check "
-            "INPUT --format json, case.keys and keys.catalog are mallard list keys --format json.\n"
+            "case.close, case.check, case.keys, keys.catalog, run.launch, run.control and shutdown; $/cancel stops a "
+            "request at its next setup phase. Each request that has a one-shot command runs the same code: "
+            "case.check is mallard check INPUT --format json, case.keys and keys.catalog are mallard list keys "
+            "--format json, run.launch is mallard -i INPUT --detach, run.control is mallard ctl RUN ... --format "
+            "json.\n"
             "\n"
             "The session keeps the mesh file it read: a check after an edit outside [mesh] (case.update with the "
             "whole text, which the session never writes back) reads the file again only if it changed. It listens "

@@ -48,6 +48,10 @@ inline constexpr int INTERNAL = -32603;
 inline constexpr int CANCELED = -32800;
 inline constexpr int NO_CASE = -32001;
 inline constexpr int UNREADABLE = -32003;
+inline constexpr int TIMEOUT = -32004;
+inline constexpr int NO_RUN = -32005;
+inline constexpr int UNREACHABLE = -32006;
+inline constexpr int UNSAVED = -32010;
 } // namespace code
 
 /** @brief A request that failed: a JSON-RPC error, with Mallard's data (a JSON object, or empty). */
@@ -88,6 +92,8 @@ class Context {
         /** @brief Mesh files read from disk by this context's setups; 0 for a one-shot's. */
         uint64_t mesh_files_read() const;
         bool resident() const { return keep; }
+        /** @brief Whether the case's text (case.update) differs from its file on disk. */
+        bool unsaved() const;
 
         /** @brief Results of requests on the current text, by request and parameters (resident only). */
         std::optional<std::string> remembered(const std::string & key) const;

@@ -1077,6 +1077,8 @@ class Solver {
         bool wall_time_reached = false;          // on some rank, so on every rank at the same step
         bool end_recorded = false;
         std::string stop_file_note;
+        bool checkpoint_file_seen = false;
+        std::string endpoint_run_log;  // the run log's path, for the endpoint record
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
         bool publishing = false;

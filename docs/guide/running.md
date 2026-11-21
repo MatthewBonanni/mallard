@@ -26,7 +26,37 @@ $ mallard ctl runs/cylinder stop
 stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 ```
 
-Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
+Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. On rank 0's node, `mallard ctl` talks to the run through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only; from anywhere else it finds its own way to the run (below). `[run] control_socket = false` turns the socket off.
+
+### Controlling a run from anywhere
+
+`mallard ctl` takes a run directory or a run ID, and needs neither a login on rank 0's node nor control files:
+
+```bash
+$ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop
+stopped at step 20481, t = 1.2742; restart: solut/restart_020481.restart
+$ mallard ctl runs/cylinder checkpoint --wait accepted --format json
+{"schema":"mallard-run-control","version":2,"id":"c1a7...","route":"srun","status":"accepted",...}
+```
+
+<a id="the-endpoint-record"></a>**The endpoint record.** At start, before its setup, rank 0 writes `mallard.run.json` in the run directory: the run ID, the `mallard` executable, rank 0's host and PID, the number of ranks, the socket, the scheduler job (Slurm job and step, PBS or LSF job, or the Kubernetes pod and namespace, from `MALLARD_POD` and `MALLARD_NAMESPACE` or the pod's own), the run log, and the state: `setup`, `running`, then `ended` with the outcome. A copy goes to the run registry, `$XDG_STATE_HOME/mallard/runs/<run_id>.json` (`~/.local/state/mallard/runs`, shared by a cluster's nodes with the home directory), so that the run ID alone finds the run; entries of runs ended more than 30 days ago are removed. `MALLARD_RUN_REGISTRY` names another directory, or `off`.
+
+**Routes.** `mallard ctl` tries these in order and takes the first that reaches the run:
+
+| Route | When | How |
+|---|---|---|
+| Socket | on rank 0's host | `mallard.sock` |
+| Slurm | a Slurm job, `srun` here | `srun --jobid=JOB --overlap -w NODE mallard ctl --direct DIR ...` |
+| Kubernetes | a pod, `kubectl` here | `kubectl exec -n NAMESPACE POD -- mallard ctl --direct DIR ...` |
+| SSH | a PBS or LSF job on another node | `ssh NODE mallard ctl --direct DIR ...` |
+| Signal | `stop` (`SIGUSR2`) and `checkpoint` (`SIGUSR1`) | `kill` on rank 0's host, else `scancel --signal`, `qsig -s`, `bkill -s` |
+| Control file | only with `--allow-files`, and `[run] control_file_interval` set | `STOP`, `CHECKPOINT` in the run directory |
+
+When the program of a route is not where `mallard ctl` runs (a GUI on a laptop, a run in a pod), the error names the command to run where it is (`route_hint`).
+
+**Acknowledgments.** Each request has an ID (`--id`, or a new UUID). The run answers on the socket at once (`accepted`, with the step), then once it has acted (`done`, with the restart file or each setting's result) or `refused` (with the reason). `--wait accepted` returns after the first answer; the default waits for the second. Every request is a `control` record of the run log, with its ID, action, source (`socket`, `signal`, `file`), status, step, `t` and result; for a signal or file, which carry no ID, `mallard ctl` waits for the record of that action after it sent it. `--timeout` bounds the wait (default 30 s for `accepted`, none for `done`). The JSON (`--format json`, and the session's [`run.control`](session.md#requests)) follows the schema `mallard-run-control`, version 2.
+
+**Detached runs.** `mallard -i input.toml --detach` starts the run in a session of its own, with its output in `mallard.out`, and returns once the endpoint record is written, printing the run ID, directory and PID as JSON (schema `mallard-run-launch`). The session's [`run.launch`](session.md#requests) does the same, also under `mpirun`, `mpiexec` or `srun`.
 
 Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request. The run record's [end record](output.md#run-record-mallardjsonl) says which, as its `outcome`, with the last snapshot and restart file written; `mallard info <run-dir>` shows it. `t_wall_stop` is reached on whichever rank gets there first, and every rank stops after the same next step.
 
@@ -248,7 +278,8 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
-| <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made; or the endpoint record `mallard.run.json` cannot be written | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="e-control"></a>`E-CONTROL` | A control request was refused (an unknown action or setting), or the run ended before acting on it | The reply's message says which; see [Controlling a run from anywhere](#controlling-a-run-from-anywhere) |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
 | <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |

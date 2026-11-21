@@ -99,7 +99,7 @@ Commands:
   Run
     mallard -i input.toml     Run a case
     mallard ctl               Ask a running case for its status, a restart file
-                              or a stop, or change its settings
+                              or a stop, or change its settings, from anywhere
     mallard reactor           Integrate a 0D reactor, or benchmark the chemistry
   Set up
     mallard new               Create a ready-to-run case from a template
@@ -158,6 +158,13 @@ Options:
                            rows. Default: the progress table's written column
                            counts them, and mallard.jsonl and the summary name
                            them.
+  --detach                 Start the run in the background, in a session of its
+                           own, and return once it has written its endpoint
+                           record mallard.run.json: prints the launch as one
+                           JSON object (run ID, directory, PID). The run's
+                           output goes to mallard.out; mallard ctl controls it.
+                           Not under mpirun: the session's run.launch starts
+                           runs on several ranks.
   --log-format text|jsonl  text: the setup, the progress table and the summary
                            on stdout; jsonl: on stdout only the run record's
                            progress records, one JSON object per line as
@@ -193,11 +200,18 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard
 ### mallard ctl
 
 ```text
-Usage: mallard ctl <run-dir> status | checkpoint | stop
-       mallard ctl <run-dir> set <key>=<value> [<key>=<value> ...]
+Usage: mallard ctl <run-dir|run-id> status | checkpoint | stop [options]
+       mallard ctl <run-dir|run-id> set <key>=<value> [<key>=<value> ...] [options]
 
-Sends a request to the run started in run-dir, through its control socket
-mallard.sock, and prints the reply. It must run on the node of the run's rank 0.
+Sends a request to a run and prints its reply. The run is named by its directory
+or by its run ID (the run registry finds it); its endpoint record,
+mallard.run.json, says where it runs, and ctl takes the first route that reaches
+it: the control socket mallard.sock on the same host, srun --overlap into its
+Slurm job, kubectl exec into its pod, ssh to the node of a PBS or LSF job, then,
+for stop and checkpoint, a signal (SIGUSR2, SIGUSR1) by kill, scancel, qsig or
+bkill. Control files only with --allow-files. Each request has an ID; the run
+acknowledges it (accepted), then answers once it has acted (done), and records
+both in its run log as control records.
 
 status: step, t, dt, CFL number, progress, wall time per step, cells per second,
 ETA and memory. checkpoint: write a restart file now; the reply names it. stop:
@@ -209,16 +223,32 @@ or .time_interval, forces.<zone>.interval, integrals.interval. Other keys are
 refused.
 
 Options:
-  -h, --help  Show this page.
+  --wait accepted|done  accepted: return once the run has queued the request;
+                        done: once it has acted on it (the restart written, the
+                        settings applied). Default: done.
+  --timeout SECONDS     Give up after this long. Default: 30 s for accepted,
+                        none for done (a step of a large run can take minutes).
+  --format text|json    text: the run's reply; json: the result as one JSON
+                        object (schema mallard-run-control), errors as {"error":
+                        {...}}. Default: text.
+  --id ID               The request's ID, to find its control records in the run
+                        log. Default: a new UUID.
+  --allow-files         If no other route reaches the run, write a STOP or
+                        CHECKPOINT file in its directory (the run must poll for
+                        them: [run] control_file_interval).
+  --direct              Only the socket in RUN_DIR, on this host: what the
+                        remote end of a route runs.
+  -h, --help            Show this page.
 
 Examples:
   $ mallard ctl runs/cylinder status
   $ mallard ctl runs/cylinder set t_stop=3.0 write_data.flow.time_interval=0.05
-  $ mallard ctl . stop
+  $ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop --format json
+  $ mallard ctl . checkpoint --wait accepted
 
 Exit status:
-  0  the run carried out the request
-  1  no run answers in run-dir, or the run refused the request
+  0  the run accepted or carried out the request
+  1  no route reached the run, the run ended or refused the request, or the timeout passed
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-ctl
@@ -765,10 +795,11 @@ Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON
 object per line, on standard input; responses and notifications go to standard
 output, one per line, and nothing else does (the setup's text goes to standard
 error). Requests: initialize, case.open, case.update, case.close, case.check,
-case.keys, keys.catalog and shutdown; $/cancel stops a request at its next setup
-phase. Each request that has a one-shot command runs the same code: case.check
-is mallard check INPUT --format json, case.keys and keys.catalog are mallard
-list keys --format json.
+case.keys, keys.catalog, run.launch, run.control and shutdown; $/cancel stops a
+request at its next setup phase. Each request that has a one-shot command runs
+the same code: case.check is mallard check INPUT --format json, case.keys and
+keys.catalog are mallard list keys --format json, run.launch is mallard -i INPUT
+--detach, run.control is mallard ctl RUN ... --format json.
 
 The session keeps the mesh file it read: a check after an edit outside [mesh]
 (case.update with the whole text, which the session never writes back) reads the

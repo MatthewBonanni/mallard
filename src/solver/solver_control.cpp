@@ -18,11 +18,13 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "json.h"
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
@@ -185,8 +187,9 @@ void Solver::diverged() {
     message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
                                             : " " + evidence.report_file + " has the evidence and other causes.";
     message += " See docs/guide/running.md#divergence.";
-    for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
-    for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
+    const run_control::Done refused{.ok = false, .message = "error: " + message, .step = step, .t = double(t), .result = "null"};
+    for (auto & command : checkpoint_replies) run_control::finish(command, refused);
+    for (auto & command : stop_replies) run_control::finish(command, refused);
     checkpoint_replies.clear();
     stop_replies.clear();
     // Collective, as is the divergence: every rank's part of the last files is written and recorded first
@@ -204,17 +207,29 @@ void Solver::act_on_requests() {
     if (acted & run_control::COMMAND) apply_commands();
     if (acted & run_control::CHECKPOINT) {
         checkpoint_requested = true;
+        run_control::Command command;
+        command.text = "checkpoint";
+        command.source = std::exchange(checkpoint_file_seen, false) ? "file" : "signal";
+        run_control::record_accepted(command, step, double(t));
+        checkpoint_replies.push_back(command);
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
         // The signal that reached any rank, so that rank 0 records it
         const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        const bool file = !signo && !stop_file_note.empty();
         if (signo) {
             const std::string name = run_control::signal_name(signo);
             control_stop = {"signal", name, name + " received"};
         } else {
-            const bool file = !stop_file_note.empty();
             control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        if (signo || file) {
+            run_control::Command command;
+            command.text = "stop";
+            command.source = signo ? "signal" : "file";
+            run_control::record_accepted(command, step, double(t));
+            stop_replies.push_back(command);
         }
         logging::event(step, double(t), "stop", control_stop.reason);
     }
@@ -242,7 +257,7 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            std::string reply;
+            std::string reply, settings = "[";
             bool ok = true;
             for (const std::string & assignment : split(line.substr(4), ' ')) {
                 const size_t eq = assignment.find('=');
@@ -252,8 +267,19 @@ void Solver::apply_commands() {
                 ok = ok && accepted;
                 reply += (accepted ? "" : "error: ") + what + "\n";
                 if (accepted) logging::event(step, double(t), "set", what);
+                settings += std::string(settings.size() > 1 ? "," : "") +
+                            json::Object()
+                                .add("key", assignment.substr(0, eq))
+                                .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
+                                .add("applied", accepted)
+                                .add("message", what)
+                                .str();
             }
-            run_control::reply(command, ok ? reply : "error: not all settings were applied\n" + reply);
+            run_control::finish(command, {.ok = ok,
+                                          .message = ok ? reply : "error: not all settings were applied\n" + reply,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = json::Object().raw("settings", settings + "]").str()});
         }
     }
 }
@@ -366,8 +392,12 @@ void Solver::write_checkpoint() {
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {
-        run_control::reply(command, "checkpoint at step " + std::to_string(step) + ", t = " +
-                                        logging::real(double(t)) + ": " + file);
+        run_control::finish(command, {.ok = true,
+                                      .message = "checkpoint at step " + std::to_string(step) + ", t = " +
+                                                 logging::real(double(t)) + ": " + file,
+                                      .step = step,
+                                      .t = double(t),
+                                      .result = run_control::restart_result(file)});
     }
     checkpoint_replies.clear();
 }
@@ -377,7 +407,10 @@ void Solver::poll_control_files() {
     if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
     control_files_polled = step / control_file_interval;
     std::error_code error;
-    if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
+    if (std::filesystem::remove("CHECKPOINT", error)) {
+        checkpoint_file_seen = true;
+        run_control::request(run_control::CHECKPOINT);
+    }
     if (std::filesystem::remove("STOP", error)) {
         stop_file_note = "STOP file found";
         run_control::request(run_control::STOP);

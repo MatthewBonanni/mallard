@@ -445,6 +445,8 @@ const std::string & placement() { return state().placement; }
 
 const std::string & run_id() { return state().run_id; }
 
+std::string new_uuid() { return random_uuid(); }
+
 void set_restart_of(const std::string & id, const std::string & file, uint64_t step) {
     json::Object r;
     if (id.empty()) {
