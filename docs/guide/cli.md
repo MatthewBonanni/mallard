@@ -238,13 +238,13 @@ acknowledges it (accepted), then answers once it has acted (done), and records
 both in its run log as control records.
 
 status: step, t, dt, CFL number, progress, wall time per step, cells per second,
-ETA and memory. checkpoint: write a restart file now; the reply names it. stop:
-write a restart file and end the run (exit status 3). set: change settings from
-the next step on: n_steps, t_stop, t_wall_stop (0 removes a limit; one must
-remain; times in seconds or with a unit, e.g. t_wall_stop=2h), check_interval,
-write_data.<prefix or index>.interval or .time_interval, probes.<name>.interval
-or .time_interval, forces.<zone>.interval, integrals.interval. Other keys are
-refused.
+ETA, memory and the state of each trigger. checkpoint: write a restart file now;
+the reply names it. stop: write a restart file and end the run (exit status 3).
+set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
+removes a limit; one must remain; times in seconds or with a unit, e.g.
+t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
+.time_interval, probes.<name>.interval or .time_interval,
+forces.<zone>.interval, integrals.interval. Other keys are refused.
 
 Options:
   --wait accepted|done  accepted: return once the run has queued the request;

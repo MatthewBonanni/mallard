@@ -132,6 +132,7 @@ struct Status {
     int device = -1;               // CUDA or HIP device of rank 0, -1 for other backends
     std::string stop_conditions;
     std::vector<std::pair<std::string, std::string>> monitors;  // last progress row's diagnostics
+    std::vector<std::pair<std::string, std::string>> triggers;  // "trigger <name>" and its state
 };
 
 void publish(const Status & status);

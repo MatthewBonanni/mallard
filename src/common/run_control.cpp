@@ -252,6 +252,7 @@ std::string status_text() {
     text += format("cells: %llu\nranks: %d\n", static_cast<unsigned long long>(s.run.n_cells), s.run.n_ranks);
     text += memory_lines(s.device);
     for (const auto & [key, value] : s.monitors) text += key + ": " + value + "\n";
+    for (const auto & [key, value] : s.triggers) text += key + ": " + value + "\n";
     return text;
 }
 
