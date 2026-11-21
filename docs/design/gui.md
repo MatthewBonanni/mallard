@@ -122,13 +122,13 @@ integer version in its JSON:
 
 | Interface | Command | Version today |
 |---|---|---|
-| Capabilities | `mallard version --format json` (new): version, build (dimension, precision, backend, MPI, HDF5), and the version of every interface below | missing |
-| Key catalog | `mallard list keys [INPUT] --format json` | none (no schema field) |
-| Check report | `mallard check INPUT --format json` | `version` field |
+| Capabilities | `mallard version --format json`: version, build (dimension, precision, backends, MPI, HDF5, ...), installed dimensions, and the schema and version of every interface below | `mallard-capabilities` 1 (#1314) |
+| Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` 1 |
+| Check report | `mallard check INPUT --format json` | `mallard-check` 1 |
 | Case view | `mallard check --view DIR`, `mallard info MESH --view DIR` | none |
-| Run log | `mallard.jsonl` | `schema = "mallard-run"`, `version = 3` |
-| Run directory | `mallard info RUN_DIR --format json` | `version` field |
-| Run control | `mallard ctl RUN_DIR status\|checkpoint\|stop\|set`, `STOP`/`CHECKPOINT` files | none |
+| Run log | `mallard.jsonl` | `mallard-run-log` 2; its run block `mallard-run` 3 |
+| Run directory | `mallard info RUN_DIR --format json` | `mallard-run-directory` 1 |
+| Run control | `mallard ctl RUN_DIR status\|checkpoint\|stop\|set`, `STOP`/`CHECKPOINT` files | `mallard-run-control` 1, with its commands and files |
 | Remote helpers | `mallard files`, `mallard install verify` (new, below) | missing |
 
 Rules:
@@ -1072,7 +1072,7 @@ tested like any other.
 | Control files | done: `STOP`, `CHECKPOINT` | off by default (`control_file_interval = 0`); `--set` is listed in [Command line](cli.md) but not implemented |
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
-| Capabilities query | missing | `mallard version --format json` |
+| Capabilities query | done: `mallard version --format json` (#1314) | none |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
 | Write-once outputs | restarts and per-snapshot files are; single-file series and rewinds are not | write-once series and rewinds |
 | Install verification | missing | `mallard install verify` |
