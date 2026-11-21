@@ -1132,7 +1132,7 @@ struct InitialState::Impl {
         count = static_cast<uint32_t>(h.nodes.extent(0));
         for (uint32_t i = 0; i < count; i++) {
             region::Node n = h.nodes(i);
-            if (n.kind == region::Kind::POLYGON) n.first += vertex_offset;
+            if (n.kind == region::Kind::POLYGON || n.kind == region::Kind::TRIANGLES) n.first += vertex_offset;
             if (n.kind == region::Kind::IMPLICIT) n.first += program_offset;
             nodes.push_back(n);
         }
@@ -1180,6 +1180,8 @@ struct InitialState::Impl {
             std::vector<std::string> at;
             if (contains_optional(e, "at")) {
                 at = find_value<std::vector<std::string>>(e, "at");
+            } else if (!entry.at.empty()) {
+                at = entry.at;
             } else {
                 for (const auto & c : coordinates) {
                     if (c != "x" && c != "y" && c != "z") {

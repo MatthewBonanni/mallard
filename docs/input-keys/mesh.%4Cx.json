@@ -75,6 +75,7 @@
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"

@@ -90,6 +90,8 @@ struct CheckRegion {
     double own_surface = std::numeric_limits<double>::quiet_NaN();
     double own_tolerance = 0.0;  // relative; 0 in closed form
     bool solution = false;       // defined by the solution: measured and counted on the initial solution
+    bool from_file = false;      // holds a surface read from a file (STL, OBJ): box is its bounding box
+    std::array<std::array<double, 3>, 2> box{};
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */
