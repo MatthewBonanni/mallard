@@ -183,7 +183,7 @@ TEST(FlameletSolverTest, ReactionDiffusionFrontMovesAtItsExactSpeed) {
 // Table fields at Z = 0.2 + 0.6 x and C = 0.2 x (about; Lambda = C / 0.2) on the reactor table, whose
 // T0 = 300 + 1500 Lambda, Y_H2O = 0.2 Lambda, Y_N2 = 1 - 0.2 Lambda and HRR = 1e10 (1 - Lambda) + 1e8 Z
 // (tabulated at rho0 = 2 rho) are linear in Z and Lambda, so lookups are exact: the written T_TABLE, HRR
-// (scaled by (rho / rho0)^2), Y_<species>, MIXTURE_FRACTION and FPV_LAMBDA. Catches fields read from the
+// (scaled by (rho / rho0)^2), Y_<species>, MIXTURE_FRACTION and C_NORM. Catches fields read from the
 // wrong column, an unscaled HRR and Lambda taken as the transported C.
 TEST(FlameletSolverTest, TableFieldsAreWrittenAtEachCellsState) {
     const std::string prefix = (rank_scratch_dir() / "mallard_flamelet_fields").string();
@@ -192,7 +192,7 @@ TEST(FlameletSolverTest, TableFieldsAreWrittenAtEachCellsState) {
           << "p = \"1e5\"\nT = \"300\"\nu = " << zero_velocity() << "\nZ = \"0.2 + 0.6 * x\"\nC = \"0.2 * x\"\n"
           << flamelet_physics("solver_reactor.h5", "euler") << "[[write_data]]\nprefix = \"" << prefix
           << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"T_TABLE\", \"HRR\", \"Y_H2O\", \"Y_N2\", "
-          << "\"MIXTURE_FRACTION\", \"FPV_LAMBDA\"]\n";
+          << "\"MIXTURE_FRACTION\", \"C_NORM\"]\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input.str()));
@@ -200,7 +200,7 @@ TEST(FlameletSolverTest, TableFieldsAreWrittenAtEachCellsState) {
     solver.write_output_of_state(false);
     const output::Contents file = output::open(prefix + "_000000.vtu");
     std::map<std::string, std::vector<double>> written;
-    for (const char * name : {"T_TABLE", "HRR", "Y_H2O", "Y_N2", "MIXTURE_FRACTION", "FPV_LAMBDA"}) {
+    for (const char * name : {"T_TABLE", "HRR", "Y_H2O", "Y_N2", "MIXTURE_FRACTION", "C_NORM"}) {
         written[name] = output::read(file, name, 0);
     }
     const double rho0 = 2.0 * 101325.0 / (287.0 * 300.0);
@@ -213,7 +213,7 @@ TEST(FlameletSolverTest, TableFieldsAreWrittenAtEachCellsState) {
         EXPECT_NEAR(written["Y_H2O"][c], 0.2 * x, tol(1e-12, 1e-6)) << x;
         EXPECT_NEAR(written["Y_N2"][c], 1.0 - 0.2 * x, tol(1e-12, 1e-6)) << x;
         EXPECT_NEAR(written["MIXTURE_FRACTION"][c], Z, tol(1e-12, 1e-6)) << x;
-        EXPECT_NEAR(written["FPV_LAMBDA"][c], x, tol(1e-12, 1e-6)) << x;
+        EXPECT_NEAR(written["C_NORM"][c], x, tol(1e-12, 1e-6)) << x;
     }
 }
 

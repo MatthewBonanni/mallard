@@ -397,7 +397,7 @@ diffusivity, source and the map `C -> Lambda` together.
   field are computed on the host when the output is staged, from the host copy
   of the table: output is infrequent, so they add no device kernel and nothing
   to the step. `HRR` is scaled by `(rho / rho0)^2` like `omega_C`, since both
-  are rates of the same reactions. `MIXTURE_FRACTION` and `FPV_LAMBDA`
+  are rates of the same reactions. `MIXTURE_FRACTION` and `C_NORM`
   are the derived fields of the catalog, `Z` and the table's `Lambda`.
   Probes and statistics of the table fields are left for later.
 - **Table pressure.** The setup compares the initial pressure field (its

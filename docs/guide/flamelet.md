@@ -86,14 +86,14 @@ table's fields at each cell's `Z` and `C` ([[write_data]] only):
 | `T_TABLE` | Temperature of the tabulated flamelet state, `T0`. `T` is the temperature of the energy equation, which compression and heat loss move away from it |
 | `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` |
 | `MIXTURE_FRACTION` | `Z` |
-| `FPV_LAMBDA` | The table's normalized progress variable `Lambda = (C - C_min) / (C_max - C_min)` at `Z`, in [0, 1] (FPVgen's Λ). `PROGRESS_VARIABLE` is the mixtures' own, defined by `[output.mixture]`, and not a field of flamelet runs |
+| `C_NORM` | The table's normalized progress variable `Lambda = (C - C_min) / (C_max - C_min)` at `Z`, in [0, 1] (FPVgen's Λ). `PROGRESS_VARIABLE` is the mixtures' own, defined by `[output.mixture]`, and not a field of flamelet runs |
 
 ```toml
 [[write_data]]
 prefix = "flame"
 format = "vtkhdf"
 interval = 100
-fields = ["RHO", "U", "P", "T", "T_TABLE", "HRR", "Y_*", "FPV_LAMBDA"]
+fields = ["RHO", "U", "P", "T", "T_TABLE", "HRR", "Y_*", "C_NORM"]
 ```
 
 ## Pressure
