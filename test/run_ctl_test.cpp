@@ -86,6 +86,30 @@ std::string joined(const std::vector<std::string> & words) {
 
 } // namespace
 
+TEST(RunCtlTest, SetIsCheckedAgainstTheRunsTableBeforeItIsSent) {
+    EXPECT_EQ(run_control::check_setting("write_data.flow.time_interval", "2ms"), "");
+    EXPECT_EQ(run_control::check_setting("write_data.0.interval", "100"), "");
+    EXPECT_EQ(run_control::check_setting("integrals.interval", "5"), "");
+    EXPECT_NE(run_control::check_setting("write_data..interval", "5"), "");
+    EXPECT_NE(run_control::check_setting("n_steps", "2s"), "");
+    EXPECT_NE(run_control::check_setting("t_stop", "3 kg"), "");
+    std::string element;
+    ASSERT_NE(run_control::setting("probes.p1.time_interval", &element), nullptr);
+    EXPECT_EQ(element, "p1");
+    // Refused before the run is looked for
+    run_ctl::Request set;
+    set.run = "no/such/run";
+    set.action = "set";
+    set.settings = {"cfl=0.5"};
+    try {
+        run_ctl::control(set);
+        ADD_FAILURE() << "cfl was sent";
+    } catch (const session::Error & e) {
+        EXPECT_EQ(e.code, session::code::INVALID_PARAMS);
+        EXPECT_NE(std::string(e.what()).find("settable: n_steps"), std::string::npos) << e.what();
+    }
+}
+
 TEST(RunCtlTest, RoutesFollowTheEndpointRecord) {
     run_ctl::Request stop;
     stop.action = "stop";
@@ -321,11 +345,11 @@ TEST(RunCtlProcessTest, RunsAreFoundByIdAcknowledgeRequestsAndRecordThem) {
     EXPECT_EQ(status["status"].string, "done");
     EXPECT_NE(status["replies"].array[0]["values"]["step"].string, "");
 
-    const json::Value set = control(dir, "set", {"check_interval=1000", "cfl=0.5"});
+    const json::Value set = control(dir, "set", {"check_interval=1000", "forces.nowhere.interval=5"});
     EXPECT_EQ(violations(CONTROL, set), "");
     ASSERT_EQ(set["replies"].array.size(), 2u) << json::dump(set);
     EXPECT_EQ(set["replies"].array[0]["status"].string, "accepted");
-    EXPECT_EQ(set["status"].string, "refused");  // cfl is not settable while running
+    EXPECT_EQ(set["status"].string, "refused");  // the run has no [[forces]] on that zone
     const json::Value & applied = set["replies"].array[1]["result"]["settings"];
     ASSERT_EQ(applied.array.size(), 2u);
     EXPECT_TRUE(applied.array[0]["applied"].boolean);

@@ -51,6 +51,12 @@ struct Here {
 /** @brief This host, and PATH. */
 Here here();
 
+/**
+ * @brief Every kind of route, in the order tried, with the programs it runs and whether one of them is on PATH
+ *        here (mallard-capabilities' control.routes).
+ */
+std::string routes_json(const Here & here);
+
 /** @brief The routes to the run of the endpoint record, in the order to try them (docs/guide/running.md#controlling-a-run-from-anywhere). */
 std::vector<Route> routes(const json::Value & endpoint, const Request & request, const Here & here);
 

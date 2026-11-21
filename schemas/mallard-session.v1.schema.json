@@ -1,73 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-session.v1.schema.json",
-  "title": "The result of mallard session's initialize; $defs/message is any message it writes (JSON-RPC 2.0, one per line)",
-  "type": "object",
-  "required": [
-    "schema",
-    "version",
-    "mallard",
-    "dimension",
-    "methods",
-    "case"
-  ],
-  "properties": {
-    "schema": {
-      "const": "mallard-session"
-    },
-    "version": {
-      "const": 1
-    },
-    "mallard": {
-      "type": "string"
-    },
-    "dimension": {
-      "enum": [
-        2,
-        3
-      ]
-    },
-    "methods": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "command",
-          "result"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "command": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "the one-shot command that runs the same handler"
-          },
-          "result": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "schema name of the result"
-          }
-        }
-      }
-    },
-    "case": {
-      "oneOf": [
-        {
-          "type": "null"
-        },
-        {
-          "$ref": "mallard-case.v1.schema.json"
-        }
-      ]
-    }
-  },
+  "title": "Any message mallard session writes (JSON-RPC 2.0, one per line); initialize's result is mallard-capabilities",
+  "$ref": "#/$defs/message",
   "$defs": {
     "id": {
       "type": [

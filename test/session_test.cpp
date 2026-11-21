@@ -28,6 +28,7 @@
 #include "data_paths.h"
 #include "json.h"
 #include "json_schema.h"
+#include "run_control.h"
 #include "session/session.h"
 
 extern char ** environ;
@@ -58,10 +59,10 @@ std::string mallard() {
 }
 
 /** @brief Runs mallard with these arguments and this standard input, outside any MPI launcher; killed after two
- *         minutes. hold_input: the input stays open until mallard exits. */
-Result run(std::vector<std::string> args, const std::string & input = "", bool hold_input = false) {
+ *         minutes. hold_input: the input stays open until mallard exits; kokkos: with one thread. */
+Result run(std::vector<std::string> args, const std::string & input = "", bool hold_input = false, bool kokkos = true) {
     args.insert(args.begin(), mallard());
-    args.push_back("--kokkos-num-threads=1");
+    if (kokkos) args.push_back("--kokkos-num-threads=1");
     std::vector<std::string> env;
     for (char ** e = environ; *e; e++) {
         const std::string var = *e;
@@ -230,7 +231,7 @@ TEST(SessionTest, AnswersAsItsOneShotCommandsDo) {
     const json::Value init = response(list, 1)["result"];
     EXPECT_EQ(init["dimension"].number, Mallard_DIM);
     EXPECT_EQ(init["case"]["input"].string, "case.toml");
-    std::vector<std::pair<int, std::string>> results = {{1, "mallard-session"}};
+    std::vector<std::pair<int, std::string>> results = {{1, "mallard-capabilities"}};
     for (const json::Value & m : init["methods"].array) {
         if (m["name"].string == "case.check") results.emplace_back(2, m["result"].string);
         if (m["name"].string == "case.keys") results.emplace_back(3, m["result"].string);
@@ -254,6 +255,37 @@ TEST(SessionTest, AnswersAsItsOneShotCommandsDo) {
     bool progress = false;
     for (const json::Value & m : list) progress = progress || (m.has("method") && m["method"].string == "$/progress" && m["params"]["id"].number == 2);
     EXPECT_TRUE(progress) << session.out;
+}
+
+TEST(SessionTest, InitializeAnswersAsVersionJsonWithTheDevicesAndTheSettingsOfControl) {
+    SKIP_UNDER_MPI();
+    const Result session = run({"session"}, request(1, "initialize") + request(2, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    json::Value init = response(messages(session.out), 1)["result"];
+    EXPECT_EQ(violations("mallard-capabilities", init), "");
+    EXPECT_TRUE(init["case"].is_null());
+    const Result version = run({"--dim", std::to_string(Mallard_DIM), "version", "--format", "json"}, "", false, false);
+    ASSERT_EQ(version.status, 0) << version.err;
+    const json::Value one_shot = json::parse(version.out);
+    EXPECT_EQ(violations("mallard-capabilities", one_shot), "");
+    for (size_t i = 0; i < init.names.size(); i++) {
+        if (init.names[i] != "case") continue;
+        init.names.erase(init.names.begin() + static_cast<std::ptrdiff_t>(i));
+        init.members.erase(init.members.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+    EXPECT_EQ(json::dump(init), json::dump(one_shot));
+
+    const json::Value & devices = one_shot["devices"];
+    EXPECT_FALSE(devices["backend"].string.empty());
+    EXPECT_EQ(devices["count"].number, static_cast<double>(devices["visible"].array.size()));
+    // ctl checks set against the table the run applies, and capabilities list that table
+    std::vector<std::string> listed, table;
+    for (const json::Value & s : one_shot["control"]["settings"].array) listed.push_back(s["key"].string);
+    for (const run_control::Setting & s : run_control::SETTINGS) table.push_back(s.key());
+    EXPECT_EQ(listed, table);
+    std::vector<std::string> methods;
+    for (const json::Value & m : one_shot["methods"].array) methods.push_back(m["name"].string);
+    EXPECT_EQ(methods.size(), session::methods().size());
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {

@@ -7,9 +7,11 @@
 
 #include "build_info.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <thread>
 #include <type_traits>
 
 #include <unistd.h>
@@ -23,6 +25,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "git_version.h"
+#include "json.h"
 #include "log.h"
 #include "version.h"
 
@@ -61,6 +64,42 @@ std::string device_name() {
     }
 #endif
     return cpu_model();
+}
+
+std::string devices_json() {
+    std::string visible = "[";
+    [[maybe_unused]] const auto add = [&](int id, const std::string & name, uint64_t bytes) {
+        visible += (visible.size() > 1 ? "," : "") +
+                   json::Object().add("id", id).add("name", name).add("memory", bytes).str();
+    };
+    int count = 0;
+#if defined(KOKKOS_ENABLE_CUDA)
+    if (cudaGetDeviceCount(&count) != cudaSuccess) count = 0;
+    for (int i = 0; i < count; i++) {
+        cudaDeviceProp prop;
+        if (cudaGetDeviceProperties(&prop, i) == cudaSuccess) add(i, prop.name, static_cast<uint64_t>(prop.totalGlobalMem));
+    }
+#elif defined(KOKKOS_ENABLE_HIP)
+    if (hipGetDeviceCount(&count) != hipSuccess) count = 0;
+    for (int i = 0; i < count; i++) {
+        hipDeviceProp_t prop;
+        if (hipGetDeviceProperties(&prop, i) == hipSuccess) add(i, prop.name, static_cast<uint64_t>(prop.totalGlobalMem));
+    }
+#elif defined(KOKKOS_ENABLE_SYCL)
+    for (const sycl::device & d : sycl::device::get_devices(sycl::info::device_type::gpu)) {
+        add(count++, d.get_info<sycl::info::device::name>(),
+            static_cast<uint64_t>(d.get_info<sycl::info::device::global_mem_size>()));
+    }
+#endif
+    const json::Object host = json::Object()
+                                  .add("cpu", cpu_model())
+                                  .add("threads", static_cast<int>(std::thread::hardware_concurrency()));
+    return json::Object()
+        .add("backend", Kokkos::DefaultExecutionSpace::name())
+        .add("count", count)
+        .raw("visible", visible + "]")
+        .raw("host", host.str())
+        .str();
 }
 
 namespace {

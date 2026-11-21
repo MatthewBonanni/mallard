@@ -410,6 +410,20 @@ Here here() {
             }};
 }
 
+std::string routes_json(const Here & h) {
+    const std::pair<const char *, std::vector<std::string>> kinds[] = {
+        {"socket", {}}, {"srun", {"srun"}}, {"kubectl", {"kubectl"}}, {"ssh", {"ssh"}},
+        {"signal", {"kill", "scancel", "qsig", "bkill"}}, {"file", {}}};
+    std::string out = "[";
+    for (const auto & [kind, programs] : kinds) {
+        bool available = programs.empty();
+        for (const std::string & p : programs) available = available || h.has_program(p);
+        out += (out.size() > 1 ? "," : "") +
+               json::Object().add("kind", kind).raw("programs", json_list(programs, true)).add("available", available).str();
+    }
+    return out + "]";
+}
+
 std::vector<Route> routes(const json::Value & endpoint, const Request & r, const Here & h) {
     std::vector<Route> out;
     const std::string host = text_or_null(endpoint.find("host"));
@@ -466,6 +480,12 @@ std::string control(Request r) {
     }
     if ((r.action == "set") == r.settings.empty()) {
         throw Error(code::INVALID_PARAMS, r.action == "set" ? "set takes settings, key=value" : r.action + " takes no settings");
+    }
+    for (const std::string & s : r.settings) {
+        const size_t eq = s.find('=');
+        const std::string why = eq == std::string::npos ? s + ": expected key=value"
+                                                        : run_control::check_setting(s.substr(0, eq), s.substr(eq + 1));
+        if (!why.empty()) throw Error(code::INVALID_PARAMS, why);
     }
     if (r.wait != "accepted" && r.wait != "done") throw Error(code::INVALID_PARAMS, "wait is accepted or done");
     if (r.id.empty()) r.id = provenance::new_uuid();
