@@ -780,22 +780,23 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   agreed over the ranks, through a per-cell index. Bytes per cell of the tables and cells per A100-80GB
   (`mallard check`; the GPU's packing in blocks of 32 tables measured with the CPU build packing slices of 32):
 
-  | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
-  |---|---|---|---|---|
-  | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
-  | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
-  | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
-  | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
-  | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
-  | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
-  | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
-  | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
+    | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
+    |---|---|---|---|---|
+    | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
+    | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
+    | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
+    | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
+    | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
+    | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
+    | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
+    | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
 
-  What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
-  states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
-  per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
-  mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
-  count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+    What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
+    states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
+    per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
+    mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
+    count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+
 - **Shared basis means and moments (#972).** Next to its entries' cells, a shared-table cell kept its basis
   means and its central moments (2D: smoothness-indicator matrix), the same for every cell of a shape up to
   round-off. They are now one row per cell shape, found the same way as the shared tables (on a grid of 2^-30 of
@@ -804,21 +805,21 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   cells per A100-80GB (`mallard check --memory a100-80` on the A100, $16^3$ hexahedra and $10^3 \times 6$
   tetrahedra, periodic):
 
-  | case | tables, before | tables | cells per A100-80GB, before / after |
-  |---|---|---|---|
-  | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
-  | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
-  | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
-  | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
-  | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
-  | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
-  | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
-  | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
+    | case | tables, before | tables | cells per A100-80GB, before / after |
+    |---|---|---|---|
+    | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
+    | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
+    | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
+    | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
+    | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
+    | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
+    | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
+    | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
 
-  The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
-  8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
-  against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
-  most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
+    The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
+    8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
+    against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
+    most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
 
 ### 15. Working set beyond the TENO tables (#552)
 

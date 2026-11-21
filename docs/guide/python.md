@@ -21,8 +21,9 @@ Every function and class: [Python API](python_api.md).
 
 ## Installing
 
-Every installer installs the package with Mallard, so `import mallard` works
-after its usual command:
+Every installer but the [relocatable archive](../installation.md#relocatable-archive)
+installs the package with Mallard, so `import mallard` works after its usual
+command:
 
 | Installer | Command | Opt out |
 |---|---|---|

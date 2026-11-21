@@ -26,6 +26,7 @@
 #include "compression.h"
 #include "data_paths.h"
 #include "device_comm.h"
+#include "file_hash.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
@@ -1187,6 +1188,51 @@ TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
         }
     }
     EXPECT_EQ(records, 1u);
+}
+
+TEST(MPITest, SharedFilesAreHashedAsChunkTreesByEveryRank) {
+    const std::string dir = io_dir() + "_chunks";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    constexpr uint64_t chunk = 4096;
+    struct ChunkBytes {
+        ChunkBytes() { file_hash::set_chunk_bytes(chunk); }
+        ~ChunkBytes() { file_hash::set_chunk_bytes(file_hash::DEFAULT_CHUNK_BYTES); }
+    } chunk_bytes;
+    const bool vtkhdf = have_hdf5() && (comm::size() == 1 || have_parallel_hdf5());
+    Solver solver;
+    solver.init(parse_toml(restart_case(
+        2, "run_log = \"" + dir + "/run.jsonl\"\n[[write_data]]\nprefix = \"" + dir +
+               "/r\"\nformat = \"restart\"\ninterval = 2\n" +
+               (vtkhdf ? "[[write_data]]\nprefix = \"" + dir + "/v\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
+                       : std::string()))));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::ifstream in(dir + "/run.jsonl");
+    std::set<std::string> trees;
+    for (std::string line; std::getline(in, line);) {
+        const json::Value r = json::parse(line);
+        if (r["type"].string != "output" || r["step"].number != 2.0) continue;
+        for (const json::Value & f : r["files"].array) {
+            const std::string file = f["path"].string;
+            const uint64_t bytes = std::filesystem::file_size(file);
+            EXPECT_EQ(f["bytes"].number, double(bytes)) << file;
+            if (bytes <= chunk) {
+                EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+                continue;
+            }
+            const file_hash::Hash expected = file_hash::of_file(file, chunk);
+            EXPECT_FALSE(f.has("sha256")) << file;
+            EXPECT_EQ(f["sha256_tree"].string, expected.sha256_tree) << file;
+            EXPECT_EQ(f["chunk_bytes"].number, double(chunk)) << file;
+            ASSERT_EQ(f["chunks"].array.size(), file_hash::n_chunks(bytes, chunk)) << file;
+            for (size_t c = 0; c < expected.chunks.size(); c++) EXPECT_EQ(f["chunks"].array[c].string, expected.chunks[c]);
+            trees.insert(r["kind"].string);
+        }
+    }
+    EXPECT_TRUE(trees.contains("restart"));
+    EXPECT_EQ(trees.contains("vtkhdf"), vtkhdf);
 }
 
 TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {

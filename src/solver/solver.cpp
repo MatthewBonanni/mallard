@@ -332,6 +332,7 @@ void Solver::write_provenance() {
         restart.add("file", find_value<std::string>(input, "initialize", "file")).add("step", step).add("t", double(t));
         const std::optional<uint64_t> recorded = run_log::last_step();
         if (recorded && *recorded > step) restart.add("rewound_from", *recorded);
+        if (!run_log::superseded().empty()) restart.raw("superseded", run_log::superseded());
         start.raw("restart", restart.str());
     }
     run_log::release(start);
@@ -1731,6 +1732,7 @@ void Solver::init_numerics() {
     }
     hybrid_threshold = find_real_or(hybrid_input, "sensor_threshold", dim::none, 0.65_r);
     hybrid_floor = find_real_or(hybrid_input, "upwind_floor", dim::none, 0.0_r);
+    hybrid_dilatation_scale = find_real_or(hybrid_input, "dilatation_scale", dim::none, hybrid_dilatation_scale);
     static const std::map<std::string, CentralFlux> central_fluxes = {
         {"reconstructed", CentralFlux::RECONSTRUCTED}, {"cell_averages", CentralFlux::CELL_AVERAGES}};
     // TENO's states make KEEP add kinetic energy (docs/design/les.md, section 4.4)
@@ -1745,6 +1747,12 @@ void Solver::init_numerics() {
                           .line = line_of(hybrid_input),
                           .message = "sensor_threshold and upwind_floor must be in [0, 1]",
                           .fix = "The defaults are sensor_threshold = 0.65 and upwind_floor = 0.0"});
+    }
+    if (!(hybrid_dilatation_scale >= 0.0_r && std::isfinite(hybrid_dilatation_scale))) {
+        throw InputError({.key = "numerics.hybrid.dilatation_scale",
+                          .line = line_of(hybrid_input, "dilatation_scale"),
+                          .message = "must be finite and at least 0",
+                          .fix = "The default is 1e-5; 0 drops epsilon"});
     }
     init_error_control();
 }
@@ -2108,7 +2116,7 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                 throw InputError({.key = "write_data.format",
                                   .line = line_of(output, "format"),
                                   .message = "\"" + format + "\" does not hold surfaces, curves or points",
-                                  .fix = "Use format = \"vtkhdf\" (one file of every snapshot) or \"vtu\" (VTK PolyData "
+                                  .fix = "Use format = \"vtkhdf\" (a series file of every snapshot) or \"vtu\" (VTK PolyData "
                                          "files and a .pvd series)"});
             }
             if (format == "vtkhdf" && !have_hdf5()) {

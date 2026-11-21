@@ -422,8 +422,12 @@ uint32_t Solver::n_gradient_cells() const {
 
 void Solver::update_upwind_sensor() {
     gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
+    if (is_mixture()) cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
     gated::parallel_for("upwind_sensor", n_gradient_cells(),
-                         UpwindSensorFunctor{viscous_gradients, cell_upwind, hybrid_threshold, hybrid_floor});
+                        UpwindSensorFunctor{viscous_gradients, W_cells, mesh->cell_volume, physics.get_gamma(),
+                                            cell_gamma, cell_upwind, hybrid_threshold, hybrid_floor,
+                                            hybrid_dilatation_scale});
 }
 
 void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {

@@ -192,14 +192,14 @@ nondimensional case); `divergence_report.json` gives them as `units`.
   valid state.
 - **Likely causes, most likely first**, each with a weight from 0 to 1, the evidence behind it and what to try:
 
-  | Cause | Evidence |
-  |---|---|
-  | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
-  | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
-  | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
-  | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
-  | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
+    | Cause | Evidence |
+    |---|---|
+    | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
+    | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
+    | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
+    | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
+    | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
+    | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** a table of the cell closest to failing, its face neighbors and the next invalid cells in the last
   valid state (density, speed, pressure, temperature, local CFL number), with their centroids, quality metrics,
