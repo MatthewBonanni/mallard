@@ -1,14 +1,15 @@
 # Particles
 
 Mallard tracks Lagrangian particles through the flow, on the device, in 2D and
-3D, serial and on many ranks. This release has massless tracers: each
-particle moves with the gas velocity at its position, for pathlines,
-residence times and other Lagrangian analyses. Each particle can carry
+3D, serial and on many ranks. Massless tracers move with the gas velocity at
+their position, for pathlines, residence times and other Lagrangian analyses;
+[solid particles](#solid-particles) have inertia: drag and gravity accelerate
+them, and walls rebound or catch them. Each particle can carry
 [quantities](#per-particle-quantities) along its path (time integrals, extrema,
 first times, turns about an axis), and [probes](#particle-probes) give
-statistics of the particles in a region. Inertial particles, sprays, injection
-during the run and particle output beyond the final positions follow in later
-releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+statistics of the particles in a region. Particles do not act on the gas yet;
+two-way coupling, sprays, injection during the run and particle output beyond
+the final positions follow in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 ## Tracers: `[particles]`
 
@@ -40,7 +41,7 @@ bitwise the same on any number of ranks.
 | `type` | required | `"tracer"` |
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
-| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), then the quantities, by id |
+| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, then the quantities, by id |
 | `capacity` | the number of particles | Particles a rank can hold |
 
 Every particle is seeded at the start of the run. Ids follow the seeds: the
@@ -69,6 +70,82 @@ At boundaries:
   step, so such runs are not captured in CUDA graphs yet (single-rank runs
   are).
 - SIMPLER chemistry coupling is refused for now.
+
+## Solid particles
+
+```toml
+[physics]
+type = "navier_stokes"
+mu = 1.8e-5
+
+[particles]
+type = "solid"
+diameter = 20e-6         # m
+density = 2500.0         # kg/m^3
+gravity = [0.0, -9.81]   # default: [source] gravity
+points = [[0.1, 0.5], [0.2, 0.5]]
+
+[[particles.walls]]
+zones = ["floor"]
+interaction = "stick"
+```
+
+A solid particle is a small rigid sphere with a velocity of its own, which
+drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
+displaces) accelerates:
+
+$$\frac{d\mathbf{v}}{dt} = \frac{\mathbf{u} - \mathbf{v}}{\tau} + \mathbf{g}\left(1 - \frac{\rho}{\rho_p}\right),
+\qquad \tau = \frac{\rho_p d^2}{18 \mu f(Re_p)}, \qquad Re_p = \frac{\rho |\mathbf{u} - \mathbf{v}| d}{\mu}.$$
+
+The gas state at the particle (`u`, `rho`, `mu` at its temperature) comes from
+the reconstruction polynomial, as for tracers, and position and velocity are
+part of the time integrator's state: trajectories converge at the
+integrator's order. `f` is the drag correlation: `"stokes"` (`f = 1`, creeping
+flow) or `"schiller_naumann"` (`f = 1 + 0.15 Re_p^0.687` up to `Re_p = 1000`,
+then `C_D = 0.44`). The particles do not act on the gas.
+
+The relaxation time `tau` can be far below the flow's time step (a 1 µm
+droplet in air relaxes in a few microseconds). A particle whose `tau` is below
+the step `dt` is in its stiff limit: it moves at its equilibrium velocity
+`u + tau g'` and its velocity relaxes to it within the step, so tiny particles
+follow the gas instead of making the run unstable, and the step never depends
+on the particles.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `type` | required | `"solid"` |
+| `diameter` | required | Sphere diameter |
+| `density` | required | Material density `rho_p` |
+| `drag` | `"schiller_naumann"` | `"stokes"` or `"schiller_naumann"` |
+| `gravity` | `[source] gravity`, else none | Gravity on the particles |
+| `velocity` | the gas velocity at each seed | Velocity of every seeded particle |
+
+The other keys of [`[particles]`](#tracers-particles) (seeds, `file`,
+`capacity`) are the same. Particle expressions read the particle velocity as
+`V_X`, `V_Y`, `V_Z`. Restart files carry the velocities; tracers restarted as
+solid particles start at the gas velocity.
+
+**Walls.** Walls and symmetry planes rebound solid particles elastically;
+`[[particles.walls]]` sets other interactions per boundary zone. A rebound
+reverses the normal velocity times the restitution coefficient `e_n` and
+scales the tangential velocity by `e_t`; a sticking wall removes the particle
+and counts it as deposited.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `zones` | required | Wall or symmetry boundary zones |
+| `interaction` | `"rebound"` | `"rebound"` or `"stick"` |
+| `restitution` | 1 | `e_n` in [0, 1] (rebound) |
+| `tangential_restitution` | 1 | `e_t` in [0, 1] (rebound) |
+
+**Pitfalls.**
+
+- Solid particles need a viscous single gas (`type = "navier_stokes"` in
+  `[physics]`); mixtures are refused for now.
+- A bounce happens at the end of the step in which the particle crossed the
+  wall, so its timing is first order in the step.
+- The stiff limit is first order in `tau / dt` for particles near it: when
+  the inertia of particles with `tau` near `dt` matters, lower `dt`.
 
 ## Per-particle quantities
 

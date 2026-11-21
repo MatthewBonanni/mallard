@@ -1693,7 +1693,8 @@ void Solver::init_numerics() {
             if (particles->reads_time()) set_stage_time(t_stage, c);
             // The first stage of every integrator is the step's start, c = 0
             particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient,
-                                viscous_gradients, c == 0.0_r, stage_time);
+                                viscous_gradients, c == 0.0_r, stage_time, dt,
+                                recording_step ? step_dt_device() : nullptr);
         }
     };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
@@ -2362,7 +2363,7 @@ void Solver::init_particles(region::Regions & regions) {
     }
     particles = std::make_unique<Particles>();
     particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
-                    restart ? &*restart : nullptr, regions, is_mixture() ? 0.0 : static_cast<double>(physics.R));
+                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics);
     if (particles->reads_time() && !stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     if (!viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
@@ -2766,6 +2767,10 @@ int Solver::run_loop() {
         // A restart's pending half step, where this run does not fuse it into its first step
         if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
         if (!reacting || simpler) chemistry_pending = 0.0;
+        if (particles && particles->starts_at_gas_velocity()) {
+            update_cell_W();
+            particles->start_velocity(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+        }
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
         if (step == 0) {
