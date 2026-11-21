@@ -5,6 +5,8 @@
 # steady solution of the Euler equations up to O(M^2) acoustic waves. Each tracer
 # moves along a closed streamline sin(2 pi x) sin(2 pi y) = const, so the
 # streamfunction at its final position (tracers.csv) measures the pathline error.
+# Each tracer also counts its turns about its vortex's center, and a probe follows
+# the tracers near that center.
 [run]
 t_stop = 10.0
 cfl = 0.8
@@ -55,6 +57,22 @@ capacity = 82
 lo = [0.05, 0.05]
 hi = [0.45, 0.45]
 n = [9, 9]
+
+# Turns of each tracer about the center of its vortex, and its largest speed, in tracers.csv
+[[particles.quantities]]
+name = "turns"
+winding = {point = [0.25, 0.25]}
+
+[[particles.quantities]]
+name = "speed_max"
+max = "hypot(U_X, U_Y)"
+
+# Statistics of the tracers near the vortex's center, every 100 steps
+[[particles.probes]]
+name = "core"
+region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
+fields = ["turns", "hypot(U_X, U_Y)"]
+interval = 100
 
 [output]
 check_interval = 200

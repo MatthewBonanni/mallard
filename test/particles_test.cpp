@@ -12,8 +12,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <limits>
 #include <numbers>
 #include <sstream>
 #include <string>
@@ -297,29 +300,33 @@ TEST(ParticlesTest, TrajectoriesAreBitwiseIndependentOfTheRankCount) {
 }
 
 TEST(ParticlesTest, RestartedRunContinuesTheTrajectoriesExactly) {
-    // On several ranks rank 0 restarts serially: the file restarts on any rank count
+    // On several ranks rank 0 restarts serially: the file restarts on any rank count. Quantities, integrated
+    // and extrema, continue too
     const std::string dir = (scratch_dir() / "mallard_particles_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 20\n";
+    const std::string q = "[[particles.quantities]]\nname = \"I\"\nintegral = \"U_X * U_Y\"\n"
+                          "[[particles.quantities]]\nname = \"top\"\nmax = \"y\"\n";
     Solver straight;
-    straight.init(parse_toml(vortex(16, 0.01, 40, TENO4, "SSPRK3")));
+    straight.init(parse_toml(vortex(16, 0.01, 40, TENO4, "SSPRK3") + q));
     straight.run();
     const std::vector<particles::Record> expected = straight.get_particles()->gather();
     const std::array<uint64_t, 2> removed = straight.get_particles()->removed();
     Solver first;
-    first.init(parse_toml(vortex(16, 0.01, 20, TENO4, "SSPRK3", "", writer)));
+    first.init(parse_toml(vortex(16, 0.01, 20, TENO4, "SSPRK3", "", writer) + q));
     first.run();
     comm::barrier();
     if (!comm::is_root()) return;
     Solver second;
     second.set_distributed(false);
     second.init(parse_toml(vortex(16, 0.01, 40, TENO4, "SSPRK3",
-                                  "type = \"restart\"\nfile = \"" + dir + "/restart_000020.restart\"\n")));
+                                  "type = \"restart\"\nfile = \"" + dir + "/restart_000020.restart\"\n") + q));
     second.run();
     const std::vector<particles::Record> records = second.get_particles()->gather();
     ASSERT_EQ(records.size(), expected.size());
     for (size_t k = 0; k < records.size(); k++) {
         EXPECT_EQ(records[k].id, expected[k].id);
         for (size_t d = 0; d < N_DIM; d++) EXPECT_EQ(records[k].x[d], expected[k].x[d]) << "particle " << k;
+        EXPECT_EQ(records[k].q, expected[k].q) << "particle " << k;
     }
     EXPECT_EQ(second.get_particles()->removed(), removed);
 }
@@ -351,10 +358,10 @@ TEST(ParticlesTest, WallsReflectTracers) {
     solver.init(parse_toml(box(12, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 1\ndt = 0.01\n",
                                "points = [" + numbers(0.5, 0.02, 0.25) + ", " + numbers(0.3, 0.97, 0.25) + "]\n")));
     Particles & p = *solver.get_particles();
-    auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), p.positions());
+    auto x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), p.values());
     x(1) = static_cast<rtype>(-0.03);                 // 0.03 below the wall
     x(N_DIM + 1) = static_cast<rtype>(1.04);          // 0.04 above the symmetry plane
-    Kokkos::deep_copy(p.positions(), x);
+    Kokkos::deep_copy(p.values(), x);
     p.relocate();
     const std::vector<particles::Record> records = p.gather();
     ASSERT_EQ(records.size(), 2u);
@@ -392,5 +399,232 @@ TEST(ParticlesTest, SeedsOutsideTheMeshAreErrors) {
         FAIL() << "no error";
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("seed point 1"), std::string::npos) << e.what();
+    }
+}
+
+namespace {
+
+/** @brief The quantity named name of each particle, by id. */
+std::vector<double> quantity_of(const Particles & particles, const std::string & name) {
+    const auto & names = particles.quantity_names();
+    const auto at = std::find(names.begin(), names.end(), name);
+    EXPECT_NE(at, names.end()) << name;
+    const size_t k = static_cast<size_t>(at - names.begin());
+    std::vector<double> out;
+    for (const auto & r : particles.gather()) out.push_back(r.q.at(k));
+    return out;
+}
+
+/** @brief The rows of a CSV file after its comment and header lines, as numbers. */
+std::vector<std::vector<double>> csv_rows(const std::string & file) {
+    std::ifstream in(file);
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    bool header = true;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        if (header) {
+            header = false;
+            continue;
+        }
+        std::vector<double> row;
+        std::stringstream s(line);
+        std::string cell;
+        while (std::getline(s, cell, ',')) row.push_back(std::stod(cell));
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+/** @brief The largest error of integral = "x" after one turn of the turning flow of turning_error. */
+double turning_integral_error(const std::string & integrator, uint32_t n_steps) {
+    const double K = 2.0 * std::numbers::pi, t = 1.0, u0[2] = {0.3, -0.2};
+    std::ostringstream run;
+    run.precision(17);
+    run << "n_steps = " << n_steps << "\ndt = " << t / n_steps << "\n";
+    std::string input = box(12, vec("0.3", "-0.2", "0.0"), "xy", "", run.str(),
+                            lattice(0.3, 0.7) + "[[particles.quantities]]\nname = \"X\"\nintegral = \"x\"\n", TENO4,
+                            integrator);
+    input.insert(input.find("[numerics]"), "[source]\nrhou = " + vec("-2 * pi * rho * u_y", "2 * pi * rho * u_x", "0.0") + "\n");
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const std::vector<double> X = quantity_of(*solver.get_particles(), "X");
+    const auto seeds = lattice_points(0.3, 0.7);
+    // x(t) = x0 + (u0_x sin Kt + u0_y (cos Kt - 1)) / K, so int_0^t x = x0 t + (u0_x (1 - cos Kt) + u0_y (sin Kt - K t)) / K^2
+    double error = 0.0;
+    for (size_t k = 0; k < seeds.size(); k++) {
+        const double exact = seeds[k][0] * t + (u0[0] * (1.0 - std::cos(K * t)) + u0[1] * (std::sin(K * t) - K * t)) / (K * K);
+        error = std::max(error, std::abs(X[k] - exact));
+    }
+    return error;
+}
+
+/** @brief Uniform flow at U_UNIFORM along x through the periodic box, for n_steps of DT_UNIFORM. */
+constexpr double U_UNIFORM = 0.3, DT_UNIFORM = 0.01;
+
+std::string uniform(const std::string & particles, uint32_t n_steps, const std::string & extra = "") {
+    return box(12, vec("0.3", "0.0", "0.0"), "xy", "", "n_steps = " + std::to_string(n_steps) + "\ndt = 0.01\n",
+               particles) + extra;
+}
+
+} // namespace
+
+TEST(ParticleQuantitiesTest, IntegralsConvergeAtTheIntegratorOrder) {
+    SKIP_IN_SINGLE_PRECISION("RK4's error with 80 steps is near single-precision round-off");
+    // The integrand reads each stage's position: integrals take the integrator's stage weights
+    const double fe = std::log2(turning_integral_error("FE", 80) / turning_integral_error("FE", 160));
+    const double ssprk3 = std::log2(turning_integral_error("SSPRK3", 40) / turning_integral_error("SSPRK3", 80));
+    const double rk4 = std::log2(turning_integral_error("RK4", 40) / turning_integral_error("RK4", 80));
+    EXPECT_GT(fe, 0.9);
+    EXPECT_GT(ssprk3, 2.8);
+    EXPECT_GT(rk4, 3.8);
+}
+
+TEST(ParticleQuantitiesTest, WindingCountsTheTurnsAboutTheVortexAxis) {
+    // Each particle turns at omega(r) about the vortex's axis, t omega(r) / (2 pi) turns, up to the error of its
+    // pathline; the winding is its own angle, unwrapped, to the integrator's error. integral = "1" is its age
+    const uint32_t n = 32;
+    const double dt = 0.005, t = 2.0;
+    const std::string axis = N_DIM == 3 ? ", axis = [0.0, 0.0, 2.0]" : "";
+    const std::string q = "[[particles.quantities]]\nname = \"turns\"\nwinding = {point = " + numbers(0.5, 0.5, 0.0) +
+                          axis + "}\n[[particles.quantities]]\nname = \"age\"\nintegral = \"1\"\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(vortex(n, dt, static_cast<uint32_t>(std::lround(t / dt)), TENO4, "RK4") + q));
+    solver.run();
+    const Particles & p = *solver.get_particles();
+    const std::vector<double> turns = quantity_of(p, "turns"), age = quantity_of(p, "age");
+    const auto seeds = vortex_seeds(n);
+    const std::vector<particles::Record> records = p.gather();
+    ASSERT_EQ(turns.size(), seeds.size());
+    for (size_t k = 0; k < seeds.size(); k++) {
+        const double rx = seeds[k][0] - 0.5, ry = seeds[k][1] - 0.5;
+        const double s = 1.0 - (rx * rx + ry * ry) / (R_VORTEX * R_VORTEX);
+        const double exact = OMEGA * s * s * s * s * t / (2.0 * std::numbers::pi);
+        EXPECT_NEAR(turns[k], exact, 3e-3 * exact) << "particle " << k;
+        const double swept = (std::atan2(records[k].x[1] - 0.5, records[k].x[0] - 0.5) - std::atan2(ry, rx)) /
+                             (2.0 * std::numbers::pi);
+        EXPECT_NEAR(turns[k], swept + std::round(turns[k] - swept), roundoff(1e-8)) << "particle " << k;
+        EXPECT_NEAR(age[k], t, roundoff(1e-12)) << "particle " << k;
+    }
+}
+
+TEST(ParticleQuantitiesTest, ExtremaAndFirstTimesAreThoseOfTheStepStarts) {
+    // Particles move exactly in uniform flow, so the values at the step starts are known: the extrema of
+    // sin(2 pi x) over them, the first with x > 0.6, and the largest x among those with y > 0.5
+    const std::string q = "[[particles.quantities]]\nname = \"top\"\nmax = \"sin(2 * pi * x)\"\n"
+                          "[[particles.quantities]]\nname = \"bottom\"\nmin = \"sin(2 * pi * x)\"\n"
+                          "[[particles.quantities]]\nname = \"arrival\"\nfirst_time = \"x > 0.6\"\n"
+                          "[[particles.quantities]]\nname = \"gated\"\nmax = \"x\"\nwhile = \"y > 0.5\"\n";
+    const uint32_t n_steps = 150;
+    auto check = [&](const Solver & s) {
+        const Particles & p = *s.get_particles();
+        const std::vector<double> top = quantity_of(p, "top"), bottom = quantity_of(p, "bottom");
+        const std::vector<double> arrival = quantity_of(p, "arrival"), gated = quantity_of(p, "gated");
+        const auto seeds = lattice_points(0.07, 0.93);
+        ASSERT_EQ(top.size(), seeds.size());
+        for (size_t k = 0; k < seeds.size(); k++) {
+            double hi = -1e300, lo = 1e300, first = std::numeric_limits<double>::quiet_NaN(), x_max = -1e300;
+            for (uint32_t i = 0; i < n_steps; i++) {
+                const double x = wrap(seeds[k][0] + U_UNIFORM * DT_UNIFORM * i, 1.0);
+                hi = std::max(hi, std::sin(2.0 * std::numbers::pi * x));
+                lo = std::min(lo, std::sin(2.0 * std::numbers::pi * x));
+                if (std::isnan(first) && x > 0.6) first = DT_UNIFORM * i;
+                x_max = std::max(x_max, x);
+            }
+            EXPECT_NEAR(top[k], hi, roundoff(1e-10)) << "particle " << k;
+            EXPECT_NEAR(bottom[k], lo, roundoff(1e-10)) << "particle " << k;
+            if (std::isnan(first)) {
+                EXPECT_TRUE(std::isnan(arrival[k])) << "particle " << k << ": " << arrival[k];
+            } else {
+                EXPECT_NEAR(arrival[k], first, roundoff(1e-12)) << "particle " << k;
+            }
+            if (seeds[k][1] > 0.5) {
+                EXPECT_NEAR(gated[k], x_max, roundoff(1e-10)) << "particle " << k;
+            } else {
+                EXPECT_EQ(gated[k], -std::numeric_limits<double>::infinity()) << "particle " << k;
+            }
+        }
+    };
+    const std::string input = uniform(lattice(0.07, 0.93) + q, n_steps);
+    if (comm::size() == 1) {
+        expect_matches_serial_with_and_without_step_graphs(input, check);
+    } else {
+        expect_matches_serial(input, check);
+    }
+}
+
+TEST(ParticleQuantitiesTest, ResidenceTimeInARegionIsItsLengthOverTheSpeed) {
+    // A particle crosses a slab 0.31 long at U = 0.3: 0.31 / 0.3 inside out of 2.5. A sharp in() is a step
+    // function, integrated within a step (here 0.0033 off); a smooth edge makes the integrand smooth and the
+    // residence time exact to the integrator's error
+    const std::string slab = std::string("type = \"") + (N_DIM == 3 ? "box" : "rectangle") + "\"\ncenter = " + numbers(0.355, 0.5, 0.25) + "\nsize = " + numbers(0.31, 4.0, 4.0) + "\n";
+    const std::string regions = "[regions.slab]\n" + slab + "[regions.soft]\n" + slab + "edge = 0.05\n";
+    const std::string q = "[[particles.quantities]]\nname = \"sharp\"\nintegral = \"in(slab)\"\n"
+                          "[[particles.quantities]]\nname = \"smooth\"\nintegral = \"in(soft)\"\n";
+    // Entering at t = 0.4925 and leaving at 1.5258, within steps
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(uniform("points = [" + numbers(0.05225, 0.5, 0.25) + "]\n" + q, 250, regions)));
+    solver.run();
+    const Particles & p = *solver.get_particles();
+    const double sharp = quantity_of(p, "sharp").at(0), smooth = quantity_of(p, "smooth").at(0);
+    const double exact = 0.31 / U_UNIFORM;
+    EXPECT_NEAR(sharp, exact, DT_UNIFORM);
+    EXPECT_NEAR(smooth, exact, 1e-4);
+}
+
+TEST(ParticleProbesTest, StatisticsOfTheParticlesInARegion) {
+    // After 0.1 at U = 0.3 the lattice's columns are at x = 0.1, 0.3867, 0.6733, 0.96: the slab
+    // 0.3 < x < 0.7 holds the middle two, 8 particles; every particle reads U_X = 0.3
+    const std::string file = (scratch_dir() / "mallard_particle_probe_slab.csv").string();
+    const std::string all = (scratch_dir() / "mallard_particle_probe_all.csv").string();
+    const std::string probes = "[[particles.probes]]\nname = \"slab\"\nregion = \"slab\"\nfields = [\"x\", \"y\", "
+                               "\"U_X\"]\ninterval = 5\nfile = \"" + file + "\"\n"
+                               "[[particles.probes]]\nname = \"all\"\nfields = [\"x\"]\nfile = \"" + all + "\"\n";
+    const std::string regions = std::string("[regions.slab]\ntype = \"") + (N_DIM == 3 ? "box" : "rectangle") +
+                                "\"\ncenter = " + numbers(0.5, 0.5, 0.25) + "\nsize = " + numbers(0.4, 4.0, 4.0) + "\n";
+    auto check = [&](const Solver &) {
+        if (!comm::is_root()) return;
+        const auto rows = csv_rows(file);
+        ASSERT_EQ(rows.size(), 2u);
+        const std::vector<double> & r = rows[1];
+        ASSERT_EQ(r.size(), 3u + 12u);
+        EXPECT_EQ(r[0], 10.0);
+        EXPECT_NEAR(r[1], 0.1, roundoff(1e-15));
+        EXPECT_EQ(r[2], 8.0);
+        const double a = 0.07 + 0.86 / 3.0 + 0.03, b = 0.07 + 2.0 * 0.86 / 3.0 + 0.03;
+        EXPECT_NEAR(r[3], 0.5 * (a + b), roundoff(1e-12));     // x mean
+        EXPECT_NEAR(r[4], 0.5 * (b - a), roundoff(1e-7));      // x std
+        EXPECT_NEAR(r[5], a, roundoff(1e-12));                 // x min
+        EXPECT_NEAR(r[6], b, roundoff(1e-12));                 // x max
+        EXPECT_NEAR(r[7], 0.5, roundoff(1e-12));               // y mean
+        EXPECT_NEAR(r[9], 0.07, roundoff(1e-12));              // y min
+        EXPECT_NEAR(r[10], 0.93, roundoff(1e-12));             // y max
+        EXPECT_NEAR(r[11], U_UNIFORM, roundoff(1e-12));        // U_X mean
+        EXPECT_NEAR(r[12], 0.0, roundoff(1e-6));               // U_X std
+        const auto every = csv_rows(all);
+        ASSERT_EQ(every.size(), 10u);
+        EXPECT_EQ(every.back()[2], 16.0);
+    };
+    const std::string input = uniform(lattice(0.07, 0.93) + probes, 10, regions);
+    if (comm::size() == 1) {
+        expect_matches_serial_with_and_without_step_graphs(input, check);
+    } else {
+        expect_matches_serial(input, check);
+    }
+}
+
+TEST(ParticleQuantitiesTest, AQuantityGivesExactlyOneKind) {
+    Solver solver;
+    try {
+        solver.init(parse_toml(uniform(lattice(0.07, 0.93) +
+                                           "[[particles.quantities]]\nname = \"q\"\nmax = \"x\"\nmin = \"x\"\n",
+                                       1)));
+        FAIL() << "no error";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("gives 2 kinds"), std::string::npos) << e.what();
     }
 }

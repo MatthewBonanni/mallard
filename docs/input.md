@@ -1553,15 +1553,16 @@ reductions = ["mean", "rms"]
 ## `[particles]`
 
 Lagrangian particles; this release has massless tracers
-([Particles](guide/particles.md)). Restart files carry them: a run restarted
-from a file with particles continues them and does not seed; a file without
-particles (or a `remap` start) seeds them from these keys.
+([Particles](guide/particles.md)). Restart files carry them and their
+quantities: a run restarted from a file with particles continues them and does
+not seed; a file without particles (or a `remap` start) seeds them from these
+keys.
 
 | Key | Description |
 |---|---|
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position. Required |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the positions at the end of the run (`id`, `x`, `y`, `z`, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.lattice]`
@@ -1572,6 +1573,39 @@ Seeds on a lattice, after the `points` in id order (`x` varying fastest).
 |---|---|
 | `lo`, `hi` | Opposite corners. Required |
 | `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
+### `[[particles.quantities]]`
+
+A value each particle follows along its path
+([Per-particle quantities](guide/particles.md#per-particle-quantities)).
+Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
+`U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
+`V_Z`, the quantities before this one, and `in(name)` of a region of
+`[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
+`winding`.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `integral` | Expression whose time integral along the path it is, at the time integrator's order |
+| `max`, `min` | Expression whose largest (smallest) value at the steps' starts it is |
+| `first_time` | Condition: the first step start's `t` at which it holds, `nan` until then |
+| `winding` | Table `point`, `axis` (3D only): the signed turns about the axis through the point |
+| `while` | Condition gating the quantity: it integrates or samples only where this holds, default none |
+
+### `[[particles.probes]]`
+
+Statistics of particle expressions over the particles in a region
+([Particle probes](guide/particles.md#particle-probes)): per row `step`, `t`,
+`count`, and each field's mean, standard deviation, min and max.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | A filled region of primitives that does not move, or its name, default every particle |
+| `fields` | Expressions as in `[[particles.quantities]]`, the quantities among their variables, default none (the count only) |
+| `interval` | Steps between rows, default 1 |
+| `file` | Its CSV file, default `particle_probe_<name>.csv` |
 
 ## `[[triggers]]`
 

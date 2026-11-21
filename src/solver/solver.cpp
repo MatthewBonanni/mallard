@@ -250,14 +250,14 @@ void Solver::setup_from_input() {
     block_owners.reset();
     timed_phase("fields and output", [&] {
         allocate_memory();
+        used_regions = std::make_unique<region::Regions>(input, *mesh);
         // Output of states read from files takes no steps
         if (!state_reader) {
-            init_particles();
+            init_particles(*used_regions);
             allocate_time_stepping();
         }
         init_les();
         init_rhs_split();
-        used_regions = std::make_unique<region::Regions>(input, *mesh);
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -1690,8 +1690,10 @@ void Solver::init_numerics() {
     rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) {
         calc_rhs(solution, rhs, t_stage, c);
         if (particles) {
+            if (particles->reads_time()) set_stage_time(t_stage, c);
+            // The first stage of every integrator is the step's start, c = 0
             particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient,
-                                viscous_gradients);
+                                viscous_gradients, c == 0.0_r, stage_time);
         }
     };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
@@ -2342,7 +2344,7 @@ void Solver::allocate_time_stepping() {
     }
 }
 
-void Solver::init_particles() {
+void Solver::init_particles(region::Regions & regions) {
     if (!Particles::configured(input)) return;
     if (simpler) {
         throw InputError(Diagnostic{.key = "particles",
@@ -2360,7 +2362,8 @@ void Solver::init_particles() {
     }
     particles = std::make_unique<Particles>();
     particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
-                    restart ? &*restart : nullptr);
+                    restart ? &*restart : nullptr, regions, is_mixture() ? 0.0 : static_cast<double>(physics.R));
+    if (particles->reads_time() && !stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     if (!viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh);
@@ -2889,6 +2892,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
     write_integrals();
     // Probes first, so that triggers read this step's values and restarts carry their state
     write_probes();
+    write_particle_probes();
     update_convergence();
     act_on_triggers();
     write_data();
@@ -2932,7 +2936,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t) || probes.averages_due(step, t);
+           probes.due(step, t) || probes.averages_due(step, t) || (particles && particles->probes_due(step));
 }
 
 double Solver::progress() const {
@@ -3255,6 +3259,9 @@ void Solver::print_summary(const RunEnd & end) const {
     if (integral_monitor.interval > 0) s.files.push_back({"integrals", 0, integral_monitor.file});
     if (convergence.enabled()) s.files.push_back({"convergence", 0, convergence.file_name()});
     for (const auto & file : probes.files()) s.files.push_back({"probes", 0, file});
+    if (particles) {
+        for (const auto & file : particles->probe_files()) s.files.push_back({"particle probes", 0, file});
+    }
     report::Text text(logging::color_stdout());
     summary_section(text, s);
     if (run_health.on) health_section(text, run_health.last);
@@ -3413,6 +3420,13 @@ void Solver::write_probes() {
     if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
     ProbeFluxes fluxes;
     probes.write(step, t, probe_fields(fluxes));
+}
+
+void Solver::write_particle_probes() {
+    if (!particles || !particles->probes_due(step)) return;
+    update_cell_W();
+    particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+    particles->write_probes(step, static_cast<double>(t));
 }
 
 void Solver::sample_probe_averages() {

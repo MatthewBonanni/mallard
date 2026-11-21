@@ -110,7 +110,8 @@ constexpr int MAX_BOUNCES = 8;
 } // namespace
 
 void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, const BoundaryData & boundaries,
-                     const Distribution * distribution, const RestartArrays * restart) {
+                     const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
+                     const double gas_constant) {
     mesh = std::move(mesh_in);
     const Input & table = input.at("particles");
     record_options("particles.type", {"tracer"});
@@ -118,6 +119,11 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     if (type != "tracer") throw not_accepted(table, "particles.type", type, {"tracer"});
     file = find_value_or<std::string>(table, "file", "");
     distributed = distribution != nullptr;
+    R = gas_constant;
+    quantities.init(table, regions, N_DIM, R > 0.0);
+    probes.init(table, regions, quantities);
+    width = N_DIM + quantities.n_integrated();
+    const uint32_t n_aux = quantities.n_aux();
     n_owned = mesh->n_owned();
 
     // What a particle does at each face
@@ -169,7 +175,12 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     n_seeded = points.size();
     std::vector<uint64_t> new_ids;
     std::vector<uint32_t> new_cells;
-    std::vector<rtype> new_x;
+    std::vector<rtype> new_values;  // persistent() per particle
+    const auto fresh = [&](const Point & p) {
+        for (size_t d = 0; d < N_DIM; d++) new_values.push_back(static_cast<rtype>(p[d]));
+        for (uint32_t k = N_DIM; k < width; k++) new_values.push_back(0.0_r);
+        for (uint32_t j = 0; j < n_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
+    };
     std::array<uint64_t, 2> removed_before{0, 0};
     const auto find_array = [&](const char * name) -> const std::vector<double> * {
         if (!restart) return nullptr;
@@ -189,12 +200,31 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             restored_x->size() != N_DIM * n_restored || restored_removed->size() != 2) {
             throw std::runtime_error("particles: the restart file's particle arrays are inconsistent.");
         }
+        // Quantities the file has continue; others start afresh
+        std::vector<const std::vector<double> *> restored_q(quantities.size(), nullptr);
+        for (uint32_t q = 0; q < quantities.size(); q++) {
+            restored_q[q] = find_array(("PARTICLE_Q_" + quantities.names()[q]).c_str());
+            if (restored_q[q] && restored_q[q]->size() != n_restored) {
+                throw std::runtime_error("particles: the restart file's quantity " + quantities.names()[q] +
+                                         " is inconsistent.");
+            }
+        }
         for (uint64_t k = 0; k < n_restored; k++) {
             const auto local = local_of_global.find(static_cast<uint64_t>((*restored_cell)[k]));
             if (local == local_of_global.end()) continue;
             new_ids.push_back(static_cast<uint64_t>((*restored_id)[k]));
             new_cells.push_back(local->second);
-            for (size_t d = 0; d < N_DIM; d++) new_x.push_back(static_cast<rtype>((*restored_x)[N_DIM * k + d]));
+            Point p{};
+            for (size_t d = 0; d < N_DIM; d++) p[d] = (*restored_x)[N_DIM * k + d];
+            const size_t at = new_values.size();
+            fresh(p);
+            for (uint32_t q = 0; q < quantities.size(); q++) {
+                if (!restored_q[q]) continue;
+                const particles::QuantitySpec & spec = quantities.spec(q);
+                const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
+                                        spec.kind == particles::Accumulate::WINDING;
+                new_values[at + (integrated ? spec.column : width + spec.column)] = static_cast<rtype>((*restored_q[q])[k]);
+            }
         }
         if (!distributed || comm::is_root()) {
             removed_before = {static_cast<uint64_t>((*restored_removed)[0]), static_cast<uint64_t>((*restored_removed)[1])};
@@ -220,7 +250,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             if (located[p] < 0) continue;
             new_ids.push_back(p);
             new_cells.push_back(static_cast<uint32_t>(located[p]));
-            for (size_t d = 0; d < N_DIM; d++) new_x.push_back(static_cast<rtype>(points[p][d]));
+            fresh(points[p]);
         }
     }
     const uint64_t n_local = new_ids.size();
@@ -234,8 +264,8 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
                                                std::to_string(comm::rank()),
                                     .fix = "Raise it, or leave it out (every rank then holds every particle)"});
     }
-    if (n_slots * N_DIM > uint64_t(std::numeric_limits<int32_t>::max())) {
-        throw InputError("particles.capacity: at most " + std::to_string(std::numeric_limits<int32_t>::max() / N_DIM) +
+    if (n_slots * width > uint64_t(std::numeric_limits<int32_t>::max())) {
+        throw InputError("particles.capacity: at most " + std::to_string(std::numeric_limits<int32_t>::max() / width) +
                          " particles per rank.");
     }
     capacity = static_cast<uint32_t>(n_slots);
@@ -248,37 +278,47 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     offsets = Kokkos::View<rtype *[N_DIM]>("particle_offsets", capacity);
     W_point = Kokkos::View<rtype *[N_CONSERVATIVE]>("particle_W", capacity);
     marked = Kokkos::View<uint32_t *>("particle_marked_cells", mesh->n_cells);
+    aux = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_aux", capacity, n_aux);
     if (distributed) slots = Kokkos::View<uint32_t *>("particle_slots", capacity);
     h_id = mirrors(id);
     h_cell = mirrors(cell);
     h_x = mirrors(x);
+    h_aux = mirrors(aux);
     h_removed = mirrors(n_removed);
 
     Kokkos::deep_copy(h_id, EMPTY);
     Kokkos::deep_copy(h_cell, 0u);
+    Kokkos::deep_copy(h_x, 0.0_r);
+    for (uint32_t j = 0; j < n_aux; j++) {
+        for (uint32_t s = 0; s < capacity; s++) h_aux(s, j) = static_cast<rtype>(quantities.initial_aux(j));
+    }
+    const uint32_t n_persistent = persistent();
     for (uint64_t k = 0; k < n_local; k++) {
         h_id(k) = new_ids[k];
         h_cell(k) = new_cells[k];
-        for (size_t d = 0; d < N_DIM; d++) h_x(N_DIM * k + d) = new_x[N_DIM * k + d];
+        const rtype * v = new_values.data() + n_persistent * k;
+        for (uint32_t j = 0; j < width; j++) h_x(width * k + j) = v[j];
+        for (uint32_t j = 0; j < n_aux; j++) h_aux(k, j) = v[width + j];
     }
     h_removed(0) = removed_before[0];
     h_removed(1) = removed_before[1];
     Kokkos::deep_copy(id, h_id);
     Kokkos::deep_copy(cell, h_cell);
     Kokkos::deep_copy(x, h_x);
+    Kokkos::deep_copy(aux, h_aux);
     Kokkos::deep_copy(n_removed, h_removed);
 }
 
-void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
-                         FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
-    if (capacity == 0) return;
+void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
+                             FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
+                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
     const auto ids = id;
     const auto start = cell;
     const auto pc = point_cell;
     const auto off = offsets;
     const auto mark = marked;
     const auto xs = x_stage;
+    const uint32_t w = width;
     const auto cell_coords = mesh->cell_coords;
     Kokkos::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) {
@@ -288,7 +328,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         }
         const uint32_t c = start(s);
         pc(s) = c;
-        FOR_I_DIM off(s, i) = xs(N_DIM * s + i) - cell_coords(c, i);
+        FOR_I_DIM off(s, i) = xs(w * s + i) - cell_coords(c, i);
         Kokkos::atomic_store(&mark(c), 1u);
     });
     const LSQVertexGradientFunctor grad = gradient;
@@ -306,10 +346,93 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         FOR_I_CONSERVATIVE Wp(s, i) = out[i];
     });
     reconstruction.point_values(W, pc, off, Wp);
-    Kokkos::parallel_for("particle_velocity", capacity, KOKKOS_LAMBDA(const uint32_t s) {
-        const bool live = ids(s) != EMPTY;
-        FOR_I_DIM dxdt(N_DIM * s + i) = live ? Wp(s, 1 + i) : 0.0_r;
+}
+
+void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
+                         FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
+                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const bool first_stage,
+                         const Kokkos::View<rtype> & time) {
+    if (capacity == 0) return;
+    evaluate_gas(x_stage, W, reconstruction, gradient, gradients);
+    const auto ids = id;
+    const auto xs = x_stage;
+    const auto a = aux;
+    const auto Wp = W_point;
+    const uint32_t w = width;
+    const double gas_R = R;
+    const bool timed = quantities.reads_time();
+    const particles::QuantityFunctor q = quantities.functor();
+    const bool observe = first_stage && q.size() > 0;
+    const uint32_t n_aux = quantities.n_aux();
+    Kokkos::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        rtype * rate = dxdt.data() + size_t(w) * s;
+        if (ids(s) == EMPTY) {
+            for (uint32_t k = 0; k < w; k++) rate[k] = 0.0_r;
+            return;
+        }
+        rtype Ws[N_CONSERVATIVE], u[N_DIM];
+        FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
+        FOR_I_DIM u[i] = Ws[1 + i];
+        FOR_I_DIM rate[i] = u[i];
+        if (q.size() == 0) return;
+        const rtype * values = xs.data() + size_t(w) * s;
+        rtype * row = a.data() + size_t(n_aux) * s;
+        const double t = timed ? static_cast<double>(time()) : 0.0;
+        double vars[particles::MAX_VARIABLES];
+        particles::fill_base(vars, values, t, Ws, u, gas_R);
+        q.fill(vars, values, row, rate);
+        if (observe) q.observe(vars, t, row);
     });
+}
+
+void Particles::sample(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                       const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
+    if (capacity == 0) return;
+    evaluate_gas(x, W, reconstruction, gradient, gradients);
+}
+
+void Particles::write_probes(const uint64_t step, const double t) {
+    if (probes.empty() || !probes.due(step)) return;
+    const uint32_t n = probes.n_fields();
+    Kokkos::View<double **, Kokkos::LayoutRight> fields("particle_probe_values", capacity, n);
+    const auto ids = id;
+    const auto xs = x;
+    const auto a = aux;
+    const auto Wp = W_point;
+    const uint32_t w = width;
+    const double gas_R = R;
+    const particles::QuantityFunctor q = quantities.functor();
+    const uint32_t n_aux = quantities.n_aux();
+    const kexpr::ProgramTable<> table = probes.table();
+    const auto field_probe = probes.fields_of();
+    const auto probe_region = probes.regions_of();
+    region::RegionView<> regions[particles::MAX_REGIONS];
+    const uint32_t n_regions = static_cast<uint32_t>(probes.regions().size());
+    if (n_regions > particles::MAX_REGIONS) {
+        throw InputError("particles.probes: at most " + std::to_string(particles::MAX_REGIONS) + " probes have regions.");
+    }
+    for (uint32_t r = 0; r < n_regions; r++) regions[r] = probes.regions()[r];
+    Kokkos::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
+        if (ids(s) == EMPTY) {
+            for (uint32_t j = 0; j < n; j++) fields(s, j) = nan;
+            return;
+        }
+        rtype Ws[N_CONSERVATIVE], u[N_DIM];
+        FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
+        FOR_I_DIM u[i] = Ws[1 + i];
+        const rtype * values = xs.data() + size_t(w) * s;
+        double vars[particles::MAX_VARIABLES];
+        particles::fill_base(vars, values, t, Ws, u, gas_R);
+        q.fill(vars, values, a.data() + size_t(n_aux) * s, nullptr);
+        const double p[3] = {vars[0], vars[1], N_DIM == 3 ? vars[N_DIM - 1] : 0.0};
+        for (uint32_t j = 0; j < n; j++) {
+            const int32_t r = probe_region(field_probe(j));
+            const bool inside = r < 0 || regions[r].distance(p) < 0.0;
+            fields(s, j) = inside ? table(j, kexpr::ArrayVariables{vars}) : nan;
+        }
+    });
+    probes.write(step, t, probes.reduce(step, fields, distributed));
 }
 
 void Particles::relocate() {
@@ -319,11 +442,12 @@ void Particles::relocate() {
     const auto start = cell;
     const auto pos = x;
     const auto removed = n_removed;
+    const uint32_t wd = width;
     Kokkos::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
         rtype p[N_DIM];
-        FOR_I_DIM p[i] = pos(N_DIM * s + i);
+        FOR_I_DIM p[i] = pos(wd * s + i);
         for (int bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
             int32_t face = -1;
             const Walker::Outcome outcome = w.walk(c, p, face);
@@ -344,7 +468,7 @@ void Particles::relocate() {
             ids(s) = EMPTY;
             return;
         }
-        FOR_I_DIM pos(N_DIM * s + i) = p[i];
+        FOR_I_DIM pos(wd * s + i) = p[i];
         start(s) = c;
     });
 }
@@ -354,7 +478,9 @@ void Particles::migrate() {
     const auto ids = id;
     const auto start = cell;
     const auto pos = x;
+    const auto a = aux;
     const uint32_t owned = n_owned;
+    const uint32_t w = width, n_aux = quantities.n_aux();
     // Slots of the particles that left the owned cells, in slot order
     const auto slot = slots;
     uint32_t n_out = 0;
@@ -363,13 +489,14 @@ void Particles::migrate() {
         if (last && out) slot(k) = s;
         k += out ? 1u : 0u;
     }, n_out);
-    constexpr size_t WIDTH = 2 + N_DIM;  // id, cell, position bits
+    const size_t WIDTH = 2 + persistent();  // id, cell, bits of the block values and aux
     Kokkos::View<uint64_t **, Kokkos::LayoutRight> packed("particle_packed", n_out, WIDTH);
     Kokkos::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         packed(k, 0) = ids(s);
         packed(k, 1) = start(s);
-        FOR_I_DIM packed(k, 2 + i) = Kokkos::bit_cast<Bits>(pos(N_DIM * s + i));
+        for (uint32_t j = 0; j < w; j++) packed(k, 2 + j) = Kokkos::bit_cast<Bits>(pos(w * s + j));
+        for (uint32_t j = 0; j < n_aux; j++) packed(k, 2 + w + j) = Kokkos::bit_cast<Bits>(a(s, j));
         ids(s) = EMPTY;
     });
     auto h_packed = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), packed);
@@ -387,7 +514,7 @@ void Particles::migrate() {
         auto & message = send[static_cast<size_t>(owner)];
         message.push_back(h_packed(k, 0));
         message.push_back(global_cell[c]);
-        for (size_t d = 0; d < N_DIM; d++) message.push_back(h_packed(k, 2 + d));
+        for (size_t j = 2; j < WIDTH; j++) message.push_back(h_packed(k, j));
     }
     const std::vector<std::vector<uint64_t>> received = comm::alltoallv(send);
     std::vector<uint64_t> in;
@@ -400,7 +527,7 @@ void Particles::migrate() {
             }
             in.push_back(message[at]);
             in.push_back(local->second);
-            for (size_t d = 0; d < N_DIM; d++) in.push_back(message[at + 2 + d]);
+            for (size_t j = 2; j < WIDTH; j++) in.push_back(message[at + j]);
         }
     }
     const uint32_t n_in = static_cast<uint32_t>(in.size() / WIDTH);
@@ -429,7 +556,8 @@ void Particles::migrate() {
         const uint32_t s = slot(k);
         ids(s) = incoming(k, 0);
         start(s) = static_cast<uint32_t>(incoming(k, 1));
-        FOR_I_DIM pos(N_DIM * s + i) = Kokkos::bit_cast<rtype>(static_cast<Bits>(incoming(k, 2 + i)));
+        for (uint32_t j = 0; j < w; j++) pos(w * s + j) = Kokkos::bit_cast<rtype>(static_cast<Bits>(incoming(k, 2 + j)));
+        for (uint32_t j = 0; j < n_aux; j++) a(s, j) = Kokkos::bit_cast<rtype>(static_cast<Bits>(incoming(k, 2 + w + j)));
     });
     if (lost > 0) {
         const auto removed = n_removed;
@@ -455,12 +583,20 @@ std::array<uint64_t, 2> Particles::removed() const {
 std::vector<particles::Record> Particles::gather() const {
     auto g_id = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), id);
     auto g_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), x);
+    auto g_aux = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), aux);
+    const size_t n_q = quantities.size(), stride = N_DIM + n_q;
     std::vector<uint64_t> ids;
-    std::vector<double> xs;
+    std::vector<double> xs;  // position, quantities
     for (uint32_t i = 0; i < capacity; i++) {
         if (g_id(i) == EMPTY) continue;
         ids.push_back(g_id(i));
-        for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(N_DIM * i + d)));
+        for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(width * i + d)));
+        for (uint32_t q = 0; q < n_q; q++) {
+            const particles::QuantitySpec & spec = quantities.spec(q);
+            const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
+                                    spec.kind == particles::Accumulate::WINDING;
+            xs.push_back(static_cast<double>(integrated ? g_x(width * i + spec.column) : g_aux(i, spec.column)));
+        }
     }
     if (distributed) {
         ids = comm::allgatherv(ids);
@@ -469,7 +605,9 @@ std::vector<particles::Record> Particles::gather() const {
     std::vector<particles::Record> records(ids.size());
     for (size_t k = 0; k < ids.size(); k++) {
         records[k].id = ids[k];
-        for (size_t d = 0; d < N_DIM; d++) records[k].x[d] = xs[N_DIM * k + d];
+        for (size_t d = 0; d < N_DIM; d++) records[k].x[d] = xs[stride * k + d];
+        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + N_DIM),
+                            xs.begin() + static_cast<std::ptrdiff_t>(stride * (k + 1)));
     }
     std::sort(records.begin(), records.end(), [](const auto & a, const auto & b) { return a.id < b.id; });
     return records;
@@ -486,10 +624,12 @@ void Particles::write(const uint64_t step, const double t) const {
     const char * names[] = {"x", "y", "z"};
     out << "id";
     for (size_t d = 0; d < N_DIM; d++) out << "," << names[d];
+    for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {
         out << r.id;
         for (size_t d = 0; d < N_DIM; d++) out << "," << r.x[d];
+        for (const double q : r.q) out << "," << q;
         out << "\n";
     }
 }
@@ -498,16 +638,19 @@ void Particles::stage_output() {
     copy_to_pinned(mirrors, h_id, id);
     copy_to_pinned(mirrors, h_cell, cell);
     copy_to_pinned(mirrors, h_x, x);
+    if (aux.span() > 0) copy_to_pinned(mirrors, h_aux, aux);
     copy_to_pinned(mirrors, h_removed, n_removed);
 }
 
 RestartArrays Particles::restart_arrays() const {
-    std::vector<double> local;  // per particle: id, global cell, position
+    const uint32_t n_aux = quantities.n_aux();
+    std::vector<double> local;  // per particle: id, global cell, block values, aux
     for (uint32_t s = 0; s < capacity; s++) {
         if (h_id(s) == EMPTY) continue;
         local.push_back(static_cast<double>(h_id(s)));
         local.push_back(static_cast<double>(global_cell[h_cell(s)]));
-        for (size_t d = 0; d < N_DIM; d++) local.push_back(static_cast<double>(h_x(N_DIM * s + d)));
+        for (uint32_t j = 0; j < width; j++) local.push_back(static_cast<double>(h_x(width * s + j)));
+        for (uint32_t j = 0; j < n_aux; j++) local.push_back(static_cast<double>(h_aux(s, j)));
     }
     std::array<uint64_t, 2> removed{h_removed(0), h_removed(1)};
     std::vector<double> all = local;
@@ -516,22 +659,33 @@ RestartArrays Particles::restart_arrays() const {
         all = comm::allgatherv(local);
         removed = comm::allreduce(removed, comm::Op::SUM);
     }
-    constexpr size_t WIDTH = 2 + N_DIM;
+    const size_t WIDTH = 2 + persistent();
     const size_t n = all.size() / WIDTH;
     std::vector<size_t> order(n);
     for (size_t k = 0; k < n; k++) order[k] = k;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[WIDTH * a] < all[WIDTH * b]; });
     std::vector<double> ids(n), cells(n), xs(N_DIM * n);
+    std::vector<std::vector<double>> qs(quantities.size(), std::vector<double>(n));
     for (size_t k = 0; k < n; k++) {
         const double * p = all.data() + WIDTH * order[k];
         ids[k] = p[0];
         cells[k] = p[1];
         for (size_t d = 0; d < N_DIM; d++) xs[N_DIM * k + d] = p[2 + d];
+        for (uint32_t q = 0; q < quantities.size(); q++) {
+            const particles::QuantitySpec & spec = quantities.spec(q);
+            const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
+                                    spec.kind == particles::Accumulate::WINDING;
+            qs[q][k] = p[2 + (integrated ? spec.column : width + spec.column)];
+        }
     }
-    return {{"PARTICLE_ID", std::move(ids)},
-            {"PARTICLE_CELL", std::move(cells)},
-            {"PARTICLE_X", std::move(xs)},
-            {"PARTICLE_REMOVED", {static_cast<double>(removed[0]), static_cast<double>(removed[1])}}};
+    RestartArrays arrays = {{"PARTICLE_ID", std::move(ids)},
+                            {"PARTICLE_CELL", std::move(cells)},
+                            {"PARTICLE_X", std::move(xs)},
+                            {"PARTICLE_REMOVED", {static_cast<double>(removed[0]), static_cast<double>(removed[1])}}};
+    for (uint32_t q = 0; q < quantities.size(); q++) {
+        arrays.emplace_back("PARTICLE_Q_" + quantities.names()[q], std::move(qs[q]));
+    }
+    return arrays;
 }
 
 std::vector<std::pair<std::string, std::string>> Particles::settings() const {
@@ -539,5 +693,8 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
                                       : logging::count(n_seeded, "tracer");
     text += ", " + logging::count(capacity, "slot") + " per rank";
     if (!file.empty()) text += ", positions at the end in " + file;
-    return {{"Particles", text}};
+    std::vector<std::pair<std::string, std::string>> lines = {{"Particles", text}};
+    for (const auto & q : quantities.summary()) lines.emplace_back("Particle quantity", q);
+    for (const auto & p : probes.summary()) lines.emplace_back("Particle probe", p);
+    return lines;
 }
