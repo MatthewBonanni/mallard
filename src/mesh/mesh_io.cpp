@@ -426,17 +426,46 @@ bool is_gmsh_file(const std::string & filename) {
     return first != '(';
 }
 
+MeshBlock read_whole_file(const std::string & filename) {
+    if (is_hdf5_mesh(filename)) return read_mesh_h5(filename, true);
+    comm::SelfScope self;
+    return read_file_block(filename);
+}
+
+MeshFileCache * mesh_file_cache = nullptr;
+
 } // namespace
+
+MeshFileCache::MeshFileCache() {
+    if (mesh_file_cache) throw std::logic_error("MeshFileCache: one at a time");
+    mesh_file_cache = this;
+}
+
+MeshFileCache::~MeshFileCache() { mesh_file_cache = nullptr; }
+
+MeshBlock MeshFileCache::block(const std::string & filename, MeshBlock (*read)(const std::string &)) {
+    // An OpenFOAM case is a directory: its time stands for its files
+    std::error_code e_path, e_size, e_time;
+    const std::filesystem::path path = std::filesystem::absolute(filename, e_path);
+    const bool directory = std::filesystem::is_directory(path);
+    const uintmax_t bytes = directory ? 0 : std::filesystem::file_size(path, e_size);
+    const auto time = std::filesystem::last_write_time(path, e_time);
+    const bool known = !e_path && !e_size && !e_time;
+    const int64_t modified = known ? static_cast<int64_t>(time.time_since_epoch().count()) : 0;
+    for (const Entry & e : entries) {
+        if (known && e.path == path.string() && e.bytes == bytes && e.modified == modified) return e.block;
+    }
+    MeshBlock block = read(filename);
+    reads++;
+    if (!known) return block;
+    std::erase_if(entries, [&](const Entry & e) { return e.path == path.string(); });
+    entries.push_back({path.string(), bytes, modified, block});
+    return block;
+}
 
 void Mesh::init_file(const std::string & filename, const std::vector<PeriodicPair> & periodic,
                      const MeshTransform & transform) {
-    MeshBlock block;
-    if (is_hdf5_mesh(filename)) {
-        block = read_mesh_h5(filename, true);
-    } else {
-        comm::SelfScope self;
-        block = read_file_block(filename);
-    }
+    MeshBlock block = mesh_file_cache ? mesh_file_cache->block(filename, read_whole_file) : read_whole_file(filename);
     transform_block(block, transform);
     init_from_block(std::move(block), periodic);
 }

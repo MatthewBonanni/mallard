@@ -8,7 +8,7 @@ user-facing pages are in [Command line](../guide/cli.md).
 ```text
 Run       mallard -i input.toml [--restart latest] [--set k=v] | ctl | reactor
 Set up    mallard new | input upgrade | input resolve
-Inspect   mallard check [input.toml] | info <file> | list fields|species|templates|keys | diff
+Inspect   mallard check [input.toml] | info <file> | list fields|species|templates|keys | session | diff
 Mesh      mallard mesh convert | extrude
 Post      mallard post extract|derive|average|convergence|render
 Share     mallard pack
@@ -26,6 +26,7 @@ Maintain  mallard test | completion | version
 | `info <file>`, `info <run-dir>` | Inspect | available; on the [output reader](output_reader.md) |
 | `info <run-dir> --html` (the run report) | Inspect | planned ([#515](https://github.com/MatthewBonanni/mallard/issues/515)) |
 | `list fields\|species\|templates\|keys` | Inspect | available (`new --list` is a deprecated alias of `list templates`) |
+| `session` (JSON-RPC on stdio for programs) | Inspect | available: case check and key listings, the same handlers as their one-shots; run control, launch, views, cuts and picks planned ([design](session.md), [#1340](https://github.com/MatthewBonanni/mallard/issues/1340)) |
 | `diff` | Inspect | available; on the [output reader](output_reader.md), `--remap` on the [remap](remap.md) |
 | `mesh convert` | Mesh | available |
 | `mesh extrude` | Mesh | planned |

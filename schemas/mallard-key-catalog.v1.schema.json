@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-key-catalog.v1.schema.json",
+  "title": "mallard list keys --format json, and the session's case.keys and keys.catalog",
+  "type": "object",
+  "required": ["input", "section", "keys"],
+  "properties": {
+    "schema": {"const": "mallard-key-catalog"},
+    "version": {"const": 1},
+    "input": {"type": ["string", "null"], "description": "the case's input, or null for the catalog of every key"},
+    "section": {"type": ["string", "null"]},
+    "keys": {
+      "type": "object",
+      "description": "by key path",
+      "additionalProperties": true
+    },
+    "complete": {"type": "boolean", "description": "with an input: whether its setup read every key it reads"},
+    "missing": {"type": "array", "items": {"type": "string"}, "description": "with an input: required keys it does not set"},
+    "diagnostics": {"type": "array", "items": {"$ref": "mallard-diagnostic.v1.schema.json"}}
+  },
+  "additionalProperties": true
+}

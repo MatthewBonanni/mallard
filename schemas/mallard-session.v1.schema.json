@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-session.v1.schema.json",
+  "title": "The result of mallard session's initialize; $defs/message is any message it writes (JSON-RPC 2.0, one per line)",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "mallard",
+    "dimension",
+    "methods",
+    "case"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mallard-session"
+    },
+    "version": {
+      "const": 1
+    },
+    "mallard": {
+      "type": "string"
+    },
+    "dimension": {
+      "enum": [
+        2,
+        3
+      ]
+    },
+    "methods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "command",
+          "result"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the one-shot command that runs the same handler"
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "schema name of the result"
+          }
+        }
+      }
+    },
+    "case": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "mallard-case.v1.schema.json"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": [
+        "integer",
+        "string",
+        "null"
+      ]
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "result": true
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "notification": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "enum": [
+            "$/progress",
+            "$/log"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            },
+            "phase": {
+              "type": "string"
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "$ref": "mallard-diagnostic.v1.schema.json"
+              }
+            }
+          }
+        }
+      }
+    },
+    "message": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/response"
+        },
+        {
+          "$ref": "#/$defs/error"
+        },
+        {
+          "$ref": "#/$defs/notification"
+        }
+      ]
+    }
+  }
+}
