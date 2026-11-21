@@ -175,15 +175,15 @@ Read off the curves (interpolated between the measured meshes):
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
-  - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
-    (Mach 1 in a Mach 0.2 flow);
-  - it undershoots where shocks start from a corner on quads (the density by a
-    third in the first steps of the 2D Riemann problem);
-  - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
+    - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
+      (Mach 1 in a Mach 0.2 flow);
+    - it undershoots where shocks start from a corner on quads (the density by a
+      third in the first steps of the 2D Riemann problem);
+    - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
-  Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
-  For smooth flow, setting `order = 4` under
-  `[numerics.face_reconstruction]` is the cheaper choice.
+    Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
+    For smooth flow, setting `order = 4` under
+    `[numerics.face_reconstruction]` is the cheaper choice.
 
 The same comparison on squares, in 3D, with a shock and on a GPU is in
 [Performance: choosing a scheme for an accuracy target](performance.md#accuracy-target).
