@@ -586,8 +586,8 @@ TEST(ParticleQuantitiesTest, ResidenceTimeInARegionIsItsLengthOverTheSpeed) {
 TEST(ParticleProbesTest, StatisticsOfTheParticlesInARegion) {
     // After 0.1 at U = 0.3 the lattice's columns are at x = 0.1, 0.3867, 0.6733, 0.96: the slab
     // 0.3 < x < 0.7 holds the middle two, 8 particles; every particle reads U_X = 0.3
-    const std::string file = (scratch_dir() / "mallard_particle_probe_slab.csv").string();
-    const std::string all = (scratch_dir() / "mallard_particle_probe_all.csv").string();
+    const std::string file = (rank_scratch_dir() / "mallard_particle_probe_slab.csv").string();
+    const std::string all = (rank_scratch_dir() / "mallard_particle_probe_all.csv").string();
     const std::string probes = "[[particles.probes]]\nname = \"slab\"\nregion = \"slab\"\nfields = [\"x\", \"y\", "
                                "\"U_X\"]\ninterval = 5\nfile = \"" + file + "\"\n"
                                "[[particles.probes]]\nname = \"all\"\nfields = [\"x\"]\nfile = \"" + all + "\"\n";
@@ -945,7 +945,7 @@ TEST(SolidParticlesTest, HeatTransferRelaxesAtTheRanzMarshallRate) {
 }
 
 TEST(SolidParticlesTest, ProbesReadTheParticleVelocityAndTemperature) {
-    const std::string file = (scratch_dir() / "mallard_solid_particle_probe.csv").string();
+    const std::string file = (rank_scratch_dir() / "mallard_solid_particle_probe.csv").string();
     const std::string probe = "[[particles.probes]]\nname = \"all\"\nfields = [\"V_Y\", \"T_P\"]\ninterval = 20\nfile = \"" +
                               file + "\"\n";
     Solver solver;
