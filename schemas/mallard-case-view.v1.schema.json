@@ -19,14 +19,14 @@
     },
     "files": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "string"
       },
-      "description": "the ParaView file, then the images"
+      "description": "the ParaView file, then the images; empty for case.view with frames_only"
     },
     "blocks": {
       "type": "array",
+      "description": "the ParaView file's blocks; empty for case.view with frames_only",
       "items": {
         "type": "object",
         "required": [

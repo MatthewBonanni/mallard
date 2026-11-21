@@ -66,6 +66,12 @@ int list_keys_main(const cli::Args & args);
  */
 json::Value general_key_catalog();
 
+/**
+ * @brief A case's catalog with the type and form of each table it has no key of (an optional table not set, as
+ *        boundaries.turbulence) from the general catalog, if a data directory has it.
+ */
+void add_unset_table_forms(json::Value & catalog);
+
 /** @brief A case's side of a key listing: whether its setup read every key, and what stopped it. */
 struct KeyCase {
     std::string input;

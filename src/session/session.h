@@ -48,6 +48,7 @@ inline constexpr int INVALID_PARAMS = -32602;
 inline constexpr int INTERNAL = -32603;
 inline constexpr int CANCELED = -32800;
 inline constexpr int NO_CASE = -32001;
+inline constexpr int NOT_SET_UP = -32002;
 inline constexpr int UNREADABLE = -32003;
 inline constexpr int TIMEOUT = -32004;
 inline constexpr int NO_RUN = -32005;

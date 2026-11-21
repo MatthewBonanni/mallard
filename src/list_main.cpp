@@ -423,6 +423,26 @@ json::Value general_key_catalog() {
                              "MALLARD_DATA_DIR to the source tree, or to the install tree's share/mallard)");
 }
 
+void add_unset_table_forms(json::Value & catalog) {
+    json::Value general;
+    try {
+        general = general_key_catalog();
+    } catch (const std::runtime_error &) {
+        return;
+    }
+    for (size_t i = 0; i < catalog.names.size(); i++) {
+        json::Value & k = catalog.members[i];
+        const json::Value * g = general.find(catalog.names[i]);
+        if (k.has("type") || k.has("form") || !g || !g->has("form")) continue;
+        for (const char * field : {"type", "form"}) {
+            if (const json::Value * v = g->find(field)) {
+                k.names.emplace_back(field);
+                k.members.push_back(*v);
+            }
+        }
+    }
+}
+
 namespace {
 
 std::string section_of(const std::string & key) { return key.substr(0, key.find('.')); }
@@ -545,6 +565,7 @@ int list_keys_main(const cli::Args & args) {
         listed = set_up_keys(input_file, args);
         if (listed.keys.empty()) return report_errors(listed);
         catalog = json::parse(listed.keys);
+        add_unset_table_forms(catalog);
     }
     const bool per_case = !input_file.empty();
     const KeyCase key_case{.input = input_file, .complete = listed.complete, .diagnostics = listed.diagnostics};

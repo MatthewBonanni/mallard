@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <chrono>
@@ -25,6 +26,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "check.h"
 #include "cli.h"
 #include "comm.h"
 #include "common_typedef.h"
@@ -261,6 +263,28 @@ TEST(SessionTest, AnswersAsItsOneShotCommandsDo) {
     EXPECT_TRUE(progress) << session.out;
 }
 
+TEST(SessionTest, CaseKeysGiveTheTablesACaseDoesNotSetTheirTypeAndForm) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"}, request(1, "case.keys", "{\"section\":\"boundaries\"}") +
+                                                             request(2, "keys.catalog", "{\"section\":\"boundaries\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    const json::Value keys = response(list, 1)["result"]["keys"], general = response(list, 2)["result"]["keys"];
+    ASSERT_TRUE(keys.has("boundaries.turbulence")) << json::dump(keys);
+    EXPECT_FALSE(keys["boundaries.turbulence"]["set"].boolean);
+    size_t unset = 0;
+    for (const std::string & key : keys.keys()) {
+        const json::Value * form = general.has(key) ? general[key].find("form") : nullptr;
+        if (!form || keys[key]["set"].boolean) continue;
+        unset++;
+        ASSERT_TRUE(keys[key].has("form")) << key << ": " << json::dump(keys[key]);
+        EXPECT_EQ(keys[key]["form"].string, form->string) << key;
+        if (const json::Value * type = general[key].find("type")) EXPECT_EQ(json::dump(keys[key]["type"]), json::dump(*type)) << key;
+    }
+    EXPECT_GT(unset, 0u);
+}
+
 TEST(SessionTest, InitializeAnswersAsVersionJsonWithTheDevicesAndTheSettingsOfControl) {
     SKIP_UNDER_MPI();
     const Result session = run({"session"}, request(1, "initialize") + request(2, "shutdown"));
@@ -290,18 +314,44 @@ TEST(SessionTest, InitializeAnswersAsVersionJsonWithTheDevicesAndTheSettingsOfCo
     std::vector<std::string> methods;
     for (const json::Value & m : one_shot["methods"].array) methods.push_back(m["name"].string);
     EXPECT_EQ(methods.size(), session::methods().size());
+    // check's options as its help lists them, and the GPUs --memory sizes a run for by name
+    const Result help = run({"check", "--help"});
+    std::vector<std::string> options;
+    for (const json::Value & o : one_shot["check"]["options"].array) {
+        options.push_back(o.string);
+        EXPECT_NE(help.out.find(o.string), std::string::npos) << o.string;
+    }
+    EXPECT_NE(std::find(options.begin(), options.end(), "--memory"), options.end()) << version.out;
+    ASSERT_FALSE(one_shot["check"]["memory_gpus"].array.empty()) << version.out;
+    for (const json::Value & gpu : one_shot["check"]["memory_gpus"].array) {
+        CheckOptions sized;
+        EXPECT_EQ(set_memory_target(gpu["key"].string, sized), "") << gpu["key"].string;
+        EXPECT_EQ(sized.memory, static_cast<uint64_t>(gpu["bytes"].number)) << gpu["key"].string;
+        EXPECT_EQ(sized.memory_name, gpu["name"].string);
+    }
 }
 
 TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
     SKIP_UNDER_MPI();
     write_cylinder_case();
-    const Result session = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
-                                                             request(2, "case.view") + request(3, "shutdown"));
+    const Result session = run({"session", "case.toml"},
+                               request(1, "case.view", "{\"dir\":\"view\"}") + request(2, "case.view") +
+                                   request(3, "case.view", "{\"frames_only\":true,\"dir\":\"view\"}") +
+                                   request(4, "shutdown"));
     ASSERT_EQ(session.status, 0) << session.err;
     const std::vector<json::Value> list = messages(session.out);
     expect_conforms(list, {{1, "mallard-case-view"}});
     EXPECT_EQ(response(list, 2)["error"]["code"].number, session::code::INVALID_PARAMS);
+    EXPECT_EQ(response(list, 3)["error"]["code"].number, session::code::INVALID_PARAMS);
     const json::Value view = response(list, 1)["result"];
+    // The frames alone: the same frames, nothing written
+    const Result frames_only = run({"session", "case.toml"}, request(1, "case.view", "{\"frames_only\":true}"));
+    ASSERT_EQ(frames_only.status, 0) << frames_only.err;
+    const std::vector<json::Value> only = messages(frames_only.out);
+    expect_conforms(only, {{1, "mallard-case-view"}});
+    const json::Value framed = response(only, 1)["result"];
+    EXPECT_TRUE(framed["files"].array.empty() && framed["blocks"].array.empty()) << json::dump(framed);
+    EXPECT_EQ(json::dump(framed["frames"]), json::dump(view["frames"]));
     const Result check = run({"check", "case.toml", "--view", "view", "--format", "json"});
     ASSERT_EQ(check.status, 0) << check.err;
     EXPECT_EQ(json::dump(view), json::dump(json::parse(check.out)["view"]));
@@ -355,6 +405,26 @@ TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
         EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-6);
         EXPECT_NEAR(after["origin"].array[1].number - before["origin"].array[1].number,
                     before["u_direction"].array[1].number * before["length"].number, 1e-5);
+    }
+}
+
+TEST(SessionTest, ACaseThatCannotBeSetUpIsItsOwnError) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    text.replace(text.find("type = \"symmetry\""), 17, "type = \"symetry\"");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
+                                                             request(2, "case.view", "{\"frames_only\":true}") +
+                                                             request(3, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    for (int id : {1, 2, 3}) {
+        const json::Value r = response(list, id);
+        ASSERT_TRUE(r.has("error")) << json::dump(r);
+        EXPECT_EQ(r["error"]["code"].number, session::code::NOT_SET_UP) << id;
+        EXPECT_FALSE(r["error"]["data"]["diagnostics"].array.empty()) << id;
+        EXPECT_EQ(violations(MESSAGE, r), "");
     }
 }
 

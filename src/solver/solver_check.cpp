@@ -1009,24 +1009,26 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
             r.view_blocks.push_back({b.name, KINDS[static_cast<size_t>(b.kind)], b.condition, b.label.empty() ? b.name : b.label});
         }
         check_frames(r);
+    } else if (options.view_frames) {
+        r.view_frames = true;
+        check_frames(r);
     }
 }
 
-std::string set_memory_target(const std::string & text, CheckOptions & options) {
+std::span<const MemoryGpu> memory_gpus() {
     // Memory as the driver reports it (cudaGetDeviceProperties, hipGetDeviceProperties; measured on the A100-80GB)
-    struct Gpu {
-        const char * key;
-        const char * name;
-        uint64_t bytes;
-    };
-    static constexpr Gpu GPUS[] = {
+    static constexpr MemoryGpu GPUS[] = {
         {"a100-40", "A100-40GB", 42'298'834'944},  {"a100-80", "A100-80GB", 85'093'171'200},
         {"h100-80", "H100-80GB", 85'093'171'200},  {"h200", "H200", 150'754'820'096},
         {"mi250x", "MI250X (one GCD)", 68'702'699'520}, {"mi300x", "MI300X", 206'141'652'992},
     };
+    return GPUS;
+}
+
+std::string set_memory_target(const std::string & text, CheckOptions & options) {
     std::string lower = text;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) { return std::tolower(ch); });
-    for (const Gpu & gpu : GPUS) {
+    for (const MemoryGpu & gpu : memory_gpus()) {
         if (lower != gpu.key) continue;
         options.memory = gpu.bytes;
         options.memory_name = gpu.name;
@@ -1034,7 +1036,7 @@ std::string set_memory_target(const std::string & text, CheckOptions & options) 
         return "";
     }
     std::string list;
-    for (const Gpu & gpu : GPUS) list += std::string(list.empty() ? "" : ", ") + gpu.key;
+    for (const MemoryGpu & gpu : memory_gpus()) list += std::string(list.empty() ? "" : ", ") + gpu.key;
     const std::string error = "--memory takes a size with its unit (40GB, 512MiB) or a GPU (" + list + "), not " + text;
     size_t used = 0;
     double value = 0.0;

@@ -119,18 +119,22 @@ std::string case_check(Context & context, const json::Value & params) {
 }
 
 std::string case_view(Context & context, const json::Value & params) {
-    as_options(params, {"dir"});
+    as_options(params, {"dir", "frames_only"});
     const std::string dir = string_param(params, "dir");
-    if (dir.empty()) throw Error(code::INVALID_PARAMS, "case.view takes dir, the directory to write the view in");
+    const bool frames_only = bool_param(params, "frames_only", false);
+    if (frames_only == !dir.empty()) {
+        throw Error(code::INVALID_PARAMS, "case.view takes dir, the directory to write the view in, or frames_only");
+    }
     const std::string key = "case.view " + json::dump(params);
     if (const std::optional<std::string> known = context.remembered(key)) return *known;
     CheckOptions options;
     options.input_file = context.path();
     options.view_dir = dir;
+    options.view_frames = frames_only;
     const CheckReport report = check_case(context, options).report;
     const std::string view = case_view_json(report);
     if (view == "null") {
-        throw Error(code::INVALID_PARAMS, "the case cannot be set up, so it has no view",
+        throw Error(code::NOT_SET_UP, "the case cannot be set up, so it has no view",
                     json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
     }
     context.remember(key, view);
@@ -148,7 +152,7 @@ std::string case_boundary_values(Context & context, const json::Value & params) 
     options.boundary_values_dir = dir;
     const CheckReport report = check_case(context, options).report;
     if (report.boundary_values.empty()) {
-        throw Error(code::INVALID_PARAMS, "the case cannot be set up, so its boundaries have no values",
+        throw Error(code::NOT_SET_UP, "the case cannot be set up, so its boundaries have no values",
                     json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
     }
     context.remember(key, report.boundary_values);
@@ -175,10 +179,12 @@ std::string case_keys(Context & context, const json::Value & params) {
     key_case.complete = result.report.setup_done;
     key_case.diagnostics = result.report.diagnostics;
     if (result.catalog.empty()) {
-        throw Error(code::INVALID_PARAMS, "the case cannot be set up",
+        throw Error(code::NOT_SET_UP, "the case cannot be set up",
                     json::Object().raw("diagnostics", diagnostics_json(result.report.diagnostics)).str());
     }
-    const std::string listed = listing(json::parse(result.catalog), params, &key_case);
+    json::Value catalog = json::parse(result.catalog);
+    add_unset_table_forms(catalog);
+    const std::string listed = listing(catalog, params, &key_case);
     context.remember(key, listed);
     return listed;
 }
