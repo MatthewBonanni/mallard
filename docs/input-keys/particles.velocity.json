@@ -6,6 +6,7 @@
  "set_in": [
   "examples/particle_cloud/input.toml",
   "examples/particle_vortex/input.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml",
   "tools/dev/catalog_inputs/2d/solid_particles.toml"
  ],
  "type": "array"
