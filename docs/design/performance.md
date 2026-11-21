@@ -872,6 +872,42 @@ of alternating runs) the time per step does not change: `flame_3d` 39.1 / 39.3 m
 with GRI-Mech at TENO5 1,567 / 1,558 ms, `teno5_3d` 105 / 104 ms; the device's peak falls by 82 MiB, 86 MiB and
 482 MiB on the three flames (221,184 cells).
 
+#### Planar face points from the face nodes (#978)
+
+3D TENO stored every face's quadrature points (face, q, dim), read by the face evaluation of every pass. On meshes
+without curved faces the kernels now place them from the faces' nodes, and the stored points are freed after the
+setup. A table holds each face's four node indices (a triangle's third repeated, which marks it), next to a copy of
+the node coordinates in `LayoutRight`, so a face's nodes take one 16-byte load and four coordinate rows; both replace
+the mesh's node lists and coordinates, which TENO kept in 2D anyway. `planar_face_point` evaluates
+$v_0 + a (v_1 - v_0) + b (v_2 - v_0)$ on triangles and $\sum_k N_k v_k$ on quadrilaterals with every product
+rounded on its own (`rounded_product`), as the setup did on the host, so the points and the results are bitwise
+those of the stored points; the rule's padding rows repeat the last point, as the stored padding did. A thread loads
+a face's nodes once for the points it evaluates on that face: `SmoothTeamPass` gives each of a cell's threads a run
+of consecutive points rather than every fifth one, and the troubled passes load them per face. The image points of
+transmissive faces are placed on the host for those faces alone.
+
+`mallard check --memory a100-80` (CUDA build on an A100, one step) of the 3D TENO5 Taylor-Green vortex on $32^3$
+hexahedra and $16^3 \times 6$ tetrahedra:
+
+| device memory | hexahedra: `main` | change | tetrahedra: `main` | change |
+|---|---|---|---|---|
+| after setup | 243 MB | 224 MB (-580 B per cell) | 183 MB | 175 MB (-330 B per cell) |
+| most cells per A100-80GB | 10,378,159 | 11,261,449 (+8.5%) | 10,455,116 | 10,904,334 (+4.3%) |
+
+On one A100 (alternating runs, three each; CUDA 13.5, TENO5, 100 steps, wall time per step), with restart files
+after the last step bitwise those of `main`:
+
+| case | `main` | change |
+|---|---|---|
+| Taylor-Green, $96^3$ hexahedra | 104 / 103 / 103 ms | 101 / 101 / 101 ms |
+| explosion, $96^3$ hexahedra | 185 / 184 / 183 ms | 153 / 153 / 153 ms |
+| Taylor-Green, $48^3 \times 6$ tetrahedra | 89.1 / 89.1 / 89.0 ms | 87.9 / 87.7 / 87.7 ms |
+
+Nsight Systems over the 100 steps: `SmoothTeamPass` 8.33 s / 8.23 s (Taylor-Green, hexahedra), 7.08 s / 7.00 s
+(tetrahedra), and `TroubledSelectTeamPass` 6.40 s / 3.53 s in the explosion, whose threads (one per face and
+variable) each read the stored points of their face again for every point. A first version that read the nodes
+through the mesh's offsets per point was 4-10% slower than `main`.
+
 ### 16. Cost of bitwise reproducibility (#429)
 
 Three places where the bitwise contract constrains the arithmetic were relaxed one at a time on a branch that is
