@@ -72,6 +72,7 @@ add_library(MallardCore STATIC
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
+    physics/flamelet.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
