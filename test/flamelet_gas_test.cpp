@@ -37,49 +37,49 @@ double cv_integral(const flamelet::Thermo & th, const double T) {
     return sum * h / 3.0;
 }
 
-// A table of the fpv / saghafian2015 contract whose fields are multilinear in (Z, S, c), so that
+// A table of the fpv / saghafian2015 contract whose fields are multilinear in (Z, Sz, Lambda), so that
 // lookups reproduce them exactly anywhere in the table.
 const std::vector<std::string> FIELDS = {"C",      "omega_C", "rho0", "T0", "e0",   "R",
                                          "gamma0", "a_gamma", "mu",   "kappa", "cp"};
 const std::vector<std::string> UNITS = {"1", "kg m-3 s-1", "kg m-3", "K", "J kg-1", "J kg-1 K-1",
                                         "1", "K-1",        "Pa s",   "W m-1 K-1",   "J kg-1 K-1"};
 
-double exact(const size_t f, const double Z, const double S, const double c) {
+double exact(const size_t f, const double Z, const double Sz, const double Lambda) {
     switch (f) {
-        case 0: return c * (0.05 + 0.25 * Z) * (1.0 - 0.4 * S);
-        case 1: return 30.0 * c * (1.0 + Z) * (1.0 - 0.5 * S) + 5.0 * Z;
-        case 2: return 1.1 - 0.7 * c + 0.2 * Z;
-        case 3: return 320.0 + 1600.0 * c * (1.0 - 0.3 * S) + 40.0 * Z;
-        case 4: return -1.0e5 - 2.0e6 * c * (1.0 - 0.2 * S) + 3.0e5 * Z;
-        case 5: return 290.0 + 100.0 * Z - 10.0 * c;
-        case 6: return 1.38 - 0.08 * c - 0.03 * Z;
-        case 7: return -5.0e-5 * (1.0 + c) + 1.0e-5 * Z * S;
-        case 8: return 1.7e-5 * (1.0 + 2.0 * c) * (1.0 + 0.2 * Z);
-        case 9: return 0.025 * (1.0 + 3.0 * c) * (1.0 + 0.1 * S);
-        default: return 1050.0 * (1.0 + 0.3 * Z) * (1.0 + 0.25 * c);
+        case 0: return Lambda * (0.05 + 0.25 * Z) * (1.0 - 0.4 * Sz);
+        case 1: return 30.0 * Lambda * (1.0 + Z) * (1.0 - 0.5 * Sz) + 5.0 * Z;
+        case 2: return 1.1 - 0.7 * Lambda + 0.2 * Z;
+        case 3: return 320.0 + 1600.0 * Lambda * (1.0 - 0.3 * Sz) + 40.0 * Z;
+        case 4: return -1.0e5 - 2.0e6 * Lambda * (1.0 - 0.2 * Sz) + 3.0e5 * Z;
+        case 5: return 290.0 + 100.0 * Z - 10.0 * Lambda;
+        case 6: return 1.38 - 0.08 * Lambda - 0.03 * Z;
+        case 7: return -5.0e-5 * (1.0 + Lambda) + 1.0e-5 * Z * Sz;
+        case 8: return 1.7e-5 * (1.0 + 2.0 * Lambda) * (1.0 + 0.2 * Z);
+        case 9: return 0.025 * (1.0 + 3.0 * Lambda) * (1.0 + 0.1 * Sz);
+        default: return 1050.0 * (1.0 + 0.3 * Z) * (1.0 + 0.25 * Lambda);
     }
 }
 
 std::shared_ptr<const Table> synthetic_table() {
     const std::vector<Table::Axis> axes = {
-        {"Z", {0.0, 0.15, 0.4, 1.0}, "1"}, {"S", {0.0, 0.3, 1.0}, "1"}, {"c", {0.0, 0.25, 0.6, 1.0}, "1"}};
+        {"Z", {0.0, 0.15, 0.4, 1.0}, "1"}, {"Sz", {0.0, 0.3, 1.0}, "1"}, {"Lambda", {0.0, 0.25, 0.6, 1.0}, "1"}};
     std::vector<Table::Field> fields;
     for (size_t f = 0; f < FIELDS.size(); f++) fields.push_back({FIELDS[f], UNITS[f]});
     std::vector<double> values;
     for (double Z : axes[0].nodes) {
-        for (double S : axes[1].nodes) {
-            for (double c : axes[2].nodes) {
-                for (size_t f = 0; f < FIELDS.size(); f++) values.push_back(exact(f, Z, S, c));
+        for (double Sz : axes[1].nodes) {
+            for (double Lambda : axes[2].nodes) {
+                for (size_t f = 0; f < FIELDS.size(); f++) values.push_back(exact(f, Z, Sz, Lambda));
             }
         }
     }
     return std::make_shared<const Table>("fpv", "saghafian2015", axes, fields, values);
 }
 
-/** @brief The table's normalized coordinates (S, c) of a point (Z, Zvar, C) inside its bounds. */
-void coordinates(const double Z, const double Zvar, const double C, double & S, double & c) {
-    S = Zvar / (Z * (1.0 - Z));
-    c = C / exact(0, Z, S, 1.0);
+/** @brief The table's normalized coordinates (Sz, Lambda) of a point (Z, Zvar, C) inside its bounds. */
+void coordinates(const double Z, const double Zvar, const double C, double & Sz, double & Lambda) {
+    Sz = Zvar / (Z * (1.0 - Z));
+    Lambda = C / exact(0, Z, Sz, 1.0);
 }
 
 /** @brief The fields at each point q, from a device kernel. */
@@ -112,7 +112,7 @@ TEST(FlameletGasTest, ThermodynamicsIntegrateTheSpecificHeat) {
 }
 
 // Device lookups at transported points (Z, Zvar, C) return each field as the table holds it at
-// (Z, S, c), and the source omega_C (rho / rho0)^2: catches swapped field indices, a variance
+// (Z, Sz, Lambda), and the source omega_C (rho / rho0)^2: catches swapped field indices, a variance
 // that does not reach the map, and a source scaled other than to second order in density.
 TEST(FlameletGasTest, DeviceLookupsReturnTheTabulatedFields) {
     const flamelet::FlameletModel model(synthetic_table(), true);
@@ -125,19 +125,19 @@ TEST(FlameletGasTest, DeviceLookupsReturnTheTabulatedFields) {
     Kokkos::View<double *[10]> out("out", n);
     auto h_q = Kokkos::create_mirror_view(q);
     for (uint32_t i = 0; i < n; i++) {
-        const double Z = 0.02 + 0.96 * u(rng), S = 0.9 * u(rng), c = u(rng);
+        const double Z = 0.02 + 0.96 * u(rng), Sz = 0.9 * u(rng), Lambda = u(rng);
         h_q(i, 0) = Z;
-        h_q(i, 1) = S * Z * (1.0 - Z);
-        h_q(i, 2) = c * exact(0, Z, S, 1.0);
+        h_q(i, 1) = Sz * Z * (1.0 - Z);
+        h_q(i, 2) = Lambda * exact(0, Z, Sz, 1.0);
         h_q(i, 3) = 0.5 + u(rng);  // rho
     }
     Kokkos::deep_copy(q, h_q);
     look_up(gas, q, out);
     auto h_out = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
     for (uint32_t i = 0; i < n; i++) {
-        double S, c;
-        coordinates(h_q(i, 0), h_q(i, 1), h_q(i, 2), S, c);
-        auto f = [&](size_t k) { return exact(k, h_q(i, 0), S, c); };
+        double Sz, Lambda;
+        coordinates(h_q(i, 0), h_q(i, 1), h_q(i, 2), Sz, Lambda);
+        auto f = [&](size_t k) { return exact(k, h_q(i, 0), Sz, Lambda); };
         const double expected[10] = {f(3), f(4), f(5), f(6), f(7), f(8), f(9), f(10),
                                      f(1) * std::pow(h_q(i, 3) / f(2), 2), h_q(i, 2)};
         for (int k = 0; k < 10; k++) {

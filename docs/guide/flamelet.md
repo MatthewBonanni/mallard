@@ -42,9 +42,10 @@ C = 0.0
 
 The transported scalars are `rho Z` and `rho C`, in the species block
 (output `Y_Z`, `Y_C`, restart and probes as any species). The table's axes are
-`(Z, S, c)` with `c = (C - C_min) / (C_max - C_min)` the normalized progress
-variable at `Z`; Mallard finds `c` from the transported `C`, exactly, because
-the format requires `C` to be linear in `c`.
+`(Z, Sz, Lambda)`, named as in FPVgen: `Sz` the normalized variance of `Z`
+and `Lambda = (C - C_min) / (C_max - C_min)` the normalized progress variable
+at `(Z, Sz)`. Mallard finds `Lambda` from the transported `C`, exactly,
+because the format requires `C` to be linear in `Lambda`.
 
 - **Thermodynamics** (Saghafian et al. 2015): the table holds, per node, `T0`,
   `e0 = e(T0)`, `R`, `gamma0` and `a_gamma`, with `gamma(T) = gamma0 +
@@ -89,7 +90,7 @@ table's fields at each cell's `Z` and `C` ([[write_data]] only):
 | `T_TABLE` | Temperature of the tabulated flamelet state, `T0`. `T` is the temperature of the energy equation, which compression and heat loss move away from it |
 | `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` |
 | `MIXTURE_FRACTION` | `Z` |
-| `PROGRESS_VARIABLE` | The normalized progress variable `c = (C - C_min) / (C_max - C_min)` at `Z`, in [0, 1] |
+| `FPV_LAMBDA` | The table's normalized progress variable `Lambda = (C - C_min) / (C_max - C_min)` at `(Z, Sz)`, in [0, 1] (FPVgen's Λ). `PROGRESS_VARIABLE` is the mixtures' own, defined by `[output.mixture]`, and not a field of flamelet runs |
 | `MIXTURE_FRACTION_VARIANCE` | (`[les]`) The subgrid variance of `Z` of each cell's lookups |
 
 With `[les]` the table fields are those at the cell's variance.
@@ -99,7 +100,7 @@ With `[les]` the table fields are those at the cell's variance.
 prefix = "flame"
 format = "vtkhdf"
 interval = 100
-fields = ["RHO", "U", "P", "T", "T_TABLE", "HRR", "Y_*", "PROGRESS_VARIABLE"]
+fields = ["RHO", "U", "P", "T", "T_TABLE", "HRR", "Y_*", "FPV_LAMBDA"]
 ```
 
 ## Pressure
@@ -147,7 +148,7 @@ $$
 
 with `Delta` the LES filter width (`filter_width`) and the least-squares
 gradient of the viscous fluxes. The table maps it to its normalized axis
-`S = Zvar / (Z (1 - Z))`, so the clip is the table's edge.
+`Sz = Zvar / (Z (1 - Z))`, so the clip is the table's edge.
 
 The eddy viscosity adds `mu_t / Sc_t` to the diffusivity of `Z` and `C`, and
 `mu_t / Pr_t` to the conductivity of the enthalpy (`h` is conducted with

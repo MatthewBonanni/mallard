@@ -424,7 +424,7 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         const derived::Field f = derived::find(name.c_str());
         if (f == derived::N_FIELDS) continue;
         // A flamelet gas has Z and C of its own
-        if (flamelet && (f == derived::MIXTURE_FRACTION || f == derived::PROGRESS_VARIABLE)) continue;
+        if (flamelet && (f == derived::MIXTURE_FRACTION || f == derived::FPV_LAMBDA)) continue;
         const uint16_t needs = derived::FIELDS[f].needs;
         uint16_t missing = 0;
         if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;

@@ -128,8 +128,8 @@ struct TableView {
 };
 
 /**
- * @brief The FPV map (axes Z, S = Zvar / (Z (1 - Z)) and c, the mean progress
- *        variable normalized between the table's ends at that (Z, S)), on
+ * @brief The FPV map (axes Z, Sz = Zvar / (Z (1 - Z)) and Lambda, the mean progress
+ *        variable normalized between the table's ends at that (Z, Sz)), on
  *        a TableView. Plain aggregate, captured by value in kernels.
  */
 template <typename Value = double, typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
@@ -148,7 +148,7 @@ struct FPV {
     /**
      * @brief The table point of a mean mixture fraction Z, its variance Zvar
      *        and the mean progress variable C. C between its table bounds
-     *        at (Z, S) is reproduced exactly by the C field (to the rounding
+     *        at (Z, Sz) is reproduced exactly by the C field (to the rounding
      *        of float32 values in a float32 table); outside, it is clamped to them.
      */
     KOKKOS_INLINE_FUNCTION Point<3> locate(const double Z, const double Zvar, const double C) const {
@@ -158,8 +158,8 @@ struct FPV {
         const double C_min = table.at_last_node(p, 0, field_C);
         const double C_max = table.at_last_node(p, table.n_nodes[2] - 1, field_C);
         const double span = C_max - C_min;
-        const double c = span > 0.0 ? (C - C_min) / span : 0.0;
-        table.locate_axis(2, c, p.lo[2], p.t[2]);
+        const double Lambda = span > 0.0 ? (C - C_min) / span : 0.0;
+        table.locate_axis(2, Lambda, p.lo[2], p.t[2]);
         return p;
     }
 };
