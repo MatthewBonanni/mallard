@@ -55,6 +55,7 @@ checks() {
     fi
     run "spelling" "$python" tools/dev/check_spelling.py
     run "CI's test splitting" "$python" tools/dev/test_split_test.py
+    run "release manifest" "$python" tools/dev/release_manifest_test.py
     run "documented input keys and defaults" "$python" tools/dev/input_catalog.py docs
     run "TOML snippets of the docs" "$python" tools/dev/check_doc_toml.py
     run "\"Used in\" lines of the guide" "$python" tools/docs/used_in.py --check
