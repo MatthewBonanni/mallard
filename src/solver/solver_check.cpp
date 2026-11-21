@@ -102,6 +102,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
+    check_particles(r);
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
@@ -550,6 +551,41 @@ void Solver::check_settings(CheckReport & r) const {
                           (std::isfinite(t_end) ? " s to t_stop = " + logging::real(t_end) + " s" : " s on") +
                           ": check its numbers and their units (seconds)");
         }
+    }
+}
+
+namespace {
+
+/** @brief The largest value of a column over the first n rows. */
+double largest_in_column(const Kokkos::View<rtype **, Kokkos::LayoutRight> & v, const uint32_t n, const uint32_t column) {
+    rtype m = 0.0_r;
+    Kokkos::parallel_reduce("largest_in_column", n, KOKKOS_LAMBDA(const uint32_t c, rtype & x) {
+        x = Kokkos::fmax(x, v(c, column));
+    }, Kokkos::Max<rtype>(m));
+    return static_cast<double>(m);
+}
+
+} // namespace
+
+void Solver::check_particles(CheckReport & r) {
+    if (!particles || !particles->inertial()) return;
+    const particles::Validity v = particles->validity(particles::SIZE_LIMIT);
+    if (v.n_large > 0) {
+        r.warning(diagnostic_code::PARTICLE_SIZE,
+                  logging::count(v.n_large, "particle") + " of diameter above " + logging::real(particles::SIZE_LIMIT) +
+                      " of their cell's size (at most " + logging::format("%.3g", v.size_ratio) +
+                      "): the point-particle model takes the gas at a particle to be undisturbed by it; coarsen "
+                      "the mesh there or use smaller particles");
+    }
+    update_particle_fields();
+    double largest = particle_fields.is_allocated() ? largest_in_column(particle_fields, mesh->n_owned(), 0) : 0.0;
+    if (is_distributed()) largest = comm::allreduce(largest, comm::Op::MAX);
+    if (largest > particles::VOLUME_FRACTION_LIMIT) {
+        r.warning(diagnostic_code::PARTICLE_VOLUME_FRACTION,
+                  logging::format("particle volume fraction up to %.3g, above %.3g: the suspension is not dilute, so "
+                                  "collisions (four-way coupling) and the volume the particles take from the gas, which "
+                                  "the model leaves out, matter there",
+                                  largest, particles::VOLUME_FRACTION_LIMIT));
     }
 }
 

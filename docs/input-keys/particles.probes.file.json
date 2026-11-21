@@ -1,5 +1,8 @@
 {
- "default": "\"particle_probe_core.csv\"",
+ "default": "\"particle_probe_cloud.csv\"",
+ "defaults_by_dim": {
+  "2": "\"particle_probe_core.csv\""
+ },
  "dims": [
   2
  ],

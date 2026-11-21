@@ -48,6 +48,8 @@ constexpr const char * QUALITY = "mesh quality";
 constexpr const char * STENCILS = "stencils";
 constexpr const char * WALLS = "[[probes]] on a wall zone";
 constexpr const char * SURFACES = "[[probes]] on a surface or boundary zone";
+constexpr const char * PARTICLES = "particles";
+constexpr const char * SOLID_PARTICLES = "[particles] type = \"solid\"";
 
 // Vectors (RHOU, U, VORTICITY in 3D) also name their components <name>_X, _Y, _Z
 const Entry VECTORS[] = {
@@ -58,6 +60,7 @@ const Entry VECTORS[] = {
     {"TRACTION_PRESSURE", dim::pressure, "pressure traction on the boundary", SURFACE, WALLS},
     {"TRACTION_VISCOUS", dim::pressure, "viscous traction on the boundary", SURFACE, WALLS},
     {"TAU_W", dim::pressure, "wall shear stress", SURFACE, WALLS},
+    {"PARTICLE_U", dim::velocity, "mass-weighted mean particle velocity", PARTICLES, SOLID_PARTICLES},
 };
 
 const Entry NAMED[] = {
@@ -112,6 +115,8 @@ const Entry NAMED[] = {
     {"STENCIL_WALL", dim::none, "1 where a stencil reaches a wall", STENCILS, ""},
     {"STENCIL_SEAM", dim::none, "1 where a stencil reaches across a periodic seam", STENCILS, ""},
     {"STENCIL_PARTITION", dim::none, "1 where a stencil reaches cells of another rank", STENCILS, ""},
+    {"PARTICLE_VOLUME_FRACTION", dim::none, "particle volume fraction", PARTICLES, SOLID_PARTICLES},
+    {"PARTICLE_NUMBER_DENSITY", dim::of(0, -3, 0), "particles per volume", PARTICLES, SOLID_PARTICLES},
     {"DIVERGED", dim::none, "1 in the cells that became invalid", DERIVED,
      "a run that diverges, whose divergence report snapshot writes it"},
 };
@@ -187,6 +192,11 @@ std::optional<FieldDescription> find(const std::string & name) {
         name.find_first_not_of("0123456789", 8) == std::string::npos) {
         return FieldDescription{dim::none, "membership in the stencils of cell " + name.substr(8), "", ""};
     }
+    if (starts_with(name, "PARTICLE_SOURCE_")) {
+        auto of = find_base(name.substr(16));
+        if (!of) return std::nullopt;
+        return FieldDescription{of->dimension.times(dim::time, -1), "particle coupling source of " + of->long_name, "", ""};
+    }
     if (starts_with(name, "SOURCE_")) {
         auto of = find_base(name.substr(7));
         if (!of) return std::nullopt;
@@ -255,7 +265,7 @@ std::optional<FieldDescription> find(const std::string & name) {
 
 size_t group_rank(const std::string & group) {
     const char * order[] = {CONSERVATIVE, PRIMITIVE, DERIVED, TRANSPORT, MIXTURE, CHEMISTRY, LES,
-                            "sources", "statistics", SURFACE, QUALITY, STENCILS};
+                            "sources", PARTICLES, "statistics", SURFACE, QUALITY, STENCILS};
     for (size_t i = 0; i < std::size(order); i++) {
         if (group == order[i]) return i;
     }
@@ -279,6 +289,7 @@ std::string group(const std::string & name) {
         if (starts_with(name, e.name) && name.size() > std::string(e.name).size()) return e.group;
     }
     if (starts_with(name, "SOURCE_")) return "sources";
+    if (starts_with(name, "PARTICLE_SOURCE_")) return PARTICLES;
     if (starts_with(name, "STENCIL_")) return STENCILS;
     for (const char * prefix : {"MEAN_", "COV_", "PHASE_", "RMS_", "FAVRE_MEAN_", "FAVRE_COV_", "CI_MEAN_", "CI_COV_",
                                 "BATCH_MEAN_", "BATCH_COV_", "BATCH_AVG_", "BATCH_M2_"}) {
@@ -315,6 +326,7 @@ std::vector<CatalogField> catalog() {
     for (const auto & e : SPECIES) add(e.name + std::string("<s>"), e, e.long_name + std::string("species s"));
     const Entry derived[] = {
         {"SOURCE_<A>", dim::none, "", "sources", "[[sources]] or [source]"},
+        {"PARTICLE_SOURCE_<A>", dim::none, "", PARTICLES, "[particles] coupling = \"two-way\""},
         {"MEAN_<A>", dim::none, "", "statistics", "[statistics] fields with A, or [[probes]] averaging A"},
         {"COV_<A>_<B>", dim::none, "", "statistics", "[statistics] products with A*B"},
         {"PHASE_<bin>_<A>", dim::none, "", "statistics", "[statistics.phase]"},
@@ -324,11 +336,11 @@ std::vector<CatalogField> catalog() {
         {"CI_<average>", dim::none, "", "statistics", "[statistics] batch, of a MEAN_ or COV_ average"},
         {"STENCIL_<id>", dim::none, "", STENCILS, "mallard check --mesh-fields with --cells or --region"},
     };
-    const char * long_names[] = {"source of A, per second", "time average of A", "covariance of A and B",
+    const char * long_names[] = {"source of A, per second", "particle coupling source of A, per second", "time average of A", "covariance of A and B",
                                  "phase average of A in a bin", "root mean square fluctuation of A",
                                  "Favre (density-weighted) time average of A", "Favre covariance of A and B",
                                  "confidence interval half width of an average", "membership in the stencils of cell id"};
-    const char * units[] = {"A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "the average's", "1"};
+    const char * units[] = {"A's s-1", "A's s-1", "A's", "A's times B's", "A's", "A's", "A's", "A's times B's", "the average's", "1"};
     for (size_t i = 0; i < std::size(derived); i++) {
         out.push_back({derived[i].name, units[i], long_names[i], derived[i].group, derived[i].needs});
     }

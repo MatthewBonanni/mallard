@@ -33,7 +33,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`, `deposition_width`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
 | Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient`; `particles.temperature` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
@@ -46,6 +46,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
 | Specific heat (J/(kg K)) | `particles.specific_heat` |
+| Particles per parcel (plain number; per meter of depth in 2D) | `particles.weight` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
 | Mass flow (kg/s; per meter of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
@@ -1570,6 +1571,9 @@ keys.
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
 | `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
 | `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |
+| `coupling` | `"one-way"` (the particles feel the gas) or `"two-way"` (the gas feels the momentum and energy they exchange, `"solid"` only) ([Two-way coupling](guide/particles.md#two-way-coupling)), default `"one-way"` |
+| `weight` | Particles per parcel (`"solid"`; per meter of depth in 2D), default 1 |
+| `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`), default 0 (each particle's own cell) |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
 | `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |

@@ -336,6 +336,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the `"saffman_lift"` force of solid particles.
 - <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
   Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
+- <a id="capecelatro-desjardins-2013"></a>J. Capecelatro and O. Desjardins, An Euler–Lagrange strategy for simulating particle-laden flows, *J. Comput. Phys.* 238, 1–31 (2013). [doi:10.1016/j.jcp.2012.12.015](https://doi.org/10.1016/j.jcp.2012.12.015)
+  Used in: the deposition of two-way coupling sources and dispersed-phase fields as a deposit spread by diffusion over a width in physical units (`deposition_width` in `[particles]`, `src/particles/particle_coupling.cpp`).
 
 ## Derived output fields
 
