@@ -280,7 +280,9 @@ TEST(SessionTest, CaseKeysGiveTheTablesACaseDoesNotSetTheirTypeAndForm) {
         unset++;
         ASSERT_TRUE(keys[key].has("form")) << key << ": " << json::dump(keys[key]);
         EXPECT_EQ(keys[key]["form"].string, form->string) << key;
-        if (const json::Value * type = general[key].find("type")) EXPECT_EQ(json::dump(keys[key]["type"]), json::dump(*type)) << key;
+        if (const json::Value * type = general[key].find("type")) {
+            EXPECT_EQ(json::dump(keys[key]["type"]), json::dump(*type)) << key;
+        }
     }
     EXPECT_GT(unset, 0u);
 }
