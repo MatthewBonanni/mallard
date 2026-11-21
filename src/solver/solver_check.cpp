@@ -577,7 +577,38 @@ double largest_in_column(const Kokkos::View<rtype **, Kokkos::LayoutRight> & v, 
 } // namespace
 
 void Solver::check_particles(CheckReport & r) {
-    if (!particles || !particles->inertial()) return;
+    if (!particles) return;
+    for (const particles::InjectorInfo & info : particles->injector_info()) {
+        CheckInjector j;
+        j.name = info.name;
+        j.site = info.site;
+        j.where = info.where;
+        j.center = info.center;
+        j.box = info.box;
+        j.measure = info.measure;
+        j.along_normal = info.along_normal;
+        j.direction = info.direction;
+        j.speed = info.speed;
+        j.cone_angle = info.cone_angle;
+        j.rate = info.rate;
+        j.mass_flow = info.mass_flow;
+        j.start = info.start;
+        j.end = info.end;
+        j.weight = info.weight;
+        j.mean_diameter = info.mean_diameter;
+        j.sauter_diameter = info.sauter_diameter;
+        double run_end = std::numeric_limits<double>::infinity();
+        if (t_stop > 0.0_r) {
+            run_end = static_cast<double>(t_stop);
+        } else if (!use_cfl && n_steps > 0) {
+            run_end = static_cast<double>(t) + static_cast<double>(n_steps) * static_cast<double>(dt_fixed);
+        }
+        const double stop = std::fmin(info.end, run_end);
+        const double from = std::fmax(info.start, static_cast<double>(t));
+        if (std::isfinite(stop)) j.parcels = stop > from ? info.rate * (stop - from) : 0.0;
+        r.injectors.push_back(j);
+    }
+    if (!particles->inertial()) return;
     const particles::Validity v = particles->validity(particles::SIZE_LIMIT);
     if (v.n_large > 0) {
         r.warning(diagnostic_code::PARTICLE_SIZE,

@@ -526,6 +526,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
+| `particle_injectors` | `[{name, site (point, zones, region), where, center, box, measure, direction (a vector, or "inward_normal"), speed, cone_angle (degrees), rate, mass_flow, start, end, weight, mean_diameter, sauter_diameter, parcels}]` ([Injectors](particles.md#injectors)); `parcels` over the run, `null` when it does not end |
 | `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |

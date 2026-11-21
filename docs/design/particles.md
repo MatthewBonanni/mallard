@@ -44,8 +44,10 @@ prefix sum over `id == EMPTY`, and the *k*-th incoming particle takes the
 in this layer, and output sorts by id.
 
 The default capacity is the global particle count, so that every rank can hold
-every particle and migration never runs out of slots. Injection (#759) will
-size it from the injectors' rates; load balancing (#763) bounds it.
+every particle and migration never runs out of slots: the seeds plus, for each
+injector, `ceil(rate * duration) + 1` parcels up to the end of the run.
+Load balancing (#763) bounds it. Solid particles carry `props` (diameter and
+weight, per slot), which injectors set per particle.
 
 ## The particle block of the State
 
@@ -183,6 +185,40 @@ order of kernels. Its stages read the polynomial of its start cell, which is
 owned, and the flow is bitwise independent of the rank count, so trajectories
 are too (tested on 2 and 3 ranks). Counters of removed particles are integer
 atomics.
+
+## Injection (#759)
+
+`Injectors` (`particle_injection.h`) emits, after every step, the parcels each
+injector owes for the part of the step between its `start` and `end`, carrying
+the fraction of a parcel left over. Four kernels, all of fixed size, so the
+step graph captures them: one thread counts each injector's parcels from the
+device's step time and advances the injected counts and the next id (a step
+the time step control rejects advances no time, so it injects nothing); a
+prefix sum lists the parcels whose element this rank owns; another lists the
+free slots; the *k*-th local parcel takes the *k*-th free slot. Overflow
+counts on the device and the host checks it at check intervals and the end.
+
+Each parcel draws everything (its element, the point in it, the cone, the
+diameter) from a counter-based generator: SplitMix64 of (seed, injector,
+the parcel's count within the injector, draw number). The count makes the step
+implicit, so parcels do not depend on where steps fall, only on when they
+enter; no generator state exists to save, distribute or advance. Every rank
+holds the global CDF of each injector's elements (zone faces by area, cells by
+volume times the region's fraction), sorted by global cell id and face
+centroid so it is the same on any partition; every rank draws every parcel's
+element and only the owner places it. Points use `locate_points`. Within an
+element a parcel is uniform in a simplex (a face is a fan of triangles, a cell
+of tetrahedra) chosen by volume; an analytic region rejects points outside its
+signed distance (up to 64 tries, which the fraction makes rare).
+
+Size distributions are tabulated on 4096 cells in ln d between their clip
+bounds and inverted by the cumulative trapezoid, linear in ln d within a cell;
+by mass they weigh the PDF by d^-3. Their moments come from the same table, so
+`mass_flow` sets the rate from the mean mass the sampler gives.
+
+Restart files carry `PARTICLE_D`, `PARTICLE_W`, `PARTICLE_NEXT_ID` and per
+injector `PARTICLE_INJECTOR_<name>` (count, carry): a restarted run continues
+the injection bit for bit.
 
 ## Per-particle quantities (#756)
 
@@ -440,11 +476,12 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   every rank, which suits thousands of particles, not millions.
 - **Remapped restarts** (#541): `type = "remap"` seeds the particles from
   `[particles]` instead of relocating the file's.
-- **Seeding during the run**, regions and weights (#759), counter-based random
-  numbers keyed by (seed, injector, step, index).
+- **Of #759:** injection from data (a file of particles, or another run's
+  exits), moving injection regions, rates as expressions of time, arrays of
+  injectors (#501), per-injector dispersion, and the case view's glyphs.
 - **Compaction**: kernels run over every slot; dense packing of the live
   particles (or sorting them by cell, for memory locality) matters at the
-  scale of #291 and comes with injection.
+  scale of #291, with parcel splitting and merging.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
 - **Further models** (#757 follow-ups): thermophoresis, the Basset force,
   splashing, mass transfer (evaporation), drag and heat transfer in mixtures,

@@ -2356,15 +2356,27 @@ void Solver::init_particles(region::Regions & regions) {
     }
     // A restart file's particles continue; a file without them (or a remap) seeds them from [particles]
     std::optional<RestartArrays> restart;
+    double t_begin = 0.0;
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart" &&
         input.at("initialize").contains("file")) {
         const std::string file = find_value<std::string>(input, "initialize", "file");
         std::ifstream in(file, std::ios::binary);
-        if (in) restart = read_restart_header(in, file).arrays;
+        if (in) {
+            RestartHeader header = read_restart_header(in, file);
+            restart = std::move(header.arrays);
+            t_begin = header.t;
+        }
+    }
+    // The latest the run can stop, which sizes the slots for the particles injected until then
+    double t_end = std::numeric_limits<double>::infinity();
+    if (t_stop > 0.0_r) {
+        t_end = static_cast<double>(t_stop);
+    } else if (!use_cfl && n_steps > 0) {
+        t_end = t_begin + static_cast<double>(n_steps) * static_cast<double>(dt_fixed);
     }
     particles = std::make_unique<Particles>();
     particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
-                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics);
+                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics, t_begin, t_end);
     if (particles->two_way() && axisymmetric) {
         throw InputError(Diagnostic{.key = "particles.coupling",
                                     .line = line_of(input.at("particles"), "coupling"),
@@ -2798,6 +2810,7 @@ int Solver::run_loop() {
         // A restart's pending half step, where this run does not fuse it into its first step
         if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
         if (!reacting || simpler) chemistry_pending = 0.0;
+        if (particles) particles->start_injection(static_cast<double>(t));
         if (particles && particles->starts_at_gas()) {
             update_cell_W();
             particles->start_from_gas(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
@@ -2880,6 +2893,7 @@ int Solver::run_loop() {
     defer_chemistry = false;
     destroy_step_graph();
     check_timed_boundaries();
+    if (particles) particles->check_capacity();
     flush_chemistry();
     const bool row_due = step != step_last_check;
     Kokkos::Timer output_timer;
@@ -2938,6 +2952,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
     if (step % check_interval == 0 && stop_reason().empty()) {
         Kokkos::Timer check_timer;
         check_timed_boundaries();
+        if (particles) particles->check_capacity();
         print_progress();
         t_wall_checks += check_timer.seconds();
     }
@@ -3563,6 +3578,7 @@ void Solver::take_step() {
     if (particles) {
         particles->relocate();
         particles->migrate();
+        particles->inject(t + dt);
     }
     if (double_flux) {
         cells_frozen = false;
