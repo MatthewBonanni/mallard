@@ -593,7 +593,7 @@ TEST(ParticleProbesTest, StatisticsOfTheParticlesInARegion) {
         const std::vector<double> & r = rows[1];
         ASSERT_EQ(r.size(), 3u + 12u);
         EXPECT_EQ(r[0], 10.0);
-        EXPECT_NEAR(r[1], 0.1, 1e-15);
+        EXPECT_NEAR(r[1], 0.1, roundoff(1e-15));
         EXPECT_EQ(r[2], 8.0);
         const double a = 0.07 + 0.86 / 3.0 + 0.03, b = 0.07 + 2.0 * 0.86 / 3.0 + 0.03;
         EXPECT_NEAR(r[3], 0.5 * (a + b), roundoff(1e-12));     // x mean
