@@ -35,6 +35,7 @@
 #include "particle_forces.h"
 #include "particle_probes.h"
 #include "particle_quantities.h"
+#include "particle_trajectories.h"
 #include "periodic_maps.h"
 #include "pinned_mirrors.h"
 #include "state.h"
@@ -335,11 +336,19 @@ class Particles {
 
         /**
          * @brief Lower step_limit to the next step after step that some probe samples, or to the next step with
-         *        [[particles.crossings]], which the host writes after every step.
+         *        [[particles.crossings]], which the host writes after every step, and step_limit or t_limit to
+         *        the next output of [[particles.trajectories]].
          */
-        void probe_limits(uint64_t step, uint64_t & step_limit) const {
+        void probe_limits(uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
             probes.due_limits(step, step_limit);
             if (!crossings.empty()) step_limit = std::min(step_limit, step + 1);
+            for (const auto & tr : trajectories) {
+                if (tr.clock.interval > 0) {
+                    step_limit = std::min(step_limit, (step / tr.clock.interval + 1) * tr.clock.interval);
+                } else {
+                    t_limit = std::min(t_limit, tr.clock.due_time());
+                }
+            }
         }
 
         /** @brief Evaluate and write the probes due at step, from the gas state sample() left (collective). */
@@ -356,6 +365,21 @@ class Particles {
 
         /** @brief The files of [[particles.crossings]]. */
         std::vector<std::string> crossing_files() const;
+
+        /** @brief Whether some entry of [[particles.trajectories]] is due after step, at t. */
+        bool trajectories_due(uint64_t step, rtype t) const;
+
+        /** @brief Whether the trajectories due read the gas at the particles: sample() before write_trajectories(). */
+        bool trajectories_read_gas(uint64_t step, rtype t) const;
+
+        /** @brief Append the trajectories due at step, at t, from the gas sample() left (collective). */
+        void write_trajectories(uint64_t step, rtype t);
+
+        /** @brief A restart at t: the trajectories continue after their outputs up to t, which the file holds. */
+        void resume_trajectories(rtype t);
+
+        /** @brief The files of [[particles.trajectories]]. */
+        std::vector<std::string> trajectory_files() const;
 
         /**
          * @brief After a step: the cell holding each particle, reflections off
@@ -475,6 +499,20 @@ class Particles {
         Resolved resolve_fields(const std::vector<std::string> & names, const std::string & key, size_t line,
                                 const std::string & docs) const;
 
+        /** @brief Staging of particles (a snapshot, a trajectory's output) inside region if not null, members of bit if not NO_MEMBERSHIP. */
+        static constexpr uint32_t NO_MEMBERSHIP = UINT32_MAX;
+        uint32_t add_staging(const Resolved & resolved, const region::RegionView<> * region, uint32_t bit);
+
+        /** @brief The header of a records file: step, t, id, the position, then extra and the fields. */
+        static std::string record_header(const std::vector<ParticleField> & fields, const std::string & extra);
+
+        /**
+         * @brief Read [[particles.trajectories]], the membership of each particle by its seed point (points in id
+         *        order), and set up their files.
+         */
+        void init_trajectories(const Input & input, const Input & table, region::Regions & regions,
+                               const std::vector<std::array<double, N_DIM>> & points);
+
         /** @brief Read [[particles.crossings]] and set up their files and device events. */
         void init_crossings(const Input & input, const Input & table, region::Regions & regions);
 
@@ -489,11 +527,16 @@ class Particles {
         Kokkos::View<uint32_t *> crossing_width;    // (entry): its columns
         Kokkos::View<double **, Kokkos::LayoutRight> crossing_values;  // (event, column)
 
+        // [[particles.trajectories]]
+        std::vector<particles::Trajectory> trajectories;
+        Kokkos::View<uint32_t *> trajectory_members;  // (seed id): bit k for entry k
+
         struct Snapshot {
             std::vector<ParticleField> fields;
             uint32_t n_columns = 0;
             bool gas = false;
             bool filtered = false;
+            uint32_t bit = NO_MEMBERSHIP;  // members of this trajectory only
             region::RegionView<> region;
             Kokkos::View<uint32_t *> variable;  // (column): its particle variable
             Kokkos::View<uint64_t *> id;        // (slot): EMPTY outside the region

@@ -12,8 +12,9 @@ statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas, and
 [dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
 [Snapshots](#particle-snapshots) write every particle, with the mesh or
-alone, and [crossings](#particle-crossings) record the particles leaving
-through a boundary or crossing a surface. Sprays and injection during the run follow in later releases
+alone, [crossings](#particle-crossings) record the particles leaving
+through a boundary or crossing a surface, and [trajectories](#particle-trajectories)
+follow a subset of them through the run. Sprays and injection during the run follow in later releases
 ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 ## Tracers: `[particles]`
@@ -489,5 +490,51 @@ appends to them, after the run's `# mallard-run` line.
   it again; take the rows of the last `# mallard-run` block for those steps.
 - The events of a step are held on the device: up to `capacity` per surface
   piece, plus `capacity` for the boundary zones.
+
+## Particle trajectories
+
+```toml
+[[particles.trajectories]]     # 1 % of the particles, every 10 steps
+name = "sample"
+interval = 10
+fraction = 0.01
+fields = ["V", "T_P"]
+
+[[particles.trajectories]]     # the particles seeded near the nozzle
+name = "nozzle"
+time_interval = 1e-4
+region = {type = "sphere", center = [0, 0, 0], radius = 0.01}
+```
+
+A `[[particles.trajectories]]` entry appends a row to its CSV file
+(`particle_trajectories_<name>.csv`) for each particle it follows, at the
+start and every `interval` steps or `time_interval` of simulated time: `step`,
+`t`, `id`, the position `x`, `y`, (`z`), then the `fields`, the variables of
+[snapshots](#particle-snapshots). Plot a pathline by selecting the rows of one
+`id`.
+
+It follows every particle unless a subset is given; both together keep the
+particles in both:
+
+- **`fraction`**: the share of the particles, chosen by a hash of their ids,
+  so the same particles on any number of ranks, and those of a smaller
+  fraction are among those of a larger one.
+- **`region`**: the particles seeded inside a region of shapes, wherever they
+  go afterwards.
+
+Rows are sorted by step, then by id, so the files are bitwise the same on any
+number of ranks and with or without step graphs. A restarted run appends to
+them, after the run's `# mallard-run` line, from its first output after the
+restart.
+
+**Pitfalls.**
+
+- Each output gathers the subset's rows on rank 0: follow a fraction of a
+  large cloud, and use [snapshots](#particle-snapshots) for all of it.
+- The subset is chosen from the seed points of `[particles]`: a restart with
+  other seeds follows the particles of the new seeds' ids and points.
+- A restart from an earlier restart file than the last appends the outputs
+  after it again; take the rows of the last `# mallard-run` block for those
+  steps.
 
 *Design notes:* [particles](../design/particles.md).

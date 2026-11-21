@@ -1646,6 +1646,23 @@ for a surface `direction`, then the fields. At most 8 entries.
 | `fields` | Particle variables (`RHO`, `U`, `P`, `T`, `V`, `T_P`) and names of `[[particles.quantities]]`, vectors by name, default none |
 | `file` | Its CSV file, default `particle_crossings_<name>.csv` |
 
+### `[[particles.trajectories]]`
+
+A subset of the particles at the start and every `interval` or `time_interval`
+([Particle trajectories](guide/particles.md#particle-trajectories)): per row
+`step`, `t`, `id`, the position `x`, `y`, (`z`), then the fields, sorted by
+step and id. At most 8 entries.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `interval` | Steps between outputs; give it or `time_interval` |
+| `time_interval` | Simulated time between outputs; give it or `interval` |
+| `fraction` | The share of the particles followed, by a hash of their ids, in (0, 1], default 1 |
+| `region` | Follow the particles seeded inside this filled region of shapes (by name or inline) that does not move, default every particle |
+| `fields` | Particle variables (`RHO`, `U`, `P`, `T`, `V`, `T_P`) and names of `[[particles.quantities]]`, vectors by name, default none |
+| `file` | Its CSV file, default `particle_trajectories_<name>.csv` |
+
 ## `[[triggers]]`
 
 A condition on the run and what to do once it holds, evaluated after every

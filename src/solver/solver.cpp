@@ -2848,6 +2848,7 @@ int Solver::run_loop() {
             const snapshot_block::Reason reason(snapshot_block::reason::START);
             write_data(true);
             write_probes();
+            write_particle_trajectories();
             update_convergence();
             t_wall_output += output_timer.seconds();
         }
@@ -2966,6 +2967,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
     write_probes();
     if (particles) particles->write_crossings(step, static_cast<double>(t), static_cast<double>(dt));
     write_particle_probes();
+    write_particle_trajectories();
     update_convergence();
     act_on_triggers();
     write_data();
@@ -3009,7 +3011,7 @@ bool Solver::state_needed() const {
         if (step % monitor.interval == 0) return true;
     }
     return (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || statistics.due(step, t) ||
-           probes.due(step, t) || probes.averages_due(step, t) || (particles && particles->probes_due(step));
+           probes.due(step, t) || probes.averages_due(step, t) || (particles && (particles->probes_due(step) || particles->trajectories_due(step, t)));
 }
 
 double Solver::progress() const {
@@ -3335,6 +3337,7 @@ void Solver::print_summary(const RunEnd & end) const {
     if (particles) {
         for (const auto & file : particles->probe_files()) s.files.push_back({"particle probes", 0, file});
         for (const auto & file : particles->crossing_files()) s.files.push_back({"particle crossings", 0, file});
+        for (const auto & file : particles->trajectory_files()) s.files.push_back({"particle trajectories", 0, file});
     }
     report::Text text(logging::color_stdout());
     summary_section(text, s);
@@ -3514,6 +3517,15 @@ void Solver::write_particle_probes() {
     update_cell_W();
     particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
     particles->write_probes(step, static_cast<double>(t));
+}
+
+void Solver::write_particle_trajectories() {
+    if (!particles || !particles->trajectories_due(step, t)) return;
+    if (particles->trajectories_read_gas(step, t)) {
+        update_cell_W();
+        particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+    }
+    particles->write_trajectories(step, t);
 }
 
 void Solver::sample_probe_averages() {

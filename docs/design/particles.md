@@ -468,6 +468,17 @@ gathers the events to rank 0 and sorts them by entry, id and fraction of the
 step, which makes the files rank-count independent. Events are few next to the
 particles, so this gather does not contradict the snapshots' design.
 
+Trajectories (`[[particles.trajectories]]`) are snapshots of a subset, staged
+by the snapshots' kernel with a membership filter: a per-seed-id bit mask
+built at initialization from a hash of the id (`fraction`) and the region at
+the seed point. The mask is a function of the input alone, so restarts need no
+per-particle state for it and the subset is rank-count independent; injected
+particles (#759) will need their membership carried with them. Each output is
+gathered to rank 0, sorted by id and appended to one CSV file per entry, which
+suits the subsets the key exists for; whole clouds belong in snapshots. Time
+schedules use the writers' `OutputClock`, and the step graph's horizon stops at
+each output.
+
 ## Not in this layer
 
 - **Graphable migration** (above): distributed runs with particles are not

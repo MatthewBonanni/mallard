@@ -459,6 +459,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     Kokkos::deep_copy(aux, h_aux);
     Kokkos::deep_copy(n_removed, h_removed);
     init_crossings(input, table, regions);
+    init_trajectories(input, table, regions, points);
 }
 
 void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
@@ -1114,6 +1115,15 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
         for (const auto & f : c.fields) fields += ", " + f.name;
         lines.emplace_back("Particle crossings", c.name + ": " + (c.exits ? "leaving through " : "crossing ") + c.region +
                                                      fields + " -> " + c.file);
+    }
+    for (const auto & tr : trajectories) {
+        std::string line = tr.name + ": ";
+        line += tr.clock.interval > 0 ? "every " + std::to_string(tr.clock.interval) + " steps"
+                                      : "every " + logging::real(static_cast<double>(tr.clock.time_interval));
+        if (tr.fraction < 1.0) line += ", fraction " + logging::real(tr.fraction);
+        if (!tr.region.empty()) line += ", seeded in " + tr.region;
+        for (const auto & f : snapshots[tr.snapshot].fields) line += ", " + f.name;
+        lines.emplace_back("Particle trajectories", line + " -> " + tr.file);
     }
     return lines;
 }

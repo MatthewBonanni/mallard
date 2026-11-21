@@ -1,0 +1,1 @@
+- `[[particles.trajectories]]`: a CSV record of a subset of the particles (a fraction of their ids, those seeded in a region) at the start and every `interval` or `time_interval`, with their particle variables and quantities; bitwise the same on any rank count, and appended to by restarted runs (#753).

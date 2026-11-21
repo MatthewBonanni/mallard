@@ -11,6 +11,7 @@ its progress on the terminal and in a machine-readable run record.
 | Solution snapshots | `PREFIX.vtkhdf`, every snapshot in one file; with `series = false` `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index) and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
 | Particle snapshots | a block of `PREFIX.vtkhdf` with the mesh; alone, or with `particles = "separate"`, `PREFIX_particles.vtkhdf` (`series = false`: `PREFIX_particles_<n>.vtkhdf` and `PREFIX_particles.vtkhdf.series`) | `[[write_data]]` with `particle_fields` | [Particle snapshots](#particle-snapshots) |
 | Particle crossings | `particle_crossings_<name>.csv` | `[[particles.crossings]]` | [Particle crossings](particles.md#particle-crossings) |
+| Particle trajectories | `particle_trajectories_<name>.csv` | `[[particles.trajectories]]` | [Particle trajectories](particles.md#particle-trajectories) |
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
 | Run record | `mallard.jsonl` | on by default; `[output] run_log` | [Run record](#run-record-mallardjsonl) |
