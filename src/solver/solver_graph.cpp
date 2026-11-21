@@ -1189,7 +1189,7 @@ void Solver::begin_device_steps() {
     bool moving = false, solution = false, current = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
         const bool reduced = triggers_read_probe(k) || convergence_reads_probe(k);
-        if (!probes.can_stage(k, statistics) || (reduced && probes.moves(k))) continue;
+        if (!probes.can_stage(k, statistics) || (reduced && !probes.reduces_staged(k))) continue;
         if (probes.follows_solution(k) && !current) {
             // Its staging is sized by the cells it covers now
             update_cell_W();
