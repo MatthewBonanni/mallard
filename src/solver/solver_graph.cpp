@@ -288,7 +288,10 @@ void Solver::record_step() {
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
     }
     // After a rejected step the positions are those of its start, where they stay
-    if (particles) particles->relocate();
+    if (particles) {
+        particles->remove_evaporated(state(), [this](const State & s) { halo.exchange(s); });
+        particles->relocate();
+    }
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
