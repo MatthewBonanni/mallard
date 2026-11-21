@@ -81,7 +81,7 @@ struct Gas {
         return fpv.locate(Z_mean, Zvar, C_mean);
     }
 
-    /** @brief C of the burnt laminar flamelet state (c = 1) at Z. */
+    /** @brief C of the burnt laminar flamelet state (Lambda = 1) at Z. */
     KOKKOS_INLINE_FUNCTION double burnt(const double Z_mean) const {
         return fpv.table.at_last_node(locate(Z_mean, 0.0, 0.0), fpv.table.n_nodes[2] - 1, fpv.field_C);
     }
@@ -139,7 +139,7 @@ class FlameletModel {
         /** @brief The transported scalars' names, in the order of the species block. */
         static std::vector<std::string> scalar_names() { return {"Z", "C"}; }
 
-        /** @brief The table's C at mixture fraction Z for fully burnt (c = 1) laminar (S = 0) states. */
+        /** @brief The table's C at mixture fraction Z for fully burnt (Lambda = 1) laminar (Sz = 0) states. */
         double burnt_progress(double Z) const;
 
         /** @brief Thermodynamics of the laminar table point of (Z, C). */
