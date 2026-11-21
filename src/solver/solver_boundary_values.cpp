@@ -73,12 +73,12 @@ std::string Solver::boundary_values(const std::string & dir) const {
             for (const uint32_t f : faces) computed = computed || std::isfinite(boundary_point(f)[k]);
             if (comm::allreduce(computed, comm::Op::MAX) == 0) continue;
             coordinates.push_back(k);
-            const bool metres = k == bv::N_M || k == bv::U_M
+            const bool meters = k == bv::N_M || k == bv::U_M
 #if N_DIM == 3
                                 || k == bv::V_M || k == bv::R_M
 #endif
                 ;
-            columns.push_back({BoundaryValue::variables()[k], metres ? "m" : "1"});
+            columns.push_back({BoundaryValue::variables()[k], meters ? "m" : "1"});
         }
         std::vector<int> slots;
         for (int s = 0; fields && s < BoundaryFields::N_SLOTS; s++) {
