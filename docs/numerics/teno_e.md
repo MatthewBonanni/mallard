@@ -23,6 +23,8 @@ faces, and its own stencil selection by a Lebesgue bound.
 | `src/numerics/teno.h` | Monomials, Euler eigenvectors, the adaptive cutoff, packed stencil storage |
 | `src/numerics/teno.cpp` | Options, the cache, and the reconstruction kernels |
 | `src/numerics/teno_setup.h`, `teno_setup.cpp` | The setup on the device: stencil search, ranking metric, moments, fits |
+| `src/numerics/teno_shapes.h`, `teno_shapes.cpp` | Stencil-shape keys, so that the setup fits one cell per shape |
+| `src/numerics/teno_sharing.h` | The store of tables shared by the cells of one stencil shape |
 | `src/numerics/teno_scalars.h` | Mixture scalars reconstructed with the flow's stencil choices |
 | `src/numerics/face_reconstruction.h`, `face_reconstruction.cpp` | Face quadrature, and the interface shared with first order and MUSCL |
 
@@ -619,8 +621,38 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
+**One fit per stencil shape.** With shared tables the setup groups the cells
+before fitting any table (`teno_shapes.h`), on the device, so that every backend
+groups them alike and gives the same tables. A cell's search reads the geometry of the cells in its
+vertex-neighbor layers, as many as the layers' cell counts make it take, and
+its own faces; its key hashes exactly that, relative to the cell and in units of
+its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
+and its boundary faces with their conditions, sorted by position so that the
+key does not depend on the numbering, and the cell's own faces in its own order.
+The cell with the lowest global id of each key, over the ranks, is fitted, and
+the other cells of the key take its stencil, each entry mapped to the cell at
+the same position of their own sorted layers, its pseudo-inverses, basis means
+and smoothness-indicator matrix. Batches of fitted cells and cells taken from
+their keys then go through the table comparison above, where the cells of a key,
+whose tables are bitwise equal, take one shape. Cells whose key no other cell
+has, whose layers reach the outermost halo layer or hold two periodic copies of
+a cell, and cells whose layers do not match their key's representative, are
+fitted on their own, so a mesh with a shape per cell is set up as before; so
+are the cells of axisymmetric meshes, whose tables depend on the radius. Once
+the halo is as deep as the searches need, the layers of every reconstructed
+halo cell lie within the complete layers, and the cell counts that decide
+whether a cell has a key are taken over the ranks, halo cells' included, so
+each cell has the same key and the same tables on every rank. Cells of one
+key have geometries that agree to within $2^{-30} h$ in every coordinate the
+key reads, so the tables a cell takes differ from its own fit by what such a
+difference changes, besides round-off. The shared tables are those of the table
+comparison, except where the cells of one key fall on either side of its grid:
+they take one table instead of two. In 2D, a cell whose search reads a wall
+with another boundary behind it (a thin body, whose far side can drop mirror
+images) has no key and is fitted on its own.
+
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 25; one file per MPI rank). The file is used
+on later runs (format version 26; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,

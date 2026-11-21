@@ -1057,6 +1057,45 @@ under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), a
 1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
 recomputes the central coefficients, so 2D keeps 1.
 
+### 20. TENO setup: one fit per stencil shape (#986)
+
+With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
+cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
+packing of #1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
+restart file (`--fields Q_CRITERION`):
+
+| $64^3$ TENO5, Threads | numerics setup | of it: tables / packing / keys | run, wall / CPU | run, peak RSS | post derive, wall / CPU | post derive, peak RSS |
+|---|---|---|---|---|---|---|
+| base | 56.9 s | 33.5 / 12.1 / - s | 63.1 / 104.4 s | 2.43 GB | 59.6 / 95.1 s | 1.82 GB |
+| keyed | 34.1 s | 0.01 / 18.5 / 4.4 s | 42.4 / 62.2 s | 2.46 GB | 47.6 / 59.8 s | 1.85 GB |
+
+27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. The packing now
+dominates; it ranks every cell's table although the cells of a key share it (#1079). Results are bitwise
+those of the base except where cells of one key used to fall on either side of the table comparison's grid:
+of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixed, tetrahedra, prisms; orders
+3-6) only the periodic order-3 box differs (restart files after 3 steps, at most 6.7e-16 in density), and of
+2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
+ranks give the 1-rank result bit for bit.
+
+On one A100 (base = #1069, device packing), restart files after 3 steps are bitwise those of the base, and a
+GPU run that reads the tables cache an OpenMP run wrote gives its own result bit for bit; the two caches differ
+only in the producer's name. Seconds of the numerics setup:
+
+| A100 | base: tables / packing | keyed: tables / packing / shapes | fitted |
+|---|---|---|---|
+| double Mach $2048 \times 512 \times 2$, TENO3 | 0.87 / 0.96 | 0.17 / 1.17 / 0.40 | 323 of 2,097,152 |
+| TENO4 | 1.43 / 0.96 | 0.20 / 1.24 / 0.40 | 323 |
+| TENO5 | 4.52 / 1.16 | 0.32 / 1.47 / 0.46 | 323 |
+| TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
+| $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
+| 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+| TENO5 | 90.10 / 30.83 | 90.05 / 31.19 / 0.18 | 750,000 |
+
+The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
+tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
+base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

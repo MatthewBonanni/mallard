@@ -3624,7 +3624,7 @@ class Setup3D {
             }
             h.cell_h = Geometry<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::cbrt(double(mesh.h_cell_volume(c))); });
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
@@ -4981,6 +4981,24 @@ void boundary_behind_faces(const Mesh & mesh, const std::vector<uint8_t> & bound
 
 }  // namespace
 
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries) {
+    auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
+    auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
+    std::vector<uint8_t> boundary(mesh.n_faces);
+    Geometry2D<HostMem>::R<uint8_t *> mirror("teno_setup_boundary_behind", mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        boundary[f] = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                      h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+        mirror(f) = boundary[f];
+    }
+    std::vector<uint32_t> start;
+    std::vector<std::array<double, 4>> pieces;
+    boundary_behind_faces(mesh, boundary, mirror, start, pieces);
+    std::vector<uint8_t> out(mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) out[f] = start[f + 1] > start[f];
+    return out;
+}
+
 /** @brief The 2D setup of one mesh. */
 class Setup2D {
     public:
@@ -5050,7 +5068,7 @@ class Setup2D {
             }
             h.cell_h = Geometry2D<HostMem>::R<double *>("teno_setup_h", n_cells);
             Kokkos::parallel_for("teno_setup_h", HostRange(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::sqrt(double(mesh.h_cell_volume(c))); });
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
