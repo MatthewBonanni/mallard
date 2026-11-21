@@ -244,7 +244,9 @@ set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
 t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
 .time_interval, probes.<name>.interval or .time_interval,
-forces.<zone>.interval, integrals.interval. Other keys are refused.
+forces.<zone>.interval, integrals.interval. ctl refuses other keys, and values
+of the wrong type, before sending (mallard version --format json lists the keys
+under control.settings).
 
 Options:
   --wait accepted|done  accepted: return once the run has queued the request;
@@ -1647,7 +1649,12 @@ blocks of output files, the run directory report, run control (with its commands
 and control files), the run endpoint record, run launch results, the grid
 convergence report and the pack manifest. Each of these carries the same schema
 and version fields; an addition keeps the version, a change that breaks a reader
-increments it.
+increments it. Also: the session's requests with the one-shot command of each
+(methods), the backend's devices (each GPU visible with its name and memory, and
+the host's CPU and threads), and what run control takes (control: the socket's
+commands, every key ctl set accepts with its type, units and the element it
+names, the control files, and the routes ctl can take from here). The session's
+initialize answers the same object, with the open case.
 
 Options:
   --format text|json  text: the version alone, as mallard --version prints it;

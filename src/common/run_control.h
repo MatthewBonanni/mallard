@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -39,6 +40,48 @@ constexpr int N_REQUESTS = 4;
 /** @brief The commands the control socket takes, and the control files the run looks for. */
 inline constexpr std::array<const char *, 4> COMMANDS = {"status", "checkpoint", "stop", "set"};
 inline constexpr std::array<const char *, 2> FILES = {"STOP", "CHECKPOINT"};
+
+/**
+ * @brief A setting `set` changes while the run goes on. The run applies it and `mallard ctl` checks it before
+ *        sending, both from this table.
+ */
+struct Setting {
+    std::string_view table;     ///< "write_data", or empty for a key of its own
+    std::string_view selector;  ///< what names the element: "prefix_or_index", "name", "zone", or empty
+    std::string_view field;     ///< "interval"
+    std::string_view type;      ///< "count" (a non-negative integer) or "time" (seconds, or with a time unit)
+    std::string_view help;
+    /** @brief The key as written: "write_data.<prefix_or_index>.interval". */
+    std::string key() const;
+};
+
+inline constexpr std::array<Setting, 10> SETTINGS = {{
+    {"", "", "n_steps", "count", "steps to run in all; 0: no step limit"},
+    {"", "", "t_stop", "time", "simulated time to stop at; 0 or less: no limit"},
+    {"", "", "t_wall_stop", "time", "wall time to stop after, with a restart; 0 or less: no limit"},
+    {"", "", "check_interval", "count", "steps between progress rows (positive)"},
+    {"write_data", "prefix_or_index", "interval", "count", "steps between writes of a [[write_data]]"},
+    {"write_data", "prefix_or_index", "time_interval", "time", "simulated time between writes of a [[write_data]]"},
+    {"probes", "name", "interval", "count", "steps between samples of a probe"},
+    {"probes", "name", "time_interval", "time", "simulated time between samples of a probe"},
+    {"forces", "zone", "interval", "count", "steps between force rows of a zone (positive)"},
+    {"integrals", "", "interval", "count", "steps between rows of [integrals] (positive)"},
+}};
+
+/** @brief The setting a key such as "write_data.flow.interval" sets, with the element's name; nullptr if none. */
+const Setting * setting(const std::string & key, std::string * element = nullptr);
+
+/** @brief Why value cannot be the key's (no such setting, or not of its type); empty if it can. */
+std::string check_setting(const std::string & key, const std::string & value);
+
+/** @brief The keys set takes, for messages: "n_steps, t_stop, ...". */
+std::string settable();
+
+/** @brief A non-negative integer written in digits alone. */
+bool parse_count(const std::string & text, uint64_t & value);
+
+/** @brief A time in seconds, or with a time unit ("2h"). */
+bool parse_time(const std::string & text, double & seconds);
 
 /** @brief Name of the control socket in the run directory. */
 inline constexpr const char * SOCKET_NAME = "mallard.sock";
