@@ -420,14 +420,14 @@ std::vector<Route> routes(const json::Value & endpoint, const Request & r, const
     const bool socket = endpoint.find("socket") && !endpoint["socket"].is_null();
     if (same_host && socket) out.push_back({"socket", {}, true});
     const std::vector<std::string> direct = direct_command(endpoint, r);
-    if (kind == "slurm" && !job.empty()) {
+    if (kind == "slurm" && !job.empty() && !same_host) {
         std::vector<std::string> argv = {"srun", "--jobid=" + job, "--overlap", "--nodes=1", "--ntasks=1"};
         const std::string node = text_or_null(scheduler->find("node"));
         if (!node.empty() || !host.empty()) argv.insert(argv.end(), {"-w", node.empty() ? host : node});
         argv.insert(argv.end(), direct.begin(), direct.end());
         out.push_back({"srun", argv, h.has_program("srun")});
     }
-    if (kind == "kubernetes") {
+    if (kind == "kubernetes" && !same_host) {
         std::vector<std::string> argv = {"kubectl", "exec"};
         const std::string ns = text_or_null(scheduler->find("namespace"));
         if (!ns.empty()) argv.insert(argv.end(), {"-n", ns});
@@ -494,8 +494,24 @@ std::string control(Request r) {
     result.run_id = text_or_null(endpoint.find("run_id"));
     result.directory = text_or_null(endpoint.find("directory"));
     const fs::path record = fs::path(result.directory) / run_endpoint::FILE_NAME;
-    const std::string state = text_or_null(endpoint.find("state"));
+    std::string state = text_or_null(endpoint.find("state"));
     const Here h = here();
+    // A run opens its socket when its setup ends: requests made before then wait for it
+    const std::optional<Clock::time_point> setup_deadline = deadline_after(r.timeout);
+    while (state == "setup") {
+        const long pid = static_cast<long>(endpoint["pid"].number);
+        if (text_or_null(endpoint.find("host")) == h.host && !pid_alive(pid)) break;
+        if (setup_deadline && Clock::now() >= *setup_deadline) {
+            throw Error(code::TIMEOUT, "the run is still in its setup after " + std::to_string(r.timeout) + " s");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        try {
+            endpoint = run_endpoint::find(r.run);
+        } catch (const std::exception &) {
+            // Mid-rename on a file system without atomic renames: read it again
+        }
+        state = text_or_null(endpoint.find("state"));
+    }
     if (state == "ended") {
         throw Error(code::NO_RUN, "the run ended (" + text_or_null(endpoint.find("outcome")) + ")",
                     json::Object().add("outcome", text_or_null(endpoint.find("outcome"))).str());

@@ -117,6 +117,13 @@ TEST(RunCtlTest, RoutesFollowTheEndpointRecord) {
               "kubectl exec -n cfd pod-7 -- /opt/mallard/bin/mallard3d ctl --direct /scratch/run status --id q1 --wait "
               "done --format json");
 
+    // From inside the pod or the job's node, they are not needed: a run still without its socket is not reachable
+    EXPECT_EQ(kinds(run_ctl::routes(endpoint("login1", R"({"kind": "kubernetes", "pod": "login1", "namespace": "cfd"})", false),
+                                    status, somewhere({"kubectl"}))),
+              std::vector<std::string>{});
+    EXPECT_EQ(kinds(run_ctl::routes(endpoint("login1", slurm, false), stop, somewhere({"srun", "scancel"}))),
+              std::vector<std::string>{"signal"});
+
     // PBS and LSF: ssh to the node, then their signals; control files only when asked for
     run_ctl::Request filed = stop;
     filed.allow_files = true;
