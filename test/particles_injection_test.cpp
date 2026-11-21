@@ -35,6 +35,9 @@ namespace {
 
 constexpr double PI = std::numbers::pi;
 
+/** @brief Agreement to round-off of the build's precision. */
+constexpr double ROUND_OFF = sizeof(rtype) == sizeof(double) ? 1e-12 : 1e-5;
+
 std::string numbers(double x, double y, double z) {
     std::ostringstream s;
     s.precision(17);
@@ -166,8 +169,8 @@ TEST(ParticleSizeTest, SampledDistributionsMatchTheirPdfs) {
         const double mean = m1 / m0, var = m2 / m0 - mean * mean;
         EXPECT_NEAR(size.mean_d, mean, 1e-4 * mean);
         EXPECT_NEAR(size.mean_d3, m3 / m0, 1e-3 * m3 / m0);
-        EXPECT_GE(size.lo, c.lo * (1.0 - 1e-12));
-        EXPECT_LE(size.hi, c.hi * (1.0 + 1e-12));
+        EXPECT_GE(size.lo, c.lo * (1.0 - ROUND_OFF));
+        EXPECT_LE(size.hi, c.hi * (1.0 + ROUND_OFF));
         const size_t N = 40000;
         std::vector<double> samples(N);
         double sum = 0.0;
@@ -210,8 +213,8 @@ TEST(ParticleInjectionTest, APointInjectorEmitsItsRateIntoTheFlow) {
             uint32_t s = 1;
             while (std::floor(1.37 * s + 1e-9) <= static_cast<double>(k)) s++;
             const double age = (steps - s) * dt;
-            EXPECT_NEAR(records[k].x[0], x0 + age, 1e-12) << "parcel " << k;
-            EXPECT_NEAR(records[k].x[1], 0.5, 1e-12);
+            EXPECT_NEAR(records[k].x[0], x0 + age, ROUND_OFF) << "parcel " << k;
+            EXPECT_NEAR(records[k].x[1], 0.5, ROUND_OFF);
         }
     };
     const std::string input = box(1.0, "n_steps = 40\ndt = 0.005\n", keys);
@@ -233,8 +236,8 @@ TEST(ParticleInjectionTest, InjectorsEmitOnlyBetweenTheirStartAndEnd) {
     EXPECT_LE(records.size(), 21u);
     // Ages between 0.2 - 0.1525 and 0.2 - 0.0525, to the step
     for (const auto & r : records) {
-        EXPECT_GE(r.x[0] - 0.2, 0.2 - 0.155 - 1e-12);
-        EXPECT_LE(r.x[0] - 0.2, 0.2 - 0.05 + 1e-12);
+        EXPECT_GE(r.x[0] - 0.2, 0.2 - 0.155 - ROUND_OFF);
+        EXPECT_LE(r.x[0] - 0.2, 0.2 - 0.05 + ROUND_OFF);
     }
 }
 
@@ -250,9 +253,9 @@ TEST(ParticleInjectionTest, AZoneInjectorSpreadsByAreaAlongItsInwardNormal) {
     std::vector<double> y, z;
     for (const auto & r : records) {
         EXPECT_NEAR(r.v[0], 2.0, 0.01);
-        EXPECT_NEAR(r.v[1], 0.0, 1e-12);
+        EXPECT_NEAR(r.v[1], 0.0, ROUND_OFF);
         EXPECT_GE(r.x[0], 0.0);
-        EXPECT_LE(r.x[0], 2.0 * 0.2 + 1e-9);
+        EXPECT_LE(r.x[0], 2.0 * 0.2 + ROUND_OFF);
         y.push_back(r.x[1]);
         if (N_DIM == 3) z.push_back(r.x[N_DIM - 1] / 0.5);
         EXPECT_EQ(r.d, 1e-3);
@@ -285,7 +288,7 @@ TEST(ParticleInjectionTest, VelocitiesFillTheirCone) {
         double along = 0.0;
         for (size_t i = 0; i < N_DIM; i++) along += r.v[i] * axis[i];
         const double c = along / norm(r.v);
-        ASSERT_LE(std::acos(std::min(c, 1.0)), cone * (1.0 + 1e-9));
+        ASSERT_LE(std::acos(std::min(c, 1.0)), cone * (1.0 + ROUND_OFF));
         for (size_t i = 0; i < N_DIM; i++) side[i] += r.v[i] / norm(r.v) - c * axis[i];
         if constexpr (N_DIM == 2) {
             const double cross = (axis[0] * r.v[1] - axis[1] * r.v[0]) / norm(r.v);
@@ -322,7 +325,7 @@ TEST(ParticleInjectionTest, ARegionInjectorFillsItsShapeUniformly) {
             d2 += (r.x[i] - c[i]) * (r.x[i] - c[i]);
             mean[i] += r.x[i] / static_cast<double>(N);
         }
-        ASSERT_LE(std::sqrt(d2), R * (1.0 + 1e-12));
+        ASSERT_LE(std::sqrt(d2), R * (1.0 + ROUND_OFF));
         r2 += d2 / (R * R) / static_cast<double>(N);
     }
     // r^2 / R^2 is uniform (2D) or Beta(5/2, 1) (3D)
@@ -527,16 +530,16 @@ TEST(ParticleInjectionTest, CheckReportsWhereAndHowEachInjectorInjects) {
     const CheckInjector & inlet = r.injectors[0];
     EXPECT_EQ(inlet.site, "zone");
     EXPECT_TRUE(inlet.along_normal);
-    EXPECT_NEAR(inlet.center[0], 0.0, 1e-12);
-    EXPECT_NEAR(inlet.center[1], 0.5, 1e-12);
-    EXPECT_NEAR(inlet.measure, N_DIM == 3 ? 0.5 : 1.0, 1e-12);
-    EXPECT_NEAR(inlet.parcels, 20.0, 1e-9);
+    EXPECT_NEAR(inlet.center[0], 0.0, ROUND_OFF);
+    EXPECT_NEAR(inlet.center[1], 0.5, ROUND_OFF);
+    EXPECT_NEAR(inlet.measure, N_DIM == 3 ? 0.5 : 1.0, ROUND_OFF);
+    EXPECT_NEAR(inlet.parcels, 20.0, 20.0 * ROUND_OFF);
     const CheckInjector & nozzle = r.injectors[1];
     EXPECT_EQ(nozzle.site, "point");
     EXPECT_FALSE(nozzle.along_normal);
-    EXPECT_NEAR(nozzle.center[1], 0.4, 1e-12);
-    EXPECT_NEAR(nozzle.direction[1], 1.0, 1e-12);
+    EXPECT_NEAR(nozzle.center[1], 0.4, ROUND_OFF);
+    EXPECT_NEAR(nozzle.direction[1], 1.0, ROUND_OFF);
     EXPECT_EQ(nozzle.cone_angle, 15.0);
-    EXPECT_NEAR(nozzle.parcels, 5.0, 1e-9);
-    EXPECT_NEAR(nozzle.mass_flow, 50.0 * 1e6 * PI / 6.0 * 1e-9, 1e-12);
+    EXPECT_NEAR(nozzle.parcels, 5.0, 5.0 * ROUND_OFF);
+    EXPECT_NEAR(nozzle.mass_flow, 50.0 * 1e6 * PI / 6.0 * 1e-9, 0.03 * ROUND_OFF);
 }
