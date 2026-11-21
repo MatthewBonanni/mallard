@@ -108,6 +108,31 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     if (type != "euler" && type != "navier_stokes") {
         throw not_accepted(physics, "physics.type", type, {"euler", "navier_stokes"});
     }
+    // The variance keys before the table, which a build without HDF5 cannot read
+    const bool les = input.contains("les");
+    for (const char * key : {"variance", "C_Z"}) {
+        if (!les && physics.contains(key)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(physics, key),
+                              .message = "closes the subgrid variance of Z, which exists only in LES",
+                              .fix = "Remove it, or add [les]",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
+    Variance variance = Variance::NONE;
+    double C_Z = 0.1;
+    if (les) {
+        const std::string name = find_value_or<std::string>(physics, "variance", "algebraic");
+        if (name != "algebraic") throw not_accepted(physics, "physics.variance", name, {"algebraic"});
+        variance = Variance::ALGEBRAIC;
+        C_Z = static_cast<double>(find_real_or(physics, "C_Z", dim::none, static_cast<rtype>(C_Z)));
+        if (!(C_Z >= 0.0)) {
+            throw InputError({.key = "physics.C_Z",
+                              .line = line_of(physics, "C_Z"),
+                              .message = "must not be negative",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
     std::shared_ptr<const Table> table;
     try {
         table = std::make_shared<const Table>(Table::read(file));
@@ -122,28 +147,8 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     }
     FlameletModel model(table, type == "navier_stokes");
     model.m_file = file;
-    const bool les = input.contains("les");
-    for (const char * key : {"variance", "C_Z"}) {
-        if (!les && physics.contains(key)) {
-            throw InputError({.key = std::string("physics.") + key,
-                              .line = line_of(physics, key),
-                              .message = "closes the subgrid variance of Z, which exists only in LES",
-                              .fix = "Remove it, or add [les]",
-                              .docs = "docs/guide/flamelet.md"});
-        }
-    }
-    if (les) {
-        const std::string variance = find_value_or<std::string>(physics, "variance", "algebraic");
-        if (variance != "algebraic") throw not_accepted(physics, "physics.variance", variance, {"algebraic"});
-        model.m_variance = Variance::ALGEBRAIC;
-        model.m_C_Z = static_cast<double>(find_real_or(physics, "C_Z", dim::none, 0.1_r));
-        if (!(model.m_C_Z >= 0.0)) {
-            throw InputError({.key = "physics.C_Z",
-                              .line = line_of(physics, "C_Z"),
-                              .message = "must not be negative",
-                              .docs = "docs/guide/flamelet.md"});
-        }
-    }
+    model.m_variance = variance;
+    model.m_C_Z = C_Z;
     return model;
 }
 
