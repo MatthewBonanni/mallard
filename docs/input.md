@@ -1553,7 +1553,8 @@ reductions = ["mean", "rms"]
 ## `[particles]`
 
 Lagrangian particles: massless tracers or solid spheres
-([Particles](guide/particles.md)). Restart files carry them and their
+([Particles](guide/particles.md); equations in the theory manual's
+[Lagrangian particles](theory/particles.md)). Restart files carry them and their
 quantities: a run restarted from a file with particles continues them and does
 not seed; a file without particles (or a `remap` start) seeds them from these
 keys.
@@ -1563,7 +1564,7 @@ keys.
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag and gravity accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
 | `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
 | `density` | Material density (`"solid"`). Required for solid particles |
-| `drag` | `"stokes"` or `"schiller_naumann"` (`"solid"`), default `"schiller_naumann"` |
+| `drag` | `"stokes"` or `"schiller_naumann"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |

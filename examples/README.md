@@ -99,6 +99,9 @@ references do not publish.
 | Case | What it shows | Cells | Run time |
 |---|---|---|---|
 | `tracer_vortex` | Tracer particles (`[particles]`) in a steady low-Mach array of Taylor-Green vortex cells: each tracer circles on a closed streamline, so the streamfunction `sin(2 pi x) sin(2 pi y)` at its final position in `tracers.csv` measures the pathline error | 4,096 quads | seconds on a few CPU threads |
+| `particle_settling` | Water droplets of 100 µm settling in still air at 1 bar (`[particles] type = "solid"`, SI units): released at rest, they reach 0.25025 m/s, within 2e-5 of the Schiller-Naumann terminal velocity (Stokes' law would give 0.302 m/s at their Re<sub>p</sub> = 1.6); `smoke.toml` settles 1 µm particles, whose relaxation time is a third of the step, in the stiff limit, exactly at their terminal velocity `tau g (1 - rho / rho_p)`. `examples/particle_settling/check_particle_settling.py` compares | 16 quads | 21,700 steps: under a minute on one CPU thread |
+| `particle_bounce` | Heavy particles thrown sideways in a closed box under gravity, bouncing off a floor of restitution 0.8 (normal) and 0.9 (tangential) and elastically off the side walls (`[[particles.walls]]`): within 8e-3 of their exact trajectories after 3 to 6 bounces, the first-order error of a bounce applied at the end of its step. `examples/particle_bounce/check_particle_bounce.py` computes the exact trajectories and compares | 1,024 quads | seconds on one CPU thread |
+| `particle_centrifuge` | Inertial particles (Stokes number 0.5) spiraling out of gas in solid-body rotation in an annulus, against their exact spirals: within 1.5e-3 at t = 15, and the outer wall catches (`interaction = "stick"`) exactly the particles whose spirals reach it. `examples/particle_centrifuge/check_particle_centrifuge.py` compares | 4,096 quads | 4,200 steps: about 3 minutes on two CPU threads |
 
 ## Large-eddy simulation
 

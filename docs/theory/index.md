@@ -29,6 +29,9 @@ accuracy of every method, from the convergence tests; the sources are in
 5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.
+6. [Lagrangian particles](particles.md): tracers and solid particles, drag
+    laws, the gas at a particle from the reconstruction, integration in
+    time and its stiff limit, walls and other boundaries.
 
 ### Part II: the discretization, in the order a step assembles it
 
@@ -61,6 +64,7 @@ accuracy of every method, from the convergence tests; the sources are in
 - $\Delta$, $\mu_t$, $\nu_t$, $Pr_t$, $Sc_t$: LES filter width, eddy viscosity (dynamic and kinematic), turbulent Prandtl and Schmidt numbers
 - $\tau_w$, $q_w$, $u_\tau$, $y^+$: wall shear stress, heat flux into the fluid at the wall, friction velocity, wall units
 - $F$, $\mathcal{E}$, $\Omega$: thickening factor, efficiency and flame sensor of the thickened flame model
+- $\mathbf{x}_p$, $\mathbf{v}$, $d$, $\rho_p$, $\tau$, $Re_p$, $St$: particle position, velocity, diameter, material density, relaxation time, Reynolds number and Stokes number
 
 Vectors and tensors are bold; $\delta_{ij}$ is the Kronecker delta and
 $S_{ij} = \tfrac12(\partial_j u_i + \partial_i u_j)$ the strain rate.
