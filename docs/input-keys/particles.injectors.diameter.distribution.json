@@ -1,0 +1,17 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/particle_injectors.toml"
+ ],
+ "type": "string",
+ "values": [
+  "log_normal",
+  "nukiyama_tanasawa",
+  "rosin_rammler",
+  "table",
+  "uniform"
+ ]
+}
