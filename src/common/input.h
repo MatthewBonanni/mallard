@@ -153,6 +153,23 @@ struct Diagnostic {
  */
 std::vector<Diagnostic> unused_keys(const Input & input);
 
+/** @brief A key path from its file name in the key catalog, which percent-encodes it (tools/dev/input_catalog.py). */
+std::string catalog_key_of_file(const std::string & stem);
+
+/**
+ * @brief The key paths of the key catalog (docs/input-keys/, as catalog_path writes them: no array indices,
+ *        regions.<name>) from Mallard's data directories; empty if none has it.
+ */
+const std::set<std::string> & catalog_keys();
+
+/**
+ * @brief The keys of the input unknown to Mallard, for a setup that stopped before it read them all: keys setup
+ *        did not read, also within tables it did not read, that are not in catalog (catalog_keys), named like no
+ *        key of it nor any key setup looked up, and not in a table of species or data columns (X, Y, rhoY, lewis,
+ *        units), whose keys are the case's own. None if catalog is empty.
+ */
+std::vector<Diagnostic> unknown_keys(const Input & input, const std::set<std::string> & catalog);
+
 /** @brief "line 12: mesh.Nxx (did you mean mesh.Nx?)". */
 std::string describe(const Diagnostic & key);
 
@@ -250,9 +267,11 @@ struct KeyLocation {
  * @brief The key a diagnostic names, as a full path of the input: key may leave out the tables around it ("T"
  *        for boundaries[1].T), the index of an array of tables (write_data.format) or give an entry by name
  *        (boundaries[name = "inlet"].T); line, if known, picks among the candidates (the line of the value or of
- *        its table). A key absent from the input counts if setup looked it up. Empty key if none matches.
+ *        its table). A key absent from the input counts if setup looked it up, or, if named (the key a
+ *        diagnostic names, rather than one read from its text), if its table, not the root, is in the input: then at the
+ *        table's line and column. Empty key if none matches.
  */
-KeyLocation locate_key(const Input & input, const std::string & key, std::size_t line = 0);
+KeyLocation locate_key(const Input & input, const std::string & key, std::size_t line = 0, bool named = false);
 
 /**
  * @brief The key a message starts with, after "line N: ", located as locate_key does: "mesh.Nx must be ...",

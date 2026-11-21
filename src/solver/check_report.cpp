@@ -35,7 +35,7 @@ void CheckReport::warning(const std::string & code, const std::string & message,
 }
 
 KeyLocation input_key(const Input & input, const std::string & key, const size_t line) {
-    KeyLocation where = locate_key(input, key, line);
+    KeyLocation where = locate_key(input, key, line, true);
     return where.key.empty() ? KeyLocation{key, line, 0} : where;
 }
 

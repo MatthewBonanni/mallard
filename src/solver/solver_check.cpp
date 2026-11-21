@@ -9,12 +9,16 @@
 #include "solver.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <cmath>
 #include <limits>
 #include <map>
+#include <optional>
+#include <set>
 #include <numbers>
+#include <iostream>
 
 #include <Kokkos_Core.hpp>
 
@@ -97,9 +101,33 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         r.error(diagnostic_code::SETUP, text, locate_message(input, text));
     }
     report_warnings();
+    const PrunedSetup pruned = r.setup_done ? PrunedSetup{} : check_past_errors(r, input_in, options.input_file);
+    const auto has_phase = [&](const std::string & name) {
+        return std::any_of(run_health.setup_phases.begin(), run_health.setup_phases.end(),
+                           [&](const auto & phase) { return phase.first == name; });
+    };
+    const bool mesh_ready = mesh && has_phase("mesh");
     r.unassigned = unassigned_zones;
+    if (mesh_ready && r.unassigned.empty() && !has_phase("physics and boundaries")) r.unassigned = zones_not_named();
+    if (!r.setup_done && mesh_ready) check_periodic(r);
+    // Keys a stopped setup did not reach are errors only if unknown; those it reached past its errors, if unread
+    const auto in_pruned = [&](const std::string & key) {
+        return std::any_of(pruned.entries.begin(), pruned.entries.end(), [&](const std::string & entry) {
+            return key.compare(0, entry.size(), entry) == 0 &&
+                   (key.size() == entry.size() || key[entry.size()] == '.' || key[entry.size()] == '[');
+        });
+    };
+    std::vector<Diagnostic> unused;
     for (const Diagnostic & key : unused_keys(input)) {
-        if (!r.setup_done && key.suggestion.empty()) continue;
+        if (r.setup_done || (pruned.complete && !in_pruned(key.key))) unused.push_back(key);
+    }
+    if (!r.setup_done) {
+        for (const Diagnostic & key : unknown_keys(input, catalog_keys())) {
+            if (!pruned.complete || in_pruned(key.key)) unused.push_back(key);
+        }
+    }
+    std::stable_sort(unused.begin(), unused.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
+    for (const Diagnostic & key : unused) {
         r.unused.push_back(key);
         r.error(diagnostic_code::KEY_UNUSED, describe(key), input_key(input, key.key, key.line));
     }
@@ -562,6 +590,149 @@ void Solver::check_settings(CheckReport & r) const {
                                   r.cfl, r.cfl_limit, r.integrator.c_str()),
                   input_key(input, r.dt_limit == "fixed" ? "run.dt" : "run.cfl"));
     }
+}
+
+namespace {
+
+/** @brief Arrays of independent entries: a setup that stops on errors of some can go on without them. */
+constexpr std::array<const char *, 6> PRUNABLE = {"boundaries", "write_data", "probes", "forces", "sponges", "sources"};
+
+/** @brief The array and index a key path starts with ("write_data", 2 of "write_data[2].interval"), if any. */
+std::optional<std::pair<std::string, size_t>> entry_of(const std::string & key) {
+    const size_t open = key.find('['), close = key.find(']');
+    if (open == std::string::npos || close == std::string::npos || close < open + 2) return std::nullopt;
+    const std::string digits = key.substr(open + 1, close - open - 1);
+    if (digits.size() > 9 || !std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })) {
+        return std::nullopt;
+    }
+    return std::make_pair(key.substr(0, open), std::stoul(digits));
+}
+
+Input symmetry_plane(const std::string & zone) {
+    return Input(Input::table_type{{"name", zone}, {"type", "symmetry"}});
+}
+
+} // namespace
+
+Solver::PrunedSetup Solver::check_past_errors(CheckReport & r, const Input & original, const std::string & file) {
+    constexpr size_t ADDED = std::numeric_limits<size_t>::max();
+    constexpr int MAX_SETUPS = 8;
+    PrunedSetup out;
+    Input current = original;
+    auto & root = current.as_table().entries();
+    // The index in original of each entry of current's arrays (ADDED: a symmetry plane for an uncovered zone)
+    std::map<std::string, std::vector<size_t>> origin;
+    for (const char * name : PRUNABLE) {
+        const auto it = root.find(name);
+        if (it == root.end() || !it->second.is_array()) continue;
+        std::vector<size_t> & indices = origin[name];
+        for (size_t i = 0; i < it->second.as_array().size(); i++) indices.push_back(i);
+    }
+    std::vector<CheckDiagnostic> last = r.diagnostics;
+    std::vector<CheckUnassigned> uncovered = unassigned_zones;
+    for (int setup = 0; setup < MAX_SETUPS; setup++) {
+        std::map<std::string, std::set<size_t>> drop;
+        std::set<size_t> renamed;  // boundary entries whose name is wrong: dropped, not replaced
+        bool cover = false;
+        bool stuck = false;
+        for (const CheckDiagnostic & d : last) {
+            if (d.severity != report::Status::ERROR) continue;
+            const auto entry = entry_of(d.where.key);
+            if (d.code != diagnostic_code::INPUT) {
+                stuck = true;
+            } else if (d.where.key == "boundaries" && !uncovered.empty()) {
+                cover = true;
+            } else if (entry && origin.count(entry->first) && entry->second < origin[entry->first].size() &&
+                       origin[entry->first][entry->second] != ADDED) {
+                drop[entry->first].insert(entry->second);
+                const std::string name = "boundaries[" + std::to_string(entry->second) + "].name";
+                if (entry->first == "boundaries" && d.where.key == name) renamed.insert(entry->second);
+            } else {
+                stuck = true;
+            }
+        }
+        if (stuck || (drop.empty() && !cover)) break;
+        for (const auto & [name, indices] : drop) {
+            Input::array_type & array = root.at(name).as_array();
+            std::vector<size_t> & from = origin[name];
+            for (auto i = indices.rbegin(); i != indices.rend(); ++i) {
+                out.entries.push_back(name + "[" + std::to_string(from[*i]) + "]");
+                std::string zone;
+                if (array[*i].is_table()) {
+                    const auto & entries = array[*i].as_table().entries();
+                    const auto it = entries.find("name");
+                    if (it != entries.end() && it->second.is_string()) zone = it->second.as_string();
+                }
+                if (name == "boundaries" && !renamed.count(*i) && !zone.empty()) {
+                    array[*i] = symmetry_plane(zone);
+                } else {
+                    array.erase(array.begin() + static_cast<std::ptrdiff_t>(*i));
+                    from.erase(from.begin() + static_cast<std::ptrdiff_t>(*i));
+                }
+            }
+        }
+        if (cover) {
+            if (!root.count("boundaries")) root.emplace("boundaries", Input(Input::array_type{}));
+            for (const CheckUnassigned & zone : uncovered) {
+                root.at("boundaries").as_array().push_back(symmetry_plane(zone.zone));
+                origin["boundaries"].push_back(ADDED);
+            }
+        }
+
+        Solver again;
+        again.distribute = distribute;
+        again.check_only = true;
+        CheckReport next;
+        {
+            std::streambuf * const shown = std::cout.rdbuf(nullptr);
+            logging::WarningCapture warnings;
+            try {
+                again.init(current);
+                out.complete = true;
+            } catch (const InputError & e) {
+                next.input_error(e, file, again.input);
+            } catch (const std::exception & e) {
+                const std::string text = error_text(e);
+                next.error(diagnostic_code::SETUP, text, locate_message(again.input, text));
+            }
+            for (const logging::CapturedWarning & w : warnings.take()) {
+                next.warning(w.code, w.message, locate_message(again.input, w.message));
+            }
+            std::cout.rdbuf(shown);
+        }
+        last = next.diagnostics;
+        for (CheckDiagnostic d : next.diagnostics) {
+            if (const auto entry = entry_of(d.where.key); entry && origin.count(entry->first)) {
+                const std::vector<size_t> & from = origin[entry->first];
+                if (entry->second >= from.size() || from[entry->second] == ADDED) continue;
+                d.where.key = entry->first + "[" + std::to_string(from[entry->second]) +
+                              d.where.key.substr(d.where.key.find(']'));
+            }
+            const bool known = std::any_of(r.diagnostics.begin(), r.diagnostics.end(), [&](const CheckDiagnostic & e) {
+                return e.code == d.code && e.message == d.message && e.where.key == d.where.key;
+            });
+            if (!known) r.diagnostics.push_back(std::move(d));
+        }
+        uncovered = again.unassigned_zones;
+        if (out.complete) break;
+    }
+    return out;
+}
+
+std::vector<CheckUnassigned> Solver::zones_not_named() const {
+    std::vector<int32_t> face_bc(mesh->n_faces, -1);
+    const auto & entries = input.as_table().entries();
+    const auto boundaries = entries.find("boundaries");
+    if (boundaries != entries.end() && boundaries->second.is_array()) {
+        for (const Input & entry : boundaries->second.as_array()) {
+            if (!entry.is_table()) continue;
+            const auto name = entry.as_table().entries().find("name");
+            if (name == entry.as_table().entries().end() || !name->second.is_string()) continue;
+            const FaceZone * zone = mesh->get_face_zone(name->second.as_string());
+            for (uint32_t i = 0; zone && i < zone->n_faces(); i++) face_bc[zone->h_faces(i)] = 0;
+        }
+    }
+    return zones_without_condition(face_bc, {PARTITION_ZONE});
 }
 
 void Solver::check_periodic(CheckReport & r) const {
