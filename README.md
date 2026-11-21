@@ -67,11 +67,12 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
   - `mallard post extract` for probes and region integrals of existing output
   - `mallard post flame` for the position, thermal thickness, consumption and displacement speed of a premixed flame
   - tab completion for bash, zsh and fish
-- Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, or start statistics
+- Triggers: conditions on time, probes, forces and integrals that stop the run, write a restart or snapshot, start or stop statistics, log a message or change a setting, with steps landing exactly on the times they test
 - A [run report](https://matthewbonanni.github.io/mallard/docs/guide/output/#run-report-reporthtml), `report.html`, from every run: outcome, configuration, health, plots of the monitors, cost and output, one self-contained page ([sample](https://matthewbonanni.github.io/mallard/docs/images/guide/run_report_sample.html))
 - A [divergence report](https://matthewbonanni.github.io/mallard/docs/guide/running/#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](https://matthewbonanni.github.io/mallard/docs/guide/output/#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation
 - Probes on points, curves, surfaces, boundaries and regions
+- Lagrangian tracer particles, moved with the velocity of the high-order reconstruction ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/))
 - Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions

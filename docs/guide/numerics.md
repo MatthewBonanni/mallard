@@ -212,7 +212,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 53 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -265,7 +265,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 53 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -330,7 +330,7 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
-| `troubled_capacity` | 0.5 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
+| `troubled_capacity` | 0.25 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 
 Pitfalls:
@@ -346,6 +346,89 @@ Pitfalls:
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 
+### Viscous gradients
+
+```toml
+[numerics]
+viscous_gradients = "reconstruction"   # default "least_squares"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+```
+
+By default the viscous stress and heat flux take second-order least-squares
+gradients, whatever the reconstruction, so viscous-dominated flows (boundary
+layers, diffusion, decaying turbulence at low Reynolds numbers) stay second
+order under TENO. With `viscous_gradients = "reconstruction"`, each face
+between two cells TENO finds smooth takes the gradients of the two cells'
+TENO polynomials at its quadrature points instead. That is order `order - 1`
+for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
+
+Two convergence studies on periodic boxes of every cell type
+(`tools/docs/viscous_gradients.py`) compare the two paths against their design
+orders. The momentum error of a decaying shear wave, an exact Navier-Stokes
+solution, converges with `reconstruction` at least at the face gradients'
+order, `order - 1`, and in practice at about `order` (4 for TENO4 and TENO5, 6
+for TENO6); least squares gives second order, and stalls on hexahedra:
+
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-light.svg#gh-light-mode-only)
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-dark.svg#gh-dark-mode-only)
+
+The viscous residual of a manufactured solution (velocity, temperature and
+density all varying) at its exact cell averages divides the face gradients'
+error by h: design order `order - 2` with `reconstruction` (higher on
+symmetric meshes), 1 with least squares, which does not converge on
+tetrahedra:
+
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-light.svg#gh-light-mode-only)
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-dark.svg#gh-dark-mode-only)
+
+Finest-pair orders (design in parentheses), least squares with TENO5:
+
+| Cells | Shear wave, `least_squares` | Shear wave, `reconstruction` TENO4 / 5 / 6 | Residual, `least_squares` | Residual, `reconstruction` TENO4 / 5 / 6 |
+|---|---|---|---|---|
+| quadrilaterals | 2.6 (2) | 4.0 / 3.9 / 5.9 (3 / 4 / 5) | 2.0 (1) | 4.0 / 3.9 / 5.9 (2 / 3 / 4) |
+| triangles | 2.0 (2) | 4.1 / 3.9 / 6.1 | 1.0 (1) | 3.0 / 3.0 / 5.0 |
+| hexahedra | -0.1 (2) | 3.9 / 3.9 / 5.9 | 1.9 (1) | 3.7 / 3.6 / 5.3 |
+| prisms | 2.0 (2) | 4.1 / 3.9 / 5.9 | 1.0 (1) | 2.9 / 3.0 / 4.8 |
+| tetrahedra | 2.0 (2) | 4.1 / 4.0 / 5.9 | 0.0 (1) | 2.0 / 3.0 / 4.1 |
+
+On 32 × 32 × 2 triangles, TENO5's shear-wave error is 24 times smaller with
+`reconstruction` than with least squares (1.9e-8 against 4.4e-7), and the gap
+grows with resolution.
+
+Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
+per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to
+partition faces receive theirs from their owners. Evaluating the gradients at
+the face points makes a TENO5 step of the 3D Taylor-Green vortex 1.9 times as
+long on hexahedra and 1.6 times on tetrahedra on CPU (16 threads), and 2.2 and
+1.6 times on an A100.
+
+Pitfalls:
+
+- **TENO4 or higher.** TENO3's quadratic polynomials give second-order face
+  gradients, with a larger error than least squares, so Mallard rejects it.
+- **Smaller viscous time steps.** The polynomial gradients make the viscous
+  operator stiffer: in 1D its largest eigenvalue is up to 8.2/h² (5.5/h² for
+  least-squares central stencils) against 4/h² for least squares, so the
+  viscous part of the time-step limit is 2.05 times as strict with
+  `reconstruction`. Viscous-dominated runs (fine near-wall cells, low Reynolds
+  numbers) take up to half the time step; convection-dominated runs are
+  unaffected.
+- **Troubled cells and boundaries.** Faces next to a cell where TENO selects
+  stencils, or whose polynomial is negative in density or pressure at a face
+  point, and boundary faces (walls among them), keep the least-squares
+  gradients. Near walls and shocks the flux is then second order, as before.
+- **Not yet available** for gas mixtures (species diffusion), axisymmetric
+  runs, LES, the hybrid convective flux, curved meshes and rotational
+  periodicity, where Mallard reports an error. Probes of the diffusive fluxes
+  on faces (`[[probes]]` surfaces) still report the least-squares fluxes.
+
 ## Riemann solvers
 
 ```toml
@@ -359,7 +442,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 53 more.
 
 | `riemann_solver` | Use |
 |---|---|
