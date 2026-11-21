@@ -931,6 +931,59 @@ TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
     EXPECT_EQ(environment["placement"].array[0]["threads"].number, 1);
 }
 
+TEST(CliTest, VersionJsonGivesTheBuildAndTheSchemaOfEveryInterface) {
+    SKIP_UNDER_MPI();
+    const Result plain = run({"--version"});
+    EXPECT_EQ(plain.status, 0) << plain.err;
+    EXPECT_EQ(plain.out, "Mallard " + mallard_version() + "\n");
+    EXPECT_EQ(run({"version"}).out, plain.out);
+    EXPECT_EQ(run({"version", "--format", "xml"}).status, 2);
+
+    const Result r = run({"version", "--format", "json"});
+    ASSERT_EQ(r.status, 0) << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_EQ(v["schema"].string, "mallard-capabilities");
+    EXPECT_EQ(v["mallard"]["version"].string, mallard_version());
+    EXPECT_EQ(v["build"]["dim"].number, Mallard_DIM);
+    for (const char * key : {"precision", "backend", "host_backend", "mpi", "gpu_aware_mpi", "nccl", "hdf5", "cgns", "zlib"}) {
+        EXPECT_TRUE(v["build"].has(key)) << key;
+    }
+    const auto & dims = v["dimensions"].array;
+    EXPECT_TRUE(std::any_of(dims.begin(), dims.end(), [](const json::Value & d) { return d.number == Mallard_DIM; }));
+    const json::Value & interfaces = v["interfaces"];
+    EXPECT_EQ(interfaces["capabilities"]["schema"].string, v["schema"].string);
+    EXPECT_EQ(interfaces["capabilities"]["version"].number, v["version"].number);
+    for (const std::string & name : interfaces.keys()) {
+        EXPECT_FALSE(interfaces[name]["schema"].string.empty()) << name;
+        EXPECT_GE(interfaces[name]["version"].number, 1.0) << name;
+    }
+    const auto commands = interfaces["run_control"]["commands"].array;
+    EXPECT_TRUE(std::any_of(commands.begin(), commands.end(), [](const json::Value & c) { return c.string == "set"; }));
+
+    // Each interface's own output carries the schema and version listed
+    const auto expect_listed = [&](const std::string & name, const json::Value & out) {
+        EXPECT_EQ(out["schema"].string, interfaces[name]["schema"].string) << name;
+        EXPECT_EQ(out["version"].number, interfaces[name]["version"].number) << name;
+    };
+    const Result check = run({"check", "--format", "json", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(check.status, 0) << check.err;
+    const json::Value report = json::parse(check.out);
+    expect_listed("check_report", report);
+    EXPECT_EQ(v["build"].keys(), report["environment"]["build"].keys());
+    const Result keys = run({"list", "keys", "--format", "json"}, true);
+    ASSERT_EQ(keys.status, 0) << keys.err;
+    expect_listed("key_catalog", json::parse(keys.out));
+    ASSERT_EQ(small_run().status, 0);
+    std::ifstream log("mallard.jsonl");
+    std::string first;
+    std::getline(log, first);
+    const json::Value start = json::parse(first);
+    expect_listed("run_log", start);
+    expect_listed("run_block", start["provenance"]);
+    const Result directory = run({"info", ".", "--format", "json"}, true);
+    expect_listed("run_directory", json::parse(directory.out));
+}
+
 TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     SKIP_UNDER_MPI();
     const Result numerics = run({"list", "keys", "numerics"}, true);

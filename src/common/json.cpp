@@ -154,15 +154,22 @@ class Parser {
             } else {
                 v.type = Value::Type::NUMBER;
                 const size_t start = at;
-                if (text[at] == '-') at++;
-                if (at >= text.size() || !std::isdigit(static_cast<unsigned char>(text[at]))) fail("bad number");
-                while (at < text.size() && (std::isdigit(static_cast<unsigned char>(text[at])) || text[at] == '.' ||
-                                            text[at] == 'e' || text[at] == 'E' || text[at] == '+' || text[at] == '-')) {
-                    at++;
+                take("-");
+                if (!take("0") && digits() == 0) fail("bad number");
+                if (take(".") && digits() == 0) fail("bad number");
+                if (take("e") || take("E")) {
+                    if (!take("+")) take("-");
+                    if (digits() == 0) fail("bad number");
                 }
                 v.number = std::strtod(std::string(text.substr(start, at - start)).c_str(), nullptr);
             }
             return v;
+        }
+
+        size_t digits() {
+            const size_t start = at;
+            while (at < text.size() && std::isdigit(static_cast<unsigned char>(text[at]))) at++;
+            return at - start;
         }
 
         unsigned long hex4() {

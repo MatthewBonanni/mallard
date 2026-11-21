@@ -133,6 +133,16 @@ std::string build_block() {
 #else
     constexpr bool kaminpar = false;
 #endif
+#ifdef Mallard_HAS_CGNS
+    constexpr bool cgns = true;
+#else
+    constexpr bool cgns = false;
+#endif
+#ifdef Mallard_HAS_ZLIB
+    constexpr bool zlib = true;
+#else
+    constexpr bool zlib = false;
+#endif
 #ifdef Mallard_SPECIES_LAYOUT_LEFT
     const char * species_layout = "left";
 #else
@@ -154,6 +164,8 @@ std::string build_block() {
         .add("hdf5", hdf5)
         .add("hdf5_parallel", hdf5_parallel)
         .add("kaminpar", kaminpar)
+        .add("cgns", cgns)
+        .add("zlib", zlib)
         .add("species_layout", species_layout);
     return b.str();
 }
@@ -317,6 +329,10 @@ std::string random_uuid() {
 }
 
 } // namespace
+
+std::string code() { return code_block(); }
+std::string build() { return build_block(); }
+std::string dependencies() { return dependencies_block(); }
 
 void Sha256::update(const char * data, size_t n) {
     const auto * bytes = reinterpret_cast<const uint8_t *>(data);

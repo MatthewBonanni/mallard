@@ -13,7 +13,7 @@
 #
 # then run (445,000 steps, about 2 hours on one A100) and measure the flame
 # speed with
-#   python ../../../tools/post/flame_speed.py . 0.373116
+#   mallard post flame solut/flame.vtkhdf --reference-speed 0.373116
 # The consumption speed settles 0.6% below Cantera's after about two flame
 # times. examples/premixed_flame/flame_sweep.py runs and reports the whole sweep (phi 0.6-1.4,
 # both transport models, 10-40 cells per thickness, two CFL numbers).

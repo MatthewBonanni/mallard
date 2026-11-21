@@ -2406,7 +2406,18 @@ struct TENOFunctor {
             g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
             sum_small += g_small[s];
         }
-        const bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        if constexpr (DEG == 3) {
+            // A face whose own sector is the smoothest candidate while another is cut looks away from a
+            // discontinuity in or next to the cell; the cubic passes the cutoff there but overshoots (#977).
+            // Mirror-image sectors tie to round-off, and both of their faces must decide alike
+            constexpr rtype tie = (sizeof(rtype) == sizeof(double)) ? 1.0e-8_r : 1.0e-4_r;
+            if (use_large && valid[k] && si_small[k] <= si_min * (1.0_r + tie)) {
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (valid[s] && g_small[s] / sum_small < cutoff) use_large = false;
+                }
+            }
+        }
         rtype w_small[teno::MAX_FACES] = {};
         if (!use_large) {
             rtype n_kept = 0.0;
