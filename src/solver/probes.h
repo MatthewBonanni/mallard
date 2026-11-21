@@ -338,10 +338,11 @@ class Probes {
         /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
         void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
-        /** @brief Changes the step interval of the probe of that name; an error message, or empty. */
-        std::string set_interval(const std::string & name, uint64_t steps, bool snapshot = false);
+        /** @brief Changes the step interval of the probe of that name (without apply: checks only); an error message, or empty. */
+        std::string set_interval(const std::string & name, uint64_t steps, bool snapshot = false, bool apply = true);
         /** @brief Changes the time interval of the probe of that name, the next output due after t. */
-        std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false);
+        std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false,
+                                      bool apply = true);
 
         /** @brief Names of the monitored values: <probe>_<reduction>_<variable>, and <probe>_<variable> of one-point probes. */
         std::vector<std::string> value_names() const;
