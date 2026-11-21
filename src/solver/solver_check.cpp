@@ -27,6 +27,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "periodic.h"
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
@@ -85,6 +86,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
             r.warning(w.code, w.message, locate_message(input, w.message));
         }
     };
+    unassigned_zones.clear();
     try {
         init(input_in);
         r.setup_done = true;
@@ -95,6 +97,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         r.error(diagnostic_code::SETUP, text, locate_message(input, text));
     }
     report_warnings();
+    r.unassigned = unassigned_zones;
     for (const Diagnostic & key : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
@@ -115,6 +118,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
 
     check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
+    check_periodic(r);
     r.t = static_cast<double>(t);
     check_time_step(r);
     const CheckFields resolution = check_resolution(r);
@@ -557,6 +561,87 @@ void Solver::check_settings(CheckReport & r) const {
                                   "flow: lower run.cfl (or run.dt)",
                                   r.cfl, r.cfl_limit, r.integrator.c_str()),
                   input_key(input, r.dt_limit == "fixed" ? "run.dt" : "run.cfl"));
+    }
+}
+
+void Solver::check_periodic(CheckReport & r) const {
+    const size_t n_directions = mesh->periodic_translations.size();
+    if (n_directions == 0) return;
+    const bool named = mesh->periodic_zones.size() == 2 * n_directions;
+    const PeriodicRotation & rotation = mesh->periodic_rotation;
+    r.periodic.assign(n_directions, {});
+    std::vector<double> sums(2 * n_directions, 0.0);  // faces and area of each direction
+    std::vector<double> lows(n_directions, std::numeric_limits<double>::infinity());  // shortest edge
+    std::vector<double> offsets(n_directions, 0.0);
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = r.periodic[j];
+        if (named) {
+            p.zone_a = mesh->periodic_zones[2 * j];
+            p.zone_b = mesh->periodic_zones[2 * j + 1];
+        }
+        p.rotation = rotation.direction == int(j);
+        if (p.rotation) {
+            p.angle = rotation.angle * 180.0 / std::numbers::pi;
+            p.center = rotation.center;
+        } else {
+            for (size_t i = 0; i < N_DIM; i++) p.translation[i] = double(mesh->periodic_translations[j][i]);
+        }
+    }
+    // Each pair of faces once: from the side of its cell of lower global id
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        const uint8_t shift = mesh->h_face_shift(f);
+        const int32_t c0 = mesh->h_cells_of_face(f, 0), c1 = mesh->h_cells_of_face(f, 1);
+        if (shift == 0 || c1 < 0 || uint32_t(c0) >= mesh->n_owned()) continue;
+        if (uint32_t(c1) >= mesh->n_owned() && mesh->h_global_cell(uint32_t(c1)) < mesh->h_global_cell(uint32_t(c0))) {
+            continue;
+        }
+        const auto & lattice = mesh->shift_lattice[shift];
+        size_t j = 0;
+        while (j + 1 < n_directions && lattice[j] == 0) j++;
+        sums[2 * j] += 1.0;
+        sums[2 * j + 1] += double(mesh->h_face_area(f));
+        const uint32_t first = mesh->h_offsets_nodes_of_face(f), end = mesh->h_offsets_nodes_of_face(f + 1);
+        for (uint32_t k = first; k < end; k++) {
+            const uint32_t a = mesh->h_nodes_of_face(k), b = mesh->h_nodes_of_face(k + 1 < end ? k + 1 : first);
+            double d2 = 0.0;
+            for (size_t i = 0; i < N_DIM; i++) {
+                const double d = double(mesh->h_node_coords(a, i)) - double(mesh->h_node_coords(b, i));
+                d2 += d * d;
+            }
+            if (d2 > 0.0) lows[j] = std::min(lows[j], std::sqrt(d2));
+        }
+    }
+    // Each node against the image of its class's key, by the map of its lattice offset
+    const bool classes = !mesh->h_node_key.empty();
+    for (uint32_t n = 0; classes && n < mesh->h_node_key.size(); n++) {
+        const uint32_t key = mesh->h_node_key[n];
+        if (key == n) continue;
+        const std::array<int8_t, 3> & L8 = mesh->h_node_lattice[n];
+        const std::array<int, 3> L = {L8[0], L8[1], L8[2]};
+        double Q[3][3], shift[3];
+        periodic_lattice_map(mesh->periodic_translations, rotation, L, Q, shift);
+        double d2 = 0.0;
+        for (size_t i = 0; i < N_DIM; i++) {
+            double y = shift[i];
+            for (size_t m = 0; m < N_DIM; m++) y += Q[i][m] * double(mesh->h_node_coords(key, m));
+            const double d = double(mesh->h_node_coords(n, i)) - y;
+            d2 += d * d;
+        }
+        for (size_t j = 0; j < n_directions; j++) {
+            if (L[j] != 0) offsets[j] = std::max(offsets[j], std::sqrt(d2));
+        }
+    }
+    comm::allreduce(std::span<double>(sums), comm::Op::SUM);
+    comm::allreduce(std::span<double>(lows), comm::Op::MIN);
+    comm::allreduce(std::span<double>(offsets), comm::Op::MAX);
+    const bool known = comm::allreduce(uint32_t(classes), comm::Op::MIN) == 1;
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = r.periodic[j];
+        p.faces = static_cast<uint64_t>(sums[2 * j]);
+        p.area = sums[2 * j + 1];
+        p.offsets_known = known;
+        p.node_offset_max = offsets[j];
+        p.node_offset_relative = std::isfinite(lows[j]) ? offsets[j] / lows[j] : 0.0;
     }
 }
 

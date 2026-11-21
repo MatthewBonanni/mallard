@@ -1401,3 +1401,75 @@ TEST(Diagnostics, EveryCodeIsExplainedInTheDocs) {
         EXPECT_NE(docs.find("<a id=\"" + anchor + "\"></a>`" + code + "`"), std::string::npos) << code << " in " << page;
     }
 }
+
+TEST(CheckBoundaries, ReportsZonesWithoutAConditionWhenTheSetupStopsOnThem) {
+    std::vector<std::string> zones = {"left", "right", "bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", zones));
+    EXPECT_FALSE(r.setup_done);
+    ASSERT_EQ(r.unassigned.size(), 1u);
+    EXPECT_EQ(r.unassigned[0].zone, "top");
+    EXPECT_EQ(r.unassigned[0].faces, N_DIM == 3 ? 32u : 16u);
+    const json::Value v = json::parse(check_json(r));
+    EXPECT_EQ(v["unassigned"].array.at(0)["zone"].string, "top");
+    EXPECT_EQ(v["unassigned"].array.at(0)["faces"].number, double(r.unassigned[0].faces));
+    EXPECT_NE(check_text(r, false).find("ERROR   top"), std::string::npos) << check_text(r, false);
+    EXPECT_TRUE(check(box()).unassigned.empty());
+}
+
+TEST(CheckBoundaries, ReportsEachPeriodicPairWithItsMapFacesAreaAndNodeOffset) {
+    const double L = 6.283185307179586;
+    const CheckReport r = check(periodic_box(4, 0.01, std::vector<std::string>(N_DIM, "1.0")));
+    ASSERT_TRUE(r.setup_done) << first_error(r);
+    ASSERT_EQ(r.periodic.size(), size_t(N_DIM));
+    const json::Value v = json::parse(check_json(r));
+    for (size_t j = 0; j < N_DIM; j++) {
+        const CheckPeriodic & p = r.periodic[j];
+        const json::Value & q = v["periodic"].array.at(j);
+        EXPECT_EQ(q["zones"].array.at(0).string, p.zone_a);
+        EXPECT_EQ(q["map"].string, "translation");
+        EXPECT_FALSE(p.rotation);
+        EXPECT_NEAR(std::abs(p.translation[j]), L, roundoff(1e-12));
+        EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 4u);
+        EXPECT_NEAR(p.area, N_DIM == 3 ? L * L : L, roundoff(1e-12));
+        EXPECT_EQ(q["faces"].number, double(p.faces));
+        EXPECT_EQ(q["node_offset_max"].number, 0.0);
+    }
+    EXPECT_EQ(r.periodic[0].zone_a, "left");
+    EXPECT_EQ(r.periodic[1].zone_b, "top");
+    if constexpr (N_DIM == 2) {
+        // Node 10 of the mesh file (x = 1, on right) moved off its partner on left, within the matching tolerance
+        const double eps = sizeof(rtype) == sizeof(double) ? 1e-9 : 1e-5;
+        std::istringstream in(jittered_periodic_mesh_2d(4));
+        std::ostringstream out;
+        out.precision(17);
+        std::string line;
+        bool nodes = false;
+        while (std::getline(in, line)) {
+            if (line == "$Nodes") nodes = true;
+            if (line == "$EndNodes") nodes = false;
+            std::istringstream fields(line);
+            int id = 0;
+            double x = 0.0, y = 0.0, z = 0.0;
+            if (nodes && (fields >> id >> x >> y >> z) && id == 10) {
+                ASSERT_DOUBLE_EQ(x, 1.0);
+                out << id << " " << x << " " << y + eps << " " << z << "\n";
+            } else {
+                out << line << "\n";
+            }
+        }
+        const std::string mesh = write_temp("check_periodic_offset.msh", out.str());
+        const std::string input = "[run]\nt_stop = 1.0\ncfl = 0.5\n[mesh]\ntype = \"file\"\nfilename = \"" + mesh +
+                                  "\"\n[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0]\n"
+                                  "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0]\n"
+                                  "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\np = \"1.0\"\nu = [\"1.0\", \"0.0\"]\n"
+                                  "[numerics]\nriemann_solver = \"HLLC\"\n[physics]\ntype = \"euler\"\ngamma = 1.4\n"
+                                  "p_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
+        const CheckReport moved = check(input);
+        ASSERT_TRUE(moved.setup_done) << first_error(moved);
+        ASSERT_EQ(moved.periodic.size(), 2u);
+        EXPECT_NEAR(moved.periodic[0].node_offset_max, eps, 0.05 * eps);
+        EXPECT_GT(moved.periodic[0].node_offset_relative, moved.periodic[0].node_offset_max);
+        EXPECT_LT(moved.periodic[1].node_offset_max, 0.05 * eps);
+    }
+}

@@ -853,8 +853,8 @@ void Solver::init_physics() {
     init_radiation();
 }
 
-std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc,
-                                            const std::vector<std::string> & skip) const {
+std::vector<CheckUnassigned> Solver::zones_without_condition(const std::vector<int32_t> & face_bc,
+                                                             const std::vector<std::string> & skip) const {
     std::vector<int32_t> local;  // "zone=faces;" of this rank's owned boundary faces, as characters
     for (const FaceZone & zone : *mesh->face_zones()) {
         if (zone.get_type() != FaceZoneType::BOUNDARY) continue;
@@ -879,11 +879,9 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
         faces[entry.substr(0, eq)] += std::stoull(entry.substr(eq + 1));
         entry.clear();
     }
-    std::string text;
-    for (const auto & [zone, n] : faces) {
-        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n, "face") + ")";
-    }
-    return text;
+    std::vector<CheckUnassigned> out;
+    for (const auto & [zone, n] : faces) out.push_back({zone, n});
+    return out;
 }
 
 void Solver::init_boundaries() {
@@ -894,6 +892,7 @@ void Solver::init_boundaries() {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    unassigned_zones.clear();
     wall_model_specs.clear();
     std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
@@ -1245,7 +1244,12 @@ void Solver::init_boundaries() {
             failed_zones.push_back(bound.as_table().entries().at("name").as_string());
         }
     }
-    const auto no_condition = [](const std::string & uncovered) {
+    const auto no_condition = [this](std::vector<CheckUnassigned> zones) {
+        std::string uncovered;
+        for (const CheckUnassigned & z : zones) {
+            uncovered += (uncovered.empty() ? "zone " : ", zone ") + z.zone + " (" + logging::count(z.faces, "face") + ")";
+        }
+        unassigned_zones = std::move(zones);
         return InputError({.key = "boundaries",
                            .message = "no condition for " + uncovered + "; every boundary face needs one",
                            .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
@@ -1253,8 +1257,8 @@ void Solver::init_boundaries() {
                            .docs = "docs/guide/boundary_conditions.md#available-boundary-conditions"});
     };
     if (!entry_errors.empty()) {
-        const std::string uncovered = zones_without_condition(face_bc, failed_zones);
-        if (!uncovered.empty()) entry_errors.add(no_condition(uncovered));
+        std::vector<CheckUnassigned> uncovered = zones_without_condition(face_bc, failed_zones);
+        if (!uncovered.empty()) entry_errors.add(no_condition(std::move(uncovered)));
         entry_errors.throw_if_any();
     }
     on_every_rank([&] {
@@ -1284,7 +1288,9 @@ void Solver::init_boundaries() {
         bcs.push_back(bc);
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
-    if (const std::string uncovered = zones_without_condition(face_bc); !uncovered.empty()) throw no_condition(uncovered);
+    if (std::vector<CheckUnassigned> uncovered = zones_without_condition(face_bc); !uncovered.empty()) {
+        throw no_condition(std::move(uncovered));
+    }
     for (uint32_t i_face = 0; i_face < mesh->n_faces; i_face++) {
         // Faces on the axis carry no flux (zero revolved area); their ghost
         // states feed reconstruction and gradients, which need the mirror image

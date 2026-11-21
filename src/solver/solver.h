@@ -853,9 +853,9 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        /** @brief "zone a (12 faces), zone b (3 faces)": the boundary zones with faces of no condition, but those of skip. */
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc,
-                                            const std::vector<std::string> & skip = {}) const;
+        /** @brief The boundary zones with faces of no condition (over every rank), but those of skip. */
+        std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc,
+                                                             const std::vector<std::string> & skip = {}) const;
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -883,6 +883,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
+        /** @brief The periodic pairs as the mesh joined them (report.periodic). Collective. */
+        void check_periodic(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
@@ -1206,6 +1208,7 @@ class Solver {
         // Run log
         MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
+        std::vector<CheckUnassigned> unassigned_zones;  // that stopped the setup
         report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
