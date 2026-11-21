@@ -27,6 +27,7 @@
 #include "json.h"
 
 class MeshFileCache;
+class SetupCache;
 
 namespace session {
 
@@ -64,6 +65,12 @@ struct Error : std::runtime_error {
  */
 struct Canceled {};
 
+/** @brief What mallard check finds of a case: its report, and the key catalog of its setup. */
+struct CheckResult {
+    CheckReport report;
+    std::string catalog;  // key_catalog, as mallard check --catalog writes it
+};
+
 /** @brief The case a session holds, and what its setups keep between requests. */
 class Context {
     public:
@@ -88,10 +95,17 @@ class Context {
         /** @brief Mesh files read from disk by this context's setups; 0 for a one-shot's. */
         uint64_t mesh_files_read() const;
         bool resident() const { return keep; }
+        /** @brief The stages of earlier setups, which a check sets up again only where its reads changed; nullptr
+         *         for a one-shot. */
+        SetupCache * setup_cache() const { return setups.get(); }
 
         /** @brief Results of requests on the current text, by request and parameters (resident only). */
         std::optional<std::string> remembered(const std::string & key) const;
         void remember(const std::string & key, const std::string & result);
+        /** @brief The check of the current text with these options (key), before the environment's diagnostics, if
+         *         one ran (resident only): case.check and case.keys share it. */
+        const CheckResult * checked(const std::string & key) const;
+        void remember_check(const std::string & key, const CheckResult & result);
 
     private:
         bool keep;
@@ -99,13 +113,9 @@ class Context {
         std::string input_path;
         std::optional<std::string> text;
         std::unique_ptr<MeshFileCache> mesh_files;
+        std::unique_ptr<SetupCache> setups;
         std::vector<std::pair<std::string, std::string>> results;
-};
-
-/** @brief What mallard check finds of a case: its report, and the key catalog of its setup. */
-struct CheckResult {
-    CheckReport report;
-    std::string catalog;  // key_catalog, as mallard check --catalog writes it
+        std::optional<std::pair<std::string, CheckResult>> last_check;
 };
 
 /**

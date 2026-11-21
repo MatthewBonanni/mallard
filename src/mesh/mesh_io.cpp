@@ -452,6 +452,7 @@ MeshBlock MeshFileCache::block(const std::string & filename, MeshBlock (*read)(c
     const auto time = std::filesystem::last_write_time(path, e_time);
     const bool known = !e_path && !e_size && !e_time;
     const int64_t modified = known ? static_cast<int64_t>(time.time_since_epoch().count()) : 0;
+    asked.push_back(path.string());
     for (const Entry & e : entries) {
         if (known && e.path == path.string() && e.bytes == bytes && e.modified == modified) return e.block;
     }

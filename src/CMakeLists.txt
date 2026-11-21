@@ -92,6 +92,7 @@ add_library(MallardCore STATIC
     solver/probes.cpp
     solver/solver.cpp
     solver/solver_check.cpp
+    solver/setup_cache.cpp
     solver/solver_mesh_fields.cpp
     solver/check_report.cpp
     solver/run_report.cpp

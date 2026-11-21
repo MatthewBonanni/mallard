@@ -915,10 +915,12 @@ constexpr Command COMMANDS[] = {
             "setup phase. Each request that has a one-shot command runs the same code: case.check is mallard check "
             "INPUT --format json, case.keys and keys.catalog are mallard list keys --format json.\n"
             "\n"
-            "The session keeps the mesh file it read: a check after an edit outside [mesh] (case.update with the "
-            "whole text, which the session never writes back) reads the file again only if it changed. It listens "
-            "on no network port: run it on another machine through ssh or kubectl exec -i. It ends at shutdown or "
-            "when standard input closes.",
+            "The session keeps what its setups built: a check after an edit (case.update with the whole text, "
+            "which the session never writes back) sets up again only the stages whose reads changed. An edit that "
+            "only [run]'s own settings read (cfl, t_stop, ...) is checked on the setup already there; other edits "
+            "outside [mesh] set the case up again on the mesh already built; a mesh file is read again only if it "
+            "changed. It listens on no network port: run it on another machine through ssh or kubectl exec -i. It "
+            "ends at shutdown or when standard input closes.",
         .options = SESSION_OPTIONS,
         .arguments = OPTIONAL_INPUT,
         .examples = "$ mallard session input.toml\n"

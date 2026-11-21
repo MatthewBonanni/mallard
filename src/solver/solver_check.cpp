@@ -184,7 +184,9 @@ std::string Solver::setup_check() {
 }
 
 void Solver::check_mesh_quality(CheckReport & r, const CheckOptions & options, const CheckFields & extra) const {
-    const MeshQuality quality = mesh_quality(*mesh);
+    std::optional<MeshQuality> computed;
+    if (setup_cache && !kept_quality) kept_quality = mesh_quality(*mesh);
+    const MeshQuality & quality = setup_cache ? *kept_quality : computed.emplace(mesh_quality(*mesh));
     r.quality = summarize(*mesh, quality, options.n_worst);
     r.has_quality = true;
     for (size_t m = 0; m < MeshQuality::N_METRICS; m++) {
@@ -950,7 +952,8 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     // The mesh's own regions: the domain, its boundary zones and cell zones; its periodic pairs
     const region::MeshRegions & automatic = used_regions->automatic();
     const bool drawn = !options.view_dir.empty();
-    MeshView view = mesh_view(*mesh, automatic, drawn);
+    if (setup_cache && !drawn && !kept_view) kept_view = mesh_view(*mesh, automatic, false);
+    MeshView view = setup_cache && !drawn ? *kept_view : mesh_view(*mesh, automatic, drawn);
     r.regions = view.regions;
     std::vector<case_view::Block> & blocks = view.blocks;
     const Box & domain = view.domain;

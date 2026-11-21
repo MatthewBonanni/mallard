@@ -65,6 +65,7 @@ class InputTable : public std::map<K, V> {
             std::map<K, KeyUse> uses;
             std::set<K> optional;
             bool all = false;
+            bool inspected = false;  // its entries were read without lookups (entries())
         };
 
         using Base::Base;
@@ -87,10 +88,38 @@ class InputTable : public std::map<K, V> {
         auto begin() const { lookups->all = true; return Base::begin(); }
         auto cbegin() const { lookups->all = true; return Base::cbegin(); }
 
-        /** @brief The entries, without counting them as read. */
-        const Base & entries() const { return *this; }
-        Base & entries() { return *this; }
+        /** @brief The entries, without counting them as read; the table is recorded as inspected. */
+        const Base & entries() const { lookups->inspected = true; return *this; }
+        Base & entries() { lookups->inspected = true; return *this; }
+        /** @brief The entries, with nothing recorded at all. */
+        const Base & unobserved() const { return *this; }
         const Lookups & lookups_made() const { return *lookups; }
+        /**
+         * @brief Sets the table's lookups aside, all but which keys are optional, and records anew: what reads it
+         *        next is then what read it alone (mallard session's setup stages). @return the lookups set aside
+         */
+        Lookups set_aside_lookups() const {
+            Lookups aside = *lookups;
+            lookups->keys.clear();
+            lookups->uses.clear();
+            lookups->all = false;
+            lookups->inspected = false;
+            return aside;
+        }
+        /** @brief Puts lookups set aside back, with the ones made since after them. */
+        void restore_lookups(const Lookups & aside) const {
+            const Lookups since = *lookups;
+            *lookups = aside;
+            merge_lookups(since);
+        }
+        /** @brief Adds lookups made elsewhere to this table's, as if they had been made on it. */
+        void merge_lookups(const Lookups & more) const {
+            lookups->keys.insert(more.keys.begin(), more.keys.end());
+            for (const auto & [k, use] : more.uses) lookups->uses[k] = use;
+            lookups->optional.insert(more.optional.begin(), more.optional.end());
+            lookups->all = lookups->all || more.all;
+            lookups->inspected = lookups->inspected || more.inspected;
+        }
         void record_use(const K & k, KeyUse use) const {
             note(k);
             if (lookups->optional.contains(k)) use.required = false;
@@ -128,6 +157,9 @@ inline bool contains_optional(const Input & table, const std::string & key) {
 Input parse_input(const std::string & filename);
 /** @brief Parse TOML text, with no key counted as read. */
 Input parse_input_string(const std::string & text, const std::string & name = "input");
+
+/** @brief A copy of an input whose reads (e.g. formatting it) do not count as reads of the original. */
+Input unrecorded(Input value);
 
 /**
  * @brief A problem with one key of the input, as normal runs and --check report

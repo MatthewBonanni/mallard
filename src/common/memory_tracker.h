@@ -64,6 +64,15 @@ struct Usage {
 /** @brief End a phase of the setup for the active tracker, if any: its peak becomes one of Usage::phases. */
 void end_phase();
 
+/** @brief The active tracker's counts, of the device's spaces and the host's; empty if none is active. */
+std::array<Usage, 2> counted();
+
+/**
+ * @brief Continues the active tracker from counts another took (counted()), as if their allocations, still held,
+ *        had been made under it: mallard session's setups that start from stages kept from an earlier one.
+ */
+void resume(const std::array<Usage, 2> & counts);
+
 /**
  * @brief Count Kokkos allocations from now on until the tracker is destroyed
  *        (allocations made before are never subtracted). One at a time; tools
