@@ -1284,7 +1284,7 @@ std::vector<particles::Record> Particles::gather() const {
     for (uint32_t i = 0; i < capacity; i++) {
         if (g_id(i) == EMPTY) continue;
         ids.push_back(g_id(i));
-        const rtype * y = &g_x(width * i + N_DIM);
+        const rtype * y = g_x.data() + size_t(width) * i + N_DIM;
         rtype v[N_DIM];
         host_velocity(y, v);
         for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(width * i + d)));
