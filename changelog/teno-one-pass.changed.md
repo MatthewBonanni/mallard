@@ -1,0 +1,1 @@
+- Distributed TENO runs whose halo must be deepened for the stencils set their tables up once instead of once per halo depth: the stencil searches alone find the depth first. Setup of a 48³ Taylor-Green box on 2 ranks: 69 s to 39 s; results are bitwise unchanged (#1307).
