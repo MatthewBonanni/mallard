@@ -41,8 +41,8 @@ cmake --build build -j
 cmake -S . -B build-3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
       -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
 cmake --build build-3d -j
-python3 -m venv .venv
-.venv/bin/pip install -r tutorials/requirements.txt -e tools
+uv venv
+uv pip install -r tutorials/requirements.txt -e tools
 export PATH=$PWD/.venv/bin:$PATH
 ```
 
