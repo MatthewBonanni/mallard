@@ -62,6 +62,7 @@ add_library(MallardCore STATIC
     chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
+    numerics/face_weights.cpp
     numerics/overlap.cpp
     numerics/cut_quadrature.cpp
     numerics/quadrature.cpp

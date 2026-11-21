@@ -275,18 +275,20 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     }
     const uint32_t n_state = mesh->n_state_faces();
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_state, n_max, N_DIM);
-    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_state, n_max);
     auto h_points = Kokkos::create_mirror_view(face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
     for (uint32_t f = 0; f < n_state; f++) {
         for (size_t q = 0; q < n_max; q++) {
             const size_t qq = offsets[f] + std::min(q, n_points(f) - 1);
             FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[qq][i]);
-            h_weights(f, q) = static_cast<rtype>((q < n_points(f)) ? weights[offsets[f] + q] : 0.0);
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
-    Kokkos::deep_copy(face_quad_weights, h_weights);
+    face_quad_weights = share_face_weights(
+        "face_quad_weights", n_state, static_cast<uint32_t>(n_max),
+        [&](const uint32_t f, rtype * w_f) {
+            for (size_t q = 0; q < n_max; q++) w_f[q] = static_cast<rtype>((q < n_points(f)) ? weights[offsets[f] + q] : 0.0);
+        },
+        share_weights);
     if (geometry) {
         face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_state, n_max, N_DIM);
         auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
@@ -344,10 +346,9 @@ void FaceReconstruction::init_face_quadrature_2d_curved() {
         ref_w[q] = double(quadrature_face.h_weights(q));
     }
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_q, N_DIM);
-    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_q);
     face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_q, N_DIM);
     auto h_points = Kokkos::create_mirror_view(face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
+    Kokkos::View<rtype **, Kokkos::HostSpace> h_weights("face_quad_weights_host", n_faces, n_q);
     auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
     std::vector<curved::Vec3> x, n;
     std::vector<double> w;
@@ -375,7 +376,11 @@ void FaceReconstruction::init_face_quadrature_2d_curved() {
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
-    Kokkos::deep_copy(face_quad_weights, h_weights);
+    face_quad_weights = share_face_weights(
+        "face_quad_weights", n_faces, n_q, [&](const uint32_t f, rtype * w_f) {
+            for (uint32_t q = 0; q < n_q; q++) w_f[q] = h_weights(f, q);
+        },
+        share_weights);
     Kokkos::deep_copy(face_quad_normals, h_normals);
 }
 

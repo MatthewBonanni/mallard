@@ -70,6 +70,13 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
 
+**Shared face quadrature weights** ([#965](https://github.com/MatthewBonanni/mallard/issues/965)). The 3D quadrature weights of the faces (and in 2D those of curved faces and of axisymmetric runs) are stored once per distinct row, bitwise, with a row index per face: the faces of a box have a few rows per direction (1,826 for the 798,720 faces of a 64³ box) and triangles one. Results are bitwise unchanged. `mallard check`, 64³ hexahedra, Navier–Stokes:
+
+| mesh and geometry per cell | before | after |
+|---|---:|---:|
+| TENO5 | 2.01 kB | 1.80 kB |
+| TENO3 | 1.52 kB | 1.44 kB |
+
 ## Cell numbering {#cell-numbering}
 
 Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first: a box of quadrilaterals or hexahedra, whose cells meet face to face (across periodic boundaries too), at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers, numbered along its axes (a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.

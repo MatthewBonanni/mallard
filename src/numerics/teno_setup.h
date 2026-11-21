@@ -21,6 +21,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "boundary.h"
+#include "face_weights.h"
 #include "mesh.h"
 #include "teno.h"
 
@@ -265,7 +266,7 @@ class Setup3D;
 class SetupHandle {
     public:
         SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> face_quad_points,
-                      Kokkos::View<rtype **> face_quad_weights, const Options & options);
+                      FaceWeights<> face_quad_weights, const Options & options);
         ~SetupHandle();
 
         /**

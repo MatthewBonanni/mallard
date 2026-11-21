@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "face_weights.h"
 #include "boundary.h"
 #include "periodic_maps.h"
 #include "riemann_solver.h"
@@ -145,7 +146,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
+    FaceWeights<> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
