@@ -24,6 +24,7 @@
 #include "comm.h"
 #include "input.h"
 #include "mesh.h"
+#include "region_surface.h"
 
 namespace region {
 
@@ -559,12 +560,18 @@ Box primitive_bounds(const Node & n, const std::vector<double> & vertices) {
             }
             break;
         }
+        case Kind::TRIANGLES: {
+            const auto b = ::region::surface::box(vertices.data() + 2 * n.first);
+            lo = b[0];
+            hi = b[1];
+            break;
+        }
         default: return EVERYWHERE;
     }
-    if (n.kind != Kind::POLYGON) hi = {-lo[0], -lo[1], -lo[2]};
+    if (n.kind != Kind::POLYGON && n.kind != Kind::TRIANGLES) hi = {-lo[0], -lo[1], -lo[2]};
     // 2D: a local z axis along the world's leaves x and y bounded however far it extends
     const bool planar = n.m[2] == 0.0 && n.m[5] == 0.0 && n.m[6] == 0.0 && n.m[7] == 0.0;
-    if (N_DIM == 2 && planar) lo[2] = hi[2] = 0.0;
+    if (N_DIM == 2 && planar && n.kind != Kind::TRIANGLES) lo[2] = hi[2] = 0.0;
     for (size_t i = 0; i < 3; i++) {
         if (!std::isfinite(lo[i]) || !std::isfinite(hi[i])) return EVERYWHERE;
     }
@@ -739,6 +746,29 @@ bool primitive_measures(const Node & n, const std::vector<double> & vertices, co
                 r_surface = world(length_centroid)[1];
                 break;
             }
+            case Kind::TRIANGLES: {
+                // The section z = 0, at local z = d[2]: segments with the area on their left
+                double signed_area = 0.0;
+                Vec area_centroid = {0.0, 0.0, n.d[2]}, length_centroid = {0.0, 0.0, n.d[2]};
+                for (const auto & [a, b] : ::region::surface::section(vertices.data() + 2 * n.first, n.d[2])) {
+                    const double cr = a[0] * b[1] - b[0] * a[1], length = std::hypot(b[0] - a[0], b[1] - a[1]);
+                    signed_area += 0.5 * cr;
+                    surface += length;
+                    for (size_t d = 0; d < 2; d++) {
+                        area_centroid[d] += (a[d] + b[d]) * cr / 6.0;
+                        length_centroid[d] += 0.5 * (a[d] + b[d]) * length;
+                    }
+                }
+                if (!(signed_area > 0.0)) return false;
+                volume = signed_area;
+                for (size_t d = 0; d < 2; d++) {
+                    area_centroid[d] /= signed_area;
+                    length_centroid[d] /= surface;
+                }
+                r_volume = world(area_centroid)[1];
+                r_surface = world(length_centroid)[1];
+                break;
+            }
             default: return false;
         }
         volume *= k * k;
@@ -775,6 +805,34 @@ bool primitive_measures(const Node & n, const std::vector<double> & vertices, co
                 volume = 2.0 * PI * PI * p[0] * p[1] * p[1];
                 surface = 4.0 * PI * PI * p[0] * p[1];
                 break;
+            case Kind::TRIANGLES: {
+                // By the divergence theorem, over the outward triangles
+                Vec volume_centroid = {0.0, 0.0, 0.0}, area_centroid = {0.0, 0.0, 0.0};
+                for (const auto & t : ::region::surface::triangles(vertices.data() + 2 * n.first)) {
+                    const Vec & a = t[0];
+                    const Vec & b = t[1];
+                    const Vec & c = t[2];
+                    const Vec u = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+                    const double area = 0.5 * std::sqrt(std::pow(u[1] * v[2] - u[2] * v[1], 2) +
+                                                        std::pow(u[2] * v[0] - u[0] * v[2], 2) +
+                                                        std::pow(u[0] * v[1] - u[1] * v[0], 2));
+                    const double tet = (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) +
+                                        a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0;
+                    volume += tet;
+                    surface += area;
+                    for (size_t d = 0; d < 3; d++) {
+                        volume_centroid[d] += tet * (a[d] + b[d] + c[d]) / 4.0;
+                        area_centroid[d] += area * (a[d] + b[d] + c[d]) / 3.0;
+                    }
+                }
+                for (size_t d = 0; d < 3; d++) {
+                    volume_centroid[d] /= volume;
+                    area_centroid[d] /= surface;
+                }
+                r_volume = world(volume_centroid)[1];
+                r_surface = world(area_centroid)[1];
+                break;
+            }
             default: return false;
         }
         volume *= k * k * k;

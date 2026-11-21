@@ -15,8 +15,10 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -25,6 +27,7 @@
 #include "distribution.h"
 #include "log.h"
 #include "mesh.h"
+#include "region_surface.h"
 #include "units.h"
 
 namespace region {
@@ -301,6 +304,7 @@ class Parser {
         std::vector<Condition> conditions;
         bool bounded = true;
         int max_depth = 0;
+        std::map<std::string, std::pair<Node, std::string>> surfaces;  // read from files, by type, file and units
 
         Parsed parse(const Input & value, const std::string & where, const Frame & parent, const bool top = false) {
             if (value.is_string()) return named(value, where, parent, top);
@@ -593,8 +597,8 @@ class Parser {
         static std::vector<std::string> types() {
             std::vector<std::string> out = {"sphere", "ellipsoid", "cylinder", "cone", "frustum", "torus",
                                             "half_space", "implicit", "circle", "ellipse", "disk", "annulus",
-                                            "rectangle", "polygon", "union", "intersection", "difference",
-                                            "boundary", "interior", "where", "isosurface"};
+                                            "rectangle", "polygon", "stl", "obj", "union", "intersection",
+                                            "difference", "boundary", "interior", "where", "isosurface"};
             if (N_DIM == 3) out.push_back("box");
             return out;
         }
@@ -1060,10 +1064,16 @@ class Parser {
             Filled f;
             f.kind = op == Kind::UNION ? Filled::Kind::UNION
                                        : (op == Kind::INTERSECTION ? Filled::Kind::INTERSECTION : Filled::Kind::DIFFERENCE);
-            if (type == "difference") f.parts.push_back(place(ps[0], where));
-            if (!shapes.empty()) {
-                Parsed joined = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
+            if (type == "difference" && ps[0].filled < 0 && !shapes.empty()) {
+                shapes.insert(shapes.begin(), &ps[0]);
+                Parsed joined = join_nodes(shapes, Kind::DIFFERENCE);
                 f.parts.push_back(place(joined, where));
+            } else {
+                if (type == "difference") f.parts.push_back(place(ps[0], where));
+                if (!shapes.empty()) {
+                    Parsed joined = join_nodes(shapes, op == Kind::DIFFERENCE ? Kind::UNION : op);
+                    f.parts.push_back(place(joined, where));
+                }
             }
             for (Parsed * p : mesh_parts) f.parts.push_back(place(*p, where));
             f.cells = true;
@@ -1210,12 +1220,97 @@ class Parser {
             return p;
         }
 
+        /** @brief A filled region inside the closed surface of an STL or OBJ file, read once per file and units. */
+        Parsed cad(const Input & t, const std::string & where, const std::string & type, const Frame & frame) {
+            const char * const docs = "docs/guide/geometry.md#regions-from-cad-surfaces";
+            const std::string example = "e.g. {type = \"" + type + "\", file = \"body." + type + "\", units = \"mm\"}";
+            if (!t.contains("file")) fail(where, line_of(t, "type"), "needs file, the path of the " + type + " file", example, docs);
+            if (!t.contains("units")) {
+                fail(where, line_of(t, "type"),
+                     "needs units, the unit of length of the file's coordinates, which " + type + " files do not state",
+                     example + "; the unit is \"m\", \"mm\", \"in\", ... as the CAD tool exported it", docs);
+            }
+            const std::string file = find_value<std::string>(t, "file");
+            const std::string units = find_value<std::string>(t, "units");
+            double factor = 0.0;
+            try {
+                const Quantity q = parse_quantity("1 " + units);
+                if (q.has_unit && !q.absolute && q.dimension.same_as(dim::length)) factor = q.value;
+            } catch (const UnitError &) {
+            }
+            if (!(factor > 0.0)) {
+                fail(where + ".units", line_of(t, "units"), "\"" + units + "\" is not a unit of length",
+                     "Give the unit of the file's coordinates: \"m\", \"cm\", \"mm\", \"um\", \"in\" or \"ft\"", docs);
+            }
+            uint64_t bits = 0;
+            std::memcpy(&bits, &factor, sizeof bits);
+            const std::string id = type + "\n" + file + "\n" + std::to_string(bits);
+            auto it = surfaces.find(id);
+            if (it == surfaces.end()) {
+                const ::region::surface::Where at{where, line_of(t, "file")};
+                const ::region::surface::Packed packed = ::region::surface::pack(::region::surface::read(file, type, factor, at), file, at);
+                Node n;
+                n.kind = Kind::TRIANGLES;
+                n.first = static_cast<uint32_t>(vertices.size() / 2);
+                n.count = static_cast<uint32_t>(packed.data.size() / 2);
+                vertices.insert(vertices.end(), packed.data.begin(), packed.data.end());
+                std::string text = type + "(" + file + ", " + units + ", " + logging::count(packed.n_triangles, "triangle");
+                if (packed.n_bodies > 1) text += ", " + logging::count(packed.n_bodies) + " bodies";
+                if (packed.n_cavities > 0) {
+                    text += ", " + logging::count(packed.n_cavities) + (packed.n_cavities == 1 ? " cavity" : " cavities");
+                }
+                it = surfaces.emplace(id, std::make_pair(n, text + ")")).first;
+            }
+            const Node & n = it->second.first;
+            if (N_DIM == 2) {
+                // The z = 0 slice: it must cut the surface, and not lie along any of its faces
+                const double * s = vertices.data() + 2 * n.first;
+                const std::array<double, 9> & M = frame.M;
+                const double det = M[0] * (M[4] * M[8] - M[5] * M[7]) - M[1] * (M[3] * M[8] - M[5] * M[6]) +
+                                   M[2] * (M[3] * M[7] - M[4] * M[6]);
+                // World z of a local point q: row 3 of M^-1 applied to q - d
+                const Vec row = {(M[3] * M[7] - M[4] * M[6]) / det, (M[1] * M[6] - M[0] * M[7]) / det,
+                                 (M[0] * M[4] - M[1] * M[3]) / det};
+                double lo = INF, hi = -INF;
+                const auto [box_lo, box_hi] = ::region::surface::box(s);
+                const double size = norm({box_hi[0] - box_lo[0], box_hi[1] - box_lo[1], box_hi[2] - box_lo[2]}) * frame.k;
+                for (const ::region::surface::Triangle & tri : ::region::surface::triangles(s)) {
+                    bool flat = true;
+                    for (const Vec & q : tri) {
+                        const double z = dot(row, {q[0] - frame.d[0], q[1] - frame.d[1], q[2] - frame.d[2]});
+                        lo = std::min(lo, z);
+                        hi = std::max(hi, z);
+                        flat = flat && std::abs(z) <= 1e-12 * size;
+                    }
+                    if (flat) {
+                        fail(where, line_of(t, "file"),
+                             "has faces in the plane z = 0, and 2D runs take the section of a region there",
+                             "Move the surface so that z = 0 cuts across it, e.g. a body extruded from z = 0 to h "
+                             "with translate = [0, 0, -h/2]",
+                             docs);
+                    }
+                }
+                if (!(lo < 0.0 && hi > 0.0)) {
+                    fail(where, line_of(t, "file"),
+                         "spans z = " + logging::real(lo) + " to " + logging::real(hi) +
+                             " m, and 2D runs take the section of a region by the plane z = 0",
+                         "Move the surface so that z = 0 cuts across it, e.g. translate = [0, 0, " +
+                             logging::real(-0.5 * (lo + hi)) + "]",
+                         docs);
+                }
+            }
+            Parsed p = node_of(n, frame);
+            p.text = it->second.second;
+            return p;
+        }
+
         Parsed primitive(const Input & t, const std::string & where, const std::string & type, Frame frame) {
             if (N_DIM == 2 && type == "box") {
                 fail(where + ".type", line_of(t, "type"), "\"box\" is a 3D solid, and regions here are areas",
                      "Use \"rectangle\"", "docs/guide/geometry.md#primitives");
             }
             if (type == "circle" || type == "ellipse") return curve(t, where, type, frame);
+            if (type == "stl" || type == "obj") return cad(t, where, type, frame);
             if (N_DIM == 3 && (type == "disk" || type == "annulus" || type == "rectangle" || type == "polygon")) {
                 return flat(t, where, type, frame);
             }
@@ -1460,19 +1555,24 @@ Definition definition(Parser & parser, Parsed & p, const std::string & where, co
     return d;
 }
 
+constexpr int MAX_IMAGES = 4096;
+constexpr int MAX_IMAGE_CANDIDATES = 1000000;
+
 /**
  * @brief The steps from the world's frame to each image of a region in the
  *        periodic lattice of the mesh, the region itself first: the images
  *        whose box meets the domain's (a moving region's: within a period of
  *        it), along the directions in which the region's box is finite.
  */
-std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array<Vec, 2> & box, const bool moving) {
+std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array<Vec, 2> & box, const bool moving,
+                                      const std::string & where, const std::size_t line) {
     const size_t n = mesh.translations.size();
     std::vector<std::vector<Step>> out = {{}};
     if (n == 0) return out;
     auto finite = [&](const size_t i) { return std::isfinite(box[0][i]) && std::isfinite(box[1][i]); };
     std::array<Vec, 2> reach = mesh.domain;
     std::vector<int> range(n, 0), low(n, 0);
+    auto bounded = [](const double r) { return static_cast<int>(std::min(r, double(MAX_IMAGE_CANDIDATES) + 1.0)); };
     for (size_t l = 0; l < n; l++) {
         const Vec & v = mesh.translations[l];
         if (static_cast<int>(l) == mesh.rotation) {
@@ -1480,7 +1580,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             for (size_t i = 0; i < N_DIM; i++) across = across && (finite(i) || std::abs(mesh.axis[i]) == 1.0);
             // Every other sector once: a half turn is reached one way only
             const double turns = 360.0 / std::abs(mesh.angle);
-            range[l] = across ? std::min(32, static_cast<int>(std::floor(0.5 * turns + 1e-9))) : 0;
+            range[l] = across ? bounded(std::floor(0.5 * turns + 1e-9)) : 0;
             low[l] = -range[l] + (range[l] > 0 && std::abs(2.0 * range[l] - turns) < 1e-9 ? 1 : 0);
             continue;
         }
@@ -1494,7 +1594,7 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
             extent += std::abs(v[i] / length) * (std::max(box[1][i], mesh.domain[1][i]) - std::min(box[0][i], mesh.domain[0][i]));
         }
         if (!along) continue;
-        range[l] = std::min(16, std::max(moving ? 1 : 0, static_cast<int>(std::ceil(extent / length))));
+        range[l] = std::max(moving ? 1 : 0, bounded(std::ceil(extent / length)));
         low[l] = -range[l];
         if (moving) {
             for (size_t i = 0; i < 3; i++) {
@@ -1502,6 +1602,17 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
                 reach[1][i] += std::abs(v[i]);
             }
         }
+    }
+    double candidates = 1.0;
+    for (size_t l = 0; l < n; l++) candidates *= double(range[l] - low[l] + 1);
+    const std::string fix =
+        "Shorten the region along the periodic directions, or leave it unbounded along them (such as a half_space)";
+    if (candidates > double(MAX_IMAGE_CANDIDATES)) {
+        fail(where, line,
+             "spans too many periods of the mesh to wrap across its periodic boundaries: " +
+                 std::to_string(static_cast<uint64_t>(candidates)) + " images to test against the domain, at most " +
+                 std::to_string(MAX_IMAGE_CANDIDATES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
     }
     const double tol = 1e-9 * norm({mesh.domain[1][0] - mesh.domain[0][0], mesh.domain[1][1] - mesh.domain[0][1],
                                     mesh.domain[1][2] - mesh.domain[0][2]});
@@ -1557,6 +1668,12 @@ std::vector<std::vector<Step>> images(const MeshRegions & mesh, const std::array
         }
         if (l == n) break;
     }
+    if (out.size() > static_cast<size_t>(MAX_IMAGES)) {
+        fail(where, line,
+             "wraps across periodic boundaries into " + std::to_string(out.size()) + " images, at most " +
+                 std::to_string(MAX_IMAGES),
+             fix, "docs/guide/geometry.md#periodic-boundaries");
+    }
     return out;
 }
 
@@ -1575,7 +1692,7 @@ Definition parse(const Input & value, const std::string & where, const Input * n
     std::vector<std::vector<Step>> wraps = {{}};
     if (mesh && !mesh->translations.empty() && !own_mesh_parts) {
         const Region unwrapped{Definition(d)};
-        wraps = images(*mesh, bounds(unwrapped), unwrapped.moving());
+        wraps = images(*mesh, bounds(unwrapped), unwrapped.moving(), where, line_of(value));
     }
     if (wraps.size() > 1) {
         Parser again;

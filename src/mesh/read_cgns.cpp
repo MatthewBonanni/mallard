@@ -280,7 +280,7 @@ MeshBlock read_cgns_block(const std::string & filename) {
     const CGNS_ENUMT(DataType_t) SIZE_TYPE = sizeof(cgsize_t) == 8 ? CGNS_ENUMV(LongInteger) : CGNS_ENUMV(Integer);
     const uint64_t first_element = block_begin(n_elements, r, p), end_element = block_begin(n_elements, r + 1, p);
     Records cells, faces, face_all;  // corners (file-wide nodes); every node of curved faces
-    std::vector<uint32_t> cell_zone_of, face_zone_of;  // the CGNS zone of each
+    std::vector<uint32_t> face_zone_of;  // the CGNS zone of each
     std::vector<std::array<uint32_t, 2>> cell_section, face_section;
     int curved_faces = 0;
     collectively([&] {
@@ -346,7 +346,6 @@ MeshBlock read_cgns_block(const std::string & filename) {
                         ref = {ElementRef::CELL, uint32_t(cells.size())};
                         for (int k = 0; k < info.n_corners; k++) cells.words.push_back(node(size_t(k)));
                         cells.end_record();
-                        cell_zone_of.push_back(uint32_t(z));
                         cell_section.push_back({uint32_t(z), uint32_t(s)});
                     } else if (info.dim == BOUNDARY_DIM) {
                         ref = {ElementRef::FACE, uint32_t(faces.size())};
@@ -418,7 +417,9 @@ MeshBlock read_cgns_block(const std::string & filename) {
     });
 
     // Names of boundary faces and cells: BCs (through their family) first; then sections' names or families
-    std::vector<std::string> face_name(faces.size()), cell_bc(cells.size());
+    constexpr uint32_t NO_BC = ~uint32_t(0);
+    std::vector<std::string> face_name(faces.size()), bc_names;
+    std::vector<uint32_t> cell_bc(cells.size(), NO_BC);  // index into bc_names
     collectively([&] {
         for (int z = 1; z <= int(zones.size()); z++) {
             const ZoneInfo & zone = zones[size_t(z - 1)];
@@ -479,7 +480,10 @@ MeshBlock read_cgns_block(const std::string & filename) {
                 auto name_element = [&](cgsize_t e) {
                     const ElementRef ref = zone.element(e);
                     if (ref.kind == ElementRef::FACE) name_face(ref.index);
-                    if (ref.kind == ElementRef::CELL && cell_bc[ref.index].empty()) cell_bc[ref.index] = name;
+                    if (ref.kind == ElementRef::CELL && cell_bc[ref.index] == NO_BC && !name.empty()) {
+                        if (bc_names.empty() || bc_names.back() != name) bc_names.push_back(name);
+                        cell_bc[ref.index] = uint32_t(bc_names.size() - 1);
+                    }
                 };
                 for (cgsize_t e : points) {
                     if (e < 1 || e > zone.max_id) file.fail("boundary condition " + std::string(bc_name) + ": element id out of range.");
@@ -500,17 +504,22 @@ MeshBlock read_cgns_block(const std::string & filename) {
         if (face_name[f].empty()) face_name[f] = zones[face_section[f][0]].sections[face_section[f][1]].name;
         if (seen.insert(face_name[f]).second) local_names.push_back(face_name[f]);
     }
+    for (ZoneInfo & zone : zones) {
+        for (SectionInfo & x : zone.sections) release(x.refs);
+    }
     MeshBlock block;
     block.zone_names = parallel_read::names_in_order(local_names);
-    std::vector<std::string> cell_name(cells.size());
+    const std::string none;
+    auto cell_name = [&](uint32_t c) -> const std::string & {
+        const std::string & family = zones[cell_section[c][0]].sections[cell_section[c][1]].family;
+        return !family.empty() ? family : cell_bc[c] == NO_BC ? none : bc_names[cell_bc[c]];
+    };
     local_names.clear();
     seen.clear();
     for (uint32_t c = 0; c < cells.size(); c++) {
-        const std::string & family = zones[cell_section[c][0]].sections[cell_section[c][1]].family;
-        cell_name[c] = !family.empty() ? family : cell_bc[c];
-        if (!cell_name[c].empty() && seen.insert(cell_name[c]).second) local_names.push_back(cell_name[c]);
+        const std::string & name = cell_name(c);
+        if (!name.empty() && seen.insert(name).second) local_names.push_back(name);
     }
-    release(cell_bc);
     block.cell_zone_names = parallel_read::names_in_order(local_names);
     auto index_of = [](const std::vector<std::string> & names, const std::string & name) {
         return uint64_t(std::find(names.begin(), names.end(), name) - names.begin());
@@ -528,13 +537,16 @@ MeshBlock read_cgns_block(const std::string & filename) {
         Records records;
         for (size_t c = 0; c < cells.size(); c++) {
             index[c] = my_first_cell + c;
-            records.words.push_back(cell_name[c].empty() ? Mesh::NO_CELL_ZONE : index_of(block.cell_zone_names, cell_name[c]));
+            const std::string & name = cell_name(uint32_t(c));
+            records.words.push_back(name.empty() ? Mesh::NO_CELL_ZONE : index_of(block.cell_zone_names, name));
             records.words.insert(records.words.end(), cells[c].begin(), cells[c].end());
             records.end_record();
         }
         release(cells.words);
         release(cells.offsets);
-        const Records mine = parallel_read::to_owners(index, records, n_cells);
+        release(cell_bc);
+        release(cell_section);
+        const Records mine = parallel_read::to_owners(index, std::move(records), n_cells);
         block.first_cell = block_begin(n_cells, r, p);
         for (size_t c = 0; c < mine.size(); c++) {
             block.add_cell(mine[c].subspan(1));
@@ -553,7 +565,7 @@ MeshBlock read_cgns_block(const std::string & filename) {
                                  face_all_xyz.begin() + std::ptrdiff_t(face_all.offsets[f + 1] * N_DIM));
             records.end_record();
         }
-        parallel_read::place_faces(index, records, n_faces, curved_faces != 0, block);
+        parallel_read::place_faces(index, std::move(records), n_faces, curved_faces != 0, block);
     }
     parallel_read::place_used_nodes(n_nodes, std::move(xyz), {&block.cell_nodes, &block.face_nodes}, block);
     return block;

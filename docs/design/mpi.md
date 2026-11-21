@@ -42,7 +42,7 @@ Setup-time communication (partitioning, migration, I/O) always uses MPI.
 
 ### 3. Distributed dual graph
 
-Two cells are adjacent if they share a face. Each rank hashes every face of its cells (sorted global node ids) to an owner rank. One `alltoallv` brings the copies of each face together and pairs them; the boundary faces of the mesh file go to the same ranks by the same hash. A second sends each pair back as a graph edge, and each unpaired face back as a boundary face with its zone (the first boundary face in global order that matches it, else `unassigned`). Faces shared by more than two cells, and boundary faces that are interior or not cell faces, are errors on every rank. The result is a distributed CSR graph in ParMETIS layout (`vtxdist`, `xadj`, `adjncy`). Cost is O(faces / ranks) per rank and two all-to-alls.
+Two cells are adjacent if they share a face. Each rank hashes every face of its cells (sorted global node ids) to an owner rank. One `alltoallv` brings the copies of each face together and pairs them; the boundary faces of the mesh file go to the same ranks by the same hash. A second sends each pair back as a graph edge, and each unpaired face back as a boundary face with its zone (the first boundary face in global order that matches it, else `unassigned`). The faces go in four rounds, split by another part of the same hash, so that the messages a rank sends and receives at once (5 words per face, about 240 B per hexahedron in all) stay a quarter of that next to its block. Faces shared by more than two cells, and boundary faces that are interior or not cell faces, are errors on every rank. The result is a distributed CSR graph in ParMETIS layout (`vtxdist`, `xadj`, `adjncy`). Cost is O(faces / ranks) per rank and two all-to-alls.
 
 ### 4. Partitioning
 
@@ -60,7 +60,7 @@ Vertex weights model cost: a base weight per cell plus a term for the TENO stenc
 
 ### 5. Migration
 
-One `alltoallv` sends each cell to its owner: its global id, owner, node ids and boundary faces (local face index and zone). A second builds a **node directory**: the rank that read each node records the cells using it and their owners. Every node shared by several owners then sends each of them the cells there it does not own, which is halo layer 1. The coordinates of the nodes a rank needs are fetched from the ranks that read them once its halo is complete. The cells' blocks stay on the ranks that read them through the halo search, and are freed before the `Mesh` is built.
+One `alltoallv` sends each cell to its owner: its global id, owner, node ids and boundary faces (local face index and zone). A second builds a **node directory**: the rank that read each node records the cells using it and their owners, in four rounds of increasing nodes of every rank's block, each filling the directory of its nodes, so that the messages stay small next to the block. Every node shared by several owners then sends each of them the cells there it does not own, which is halo layer 1. The coordinates of the nodes a rank needs are fetched from the ranks that read them once its halo is complete. The cells' blocks stay on the ranks that read them through the halo search, and are freed before the `Mesh` is built.
 
 ### 6. Halo
 
