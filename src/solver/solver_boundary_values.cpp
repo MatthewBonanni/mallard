@@ -1,7 +1,7 @@
 /**
  * @file solver_boundary_values.cpp
  * @brief The values each [[boundaries]] entry prescribes at its faces, as the boundary itself evaluates them, and
- *        the inflow that stagnation and mass-flow inlets would make of the initial state: mallard check
+ *        the inflow that stagnation and mass-flow inlets settle at against the initial pressure: mallard check
  *        --boundary-values and the session's case.boundary_values.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
@@ -19,6 +19,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "inflow.h"
 #include "interfaces.h"
 #include "json.h"
 #include "log.h"
@@ -102,7 +103,7 @@ std::string Solver::boundary_values(const std::string & dir) const {
             columns.push_back({"p", "Pa", true});
         }
 
-        // The ghost state of the flux, against the cell's initial state
+        // The inflow each face settles at against its cell's initial pressure; supersonic interiors, the flux's ghost
         Kokkos::View<double **>::host_mirror_type h_ghost;
         if (inflow && !faces.empty()) {
             Kokkos::View<uint32_t *> d_faces("boundary_values_faces", faces.size());
@@ -121,10 +122,30 @@ std::string Solver::boundary_values(const std::string & dir) const {
                 unit<N_DIM>(n_vec, n);
                 for (uint8_t j = 0; j < N_DIM + 2; j++) W_i[j] = W(cells(f, 0), j);
                 const int32_t i_bc = boundaries.face_bc(f);
-                if (boundaries.mixture_inflow(i_bc)) {
-                    boundaries.mixture_inflow_W(i_bc, W_i, n, W_g, th_g);
+                const BoundaryCondition & bc = boundaries.bcs(i_bc);
+                const BoundaryComposition y{boundaries.bc_Y, i_bc};
+                const double R = boundaries.mixture ? boundaries.thermo.gas_constant(y) : double(boundaries.R);
+                const double gamma = double(boundaries.mixture ? boundaries.bc_thermo(i_bc, 0) : boundaries.gamma);
+                const double p_i = double(W_i[N_DIM + 1]);
+                const double a_i = Kokkos::sqrt(gamma * p_i / double(W_i[0]));
+                const bool stagnation = bc.type == BoundaryType::INLET_STAGNATION;
+                double T_b;
+                if (!stagnation) {
+                    inflow::mass_flow_state_at(R, double(bc.data[0]), double(bc.data[N_DIM + 1]), bc.data + 1, n, p_i, W_g);
+                } else if (Kokkos::fabs(double(dot<N_DIM>(W_i + 1, n))) >= a_i) {
+                    if (boundaries.mixture) {
+                        boundaries.mixture_inflow_W(i_bc, W_i, n, W_g, th_g);
+                    } else {
+                        boundaries.ghost_W(f, W_i, n, W_g, true);
+                    }
+                } else if (boundaries.mixture) {
+                    const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> isentrope{
+                        boundaries.thermo, y, R};
+                    inflow::stagnation_state_at(isentrope, double(bc.data[0]), double(bc.data[N_DIM + 1]), bc.data + 1, n, p_i,
+                                                W_g, T_b);
                 } else {
-                    boundaries.ghost_W(f, W_i, n, W_g, true);
+                    inflow::stagnation_state_at(inflow::PerfectGas{gamma, R}, double(bc.data[0]), double(bc.data[N_DIM + 1]),
+                                                bc.data + 1, n, p_i, W_g, T_b);
                 }
                 for (uint8_t j = 0; j < N_DIM + 2; j++) ghost(k, j) = static_cast<double>(W_g[j]);
             });

@@ -420,6 +420,7 @@ TEST(SessionTest, BoundaryValuesAreTheBoundariesOwnWithTheInflowOfMassFlowInlets
     for (size_t k = 0; k < out.at("rho_u_n").size(); k++) {
         EXPECT_NEAR(out.at("rho_u_n")[k], 0.15, 1e-6);
         EXPECT_GT(out.at("speed")[k], 0.0);
+        EXPECT_NEAR(out.at("p")[k], 0.7142857142857143, 1e-6);
     }
     for (const json::Value & c : entries["outlet"]["columns"].array) {
         EXPECT_EQ(c["estimated"].boolean, c["name"].string == "rho_u_n" || c["name"].string == "speed" ||
@@ -479,6 +480,42 @@ TEST(SessionTest, FileInfoAnswersAsInfoJsonWithWhetherThisBuildContinuesARestart
     for (size_t k = 0; k < expected.size(); k++) EXPECT_EQ(info["incompatibilities"].array[k].string, expected[k]);
     const Result text = run({"info", restart});
     EXPECT_NE(text.out.find(expected.empty() ? "yes, by this build" : "no, by this build"), std::string::npos) << text.out;
+}
+
+TEST(SessionTest, BoundaryValuesOfAStagnationInletAreItsInflowAtTheInitialPressure) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    const std::string u = Mallard_DIM == 3 ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
+    const std::string tangential = Mallard_DIM == 3 ? "[0.0, 0.2, 0.0]" : "[0.0, 0.2]";
+    const std::string initial = "[initialize]\ntype = \"constant\"\nu = " + u + "\n";
+    const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    ASSERT_NE(text.find(initial), std::string::npos);
+    text.replace(text.find(initial), initial.size(), "[initialize]\ntype = \"constant\"\nu = " + tangential + "\n");
+    ASSERT_NE(text.find(inlet), std::string::npos);
+    text.replace(text.find(inlet), inlet.size(),
+                 "name = \"inlet\"\ntype = \"inlet_stagnation\"\np0 = 0.75\nT0 = 0.7142857142857143\n");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const json::Value values = response(messages(session.out), 1)["result"];
+    const json::Value * entry = nullptr;
+    for (const json::Value & e : values["entries"].array) {
+        if (e["zone"].string == "inlet") entry = &e;
+    }
+    ASSERT_NE(entry, nullptr) << json::dump(values);
+    // Isentropic from (p0, T0) to the interior pressure, along the inward normal: R = 1, cp = 3.5
+    const double p = 0.7142857142857143, T0 = 0.7142857142857143;
+    const double T = T0 * std::pow(p / 0.75, 0.4 / 1.4);
+    const double speed = std::sqrt(7.0 * (T0 - T));
+    const auto in = csv_columns((*entry)["file"].string);
+    ASSERT_TRUE(in.count("speed") && in.count("p") && in.count("rho_u_n")) << json::dump(*entry);
+    for (size_t k = 0; k < in.at("speed").size(); k++) {
+        EXPECT_NEAR(in.at("speed")[k], speed, 1e-5);
+        EXPECT_NEAR(in.at("p")[k], p, 1e-5);
+        EXPECT_NEAR(in.at("rho_u_n")[k], p / T * speed, 1e-5);
+        EXPECT_NEAR(in.at("u_x")[k], speed * in.at("n_x")[k], 1e-5);
+    }
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {
