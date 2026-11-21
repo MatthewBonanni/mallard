@@ -210,9 +210,23 @@ void DataWriter::write_hdf5_mesh() {
     for (size_t i = 0; i < starts.size(); i++) starts[i] = int64_t(first + block_offsets[i]);
     const std::vector<int64_t> records(block_topology.begin(), block_topology.end());
 
+    const std::string filename = mesh_file(prefix);
+    if (hdf5_reuse_mesh) {
+        // A continued series: the mesh file its snapshots name is the run's mesh
+        int32_t same = 1;
+        if (comm::is_root()) {
+            Handle file(H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + filename);
+            same = h5::n_rows(file, "nodes/coordinates") == n_nodes && h5::n_rows(file, "cells/topology") == total;
+        }
+        if (distributed && comm::size() > 1) same = comm::allreduce(same, comm::Op::MIN);
+        if (!same) {
+            throw std::runtime_error("DataWriter: " + filename +
+                                     " holds another mesh than the series continued; move the series away to start a new one.");
+        }
+        return;
+    }
     const std::string & provenance = provenance::json();
     const bool deflate = compression == Compression::ZLIB;
-    const std::string filename = mesh_file(prefix);
     Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
     Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
     Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
