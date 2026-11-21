@@ -78,6 +78,7 @@
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tools/dev/catalog_inputs/3d/mesh_file.toml",
