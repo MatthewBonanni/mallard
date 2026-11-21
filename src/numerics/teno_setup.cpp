@@ -405,7 +405,7 @@ struct Geometry {
     R<double **> moments;          // (cell, moment)
     R<double *[9]> metric;         // (reconstructed cell)
     V<rtype ***> quad_points;      // (face, q, d)
-    V<rtype **> quad_weights;      // (face, q)
+    FaceWeights<Space> quad_weights;  // (face, q)
     R<double *[4]> tet_rule;       // (q, [x, y, z, w]) for the moments
 
     KOKKOS_INLINE_FUNCTION
@@ -3562,7 +3562,7 @@ class Setup3D {
 
     public:
         Setup3D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                Kokkos::View<rtype **> quad_weights, const Options & opt)
+                FaceWeights<> quad_weights, const Options & opt)
             : options(opt), tables(opt.degree) {
             Kokkos::Timer timer;
             r = opt.degree;
@@ -3920,7 +3920,7 @@ class Setup3D {
             host.moments = Kokkos::create_mirror_view_and_copy(HostMem(), device.moments);
             host.boxes = Kokkos::create_mirror_view_and_copy(HostMem(), device.boxes);
             host.quad_points = Kokkos::create_mirror_view_and_copy(HostMem(), device.quad_points);
-            host.quad_weights = Kokkos::create_mirror_view_and_copy(HostMem(), device.quad_weights);
+            host.quad_weights = device.quad_weights.host();
             host_ready = true;
         }
 
@@ -4985,7 +4985,7 @@ void boundary_behind_faces(const Mesh & mesh, const std::vector<uint8_t> & bound
 class Setup2D {
     public:
         Setup2D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                Kokkos::View<rtype **>, const Options & opt)
+                FaceWeights<>, const Options & opt)
             : options(opt) {
             Kokkos::Timer timer;
             r = opt.degree;
@@ -5360,7 +5360,7 @@ class Setup2D {
 #endif
 
 SetupHandle::SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                         Kokkos::View<rtype **> quad_weights, const Options & options)
+                         FaceWeights<> quad_weights, const Options & options)
     : impl(std::make_unique<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>>(mesh, boundaries, quad_points, quad_weights,
                                                                              options)) {}
 
