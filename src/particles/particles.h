@@ -27,6 +27,8 @@
 #include "common.h"
 #include "gradient.h"
 #include "input.h"
+#include "particle_probes.h"
+#include "particle_quantities.h"
 #include "periodic_maps.h"
 #include "pinned_mirrors.h"
 #include "state.h"
@@ -139,10 +141,11 @@ struct Walker {
     }
 };
 
-/** @brief A particle as output reports it. */
+/** @brief A particle as output reports it: its id, position and quantities. */
 struct Record {
     uint64_t id;
     std::array<double, N_DIM> x;
+    std::vector<double> q;
 };
 
 } // namespace particles
@@ -150,11 +153,15 @@ struct Record {
 /**
  * @brief The particles of a run ([particles]): massless tracers whose velocity
  *        is the gas velocity of the reconstruction polynomial at their
- *        position. Their positions are a block of the solver's State, so every
- *        time integrator advances them with the flow, at its order.
+ *        position, with their quantities ([[particles.quantities]]) and probes
+ *        ([[particles.probes]]). Their positions and integrated quantities are
+ *        a block of the solver's State, so every time integrator advances them
+ *        with the flow, at its order.
  *
  * Storage is a fixed number of slots per rank (structure of arrays on the
  * device); an empty slot has id particles::EMPTY. Kernels run over every slot.
+ * Each slot has width() values in the block, its position first, and n_aux()
+ * values outside it (extrema and first times).
  */
 class Particles {
     public:
@@ -167,15 +174,27 @@ class Particles {
          * @param distribution The distribution of a distributed run, else null.
          * @param restart The arrays of the restart file the run starts from, or
          *        null; the particles are seeded when it holds none.
+         * @param regions The regions expressions and probes read.
+         * @param gas_constant R of a single gas (the temperature at a particle), 0 for a mixture.
          */
         void init(const Input & input, std::shared_ptr<const Mesh> mesh, const BoundaryData & boundaries,
-                  const Distribution * distribution, const RestartArrays * restart);
+                  const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
+                  double gas_constant);
 
-        /** @brief The values of the particle block of a State: N_DIM per slot. */
-        size_t n_values() const { return size_t(capacity) * N_DIM; }
+        /** @brief The values of the particle block of a State: width() per slot. */
+        size_t n_values() const { return size_t(capacity) * width; }
 
-        /** @brief The positions, the particle block of the solver's state. */
-        const ParticleView & positions() const { return x; }
+        /** @brief Values per slot in the block: the position, then the integrated quantities. */
+        uint32_t get_width() const { return width; }
+
+        /** @brief The particle block of the solver's state. */
+        const ParticleView & values() const { return x; }
+
+        /** @brief The names of the quantities, in the order of Record::q. */
+        const std::vector<std::string> & quantity_names() const { return quantities.names(); }
+
+        /** @brief Whether the right-hand side reads the stage time (set_stage_time before velocity()). */
+        bool reads_time() const { return quantities.reads_time(); }
 
         /**
          * @brief dx/dt of a stage: the gas velocity at the stage positions x,
@@ -185,13 +204,37 @@ class Particles {
          *        else from that cell's least-squares gradient. Within a step
          *        the velocity is one smooth function of the position, so the
          *        integrator keeps its order.
+         *        The rates of the integrated quantities follow from the same
+         *        state, and at the first stage of a step (the step's start) the
+         *        extrema and first times are updated.
          * @param W Cell states W = [rho, u, p] of the stage, halo included.
          * @param reconstruction The face reconstruction of the stage.
          * @param gradient Least-squares gradients of W, written to gradients(c).
+         * @param time The stage time on the device, if reads_time().
          */
         void velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                       FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                      Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+                      Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, bool first_stage,
+                      const Kokkos::View<rtype> & time);
+
+        /**
+         * @brief The gas state W = [rho, u, p] at the particles' positions, as
+         *        velocity() evaluates it, from the cell states W (halo included).
+         */
+        void sample(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                    const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+
+        /** @brief Whether some probe samples after this step. */
+        bool probes_due(uint64_t step) const { return probes.due(step); }
+
+        /** @brief Lower step_limit to the next step after step that some probe samples. */
+        void probe_limits(uint64_t step, uint64_t & step_limit) const { probes.due_limits(step, step_limit); }
+
+        /** @brief Evaluate and write the probes due at step, from the gas state sample() left (collective). */
+        void write_probes(uint64_t step, double t);
+
+        /** @brief The files of the probes. */
+        std::vector<std::string> probe_files() const { return probes.files(); }
 
         /**
          * @brief After a step: the cell holding each particle, reflections off
@@ -234,17 +277,31 @@ class Particles {
 
         uint32_t get_capacity() const { return capacity; }
 
+        // Public because nvcc rejects device lambdas in non-public member functions
+        /** @brief W at the stage positions x_stage into W_point. */
+        void evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
+                          FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
+                          Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+
     private:
+        /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
+        uint32_t persistent() const { return width + quantities.n_aux(); }
+
         std::shared_ptr<const Mesh> mesh;
         particles::Walker walker;
         uint32_t capacity = 0;
+        uint32_t width = N_DIM;
         uint32_t n_owned = 0;
+        double R = 0.0;
+        particles::Quantities quantities;
+        particles::ParticleProbes probes;
         uint64_t n_seeded = 0;
         uint64_t n_restored = 0;
         bool distributed = false;
         std::string file;
 
-        ParticleView x;                     // (N_DIM slot + d)
+        ParticleView x;                     // (width slot + k): position, integrated quantities
+        Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
         Kokkos::View<uint64_t[2]> n_removed;  // left the domain, lost
@@ -260,6 +317,7 @@ class Particles {
         Kokkos::View<uint64_t *>::host_mirror_type h_id;
         Kokkos::View<uint32_t *>::host_mirror_type h_cell;
         ParticleView::host_mirror_type h_x;
+        Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_aux;
         Kokkos::View<uint64_t[2]>::host_mirror_type h_removed;
 
         // Migration (host)

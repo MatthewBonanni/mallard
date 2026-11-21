@@ -25,7 +25,8 @@ Particles live on the device as a structure of arrays over a fixed number of
 
 | Array | Per slot | |
 |---|---|---|
-| `x` | `N_DIM` reals | position, in the frame of the cell that holds it |
+| `x` | `width` reals | position, in the frame of the cell that holds it, then the integrated quantities (#756) |
+| `aux` | `n_aux` reals | extrema and first times of quantities (#756) |
 | `id` | `uint64_t` | global id in injection order; `EMPTY` (all bits set) marks a free slot |
 | `cell` | `uint32_t` | local cell holding the particle at the start of the step |
 
@@ -49,7 +50,8 @@ size it from the injectors' rates; load balancing (#763) bounds it.
 ## The particle block of the State
 
 `State` (`src/common/state.h`) gains a third block, `particles`, next to the
-flow block and the species: a flat view of `N_DIM * capacity` reals. Every time
+flow block and the species: a flat view of `width * capacity` reals, `width`
+per slot (the position, then what later layers integrate). Every time
 integrator updates its states only through `axpby`, `lerp`, `deep_copy` and the
 low-storage stage kernels, and all of them now loop over the three blocks, so
 every integrator (FE, RK4, SSPRK3, SSPRK54, CK45, RDPK3Sp35) advances the
@@ -182,6 +184,55 @@ owned, and the flow is bitwise independent of the rank count, so trajectories
 are too (tested on 2 and 3 ranks). Counters of removed particles are integer
 atomics.
 
+## Per-particle quantities (#756)
+
+A quantity is a value each particle follows along its path. Two families,
+stored differently:
+
+- **Integrals and windings** are values of the particle block, after the
+  position: `width = N_DIM + n_integrated`. Their right-hand side is written by
+  the same kernel that writes dx/dt (`particle_rhs`), from the same stage state:
+  the stage position, the gas W at it, and the stage values of the earlier
+  quantities. Every integrator therefore integrates them with its own stage
+  weights, at its order, and a rejected step restores them with the positions.
+  A winding is the integral of d(theta)/dt = a . (r x v) / |r_perp|^2 / (2 pi)
+  about the axis a through the point, so it is unwrapped by construction.
+- **Extrema and first times** are outside the block (`aux`), since an
+  integrator cannot combine them linearly. They are updated in the same kernel
+  at the first stage of each step (c = 0 for every integrator), whose state is
+  the accepted solution at the step's start. Stage states of later stages are
+  not on the trajectory to the integrator's order, so sampling them would mix
+  lower-order points into a maximum. A rejected step's retry samples the same
+  start again, which leaves extrema and first times unchanged.
+
+Expressions are kexpr programs over a fixed variable list: x, t, the gas
+W = [rho, u, p] and T = p / (rho R) (single gas), the particle velocity, every
+quantity (later ones are placeholders the compiler rejects), and `in(name)` of
+the regions read, rewritten to variables before compilation. A region is a
+`RegionView` of primitives (its signed distance on the device), at most 4 of
+them, held by value in the functor; `in()` is the region's indicator, smooth
+across its `edge`. A sharp indicator jumps within a stage, so its integral is
+exact only to the crossing's step; locating the crossing within the stage
+(root finding on the signed distance along the stage's path) is left for when
+a case needs residence times to better than a step.
+
+Quantities travel with their particle in migration (as raw bits, like the
+position) and restart files carry each as `PARTICLE_Q_<name>`, so a restarted
+run continues them bit for bit; a quantity added on restart starts afresh.
+
+## Particle probes (#756)
+
+A probe samples on the host after a step it is due at: the gas at the
+particles of the current state (the same path as the stage evaluation,
+`Particles::sample`, after `update_cell_W`), then one kernel writes each
+field's value per slot, NaN outside the probe's region. Counts, sums and sums
+of squares are `ExactSums` (fixed point), so the statistics are bitwise the
+same on any rank count; minima and maxima are order independent. Steps decided
+on the device stop at the probes' steps (`step_horizon`), so device steps stay
+on for runs with probes. Staging the reductions in the step graph, as the gas
+probes do, would let the device run past them; it matters once probes sample
+every few steps of a large run.
+
 ## Restart files
 
 Restart files carry the particles as named arrays (version 6), written by rank
@@ -216,5 +267,7 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
 - **Compaction**: kernels run over every slot; dense packing of the live
   particles (or sorting them by cell, for memory locality) matters at the
   scale of #291 and comes with injection.
-- **Particle fields in the registry** (#502), probes and statistics of
-  particles (#756, #764).
+- **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
+- **Of #756:** probes through surfaces (fluxes of particles), histograms, the
+  residence time per visit and visit counts, crossings located within a stage,
+  and probes staged in the step graph.

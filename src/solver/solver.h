@@ -801,8 +801,8 @@ class Solver {
         /** @brief Collects the health report now, as a progress row does (collective). */
         void report_health();
 
-        /** @brief The solution: flow block, species partial densities and particle positions. */
-        State state() const { return State(conservatives, species, particles ? particles->positions() : ParticleView()); }
+        /** @brief The solution: flow block, species partial densities and the particle block. */
+        State state() const { return State(conservatives, species, particles ? particles->values() : ParticleView()); }
 
         /** @brief The particles ([particles]), or null. */
         const Particles * get_particles() const { return particles.get(); }
@@ -921,7 +921,8 @@ class Solver {
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
-        void init_particles();          // [particles], before allocate_time_stepping
+        void init_particles(region::Regions & regions);  // [particles], before allocate_time_stepping
+        void write_particle_probes();   // [[particles.probes]] due at this step
         std::unique_ptr<Particles> particles;
         /**
          * @brief stage_scratch: the reconstructions' work memory and face_thermo and face_mdot (from the
