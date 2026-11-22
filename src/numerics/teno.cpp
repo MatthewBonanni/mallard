@@ -46,6 +46,7 @@
 #include "teno.h"
 #include "structured_blocks.h"
 #include "teno_setup.h"
+#include "teno_shapes.h"
 
 namespace {
 
@@ -1387,6 +1388,156 @@ class TableBuilder {
         PackedRows large, small;
 };
 
+/** @brief Slot j of from into slot to_slot[j] of to. */
+void scatter_slots(const teno_setup::TableBatch & from, const std::vector<uint32_t> & to_slot, const teno_setup::TableBatch & to) {
+    const uint32_t n = static_cast<uint32_t>(to_slot.size());
+    if (n == 0) return;
+    Kokkos::View<uint32_t *> slot(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_slots"), n);
+    Kokkos::deep_copy(slot, HostUnmanaged<const uint32_t>(to_slot.data(), n));
+    const size_t nk = from.nk;
+    Kokkos::parallel_for("teno_shape_scatter", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
+        const uint32_t k = slot(j);
+        to.status(k) = from.status(j);
+        to.gather_depth(k) = from.gather_depth(j);
+        to.failed_large(k) = from.failed_large(j);
+        to.invalid_small(k) = from.invalid_small(j);
+        to.large_size(k) = from.large_size(j);
+        to.small_total(k) = from.small_total(j);
+        for (int f = 0; f < teno::MAX_FACES; f++) to.small_size(k, f) = from.small_size(j, f);
+        auto copy = [&](const auto & a, const auto & b, const size_t count) {
+            const auto x = a.lane(j);
+            const auto y = b.lane(k);
+            for (size_t i = 0; i < count; i++) y[i] = x[i];
+        };
+        const size_t n_large = from.large_size(j), n_small = from.small_total(j);
+        copy(from.scale, to.scale, 1);
+        copy(from.basis_mean, to.basis_mean, from.basis_mean.cap);
+        copy(from.si, to.si, from.si.cap);
+        copy(from.large_cells, to.large_cells, n_large);
+        copy(from.large_faces, to.large_faces, n_large);
+        copy(from.large_pinv, to.large_pinv, n_large * nk);
+        copy(from.small_cells, to.small_cells, n_small);
+        copy(from.small_faces, to.small_faces, n_small);
+        copy(from.small_pinv, to.small_pinv, n_small * teno::NK_SMALL);
+    });
+}
+
+/**
+ * @brief With shared tables, the setup fits one cell of each stencil shape
+ *        (teno::ShapeKeys): the cell with the lowest global id of each key,
+ *        over the ranks. The other cells of the key take its stencil, mapped
+ *        to their own cells by position in the key's order, its
+ *        pseudo-inverses, basis means and smoothness matrix; their scale is
+ *        their own. Cells without a key, alone in theirs, whose key's
+ *        representative has a stencil the key does not describe, or whose
+ *        neighborhood does not match the representative's, are fitted. Its
+ *        cells are table rows [0, n_direct_rows); the extra rows are fitted.
+ */
+class KeyedSetup {
+    public:
+        KeyedSetup(const TENO & scheme, const Mesh & mesh, const BoundaryData & boundaries,
+                   teno_setup::SetupHandle & setup_in, const Kokkos::View<uint32_t *> & cells, teno_setup::TableBatch & out)
+            : setup(setup_in), keys(mesh, boundaries, setup_in.max_large(), scheme.n_stencil_small, out.slots),
+              bad("teno_shape_bad", out.slots) {
+            Kokkos::Timer timer;
+            const uint32_t n = scheme.n_direct_rows;
+            const uint32_t n_rows = scheme.n_rows();
+            const teno::ShapeGroups groups = teno::ShapeGroups::build(keys.keys(n), scheme.global_cell_ids());
+            std::vector<std::vector<uint64_t>> records(groups.groups.size());
+            std::vector<uint32_t> reps, rep_group;
+            for (size_t k = 0; k < groups.groups.size(); k++) {
+                const auto & g = groups.groups[k];
+                if (g.single || g.rep_cell == teno::ShapeGroups::NONE) continue;
+                reps.push_back(g.rep_cell);
+                rep_group.push_back(uint32_t(k));
+            }
+            const uint32_t batch = static_cast<uint32_t>(cells.extent(0));
+            Kokkos::View<uint32_t *> size("teno_shape_sizes", batch);
+            for (size_t r0 = 0; r0 < reps.size(); r0 += batch) {
+                const uint32_t nb = static_cast<uint32_t>(std::min<size_t>(batch, reps.size() - r0));
+                Kokkos::deep_copy(Kokkos::subview(cells, std::make_pair(0u, nb)),
+                                  HostUnmanaged<const uint32_t>(reps.data() + r0, nb));
+                setup.compute(cells, nb, out);
+                keys.encode(cells, nb, out, size);
+                std::vector<std::vector<uint64_t>> chunk = teno::ShapeKeys::records(out, nb, size);
+                for (uint32_t j = 0; j < nb; j++) records[rep_group[r0 + j]] = std::move(chunk[j]);
+            }
+            groups.exchange(records);
+            host_group.assign(n_rows, teno::ShapeGroups::NONE);
+            for (uint32_t c = 0; c < n; c++) {
+                const uint32_t k = groups.group[c];
+                if (k != teno::ShapeGroups::NONE && !groups.groups[k].single && !records[k].empty() && records[k][0] == 1) {
+                    host_group[c] = k;
+                }
+            }
+            group = Kokkos::View<uint32_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_groups"), n_rows);
+            Kokkos::deep_copy(group, HostUnmanaged<const uint32_t>(host_group.data(), n_rows));
+            table = teno::ShapeKeys::upload(records);
+            n_representatives = static_cast<uint32_t>(reps.size());
+            seconds = timer.seconds();
+        }
+
+        /** @brief Rows of [c0, c0 + n) that are fitted. */
+        std::vector<uint32_t> to_fit(const uint32_t c0, const uint32_t n) const {
+            std::vector<uint32_t> fit;
+            for (uint32_t c = c0; c < c0 + n; c++) {
+                if (host_group[c] == teno::ShapeGroups::NONE) fit.push_back(c);
+            }
+            return fit;
+        }
+
+        /**
+         * @brief Makes out the batch of rows [c0, c0 + n), row c0 + j in
+         *        slot j: the fitted ones (fit, in slots 0.. of out) move to
+         *        their slots, and the others take their keys' records.
+         * @return The cells fitted because they do not match their records.
+         */
+        uint32_t batch(const uint32_t c0, const uint32_t n, const std::vector<uint32_t> & fit,
+                       const Kokkos::View<uint32_t *> & cells, teno_setup::TableBatch & out) {
+            if (fit.size() == n) return 0;
+            const uint32_t n_fit = static_cast<uint32_t>(fit.size());
+            std::vector<uint32_t> fit_slot(n_fit);
+            for (size_t j = 0; j < n_fit; j++) fit_slot[j] = fit[j] - c0;
+            teno_setup::TableBatch fitted;
+            if (n_fit > 0) {
+                fitted = teno_setup::TableBatch(n_fit, out.nk, out.max_large, out.max_small, out.large_pinv.interleaved);
+                std::vector<uint32_t> same(n_fit);
+                std::iota(same.begin(), same.end(), 0u);
+                scatter_slots(out, same, fitted);
+            }
+            keys.decode(c0, n, group, table, out, bad);
+            scatter_slots(fitted, fit_slot, out);
+            uint32_t n_bad = 0;
+            const auto flags = bad;
+            Kokkos::parallel_reduce("teno_shape_bad", Kokkos::RangePolicy<>(0, n),
+                                    KOKKOS_LAMBDA(const uint32_t t, uint32_t & sum) { sum += flags(t); }, n_bad);
+            if (n_bad == 0) return 0;
+            auto h_bad = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), bad);
+            std::vector<uint32_t> redo, redo_slot;
+            for (uint32_t t = 0; t < n; t++) {
+                if (h_bad(t) == 0) continue;
+                redo.push_back(c0 + t);
+                redo_slot.push_back(t);
+            }
+            Kokkos::deep_copy(Kokkos::subview(cells, std::make_pair(0u, n_bad)), HostUnmanaged<const uint32_t>(redo.data(), n_bad));
+            teno_setup::TableBatch extra(n_bad, out.nk, out.max_large, out.max_small, out.large_pinv.interleaved);
+            setup.compute(cells, n_bad, extra);
+            scatter_slots(extra, redo_slot, out);
+            return n_bad;
+        }
+
+        double seconds = 0.0;  // keys and representatives
+        uint32_t n_representatives = 0;
+
+    private:
+        teno_setup::SetupHandle & setup;
+        teno::ShapeKeys keys;
+        std::vector<uint32_t> host_group;    // (row): its group if it takes the group's record, else NONE
+        Kokkos::View<uint32_t *> group;      // (row): the same, on the device
+        teno::ShapeKeys::Records table;
+        Kokkos::View<uint8_t *> bad;         // (slot)
+};
+
 /** @brief Tables of the chunk of reconstructed cells starting at c0 from TENO's device arrays. */
 void download_tables(const TENO & scheme, const HostIndex & large_index, const HostIndex & small_index, const uint32_t c0,
                      std::vector<CellTables> & tables) {
@@ -1661,12 +1812,42 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     Kokkos::View<uint32_t *> batch_rows = rows_are_cells ? cells : Kokkos::View<uint32_t *>("teno_setup_batch_rows", batch);
     std::unique_ptr<TableBuilder> builder;
     if (subset == nullptr) builder = std::make_unique<TableBuilder>(*this, n_target);
+    std::unique_ptr<KeyedSetup> keyed;
+    if (subset == nullptr) n_cells_fitted = n_target;
+    if (subset == nullptr && share_tables && teno::ShapeKeys::supported(*mesh)) {
+        keyed = std::make_unique<KeyedSetup>(*this, *mesh, boundaries, setup, cells, out);
+        n_cells_fitted = keyed->n_representatives;
+    }
     uint32_t n_failed_large = 0, n_invalid_small = 0;
     uint16_t largest = 0;
     double t_pack = 0.0;
     for (uint32_t c0 = 0; c0 < n_target; c0 += batch) {
         const uint32_t n = std::min(batch, n_target - c0);
         const auto first = std::make_pair(0u, n);
+        if (keyed) {
+            const std::vector<uint32_t> fit = keyed->to_fit(c0, n);
+            const uint32_t n_fit = static_cast<uint32_t>(fit.size());
+            if (n_fit > 0) {
+                std::vector<uint32_t> fit_cells(n_fit);
+                for (uint32_t j = 0; j < n_fit; j++) fit_cells[j] = cell_of_row(fit[j]);
+                Kokkos::deep_copy(Kokkos::subview(cells, std::make_pair(0u, n_fit)),
+                                  HostUnmanaged<const uint32_t>(fit_cells.data(), n_fit));
+                setup.compute(cells, n_fit, out);
+            }
+            Kokkos::Timer pack_timer;
+            n_cells_fitted += n_fit + keyed->batch(c0, n, fit, cells, out);
+            uint32_t failed = 0, invalid = 0;
+            uint16_t batch_largest = 0;
+            batch_counts(out, n, failed, invalid, batch_largest);
+            n_failed_large += failed;
+            n_invalid_small += invalid;
+            largest = std::max(largest, batch_largest);
+            if (n_failed_large > 0) continue;
+            fill_range(batch_rows, c0, n);
+            builder->add_batch(c0, batch_rows, out, n);
+            t_pack += pack_timer.seconds();
+            continue;
+        }
         if (setup_cells.empty()) {
             fill_range(cells, c0, n);
         } else {
@@ -1700,6 +1881,8 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     cells = Kokkos::View<uint32_t *>();
     batch_rows = Kokkos::View<uint32_t *>();
     handle.reset();
+    const double t_shapes = keyed ? keyed->seconds : -1.0;
+    keyed.reset();
     if (subset == nullptr) {
         if (n_failed_large == 0) builder->finish();
         largest_stencil = largest;
@@ -1710,6 +1893,11 @@ void TENO::compute_stencils_and_matrices(const std::vector<uint32_t> * subset) {
     setup_status = logging::format("on %s; of Setup's numerics time: geometry %.2f s, tables %.2f s, packing %.2f s",
                                    setup_on_host ? "the host" : Kokkos::DefaultExecutionSpace::name(), t.geometry,
                                    t.tables, t_pack);
+    if (t_shapes >= 0.0) {
+        const auto [fitted, of] = comm::allreduce(std::array<uint64_t, 2>{n_cells_fitted, n_target}, comm::Op::SUM);
+        setup_status += logging::format(", stencil shapes %.2f s (%s fitted of %s)", t_shapes,
+                                        logging::count(fitted).c_str(), logging::count(of).c_str());
+    }
     if (t.n_host_cells > 0) {
         setup_status += logging::format(", %llu cells redone on the host in %.2f s",
                                         static_cast<unsigned long long>(t.n_host_cells), t.host_cells);
@@ -3406,8 +3594,9 @@ namespace {
 // tables for the owned cells and halo image cells only when partition faces are exchanged (#1040);
 // version 24 fits curved_wall_degree in 2D stencils grown past their start to a curved-wall cell (#1202);
 // version 25 stops 3D stencils grown past their start short of a curved-wall cell at the full degree, and fits
-// curved_wall_degree only when no shorter stencil fits (#1202)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-25";
+// curved_wall_degree only when no shorter stencil fits (#1202);
+// version 26 has shared tables fitted once per stencil shape (#986), which differ from version 25's at round-off
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-26";
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -3421,6 +3610,15 @@ struct Fnv1a {
     }
     template <typename T>
     void add(const T & value) { add(&value, sizeof(T)); }
+    // Element by element in index order, which the backend's layout does not change
+    template <typename V>
+    void add_view(const V & v) {
+        for (size_t i = 0; i < v.extent(0); i++) {
+            for (size_t j = 0; j < v.extent(1); j++) {
+                for (size_t k = 0; k < v.extent(2); k++) add(v.access(i, j, k));
+            }
+        }
+    }
 };
 
 struct CacheHeader {
@@ -3846,7 +4044,7 @@ uint64_t TENO::cache_key() const {
         hash.add(n_direct_rows);
         hash.add(extra_cells.data(), extra_cells.size() * sizeof(uint32_t));
     }
-    hash.add(mesh->h_node_coords.data(), mesh->h_node_coords.span() * sizeof(rtype));
+    hash.add_view(mesh->h_node_coords);
     hash.add(mesh->h_offsets_nodes_of_cell.data(), mesh->h_offsets_nodes_of_cell.span() * sizeof(uint32_t));
     hash.add(mesh->h_nodes_of_cell.data(), mesh->h_nodes_of_cell.span() * sizeof(uint32_t));
     hash.add(mesh->h_faces_of_cell.data(), mesh->h_faces_of_cell.span() * sizeof(uint32_t));
@@ -3863,15 +4061,15 @@ uint64_t TENO::cache_key() const {
         hash.add(uint8_t(2));
         hash.add(curved_mirrors);
         hash.add(curved_wall_degree);
-        hash.add(mesh->h_cell_coords.data(), mesh->h_cell_coords.span() * sizeof(rtype));
+        hash.add_view(mesh->h_cell_coords);
         hash.add(mesh->h_cell_volume.data(), mesh->h_cell_volume.span() * sizeof(rtype));
         auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
-        hash.add(h_points.data(), h_points.span() * sizeof(rtype));
+        hash.add_view(h_points);
     }
     if (mesh->is_periodic()) {
-        hash.add(mesh->h_shifts.data(), mesh->h_shifts.span() * sizeof(rtype));
+        hash.add_view(mesh->h_shifts);
         hash.add(mesh->h_face_shift.data(), mesh->h_face_shift.span() * sizeof(uint8_t));
-        if (mesh->is_rotational()) hash.add(mesh->h_shift_rotations.data(), mesh->h_shift_rotations.span() * sizeof(rtype));
+        if (mesh->is_rotational()) hash.add_view(mesh->h_shift_rotations);
     }
     return hash.h;
 }

@@ -18,12 +18,15 @@
 #include <complex>
 #include <limits>
 #include <sstream>
+#include <set>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include "test_fixtures.h"
+#include "teno_shapes.h"
+#include "comm.h"
 #include "verification.h"
 #include "gmsh_fixtures.h"
 #include "lattice_symbol.h"
@@ -1039,6 +1042,39 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
     }
 }
 
+TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTables) {
+    // Cells differ only in which of their faces are periodic (low, high or neither
+    // along each axis): the setup fits 27 cells, and every cell's face values are
+    // those of its own tables up to round-off
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 16\nNy = 16\nNz = 16\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, periodic_conservatives);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    Kokkos::deep_copy(W, avg);
+    for (const int order : {3, 5}) {
+        auto face_values = [&](const bool share) {
+            auto teno = make_teno_with(mesh, bd, order, [&](TENO & t) { t.share_tables = share; });
+            EXPECT_EQ(teno->n_cells_fitted, share ? 27u : mesh->n_cells) << "order " << order;
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+            return std::vector<rtype>(h.data(), h.data() + h.span());
+        };
+        const auto own = face_values(false), shared = face_values(true);
+        double largest = 0.0, difference = 0.0;
+        for (size_t k = 0; k < own.size(); k++) {
+            largest = std::max(largest, std::abs(double(own[k])));
+            difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
+        }
+        EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+    }
+}
+
 TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPathsFaceValuesAndPolynomialsBitwise) {
     // A blast in a box with walls: smooth and troubled cells, cells with mirror images along the walls
     auto mesh = make_mesh_3d("cartesian", 12, 12, 12);
@@ -1158,4 +1194,33 @@ TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStays
     const auto shape = store.add(1, &ta, [&](uint32_t) { return values; }, &gid);
     EXPECT_EQ(store.size(), 3u);
     EXPECT_NE(shape[0], k);
+}
+
+TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
+    // A digest of the keys of a box periodic in x, with walls, of sizes that are
+    // not exact in binary, against the host builds' value: GPU CI runs it on the device
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 12\nNy = 12\nNz = 12\nLx = 0.7\nLy = 0.9\nLz = 1.1\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n"));
+    mesh->copy_host_to_device();
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 32, 4, 256).keys(mesh->n_reconstructed());
+    uint64_t digest = 14695981039346656037ULL;
+    std::set<std::pair<uint64_t, uint64_t>> distinct;
+    for (const teno::ShapeKey & k : keys) {
+        for (const uint64_t v : {k.hash, k.check}) digest = (digest ^ v) * 1099511628211ULL;
+        if (k) distinct.insert({k.hash, k.check});
+    }
+    const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
+    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
+#ifdef Mallard_USE_DOUBLE
+    EXPECT_EQ(n_keyed, 1728);
+    EXPECT_EQ(distinct.size(), 147u);
+    EXPECT_EQ(digest, 2977545027036466055ULL);
+#else
+    EXPECT_EQ(n_keyed, 1557);
+    EXPECT_EQ(distinct.size(), 1557u);
+    EXPECT_EQ(digest, 13203929841608398468ULL);
+#endif
 }
