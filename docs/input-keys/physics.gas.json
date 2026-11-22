@@ -24,10 +24,17 @@
   "examples/triple_flame/input.toml",
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
-  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
+  "tools/dev/catalog_inputs/2d/flamelet.toml",
+  "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
+  "tools/dev/catalog_inputs/2d/flamelet_transported.toml",
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/3d/flamelet.toml",
+  "tools/dev/catalog_inputs/3d/flamelet_tfles.toml",
+  "tools/dev/catalog_inputs/3d/flamelet_transported.toml"
  ],
  "type": "string",
  "values": [
+  "flamelet",
   "mixture",
   "perfect"
  ]
