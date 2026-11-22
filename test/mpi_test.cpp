@@ -367,6 +367,8 @@ TEST(MPITest, TENOStencilShapeKeysOfReconstructedHaloCellsAreTheirOwnersKeys) {
                   "type = \"file\"\nfilename = \"" +
                       write_temp_shared("mallard_mpi_clustered_keys.msh", clustered_quads(nx, ny, ly)) + "\"\n");
     Solver solver;
+    // The keys are those of the halo the setup searched, before the cells no stencil reads are dropped
+    solver.set_keep_unread_halo(true);
     solver.init(parse_toml(input));
     const auto mesh = solver.get_mesh();
     const uint32_t n = mesh->n_reconstructed(), n_owned = mesh->n_owned();

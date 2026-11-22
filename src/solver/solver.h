@@ -802,6 +802,8 @@ class Solver {
             CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: step graphs gate their bodies
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
+        /** @brief Tests only: keep the halo the setup searched, which drop_unread_halo would trim. */
+        void set_keep_unread_halo(bool keep) { keep_unread_halo = keep; }
         /**
          * @brief false gives each part of stage_scratch its own memory instead of sharing it, so that tests
          *        compare the two bit for bit. Call before init().
@@ -1159,6 +1161,7 @@ class Solver {
         std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
         curved::Surfaces curved_surfaces;               // of the local mesh, during init only
         std::optional<TENO::Carried> carried_tables;    // for the next init_numerics (drop_unread_halo)
+        bool keep_unread_halo = false;                  // set_keep_unread_halo
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;

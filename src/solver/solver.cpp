@@ -648,7 +648,9 @@ void Solver::trim_halo() {
 }
 
 void Solver::drop_unread_halo() {
-    if (!is_distributed() || dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) return;
+    if (keep_unread_halo || !is_distributed() || dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
+        return;
+    }
     std::vector<uint8_t> keep(mesh->n_cells, 0);
     std::fill_n(keep.begin(), mesh->n_owned(), uint8_t(1));
     for (const auto & cells : distribution.recv_cells) {
