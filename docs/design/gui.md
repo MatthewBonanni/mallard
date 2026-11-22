@@ -513,15 +513,15 @@ current code:
 | Restart files | written as `.partial`, renamed when complete | object |
 | Snapshots with `series = false`, VTU, per-step VTP | one file per snapshot | object |
 | Run log, CSV probes, forces, integrals | appended when a run continues from a restart; truncated by a fresh start in the same directory | stream (a fresh start is a new stream: the prefix hash no longer matches, and the run's `start` record has a new `run_id`) |
-| VTKHDF series (`series = true`, the default; boundary and region writers always), HDF5 and VTKHDF probes | every snapshot appended into one HDF5 file, rewritten in place | no: mutable until the run ends |
-| Snapshots and restart files after a rewind (resuming from an earlier restart) | files of the same names overwritten as the run reaches them again | path reused for new content; the old object is gone |
+| VTKHDF series (`series = true`, the default; boundary and region writers always) | one file per snapshot and the mesh once, each written once; `PREFIX.vtkhdf` an index of HDF5 virtual datasets over them, rewritten after each snapshot | objects, and a derived index |
+| HDF5 and VTKHDF probes | rows appended into one HDF5 file in place; cut back by a rewind, after a copy to `.rewound/<run_id>/` | no: live files, read on the remote ([#1317](https://github.com/MatthewBonanni/mallard/issues/1317)) |
+| Snapshots and restart files after a rewind (resuming from an earlier restart) | the files of the later steps moved to `.rewound/<run_id>/` before the run writes, listed in its `start` record (`restart.superseded`) | objects: kept, at the path the record gives |
 | Series indexes, `report.html` | rewritten | derived |
 
-Until Mallard makes them write-once (a [follow-up](#follow-ups)), the GUI treats
-a single-file series as one object only once its run has ended and the end
-record carries its final SHA-256, and as a live file (viewable remotely, not
-copyable as an object) before that; a rewind shows as the old object being
-gone from the run's home.
+Why and how: [output objects](output_objects.md). A probe's HDF5 or VTKHDF
+file stays one growing file: a file per sample, or an index rewritten at every
+sample, would cost the step loop. The GUI shows it as a live file, viewable
+remotely and not copyable as an object until its run has ended.
 
 ### The manifest and the cache index
 
@@ -806,14 +806,16 @@ the global order), which an HDF5 mesh can carry.
 
 ### Data and transfers
 
-- **Hashes in parallel.** Today rank 0 hashes every shared output file (VTKHDF,
-  XDMF, restart) in one background thread by reading it back: about 25 s for a
-  40 GB restart at 1.6 GB/s, minutes for a 200 GB one, a queue that a run
-  writing often outgrows. Object ids for large files become a **chunk tree**:
-  SHA-256 of every 64 MiB chunk, computed by all ranks in parallel once the
-  file is closed (each reading its share of the chunks), and the object id is the SHA-256 of that list (files of one chunk keep
-  their plain SHA-256). Chunks are also the unit of resume, verification and
-  parallel transfer ([#1329](https://github.com/MatthewBonanni/mallard/issues/1329)).
+- **Hashes in parallel.** Object ids for large files are a **chunk tree**:
+  the SHA-256 of every 64 MiB chunk, computed by all ranks in parallel once the
+  file is closed (each reading its share of the chunks), and the object id is
+  the SHA-256 of that list (files of one chunk keep their plain SHA-256),
+  `sha256_tree` with `chunk_bytes` and `chunks` in the output record. Rank 0
+  alone reading back every shared file (about 25 s for a 40 GB restart at
+  1.6 GB/s, minutes for a 200 GB one, a queue that a run writing often
+  outgrew) is gone. Chunks are also the unit of resume, verification and
+  parallel transfer ([#1329](https://github.com/MatthewBonanni/mallard/issues/1329),
+  [design](output_objects.md#chunk-tree-hashes)).
 - **Manifests of millions of files.** `mallard files` streams JSON lines rather
   than one document, built from the run log (O(records)), listing directories
   only for what the log does not record, all in one process on the remote. It
@@ -890,29 +892,29 @@ When a remote is added, the GUI offers to install Mallard there, versioned to
 match what the GUI needs:
 
 - **SSH clusters**, into the user's home or project space, without root:
-  1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
-     scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
-     for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
-  2. **Choose**, in this order: a prebuilt relocatable archive for the
-     architecture and backend (CPU, CUDA, HIP; a new release artifact; built
-     against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
-     `module load`),
-     downloaded by the login node from the GitHub release with its SHA-256
-     checked; the release's container image through Apptainer (`apptainer pull`)
-     for single-node runs; a Spack build in user space with the detected
-     compilers, MPI and GPU toolkits as externals, run as a batch job: the
-     fallback for clusters that need their own MPI (Open MPI); slow.
-  3. **Install** into `<root>/mallard/<version>-<variant>/` with an
-     `install.toml` (version, variant, artifact and SHA-256, how it was
-     installed), recorded in the global remote config. Versions live side by
-     side; nothing points at "current", the GUI names the path.
-  4. **Verify**: `mallard install verify` (new) as a short job on the chosen
-     partition: the environment check (`mallard check` without input) and a
-     quick template run (`mallard new <template> --quick`), with a JSON result
-     recorded with the install.
-  5. **Upgrade**: install the new version beside the old one, verify, then make
-     it the remote's default; runs record the install they used, so a restart
-     can continue on the same one. Old installs are removed only on request.
+    1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
+       scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
+       for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
+    2. **Choose**, in this order: a prebuilt relocatable archive for the
+       architecture and backend (CPU, CUDA, HIP; a new release artifact; built
+       against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
+       `module load`),
+       downloaded by the login node from the GitHub release with its SHA-256
+       checked; the release's container image through Apptainer (`apptainer pull`)
+       for single-node runs; a Spack build in user space with the detected
+       compilers, MPI and GPU toolkits as externals, run as a batch job: the
+       fallback for clusters that need their own MPI (Open MPI); slow.
+    3. **Install** into `<root>/mallard/<version>-<variant>/` with an
+       `install.toml` (version, variant, artifact and SHA-256, how it was
+       installed), recorded in the global remote config. Versions live side by
+       side; nothing points at "current", the GUI names the path.
+    4. **Verify**: `mallard install verify` (new) as a short job on the chosen
+       partition: the environment check (`mallard check` without input) and a
+       quick template run (`mallard new <template> --quick`), with a JSON result
+       recorded with the install.
+    5. **Upgrade**: install the new version beside the old one, verify, then make
+       it the remote's default; runs record the install they used, so a restart
+       can continue on the same one. Old installs are removed only on request.
 - **Kubernetes**: choose the image tag for the Mallard version and backend
   (`ghcr.io/matthewbonanni/mallard:<version>` or `:<version>-cuda`), recorded by
   digest; a short pod checks that the namespace can pull it (image pull secrets
@@ -1003,20 +1005,21 @@ St 0.164, Cd 1.36; sphere_re300: its mesh size and zones).
   text for touch and for beginners. Hit targets stay at least 24 px (WCAG 2.2
   2.5.8) in both. Provisional tokens:
 
-  | Token | Compact | Comfortable |
-  |---|---|---|
-  | Base unit | 4 px | 4 px |
-  | Row, input, tab height | 24 px (28 px tabs) | 32 px |
-  | Body / secondary text | 12 / 11 px | 14 / 12 px |
-  | Header bar / status bar | 36 / 24 px | 44 / 28 px |
-  | Panel padding | 8 px | 12 px |
-  | Radius | 4 px | 6 px |
-  | Divider | 1 px `border` | 1 px `border` |
-  | Accent (light / dark) | `#0f766e` / `#2dd4bf` | same |
+    | Token | Compact | Comfortable |
+    |---|---|---|
+    | Base unit | 4 px | 4 px |
+    | Row, input, tab height | 24 px (28 px tabs) | 32 px |
+    | Body / secondary text | 12 / 11 px | 14 / 12 px |
+    | Header bar / status bar | 36 / 24 px | 44 / 28 px |
+    | Panel padding | 8 px | 12 px |
+    | Radius | 4 px | 6 px |
+    | Divider | 1 px `border` | 1 px `border` |
+    | Accent (light / dark) | `#0f766e` / `#2dd4bf` | same |
 
-  Secondary text uses the `muted` color, which meets 4.5:1 on every panel; the
-  lighter `faint` is for dividers and disabled glyphs only, never for text that
-  must be read.
+    Secondary text uses the `muted` color, which meets 4.5:1 on every panel; the
+    lighter `faint` is for dividers and disabled glyphs only, never for text that
+    must be read.
+
 - **Chrome**: a toolbar with the project, breadcrumbs (project / case / node)
   and the run controls; tabs for open cases and runs; a status bar with the
   remote, the job id, step, simulated time, wall time and ETA, and transfers in
@@ -1091,7 +1094,7 @@ tested like any other.
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
-| Write-once outputs | restarts and per-snapshot files are; single-file series and rewinds are not | write-once series and rewinds |
+| Write-once outputs | done ([#1326](https://github.com/MatthewBonanni/mallard/issues/1326)): snapshots, series and rewinds; probe HDF5 and VTKHDF files stay live | none |
 | Install verification | missing | `mallard install verify` |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
@@ -1181,8 +1184,7 @@ Mallard prerequisites of the MVP: the catalog with types, units, descriptions,
 variants and a schema version (#1256, at least for the keys of the guided
 steps); partial-input `list keys` (#1311); structured diagnostics (#1312); the
 capabilities query (#1314); `mallard session` with routed run control (#1340); `mallard files` (#1317); a way to turn control files
-on from the command line (#1316). Write-once series (#1326) can follow: until
-then single-file series are copied only once their run has ended.
+on from the command line (#1316).
 
 **After the MVP:**
 

@@ -107,6 +107,7 @@ RULES = {
     ("statistics.md", "## Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
     ("statistics.md", "## Conditional statistics and PDFs: `[[statistics.conditional]]`"):
         (lambda t: "conditional" in t.get("statistics", {}), None),
+    ("particles.md", "## Tracers: `[particles]`"): (lambda t: "particles" in t, None),
     ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("probes.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),

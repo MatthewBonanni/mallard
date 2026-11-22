@@ -7,6 +7,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -40,7 +41,7 @@ constexpr int AMBIGUOUS = -2;          // every conservative variable is non-fin
 
 /** @brief cfl_local holds each cell's stable time step at CFL 1: make it the local CFL number of dt. */
 void to_local_cfl(const Kokkos::View<rtype *> & c, const rtype dt, const uint32_t n) {
-    Kokkos::parallel_for("divergence_local_cfl", n, KOKKOS_LAMBDA(const uint32_t i) { c(i) = dt / c(i); });
+    gated::parallel_for("divergence_local_cfl", n, KOKKOS_LAMBDA(const uint32_t i) { c(i) = dt / c(i); });
 }
 
 /** @brief The exterior state [rho, u, p] of the flux at each boundary face, from the cell's state. */
@@ -53,7 +54,7 @@ Kokkos::View<rtype **>::host_mirror_type ghost_states(const BoundaryData & bound
     const Kokkos::View<int32_t *[2]> cells = mesh.cells_of_face;
     const Kokkos::View<rtype *[N_DIM]> normals = mesh.face_normals;
     const BoundaryData bd = boundaries;
-    Kokkos::parallel_for("divergence_ghosts", list.size(), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("divergence_ghosts", list.size(), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t f = faces(k);
         const int32_t c = cells(f, 0);
         rtype W[N_DIM + 2], W_g[N_DIM + 2], n[N_DIM], n_vec[N_DIM];
@@ -101,7 +102,7 @@ divergence::Evidence Solver::diagnose_divergence(const bool has_valid, std::vect
     e.n_cells = n_cells_global;
     e.n_ranks = comm::size();
     e.integrator = TIME_INTEGRATOR_NAMES.at(time_integrator->get_type());
-    e.limit = divergence::cfl_limit(time_integrator->get_type());
+    e.limit = cfl_limit(time_integrator->get_type());
     e.use_cfl = use_cfl;
     e.error_control = step_controller.enabled();
     e.cfl_input = double(cfl);

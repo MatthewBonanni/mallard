@@ -20,11 +20,11 @@ Mallard comes with one command, `mallard`, and a set of Python scripts that cove
 The Python scripts need numpy, scipy, matplotlib, imageio and imageio-ffmpeg; the mesh generators also need gmsh, the chemistry scripts cantera, HDF5 output h5py, and the 3D renders pyvista:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
+uv venv
+uv pip install numpy scipy matplotlib imageio imageio-ffmpeg gmsh cantera h5py pyvista
 ```
 
-The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `.venv/bin/pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
+The [Python package](../docs/guide/python.md) `mallard/` needs only numpy and the library every build makes (`Mallard_ENABLE_PYTHON`, on by default): `uv pip install -e tools`. The scripts in `post/` and the tutorials' scripts read the output through it, so they need that library: they find it next to the `mallard` on the `PATH`, or at `MALLARD_LIBRARY`.
 
 A script that serves one example lives in that example's directory, next to its inputs (`examples/sod/plot_sod.py`); the others are grouped in `tools/` by step: `mesh/`, `setup/`, `post/`, `perf/`, `dev/` and `docs/`. The readers they share are the Python package `tools/mallard/`. `python tools/DIR/NAME.py --help` lists a script's options. Every figure on this page comes from running the tool it shows: [`docs/tools.py`](docs/tools.py) runs them and draws what they wrote.
 
@@ -288,7 +288,7 @@ Mallard writes VTKHDF files that ParaView opens (`PREFIX.vtkhdf` holds the serie
 
 ### `mallard`: the Python package
 
-`tools/mallard` is the [Python package](../docs/guide/python.md) (`pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
+`tools/mallard` is the [Python package](../docs/guide/python.md) (`uv pip install -e tools`): `mallard.open` reads every file Mallard writes into numpy arrays through Mallard's own reader (a build with `-DMallard_ENABLE_PYTHON=ON`), and `mallard.post.extract`, `mallard.diff` and the other commands run as functions. Use it for your own scripts:
 
 ```python
 import mallard
@@ -454,7 +454,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | Script | Purpose |
 |---|---|
 | `dev/device_changes.sh [BASE]` | Whether the changes since BASE touch device code (a changed `src/` file with Kokkos device constructs, or a Kokkos bump): decides whether CI runs the CUDA builds and whether a PR needs GPU CI |
-| `dev/gpu_runtime_tests.sh [--full] BUILD` | GPU runtime checks of a CUDA build, on one GPU and on 2 ranks (`MPIEXEC=none`: one GPU only): the step graph and stream ordering tests, then a representative set of tests under NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) with `MALLARD_TEST_CUDA_GRAPHS=off`, as compute-sanitizer misreports kernels in step graphs (#1076); racecheck fails on errors, not warnings; `--full` adds initcheck, memcheck on the whole suite but the chemistry reactor tests, and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL across the network). Run on demand ([CONTRIBUTING](../CONTRIBUTING.md)) |
+| `dev/gpu_runtime_tests.sh [--full] BUILD` | GPU runtime checks of a CUDA build, on one GPU and on 2 ranks (`MPIEXEC=none`: one GPU only): the step graph and stream ordering tests, then a representative set of tests under NVIDIA's compute-sanitizer (memcheck, racecheck, synccheck) with `MALLARD_TEST_CUDA_GRAPHS=off`, as compute-sanitizer misreports kernels in step graphs (#1076); racecheck fails on errors, not warnings; memcheck and initcheck skip the CUDA API errors NCCL and Open MPI make and handle (`dev/compute_sanitizer_suppressions.xml`), and memcheck reports explicit API errors only; `--full` adds initcheck, memcheck on the whole suite but the chemistry reactor tests, and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL across the network). Run on demand ([CONTRIBUTING](../CONTRIBUTING.md)) |
 | `dev/check_output_units.py MALLARD` | Runs a small case and checks with h5py and `tools/mallard`'s h5py readers that every snapshot and monitor format carries the same units for each field, and that `mallard info --format json` finds them too; the `openmp` job of `ci.yml` runs it |
 | `dev/check_restart_tools.py MALLARD...` | Runs a small periodic box and checks that `tools/mallard/restart.py` (`read`, `write`), `setup/tile_restart.py`, `setup/interpolate_restart.py` (3D) and `post/insitu_statistics.py spectra` read the restart files it writes, compressed too where the build has zlib, so a new restart format version fails it until the reader learns it; the `openmp` (2D) and `clang-23-arm64` (3D) jobs of `ci.yml` run it |
 | `dev/check_workflow_triggers.py` | Fails if a GitHub workflow runs on pull requests or on pushes to branches other than `main` (CI on branches runs only by hand; releases by dispatch on `main`); the first job of `ci.yml` runs it |
@@ -481,6 +481,7 @@ These set up or analyze one example each, and live in its directory (`examples/<
 | `dev/make_import_meshes.py` | The mesh-import test fixtures in `test/data/meshes/`: one geometry as Gmsh, CGNS, Fluent and OpenFOAM, 2D and 3D, linear and curved |
 | `dev/chemistry_reference.py`, `dev/transport_reference.py` | Cantera reference data for the chemistry and transport tests (`test/data/chemistry/`, committed so the tests need no Cantera) |
 | `dev/v3_reference.py`, `dev/v3_check.py` | Constant-volume ignition with large mechanisms: Cantera references, and `mallard reactor` against them |
+| `dev/check_doc_lists.py` | Lists the list blocks of the pages the website builds (`docs/`, README, CONTRIBUTING, examples and tools READMEs) that its Python-Markdown breaks where GitHub does not: nested blocks indented less than 4 spaces, and lists or items with no blank line after a paragraph or nested block; runs in `ci.yml`; standard library only |
 | `dev/check_doc_toml.py` | Parses every ```` ```toml ```` snippet of the Markdown docs (`docs/`, README, examples, tutorials) and lists those that are not valid TOML; runs in `ci.yml`; standard library only |
 | `dev/input_catalog.py` | The key catalog `docs/input-keys/` (one file per input key, with its type, default or requiredness and accepted values, as setup records them): `build` runs `mallard check --catalog` on every example and tutorial in 2D and 3D and merges them (`--check` compares with the committed files); `docs` checks `docs/input.md` against it: every documented key is in it (except the few no example sets up yet, listed in the script) and the stated defaults are its. Both run in `ci.yml`; standard library only |
 | `dev/check_upgrade_input.py` | Runs `mallard input upgrade` on every input file of every release tag: it must succeed, leave nothing to upgrade, and return up-to-date files byte for byte (CI, openmp job); standard library only |

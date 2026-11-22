@@ -54,7 +54,7 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
+    FaceWeights<> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;
     BoundaryData boundaries;
@@ -170,7 +170,7 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;
+    FaceWeights<> face_weights;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[2]> frozen;  // (cell, [gamma, e0])
@@ -329,7 +329,7 @@ struct SpeciesSlotFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> quad_weights;   // 2D
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D; 2D axisymmetric (see MixtureFluxFunctor); else empty
+    FaceWeights<> face_weights;  // (face, q): 3D; 2D axisymmetric (see MixtureFluxFunctor); else empty
     Kokkos::View<rtype **> face_mdot;
     Eval values;
     BoundaryData boundaries;
