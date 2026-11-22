@@ -655,6 +655,12 @@ class Solver {
         /** @brief gas = "flamelet": refuse the models it does not combine with (yet): [chemistry], [radiation], [les]. */
         void check_flamelet_input() const;
 
+        /**
+         * @brief gas = "flamelet": warns (W-TABLE-PRESSURE) where the initial pressure or a boundary's prescribed
+         *        pressure differs from the table's by more than 10%.
+         */
+        void check_table_pressure() const;
+
         /** @brief gas = "flamelet": the table's source of rho C at each owned cell's state, added to rhoY's rates. */
         void add_progress_source(SpeciesView rhs);
         void allocate_chemistry();
@@ -855,6 +861,8 @@ class Solver {
         derived::Workspace derived_workspace;
         Kokkos::View<rtype **> derived_fields;
         Kokkos::View<rtype **>::host_mirror_type h_derived_fields;
+        // gas = "flamelet": the table's fields of each cell, in the order of FlameletModel::output_names()
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_table_fields;
 
     protected:
         void init_mesh();

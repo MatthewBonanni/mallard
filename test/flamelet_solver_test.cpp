@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -25,6 +26,8 @@
 
 #include "data_paths.h"
 #include "flamelet.h"
+#include "output_reader.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 
@@ -175,6 +178,69 @@ TEST(FlameletSolverTest, ReactionDiffusionFrontMovesAtItsExactSpeed) {
     }
     EXPECT_NEAR(crossing - x0, s * t_end, 0.005 * s * t_end);
     EXPECT_LT(err, 2e-3);
+}
+
+// Table fields at Z = 0.2 + 0.6 x and C = 0.2 x (about; Lambda = C / 0.2) on the reactor table, whose
+// T0 = 300 + 1500 Lambda, Y_H2O = 0.2 Lambda, Y_N2 = 1 - 0.2 Lambda and HRR = 1e10 (1 - Lambda) + 1e8 Z
+// (tabulated at rho0 = 2 rho) are linear in Z and Lambda, so lookups are exact: the written T_TABLE, HRR
+// (scaled by (rho / rho0)^2), Y_<species>, MIXTURE_FRACTION and C_NORM. Catches fields read from the
+// wrong column, an unscaled HRR and Lambda taken as the transported C.
+TEST(FlameletSolverTest, TableFieldsAreWrittenAtEachCellsState) {
+    const std::string prefix = (rank_scratch_dir() / "mallard_flamelet_fields").string();
+    std::ostringstream input;
+    input << "[run]\nn_steps = 1\ncfl = 0.5\n" << strip(8, 1.0) << "[initialize]\ntype = \"analytical\"\n"
+          << "p = \"1e5\"\nT = \"300\"\nu = " << zero_velocity() << "\nZ = \"0.2 + 0.6 * x\"\nC = \"0.2 * x\"\n"
+          << flamelet_physics("solver_reactor.h5", "euler") << "[[write_data]]\nprefix = \"" << prefix
+          << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"T_TABLE\", \"HRR\", \"Y_H2O\", \"Y_N2\", "
+          << "\"MIXTURE_FRACTION\", \"C_NORM\"]\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input.str()));
+    solver.copy_device_to_host();
+    solver.write_output_of_state(false);
+    const output::Contents file = output::open(prefix + "_000000.vtu");
+    std::map<std::string, std::vector<double>> written;
+    for (const char * name : {"T_TABLE", "HRR", "Y_H2O", "Y_N2", "MIXTURE_FRACTION", "C_NORM"}) {
+        written[name] = output::read(file, name, 0);
+    }
+    const double rho0 = 2.0 * 101325.0 / (287.0 * 300.0);
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        const double rho = double(solver.h_conservatives(c, 0)), r = rho / rho0;
+        const double Z = double(solver.h_species(c, 0)) / rho, x = double(solver.h_species(c, 1)) / rho / 0.2;
+        EXPECT_GT(x, 0.0);
+        EXPECT_NEAR(written["T_TABLE"][c], 300.0 + 1500.0 * x, tol(1e-9, 1e-3)) << x;
+        EXPECT_NEAR(written["HRR"][c], (1e10 * (1.0 - x) + 1e8 * Z) * r * r, tol(1e-9, 1e-5) * 1e10) << x;
+        EXPECT_NEAR(written["Y_H2O"][c], 0.2 * x, tol(1e-12, 1e-6)) << x;
+        EXPECT_NEAR(written["Y_N2"][c], 1.0 - 0.2 * x, tol(1e-12, 1e-6)) << x;
+        EXPECT_NEAR(written["MIXTURE_FRACTION"][c], Z, tol(1e-12, 1e-6)) << x;
+        EXPECT_NEAR(written["C_NORM"][c], x, tol(1e-12, 1e-6)) << x;
+    }
+}
+
+// The reactor table is at 101325 Pa: a run at 1e5 Pa is within 10% and quiet, one at 5e4 Pa, or with
+// an outlet at 2e5 Pa, warns with W-TABLE-PRESSURE naming what differs. Catches a missing or
+// misplaced check.
+TEST(FlameletSolverTest, PressuresFarFromTheTablesWarn) {
+    auto warnings = [](const std::string & p, const std::string & right) {
+        std::string mesh = strip(4, 1.0);
+        const std::string symmetry = "name = \"right\"\ntype = \"symmetry\"\n";
+        mesh.replace(mesh.find(symmetry), symmetry.size(), "name = \"right\"\n" + right);
+        const std::string input = "[run]\nn_steps = 1\ncfl = 0.5\n" + mesh + "[initialize]\np = " + p +
+                                  "\nT = 300.0\nu = " + (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") +
+                                  "\nZ = 0.3\n" + flamelet_physics("solver_reactor.h5", "euler");
+        Solver solver;
+        solver.set_distributed(false);
+        testing::internal::CaptureStderr();
+        solver.init(parse_toml(input));
+        return testing::internal::GetCapturedStderr();
+    };
+    EXPECT_EQ(warnings("1e5", "type = \"symmetry\"\n").find("W-TABLE-PRESSURE"), std::string::npos);
+    const std::string low = warnings("5e4", "type = \"symmetry\"\n");
+    EXPECT_NE(low.find("W-TABLE-PRESSURE"), std::string::npos) << low;
+    EXPECT_NE(low.find("initial pressure"), std::string::npos) << low;
+    const std::string outlet = warnings("1e5", "type = \"outlet_pressure\"\np = 2e5\n");
+    EXPECT_NE(outlet.find("boundary right"), std::string::npos) << outlet;
+    EXPECT_EQ(outlet.find("initial pressure"), std::string::npos) << outlet;
 }
 
 // C = "burnt" in an initial region takes the table's burnt progress variable (C_max = 0.2 in the

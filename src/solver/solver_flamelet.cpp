@@ -14,7 +14,10 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "comm.h"
+#include "diagnostic_code.h"
 #include "input.h"
+#include "log.h"
 
 namespace {
 
@@ -61,4 +64,44 @@ void Solver::check_flamelet_input() const {
 void Solver::add_progress_source(SpeciesView rhs) {
     Kokkos::parallel_for("progress_source", mesh->n_owned(),
                          ProgressSourceFunctor{mixture.flamelet, W_cells, cell_scalars, rhs});
+}
+
+void Solver::check_table_pressure() const {
+    const double p_table = mixture_model->flamelet().table().pressure();
+    const auto P = primitives;
+    double lo = 0.0, hi = 0.0;
+    Kokkos::parallel_reduce(
+        "table_pressure", mesh->n_owned(),
+        KOKKOS_LAMBDA(const uint32_t c, double & l, double & h) {
+            const double p = static_cast<double>(P(c, N_DIM));
+            l = Kokkos::fmin(l, p);
+            h = Kokkos::fmax(h, p);
+        },
+        Kokkos::Min<double>(lo), Kokkos::Max<double>(hi));
+    lo = comm::allreduce(lo, comm::Op::MIN);
+    hi = comm::allreduce(hi, comm::Op::MAX);
+    std::vector<std::string> where;
+    if (lo < 0.9 * p_table || hi > 1.1 * p_table) {
+        where.push_back("the initial pressure (" + logging::real(lo) + " to " + logging::real(hi) + " Pa)");
+    }
+    const std::vector<Input> boundaries = contains_optional(input, "boundaries")
+                                              ? find_value<std::vector<Input>>(input, "boundaries")
+                                              : std::vector<Input>{};
+    const auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.bcs);
+    for (size_t i = 0; i < boundaries.size() && i < h_bcs.extent(0); i++) {
+        const BoundaryCondition & bc = h_bcs(i);
+        const bool prescribed = bc.type == BoundaryType::INLET_STATE || bc.type == BoundaryType::INLET_STAGNATION ||
+                                bc.type == BoundaryType::OUTLET_PRESSURE;
+        const double p = static_cast<double>(bc.data[N_DIM + 1]);
+        if (prescribed && (p < 0.9 * p_table || p > 1.1 * p_table)) {
+            where.push_back("boundary " + find_value<std::string>(boundaries[i], "name") + " (" + logging::real(p) + " Pa)");
+        }
+    }
+    if (where.empty()) return;
+    std::string list;
+    for (const std::string & w : where) list += (list.empty() ? "" : ", ") + w;
+    logging::warning(diagnostic_code::TABLE_PRESSURE,
+                     "the flamelet table was generated at " + logging::real(p_table) + " Pa, and " + list +
+                         " differs from it by more than 10%: its flamelets' chemistry and transport hold at their own "
+                         "pressure. Generate the table at the run's pressure");
 }

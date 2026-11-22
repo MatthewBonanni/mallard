@@ -148,7 +148,15 @@ control variable is `rho D = kappa / cp`.
 | `kappa` | `W m-1 K-1` | Thermal conductivity | > 0 |
 | `cp` | `J kg-1 K-1` | Specific heat at constant pressure | > 0 |
 
-### 4.2 Species block
+### 4.2 Optional fields
+
+Fields Mallard reads when a table has them, checked as the others:
+
+| Field | Units | Meaning | Check |
+|---|---|---|---|
+| `HRR` | `W m-3` | Heat release rate `-sum_k h_k omega_k` of the tabulated state, at its density `rho0` (output only) | finite |
+
+### 4.3 Species block
 
 Every species `k` in `species` has the field `Y_k`, units `"1"`, with values in
 [0, 1]. The block may be partial, for example only the species that output or

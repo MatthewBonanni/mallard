@@ -75,13 +75,41 @@ mass fractions that sum to one).
 `C` must lie between the table's `C_min` and `C_max` at its `Z`; values
 outside are clamped in lookups.
 
+## Output
+
+Besides `Y_Z` and `Y_C` (the transported scalars), a flamelet run writes the
+table's fields at each cell's `Z` and `C` ([[write_data]] only):
+
+| Field | Meaning |
+|---|---|
+| `Y_<species>` | Mass fraction of each species of the table's species block (`Y_*` selects them with `Y_Z` and `Y_C`); a species named `Z` or `C` is not written |
+| `T_TABLE` | Temperature of the tabulated flamelet state, `T0`. `T` is the temperature of the energy equation, which compression and heat loss move away from it |
+| `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` |
+| `MIXTURE_FRACTION` | `Z` |
+| `C_NORM` | The table's normalized progress variable `Lambda = (C - C_min) / (C_max - C_min)` at `Z`, in [0, 1] (FPVgen's Λ). `PROGRESS_VARIABLE` is the mixtures' own, defined by `[output.mixture]`, and not a field of flamelet runs |
+
+```toml
+[[write_data]]
+prefix = "flame"
+format = "vtkhdf"
+interval = 100
+fields = ["RHO", "U", "P", "T", "T_TABLE", "HRR", "Y_*", "C_NORM"]
+```
+
+## Pressure
+
+A table holds flamelets computed at one pressure. A run whose initial pressure,
+or a boundary's prescribed pressure (`inlet_state`, `inlet_stagnation`,
+`outlet_pressure`), differs from it by more than 10% warns `W-TABLE-PRESSURE`:
+the tabulated source, transport and composition are those of the table's
+pressure. Generate the table at the run's pressure.
+
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:
 `[les]` (LES closures and the subgrid variance are the next stage),
 `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
-mixture's derived fields, nondimensional units, `wall_isothermal`,
+mixture's other derived fields, nondimensional units, `wall_isothermal`,
 `wall_heat_flux`, `inlet_stagnation`, `inlet_mass_flow`, expressions of `T`,
 `Z` or `C` at `inlet_state`, and boundary values that vary in time. Walls are
-adiabatic and pass no scalar flux. Output of the table's species, `T` from the
-table and `HRR` as derived fields comes later.
+adiabatic and pass no scalar flux.

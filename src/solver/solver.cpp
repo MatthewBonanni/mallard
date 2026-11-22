@@ -2285,6 +2285,10 @@ void Solver::allocate_memory() {
         }
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+        if (mixture.tabulated()) {
+            h_table_fields = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
+                "table_fields", mesh->n_cells, mixture_model->flamelet().output_names().size());
+        }
         if (reacting) allocate_chemistry();
         if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
@@ -2513,6 +2517,15 @@ void Solver::finish_output_arrays() {
                 h_X(c, k) = static_cast<rtype>(X[k]);
             }
         }
+        if (mixture.tabulated()) {
+            std::vector<double> out(h_table_fields.extent(1));
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const double rho = static_cast<double>(h_conservatives(c, 0));
+                mixture_model->flamelet().outputs(rho, static_cast<double>(h_Y(c, 0)), static_cast<double>(h_Y(c, 1)),
+                                                  out.data());
+                for (size_t i = 0; i < out.size(); i++) h_table_fields(c, i) = static_cast<rtype>(out[i]);
+            }
+        }
     }
     if (radiating) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -2533,12 +2546,19 @@ void Solver::register_data() {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
     if (is_mixture()) {
-        data.reserve(data.size() + 4 * species_names.size() + 6 + PRIMITIVE_NAMES.size() + 2);
+        data.reserve(data.size() + 4 * species_names.size() + h_table_fields.extent(1) + 6 + PRIMITIVE_NAMES.size() +
+                     2);
         for (size_t k = 0; k < species_names.size(); k++) {
             data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
             if (!mixture.tabulated()) data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
         }
         data.push_back(Data("T_SEED", h_T_seed));
+        if (mixture.tabulated()) {
+            const std::vector<std::string> & names = mixture_model->flamelet().output_names();
+            for (size_t i = 0; i < names.size(); i++) {
+                data.push_back(Data(names[i], Kokkos::subview(h_table_fields, Kokkos::ALL(), i)));
+            }
+        }
         if (is_viscous()) {
             data.push_back(Data("MU", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 0)));
             // A flamelet gas's column holds kappa / cp, the conductivity of enthalpy, which D_ shows
@@ -2654,14 +2674,18 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & s : species_names) names.push_back("RHOY_" + s);
     if (is_mixture()) {
+        const bool tabulated = mixture_model->tabulated();
         for (const auto & s : species_names) {
             names.push_back("Y_" + s);
-            names.push_back("X_" + s);
+            if (!tabulated) names.push_back("X_" + s);
         }
         names.emplace_back("T_SEED");
+        if (tabulated) {
+            for (const auto & name : mixture_model->flamelet().output_names()) names.push_back(name);
+        }
         if (is_viscous()) {
             names.emplace_back("MU");
-            names.emplace_back("LAMBDA");
+            if (!tabulated) names.emplace_back("LAMBDA");
             for (const auto & s : species_names) names.push_back("D_" + s);
             if (mixture.transport.thermal_diffusion) {
                 for (const auto & s : species_names) names.push_back("DT_" + s);
@@ -4105,6 +4129,7 @@ void Solver::update_derived_fields() {
         inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
         inputs.Y = cell_scalars;
         inputs.thermo = mixture.thermo;
+        inputs.flamelet = mixture.flamelet;
         if (derived_selection.need(derived::need::VISCOUS)) {
             update_transport();
             inputs.transport = cell_transport;
