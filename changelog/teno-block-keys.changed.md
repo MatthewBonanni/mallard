@@ -1,0 +1,1 @@
+- The keyed TENO setup finds the stencil-shape neighborhoods of cells deep in a structured block by index instead of walking their vertex neighbors (#1167). Keys, records and tables are unchanged bit for bit.
