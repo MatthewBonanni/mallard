@@ -1912,7 +1912,9 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     int on_node = 0;
     MPI_Comm_size(node, &on_node);
     MPI_Comm_free(&node);
-    if (on_node == comm::size()) EXPECT_TRUE(nodes.conditional_nodes) << "the ranks share a node";
+    if (on_node == comm::size()) {
+        EXPECT_TRUE(nodes.conditional_nodes) << "the ranks share a node";
+    }
 #endif
     EXPECT_TRUE(gated.gated);
 #endif

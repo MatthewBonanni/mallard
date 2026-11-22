@@ -236,7 +236,9 @@ TEST(CommTest, SharedDirectoriesAreRemovedOrFailAlikeOnEveryRank) {
         std::ofstream(dir / "sub" / "file") << "x";
     }
     EXPECT_EQ(remove_shared_directory(dir), "");
-    if (comm::is_root()) EXPECT_FALSE(std::filesystem::exists(dir));
+    if (comm::is_root()) {
+        EXPECT_FALSE(std::filesystem::exists(dir));
+    }
     // A name no file system takes: rank 0's failure reaches every rank, and nothing throws
     std::string failure;
     EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(300, 'x')));
