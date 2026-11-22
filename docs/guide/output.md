@@ -588,7 +588,7 @@ check_interval = 100   # a progress row every 100 steps
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 55 more.
+and 56 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),
