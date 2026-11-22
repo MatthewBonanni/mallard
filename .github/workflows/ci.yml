@@ -729,7 +729,7 @@ jobs:
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
               -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
-            cmake --build build-$dim -j $(nproc) --target mallard MallardReader
+            cmake --build build-$dim -j $(nproc) --target mallard MallardLibrary
           done
           ccache --show-stats
           if [ "$GITHUB_REF" = refs/heads/main ]; then
@@ -744,6 +744,9 @@ jobs:
       # Both dimensions in one install, run through the mallard front end
       - name: Install (2D and 3D)
         run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
+      # A program built against the install with find_package(Mallard) runs a case as mallard -i does
+      - name: C++ API of the install
+        run: examples/cpp_api/ci.sh ${{ runner.temp }}/mallard ${{ runner.temp }}/cpp_api
       # The scripts the install wrote: bash and fish complete through them, zsh parses its own
       - name: Shell completion of the install
         run: |

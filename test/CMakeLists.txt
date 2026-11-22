@@ -22,6 +22,7 @@ set(MALLARD_TEST_SOURCES
     session_test.cpp
     run_ctl_test.cpp
     json_schema.cpp
+    cpp_api_test.cpp
     time_integrator_test.cpp
     binding_test.cpp
     comm_test.cpp
@@ -30,6 +31,10 @@ set(MALLARD_TEST_SOURCES
     chemistry_reactor_test.cpp
     chemistry_benchmark_test.cpp
     chemistry_transport_test.cpp
+    flamelet_table_test.cpp
+    flamelet_gas_test.cpp
+    flamelet_solver_test.cpp
+    flamelet_les_test.cpp
     mixture_test.cpp
     radiation_test.cpp
     mixture_transport_test.cpp
@@ -39,6 +44,7 @@ set(MALLARD_TEST_SOURCES
     distributed_mesh_test.cpp
     structured_blocks_test.cpp
     stencil_shapes_test.cpp
+    face_weights_test.cpp
     statistics_test.cpp
     conditional_statistics_test.cpp
     probes_test.cpp
@@ -75,7 +81,9 @@ set(MALLARD_TEST_SOURCES
     invariance_test.cpp
     inlet_test.cpp
     step_queue_test.cpp
+    gated_test.cpp
     statistical_convergence_test.cpp
+    particles_test.cpp
     viscous_order_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
@@ -125,7 +133,7 @@ set_target_properties(mallard-test PROPERTIES OUTPUT_NAME mallard-test${Mallard_
 # The compiled expressions round every operation on its own, and so must their hand-written references
 mallard_no_contraction(kexpr_test.cpp)
 # They inline the Riemann solvers, which src/CMakeLists.txt compiles without contraction
-mallard_no_contraction(riemann_solver_test.cpp riemann3d_test.cpp mixture_test.cpp)
+mallard_no_contraction(riemann_solver_test.cpp riemann3d_test.cpp mixture_test.cpp teno3d_test.cpp)
 target_include_directories(mallard-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mallard-test PRIVATE MALLARD_EXECUTABLE="$<TARGET_FILE:mallard>")
 add_dependencies(mallard-test mallard)
@@ -151,7 +159,7 @@ FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 
-target_link_libraries(mallard-test PRIVATE MallardCommands)
+target_link_libraries(mallard-test PRIVATE MallardCommands MallardApi)
 # Malformed CGNS files written by the tests
 if(Mallard_ENABLE_CGNS)
     target_link_libraries(mallard-test PRIVATE ${MALLARD_CGNS_LIBRARY})
