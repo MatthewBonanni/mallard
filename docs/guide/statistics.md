@@ -64,7 +64,7 @@ batch = 2.0          # >= 10 integrated autocorrelation times
 
 With `batch`, every cell also gets the half width of a confidence interval
 on each of its averages, `CI_MEAN_<A>` and `CI_COV_<A>_<B>` (write them with
-`variables = ["CI_*"]`): the samples fall in consecutive batches of that
+`fields = ["CI_*"]`): the samples fall in consecutive batches of that
 duration, each batch is averaged on its own, and the spread of the batch
 averages gives the interval (batch means, Student's t over the closed
 batches; NaN before two have closed). This is what

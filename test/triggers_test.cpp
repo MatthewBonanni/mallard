@@ -341,7 +341,7 @@ std::map<uint64_t, std::string> csv_rows(const std::string & file) {
 
 std::string convergence_case(const std::string & dir) {
     // The pressure ahead of the expansion is steady until it arrives
-    return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nvariables = [\"P\"]\ninterval = 1\nfile = \"" + dir +
+    return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nfields = [\"P\"]\ninterval = 1\nfile = \"" + dir +
            "/far.csv\"\n[statistics]\nfields = [\"P\"]\n[statistics.convergence]\nsignals = [\"far_P\"]\n"
            "min_samples = 10\nbatches = 4\ntolerance = 1e-3\nfile = \"" + dir + "/convergence.csv\"\n"
            "[[triggers]]\nname = \"steady\"\nwhen = \"convergence_stationary\"\ndo = \"start statistics\"\n";
