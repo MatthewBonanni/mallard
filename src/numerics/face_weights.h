@@ -27,7 +27,7 @@ template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct FaceWeights {
     template <typename T>
     using V = Kokkos::View<T, Kokkos::DefaultExecutionSpace::array_layout, MemorySpace>;
-    V<uint32_t *> rows;  ///< (face): its row of table; empty when every face has its own
+    V<uint32_t *> rows;  ///< (face): its row of table; unallocated when every face has its own
     V<rtype **> table;   ///< (row, q)
     uint32_t n_faces = 0;
 
@@ -45,8 +45,12 @@ struct FaceWeights {
 
     /** @brief A copy in host memory (the same Views in host builds). */
     FaceWeights<Kokkos::HostSpace> host() const {
-        return {Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rows),
-                Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), table), n_faces};
+        // A mirror of unallocated rows is an allocated, empty View, which operator() would index.
+        FaceWeights<Kokkos::HostSpace> out;
+        if (rows.is_allocated()) out.rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rows);
+        out.table = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), table);
+        out.n_faces = n_faces;
+        return out;
     }
 };
 
