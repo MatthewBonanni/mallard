@@ -1,10 +1,11 @@
 # Installation
 
-Three ways to install Mallard, quickest first:
+Four ways to install Mallard, quickest first:
 
 | | Best for | Compiling |
 |---|---|---|
 | [Container](#container) (Docker, Apptainer, Kubernetes) | Trying Mallard; workstations; GPU nodes; Kubernetes clusters | None |
+| [Relocatable archive](#relocatable-archive) | Linux clusters with an MPICH-based MPI; no container runtime | None |
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
@@ -12,7 +13,7 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
-Each also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
+Each but the archive also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `uv pip install` ([Python package](#python-package)).
 
 ## Supported platforms
 
@@ -28,6 +29,7 @@ Mallard supports the two newest major releases of GCC and of Clang, the current 
 | AMD GPUs | x86-64 | ROCm's Clang | 4.2 | ROCm 10.1 | `ci.yml/hip` (compile) |
 | Intel GPUs | x86-64 | oneAPI `icpx` | 4.2 | oneAPI 2026.2 | `ci.yml/sycl` (compile) |
 | Containers (`docker/`), Spack on Ubuntu | x86-64, arm64 | GCC 15 | 4.2, 4.4 | CUDA 13.5 | `release.yml/cpu`, `release.yml/cuda`, `release.yml/spack` |
+| Relocatable archives (built on AlmaLinux 8, run on glibc 2.28 and newer) | x86-64, arm64 | GCC 16 (gcc-toolset) | manylinux's | | `release.yml/archive` |
 
 The GPU builds are compiled in CI on every change to device code; only the NVIDIA A100 also runs them ([GPU CI](guide/support.md#builds)). ROCm and oneAPI are tested on x86-64 only.
 
@@ -35,12 +37,13 @@ The GPU builds are compiled in CI on every change to device code; only the NVIDI
 
 - **A cluster**: load a newer compiler module if there is one (`module avail gcc`, then e.g. `module load gcc/15`), or let [Spack](#spack) build one:
 
-  ```sh
-  spack install gcc@15
-  spack install mallard %gcc@15
-  ```
+    ```sh
+    spack install gcc@15
+    spack install mallard %gcc@15
+    ```
 
-  For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+    For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+
 - **Ubuntu 26.04**: `sudo apt-get install g++ cmake` installs GCC 15 and CMake 4.2; `sudo apt-get install clang-22` adds Clang 22 (configure with `-DCMAKE_CXX_COMPILER=clang++-22`).
 - **Debian 13**: its GCC 14 is too old; use Clang 22 and, with `trixie-backports` enabled, the backported CMake: `sudo apt-get install clang-22 libomp-22-dev && sudo apt-get install -t trixie-backports cmake`.
 - **Fedora 44**: `sudo dnf install gcc-c++ cmake` installs GCC 16 and CMake 4.3.
@@ -98,7 +101,23 @@ cd examples/sod && apptainer exec ../../mallard.sif mallard -i input.toml
 
 For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`.
 
+[`docker/mallard.def`](https://github.com/MatthewBonanni/mallard/blob/main/docker/mallard.def) builds the same image with a run script and a self-test (`apptainer test mallard.sif`), from any tag or digest: `apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.11.0 mallard.sif docker/mallard.def`, then `apptainer run mallard.sif -i input.toml`.
+
 On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, and resumes from a restart file after preemption; an `MPIJob` ([Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator)) runs it across nodes, with the images' Open MPI in the launcher and the workers ([manifests and guide](guide/running.md#kubernetes)). On clusters with their own MPI and no Kubernetes, run across nodes with Spack or a source build.
+
+## Relocatable archive
+
+From 0.11.0, each release attaches an archive of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer):
+
+```sh
+v=0.11.0 a=mallard-$v-linux-$(uname -m)-cpu.tar.gz
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a.sha256
+sha256sum -c $a.sha256 && tar -xzf $a
+export PATH=$PWD/mallard-$v-linux-$(uname -m)-cpu/bin:$PATH && mallard --version
+```
+
+It carries MPICH's library, so it runs on one node as it is. Across nodes, load the site's MPI built on MPICH (Cray MPICH, Intel MPI, MVAPICH, MPICH: the MPICH ABI, `libmpi.so.12`) with `module load` first, and start it with the site's launcher (`srun`, `mpiexec`): its library on `LD_LIBRARY_PATH` replaces the archive's. Open MPI sites use Spack or a source build. `share/mallard/archive.toml` names the archive's variant and glibc floor, and `release-manifest.json`, beside the archives on the release, lists every archive and image with its SHA-256 or digest (what the [GUI](https://github.com/MatthewBonanni/mallard/blob/main/docs/design/gui.md) installs from). The archive has no Python package: use a container or Spack for it.
 
 ## Spack
 
@@ -134,7 +153,7 @@ spack install mallard ^openmpi@5                         # a particular MPI
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
 | `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
 
-`spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, its library, Python and numpy.
+`spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, Python and numpy; the library stays, for the [C++ API](guide/cpp_api.md).
 
 For tab completion, add `source <(mallard completion bash)` (or the [zsh or fish line](guide/cli.md#shell-completion)) to the shell's startup file, after `spack load mallard`. Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be registered with `spack external find` (e.g. `spack external find openmpi cuda`). dKaMinPar is not in the package: build from source for `partitioner = "graph"`.
 
@@ -191,7 +210,8 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_ENABLE_PYTHON` | `ON` | `libmallard2d` or `libmallard3d`, the output reader as a library for the [Python package](guide/python.md), installed in `lib/`; compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_ENABLE_LIBRARY` | `ON` | `libmallard2d` or `libmallard3d`, installed in `lib/`: the [C++ API](guide/cpp_api.md), with its header in `include/mallard/` and the CMake package `Mallard` in `lib/cmake/Mallard/`, and the output reader of the [Python package](guide/python.md); compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_ENABLE_PYTHON` | `ON` | Checks that the [Python package](guide/python.md)'s version is Mallard's, for `Mallard_PYTHON_INSTALL_DIR`; needs `Mallard_ENABLE_LIBRARY` |
 | `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |
 | `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
 | `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
@@ -208,4 +228,4 @@ Every build makes the library of the [Python package](guide/python.md); after `c
 uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
-It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF` builds without the library ([Python](guide/python.md#installing)).
+It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)).

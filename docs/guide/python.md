@@ -17,18 +17,20 @@ rho = f.read_all("RHO")                       # (11, 800): every snapshot
 x = f.geometry().vertex_averages()[:, 0]      # where each cell is
 ```
 
-Every function and class: [Python API](python_api.md).
+Every function and class: [Python API](python_api.md). To run cases from a
+program instead, see the [C++ API](cpp_api.md).
 
 ## Installing
 
-Every installer installs the package with Mallard, so `import mallard` works
-after its usual command:
+Every installer but the [relocatable archive](../installation.md#relocatable-archive)
+installs the package with Mallard, so `import mallard` works after its usual
+command:
 
 | Installer | Command | Opt out |
 |---|---|---|
 | [Container](../installation.md#container) | `docker run --rm -v "$PWD:/work" ghcr.io/matthewbonanni/mallard python3 script.py` | |
 | [Spack](../installation.md#spack) | `spack install mallard && spack load mallard` | `~python` |
-| [From source](../installation.md#from-source) | `cmake --install build`, then `uv pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
+| [From source](../installation.md#from-source) | `cmake --install build`, then `uv pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` |
 
 The package is `tools/mallard` of the Mallard repository
 (`share/mallard/tools/mallard` of an install; its distribution name, for uv,

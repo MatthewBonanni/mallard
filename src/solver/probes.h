@@ -40,6 +40,7 @@
 #include "common_io.h"
 #include "probe_surface.h"
 #include "snapshot_block.h"
+#include "vtkhdf_series.h"
 #include "data.h"
 #include "exact_sums.h"
 #include "probe_reduction.h"
@@ -288,6 +289,8 @@ class Probes {
         bool reads_intervals(size_t k) const;
         /** @brief Probe k's samples are selected anew at each write: it samples a moving region or an isosurface. */
         bool moves(size_t k) const;
+        /** @brief Whether stage can reduce probe k on the device: not of an isosurface, whose samples the host extracts. */
+        bool reduces_staged(size_t k) const;
         /** @brief Probe k's region follows the solution: its selection reads ProbeFields::W. */
         bool follows_solution(size_t k) const;
         /**
@@ -531,6 +534,7 @@ class Probes {
                 Kokkos::View<ProbeTerm *> terms;
                 Kokkos::View<ProbeOutput *> outputs;
                 Kokkos::View<double *> weights;                     // of the reduced samples; empty: 1
+                Kokkos::View<const uint32_t> count;                 // moving regions: the first count() are reduced
                 Kokkos::View<double *[3]> positions;                // moments: of the reduced samples, from the center
                 Kokkos::View<double **, Kokkos::LayoutRight> values;  // (sample, term)
                 ExactSums sums;
@@ -538,6 +542,16 @@ class Probes {
                 Kokkos::View<int64_t *> point;                      // one-point probes: its values' bits
                 // Averaging probes: the means of the local nodes and quadrature points, the host's as of resume_staged
                 Kokkos::View<double **, Kokkos::LayoutRight> mean_nodes, mean_quadrature;
+                // Averaging moving regions (cell_means), per owned cell: mean_quadrature the means of f V q, with
+                // the means of f V and whether the averages hold the cell (the host's mean_cells); and each one's
+                // covered sample (-1: none), and the cells held (the first held_count()) with their weights and
+                // mean values, reduced
+                Kokkos::View<double *> mean_weights;
+                Kokkos::View<uint32_t *> held;
+                Kokkos::View<int32_t *> sample_of;
+                Kokkos::View<uint32_t *> held_cells;
+                Kokkos::View<uint32_t> held_count;
+                Kokkos::View<double **, Kokkos::LayoutRight> held_values;
                 bool means_current = false;
                 bool summed = false;                                // some value is of the sums
                 bool use_nccl = false;
@@ -555,6 +569,7 @@ class Probes {
             };
             std::vector<SeriesEntry> series;  // vtp: the snapshots of the .pvd
             uint64_t vtkhdf_steps = 0;                           // vtkhdf: snapshots in the file
+            std::vector<vtkhdf_series::Step> index_steps;        // vtkhdf snapshots: those the series file indexes
             std::string last_file;                               // vtp, vtkhdf: the file written last
             bool point_value = false;   // one sample, evaluated at every write: its values are monitored
             std::vector<double> last;   // the latest reductions, then the point's values (rank 0, or every rank undistributed)
@@ -687,6 +702,9 @@ class Probes {
             void write_vtp(const snapshot_block::Block & block, const std::vector<double> & values);
             void write_vtkhdf(const snapshot_block::Block & block, const std::vector<double> & values);
             bool vtkhdf_run_written = false;  // this run's block is in the vtkhdf file
+            bool vtkhdf_mesh_checked = false;  // a boundary snapshot's mesh file is written, or compared
+            bool vtkhdf_mesh_linked = false;   // the snapshots link to the fixed geometry of the mesh file
+            std::string vtkhdf_mesh_written;  // the mesh file, by the last write_vtkhdf that wrote it
             /** @brief The terms its reductions sum (the weight first), and its reduced values as reduction_names(). */
             void reduction_plan(std::vector<ProbeTerm> & terms, std::vector<ProbeOutput> & outputs) const;
             /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */

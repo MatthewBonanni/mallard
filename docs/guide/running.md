@@ -222,14 +222,14 @@ nondimensional case); `divergence_report.json` gives them as `units`.
   valid state.
 - **Likely causes, most likely first**, each with a weight from 0 to 1, the evidence behind it and what to try:
 
-  | Cause | Evidence |
-  |---|---|
-  | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
-  | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
-  | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
-  | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
-  | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
+    | Cause | Evidence |
+    |---|---|
+    | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
+    | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
+    | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
+    | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
+    | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
+    | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** a table of the cell closest to failing, its face neighbors and the next invalid cells in the last
   valid state (density, speed, pressure, temperature, local CFL number), with their centroids, quality metrics,
@@ -316,7 +316,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-format-vtu"></a>`W-FORMAT-VTU` | `[[write_data]]` without a `format` writes VTU files: the default, VTKHDF, needs HDF5 (parallel HDF5 on several ranks) | Set `format = "vtu"`, or build with HDF5 ([Which format](output.md#which-format)) |
 | <a id="w-key-ignored"></a>`W-KEY-IGNORED` | A key that is read but has no effect: `source.time_dependent` (expressions of `t` are evaluated at every stage) | Remove it |
 | <a id="w-spectra-restarted"></a>`W-SPECTRA-RESTARTED` | A probe's time spectra got a sample that is not `dt` after the last one (a resumed run, a changed interval): its history starts afresh | Keep the probe's interval fixed over a run and its restarts ([Time spectra](probes.md#time-spectra)) |
-| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel; or NCCL failed under a graph's conditional node (as across a network), so steps run kernel by kernel too. Slower, with the same results | Report it with the message: every step is meant to be graphed |
+| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel. Slower, with the same results | Report it with the message: every step is meant to be graphed |
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |

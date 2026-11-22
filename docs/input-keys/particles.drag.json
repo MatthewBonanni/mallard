@@ -1,0 +1,15 @@
+{
+ "default": "\"schiller_naumann\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/solid_particles.toml"
+ ],
+ "type": "string",
+ "values": [
+  "schiller_naumann",
+  "singh",
+  "stokes"
+ ]
+}
