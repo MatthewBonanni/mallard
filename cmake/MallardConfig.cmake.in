@@ -1,0 +1,21 @@
+# find_package(Mallard [VERSION] [COMPONENTS 2d 3d]): Mallard::mallard2d and Mallard::mallard3d, the C++ library
+# API of the solver of each dimension installed in this prefix (docs/guide/cpp_api.md)
+@PACKAGE_INIT@
+
+set(Mallard_DIMENSIONS)
+foreach(_mallard_dim 2 3)
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/MallardTargets${_mallard_dim}d.cmake")
+        include("${CMAKE_CURRENT_LIST_DIR}/MallardTargets${_mallard_dim}d.cmake")
+        list(APPEND Mallard_DIMENSIONS ${_mallard_dim})
+    endif()
+endforeach()
+foreach(_mallard_component IN LISTS Mallard_FIND_COMPONENTS)
+    if(_mallard_component MATCHES "^[23]d$" AND TARGET Mallard::mallard${_mallard_component})
+        set(Mallard_${_mallard_component}_FOUND TRUE)
+    else()
+        set(Mallard_${_mallard_component}_FOUND FALSE)
+    endif()
+endforeach()
+unset(_mallard_dim)
+unset(_mallard_component)
+check_required_components(Mallard)
