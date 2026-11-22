@@ -41,10 +41,12 @@ inline constexpr uint32_t MAX_REGIONS = 4;
 /**
  * @brief The variables of particle expressions, by index: x, y, (z), t, the gas
  *        at the particle RHO, U_X, U_Y, (U_Z), P, T, the particle velocity V_X,
- *        V_Y, (V_Z), then the quantities, then in(region) of each region read.
+ *        V_Y, (V_Z) and temperature T_P, then the quantities, then in(region)
+ *        of each region read.
  */
 inline constexpr uint32_t VAR_T = N_DIM, VAR_RHO = N_DIM + 1, VAR_U = N_DIM + 2, VAR_P = 2 * N_DIM + 2,
-                          VAR_TEMPERATURE = 2 * N_DIM + 3, VAR_V = 2 * N_DIM + 4, N_BASE_VARIABLES = 3 * N_DIM + 4;
+                          VAR_TEMPERATURE = 2 * N_DIM + 3, VAR_V = 2 * N_DIM + 4, VAR_TP = 3 * N_DIM + 4,
+                          N_BASE_VARIABLES = 3 * N_DIM + 5;
 inline constexpr uint32_t MAX_VARIABLES = N_BASE_VARIABLES + MAX_QUANTITIES + MAX_REGIONS;
 
 /** @brief The names of the first N_BASE_VARIABLES variables. */
@@ -53,10 +55,11 @@ std::vector<std::string> base_variables();
 /**
  * @brief The first N_BASE_VARIABLES variables: the position x, the time t, the
  *        gas state W = [rho, u, p] at the particle with T = p / (rho R) (NaN
- *        if R is 0), and the particle velocity v.
+ *        if R is 0), the particle velocity v, and the particle temperature
+ *        *Tp, or T if Tp is null.
  */
 KOKKOS_INLINE_FUNCTION void fill_base(double * vars, const rtype * x, const double t, const rtype * W, const rtype * v,
-                                      const double R) {
+                                      const rtype * Tp, const double R) {
     FOR_I_DIM vars[i] = static_cast<double>(x[i]);
     vars[VAR_T] = t;
     vars[VAR_RHO] = static_cast<double>(W[0]);
@@ -64,6 +67,7 @@ KOKKOS_INLINE_FUNCTION void fill_base(double * vars, const rtype * x, const doub
     vars[VAR_P] = static_cast<double>(W[N_DIM + 1]);
     vars[VAR_TEMPERATURE] = R > 0.0 ? vars[VAR_P] / (vars[VAR_RHO] * R) : Kokkos::Experimental::quiet_NaN_v<double>;
     FOR_I_DIM vars[VAR_V + i] = static_cast<double>(v[i]);
+    vars[VAR_TP] = Tp ? static_cast<double>(*Tp) : vars[VAR_TEMPERATURE];
 }
 
 /** @brief A quantity on the device. */
