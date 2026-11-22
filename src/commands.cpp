@@ -243,7 +243,7 @@ constexpr Option DERIVE_OPTIONS[] = {
      "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
      "table, as [[write_data]] region takes it. Default: the whole mesh."},
     {"--snapshot", "", "vtkhdf|vtu",
-     "The format of the snapshots: OUTPUT/NAME.vtkhdf, every snapshot in one file, or .vtu files with a "
+     "The format of the snapshots: OUTPUT/NAME.vtkhdf, the series of a file per snapshot, or .vtu files with a "
      ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
     {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
     {"--steps", "", "LIST",
@@ -600,7 +600,8 @@ constexpr Command COMMANDS[] = {
             "Sends a request to the run started in run-dir, through its control socket mallard.sock, and "
             "prints the reply. It must run on the node of the run's rank 0.\n"
             "\n"
-            "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA and memory. "
+            "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA, memory "
+            "and the state of each trigger. "
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
@@ -1220,7 +1221,7 @@ constexpr Command COMMANDS[] = {
             "print, so it knows every command, key and field of this build; templates come from mallard new when "
             "completing.\n"
             "\n"
-            "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
+            "An install (cmake --install, Spack, the containers, the archives) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
             "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
             "shell does not search, load it from the shell's startup file, as the examples show.",

@@ -101,9 +101,23 @@ struct Entry {
     std::string role;    ///< input, mesh, read, resolved_input, run_record, run_log, output
     std::string kind;    ///< of a file read (mechanism, restart, ...) or an output (vtu, restart, ...)
     std::string given;   ///< input, mesh, read: the path as the run gave it
-    std::string recorded;  ///< SHA-256 the run record gives it, or ""
+    std::string recorded;  ///< SHA-256 the run record gives it (sha256_tree with recorded_chunk), or ""
     archive::Member packed;
+    uint64_t recorded_chunk = 0;  ///< chunk_bytes of recorded, a chunk-tree hash; 0: a SHA-256
 };
+
+/** @brief Whether a file packed as e is what the run record gives it. */
+bool as_recorded(const Entry & e) {
+    if (e.recorded.empty()) return true;
+    if (e.recorded_chunk == 0) return e.packed.sha256 == e.recorded;
+    return file_hash::of_file(e.source, e.recorded_chunk).sha256_tree == e.recorded;
+}
+
+/** @brief The chunk_bytes of a recorded chunk-tree hash; 0 for a SHA-256 or none. */
+uint64_t chunk_of(const json::Value & f) {
+    const json::Value * chunk = f.find("chunk_bytes");
+    return f.find("sha256") || !chunk ? 0 : static_cast<uint64_t>(chunk->number);
+}
 
 /** @brief How many leading ".." a relative path has once normal. */
 size_t parents(const fs::path & normal) {
@@ -259,16 +273,17 @@ int pack(const cli::Args & args) {
         input_given = input_given.empty() ? "input.toml" : fs::path(input_given).filename().string();
     }
     cases.push_back({.name = "", .source = "", .contents = input->find("text")->string, .role = "input", .kind = "",
-                     .given = input_given, .recorded = text(input->find("sha256")), .packed = {}});
+                     .given = input_given, .recorded = text(input->find("sha256")), .packed = {}, .recorded_chunk = 0});
     if (text(block["mesh"].find("type")) == "file") {
         cases.push_back({.name = "", .source = "", .contents = "", .role = "mesh", .kind = "",
                          .given = text(block["mesh"].find("file")), .recorded = text(block["mesh"].find("sha256")),
-                         .packed = {}});
+                         .packed = {}, .recorded_chunk = 0});
     }
     if (const json::Value * files = block.find("files")) {
         for (const json::Value & f : files->array) {
             cases.push_back({.name = "", .source = "", .contents = "", .role = "read", .kind = text(f.find("kind")),
-                             .given = text(f.find("path")), .recorded = text(f.find("sha256")), .packed = {}});
+                             .given = text(f.find("path")), .recorded = file_hash::recorded(f), .packed = {},
+                             .recorded_chunk = chunk_of(f)});
         }
     }
     size_t depth = 0;
@@ -325,12 +340,12 @@ int pack(const cli::Args & args) {
 
     // The run's own record, and its outputs as its output records and resolved input name them
     entries.push_back({.name = RUN_RECORD, .source = "", .contents = run.start_line + "\n", .role = "run_record",
-                       .kind = "", .given = "", .recorded = "", .packed = {}});
+                       .kind = "", .given = "", .recorded = "", .packed = {}, .recorded_chunk = 0});
     entries.push_back({.name = "resolved.toml", .source = "", .contents = input->find("resolved")->string,
-                       .role = "resolved_input", .kind = "", .given = "", .recorded = "", .packed = {}});
+                       .role = "resolved_input", .kind = "", .given = "", .recorded = "", .packed = {}, .recorded_chunk = 0});
     std::set<std::string> output_names;
     const auto add_output = [&](const std::string & path, const std::string & role, const std::string & kind,
-                                const std::string & recorded) {
+                                const std::string & recorded, uint64_t recorded_chunk) {
         fs::path p(path);
         if (p.is_absolute()) {
             const fs::path relative = p.lexically_relative(absolute_dir);
@@ -348,18 +363,19 @@ int pack(const cli::Args & args) {
         const std::string name = (fs::path(OUTPUT) / p).generic_string();
         if (!output_names.insert(name).second || !fs::is_regular_file(run_dir / p, error)) return;
         entries.push_back({.name = name, .source = (run_dir / p).string(), .contents = "", .role = role,
-                           .kind = kind, .given = "", .recorded = recorded, .packed = {}});
+                           .kind = kind, .given = "", .recorded = recorded, .packed = {},
+                           .recorded_chunk = recorded_chunk});
     };
-    add_output("mallard.jsonl", "run_log", "", "");
+    add_output("mallard.jsonl", "run_log", "", "", 0);
     std::set<std::string> snapshot_writers;
     const std::vector<std::string> small = small_outputs(input->find("resolved")->string, snapshot_writers);
     if (with != "none") {
-        for (const std::string & f : small) add_output(f, "output", "csv", "");
+        for (const std::string & f : small) add_output(f, "output", "csv", "", 0);
         for (const json::Value & record : run.outputs) {
             const bool snapshot = snapshot_writers.contains(text(record.find("writer")));
             if (snapshot && with != "all") continue;
             for (const json::Value & f : record["files"].array) {
-                add_output(text(f.find("path")), "output", text(record.find("kind")), text(f.find("sha256")));
+                add_output(text(f.find("path")), "output", text(record.find("kind")), file_hash::recorded(f), chunk_of(f));
             }
         }
     }
@@ -387,7 +403,7 @@ int pack(const cli::Args & args) {
             e.packed = e.source.empty() ? writer.add_text(name, e.contents, std::time(nullptr))
                                         : writer.add_file(name, e.source);
             e.packed.name = e.name;
-            if (!e.recorded.empty() && e.packed.sha256 != e.recorded) {
+            if (!as_recorded(e)) {
                 throw std::runtime_error("cannot pack " + e.source + ": it differs from the run's record of it "
                                          "(SHA-256): changed since the run " +
                                          (e.role == "output" ? "wrote" : "read") + " it");

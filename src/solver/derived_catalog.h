@@ -34,6 +34,7 @@ enum Field : uint8_t {
     CP,
     MIXTURE_FRACTION,
     PROGRESS_VARIABLE,
+    C_NORM,
     FLAME_INDEX,
     SCALAR_DISSIPATION,
     N_FIELDS
@@ -50,6 +51,7 @@ inline constexpr uint16_t REFERENCE = 1u << 5;          ///< [output] reference
 inline constexpr uint16_t STREAMS = 1u << 6;            ///< [output.mixture] fuel and oxidizer
 inline constexpr uint16_t SPECIES_PAIR = 1u << 7;       ///< a fuel and an oxidizer species
 inline constexpr uint16_t PROGRESS = 1u << 8;           ///< [output.mixture] progress
+inline constexpr uint16_t FLAMELET = 1u << 9;           ///< gas = "flamelet"
 } // namespace need
 
 /** @brief A derived field's entry in the catalog. */
@@ -86,9 +88,11 @@ inline constexpr Definition FIELDS[N_FIELDS] = {
     {"STRAIN_RATE", dim::rate, "strain-rate magnitude", detail::DERIVED, need::GRADIENTS, ""},
     {"CP", dim::none, "pressure coefficient", detail::DERIVED, need::REFERENCE, "[output] reference = {rho, u, p}"},
     {"MIXTURE_FRACTION", dim::none, "Bilger mixture fraction", detail::MIXTURE, need::MIXTURE | need::STREAMS,
-     "a mixture with [output.mixture] fuel and oxidizer"},
+     "a mixture with [output.mixture] fuel and oxidizer, or gas = \"flamelet\" (its Z)"},
     {"PROGRESS_VARIABLE", dim::none, "progress variable", detail::MIXTURE, need::MIXTURE | need::PROGRESS,
      "a mixture with [output.mixture] progress"},
+    {"C_NORM", dim::none, "normalized progress variable Lambda of the flamelet table", detail::MIXTURE,
+     need::FLAMELET, "gas = \"flamelet\""},
     {"FLAME_INDEX", dim::none, "Takeno flame index", detail::MIXTURE,
      need::MIXTURE | need::SPECIES_PAIR | need::SPECIES_GRADIENTS,
      "a mixture with [output.mixture] fuel and oxidizer, or fuel_species and oxidizer_species"},
