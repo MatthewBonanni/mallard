@@ -293,6 +293,7 @@ struct Outcome {
     uint64_t queued = 0;
     uint64_t graph_steps = 0;
     bool gated = false;  // step graphs gated their bodies
+    bool conditional_nodes = false;  // step graphs could hold NCCL operations under conditional nodes
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
@@ -349,6 +350,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         }
         o.graph_steps = solver.get_graph_steps();
         o.gated = solver.get_gate_steps();
+        o.conditional_nodes = o.graph_steps > 0 && solver.conditional_nodes_work();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -1902,7 +1904,18 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     EXPECT_EQ(gated.step, 19u);
     EXPECT_EQ(gated.queued, nodes.queued);
     EXPECT_GT(gated.graph_steps, 0u);
-    EXPECT_FALSE(nodes.gated);
+    // Over a network the unfaulted run gates too, as Mallard decides from its trial of a conditional node
+    EXPECT_EQ(nodes.gated, !nodes.conditional_nodes);
+#ifdef Mallard_HAS_MPI
+    MPI_Comm node;
+    MPI_Comm_split_type(comm::communicator(), MPI_COMM_TYPE_SHARED, comm::rank(), MPI_INFO_NULL, &node);
+    int on_node = 0;
+    MPI_Comm_size(node, &on_node);
+    MPI_Comm_free(&node);
+    if (on_node == comm::size()) {
+        EXPECT_TRUE(nodes.conditional_nodes) << "the ranks share a node";
+    }
+#endif
     EXPECT_TRUE(gated.gated);
 #endif
 }
