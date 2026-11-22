@@ -126,6 +126,7 @@ inline void expect_matches_serial(const std::string & input,
 inline void expect_matches_serial_with_and_without_step_graphs(
     const std::string & input, const std::function<void(const Solver &)> & check_distributed = {}) {
     for (const bool graphs : {true, false}) {
+        if (graphs && Solver::are_cuda_graphs_off()) continue;
         std::string text = input;
         text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
         SCOPED_TRACE(text);
@@ -140,7 +141,7 @@ inline void expect_matches_serial_with_and_without_step_graphs(
 #ifdef KOKKOS_ENABLE_CUDA
                 EXPECT_EQ(s.get_graph_steps() > 0, graphs && why.empty()) << why;
 #if CUDART_VERSION >= 12040
-                // On one node NCCL's collectives fit under the step's conditional node: steps queue ahead
+                // Steps with NCCL queue ahead: under conditional nodes, or gated where those cannot hold NCCL
                 if (graphs && why.empty() && s.is_distributed()) {
                     EXPECT_GT(s.get_queue_depth(), 1u) << "NCCL steps launched one at a time";
                 }

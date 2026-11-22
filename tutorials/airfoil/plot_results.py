@@ -51,12 +51,11 @@ def coefficients(run):
 
 def wall(run):
     """Cells next to the airfoil: wall-face midpoints, Cp, Cf, upper-surface flags."""
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(run, "solut", "flow")))
-    polys, c = snapshots.cells(pts, conn, offs)
-    starts = np.concatenate([[0], offs[:-1]])
+    g, a = snapshots.read(snapshots.series(os.path.join(run, "solut", "flow")))
+    pts, c = g.points, g.vertex_averages()
     owner = {}
-    for k, (s, e) in enumerate(zip(starts, offs)):
-        nodes = conn[s:e]
+    for k, (s, e) in enumerate(zip(g.offsets[:-1], g.offsets[1:])):
+        nodes = g.connectivity[s:e]
         for i in range(len(nodes)):
             key = tuple(sorted((nodes[i], nodes[(i + 1) % len(nodes)])))
             owner[key] = -1 if key in owner else k
@@ -128,8 +127,8 @@ def main():
         fig.tight_layout()
         return fig
 
-    pts, conn, offs, a = snapshots.read(snapshots.last(os.path.join(args.runs[-1], "solut", "flow")))
-    polys, cent = snapshots.cells(pts, conn, offs)
+    g, a = snapshots.read(snapshots.series(os.path.join(args.runs[-1], "solut", "flow")))
+    polys, cent = snapshots.cells(g)
     mach = np.hypot(a["U_X"], a["U_Y"]) / np.sqrt(GAMMA * a["P"] / a["RHO"])
 
     def field(th):

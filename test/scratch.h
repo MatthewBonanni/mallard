@@ -35,7 +35,17 @@ std::filesystem::path rank_scratch_dir();
  */
 std::string serial_name(const std::string & name);
 
-/** @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS(). */
-void install_scratch_directories();
+/**
+ * @brief Removes dir, which every rank shares, on rank 0 once every rank is
+ *        done with it: "" on every rank, or on every rank why it could not.
+ */
+std::string remove_shared_directory(const std::filesystem::path & dir);
+
+/**
+ * @brief Gives every test a scratch_dir(); call once, before RUN_ALL_TESTS().
+ *        False, with the reason on stderr, when the ranks do not share the
+ *        temporary directory (TMPDIR), which the tests' files need.
+ */
+bool install_scratch_directories();
 
 #endif // SCRATCH_H

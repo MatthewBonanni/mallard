@@ -68,11 +68,19 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 | TENO6, hexahedra | 129.6 / 99.6 KB | 77.9 KB | 46.5 KB |
 
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
+- **Since 0.11.0** ([#978](https://github.com/MatthewBonanni/mallard/issues/978)): the troubled-cell passes take a quarter of the cells per round (`troubled_capacity`, was half); results are bitwise unchanged. At TENO5 that is 880 bytes less per cell (7.6 → 6.7 KB per hexahedron for a perfect gas, everything included: 13% more cells per A100-80GB) at a cost under 0.3 ms per step ([measurements](../design/performance.md#19-troubled-scratch-for-a-quarter-of-the-cells-978)).
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
+
+**Shared face quadrature weights** ([#965](https://github.com/MatthewBonanni/mallard/issues/965)). The 3D quadrature weights of the faces (and in 2D those of curved faces and of axisymmetric runs) are stored once per distinct row, bitwise, with a row index per face: the faces of a box have a few rows per direction (1,826 for the 798,720 faces of a 64³ box) and triangles one. Results are bitwise unchanged. `mallard check`, 64³ hexahedra, Navier–Stokes:
+
+| mesh and geometry per cell | before | after |
+|---|---:|---:|
+| TENO5 | 2.01 kB | 1.80 kB |
+| TENO3 | 1.52 kB | 1.44 kB |
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first: a box of quadrilaterals or hexahedra, whose cells meet face to face, at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers, numbered along its axes (a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
+Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first: a box of quadrilaterals or hexahedra, whose cells meet face to face (across periodic boundaries too), at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers, numbered along its axes (a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
 
 The performance set on one A100, cells per second, best of six runs over two interleaved rounds, before 0.10.0 and with `auto`:
 
@@ -125,6 +133,8 @@ The performance case `flame_3d` is a propane–air flame with the two-step mecha
 | cost per cell and step over the same flow of air | 15.5× | 7.8× | 5.9× |
 
 The opt-in `C_reg = 1e-10` cheapens trace fuel burning out in hot gas. After 100 steps the temperature is within 0.54 K and the integrated heat release within 0.08% of the default.
+
+Device memory: the reconstruction's work memory and the transport properties of a mixture share one allocation, since a step never needs both at once ([#552](https://github.com/MatthewBonanni/mallard/issues/552)). An A100-80GB holds 4% more cells of the two-step flame at TENO5, 9% with MUSCL and 18% with GRI-Mech 3.0; `mallard check --memory` counts it under faces and gradients.
 
 ### Chemistry load balancing {#chemistry-load-balancing}
 

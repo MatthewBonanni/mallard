@@ -1,7 +1,7 @@
 /**
  * @file chemistry_reactor_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief RODAS order and stiff accuracy, the reactor Jacobian, and
+ * @brief RODAS and BDF order and stiff accuracy, the reactor Jacobian, and
  *        constant-volume ignition and equilibrium against Cantera.
  * @version 0.3
  * @date 2026-10-03
@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "bdf.h"
 #include "data_paths.h"
 #include "kinetics.h"
 #include "mechanism.h"
@@ -71,6 +72,7 @@ Table read_table(const std::string & file) {
 
 /** @brief Van der Pol oscillator with mu = 1 (not stiff). */
 struct VanDerPol {
+    KOKKOS_INLINE_FUNCTION double atol(uint32_t) const { return 1.0; }
     template <typename L> KOKKOS_INLINE_FUNCTION bool admissible(const L &, const double *) const { return true; }
     template <typename L> KOKKOS_INLINE_FUNCTION void rhs(const L &, const double * y, double * f) const {
         f[0] = y[1];
@@ -109,6 +111,21 @@ struct Robertson {
     }
 };
 
+/** @brief dy/dt = -lambda y: stiff for lambda h >> 1, however small y. */
+struct Decay {
+    double lambda;
+    KOKKOS_INLINE_FUNCTION double atol(uint32_t) const { return 1e-10; }
+    template <typename L> KOKKOS_INLINE_FUNCTION bool admissible(const L &, const double *) const { return true; }
+    template <typename L> KOKKOS_INLINE_FUNCTION void rhs(const L &, const double * y, double * f) const {
+        f[0] = -lambda * y[0];
+    }
+    template <typename L> KOKKOS_INLINE_FUNCTION void rhs_jacobian(const L & lanes, const double * y, double * f,
+                                                                    double * J) const {
+        rhs(lanes, y, f);
+        J[0] = -lambda;
+    }
+};
+
 /** @brief Van der Pol at t = 1 from (2, 0) with n fixed RODAS steps; err_1 is the first step's error estimate. */
 std::array<double, 2> van_der_pol(const uint32_t n_steps, double & err_1) {
     const VanDerPol system;
@@ -137,7 +154,7 @@ struct IgnitionResults {
     uint32_t steps = 0, failures = 0;
 };
 
-IgnitionResults device_ignition(const Mechanism & mech, const Table & ref) {
+IgnitionResults device_ignition(const Mechanism & mech, const Table & ref, const ReactorOptions & options = {}) {
     const ThermoTable<> thermo = make_thermo_table(mech);
     const KineticsTable<> kinetics = make_kinetics_table(mech);
     const uint32_t ns = mech.n_species(), n_cases = static_cast<uint32_t>(ref.rows.size());
@@ -153,9 +170,8 @@ IgnitionResults device_ignition(const Mechanism & mech, const Table & ref) {
         for (uint32_t k = 0; k < ns; k++) h_state(c, 3 + k) = ref.rows[c][c_Y0 + k];
     }
     Kokkos::deep_copy(state, h_state);
-    Rows<double> work("work", n_cases, reactor_work_size(kinetics));
+    Rows<double> work("work", n_cases, reactor_work_size(kinetics, nullptr, options.method));
     Rows<uint32_t> pivot("pivot", n_cases, ns + 1);
-    const ReactorOptions options;
     Kokkos::parallel_for("ignition", n_cases, KOKKOS_LAMBDA(const uint32_t c) {
         const double rho = state(c, 0), tau_ref = state(c, 2);
         double T = state(c, 1), h = 0.0;
@@ -210,6 +226,7 @@ struct LanesIgnitionFunctor {
     Rows<uint32_t> pivot;
     Rows<double> out;    // T, steps, Y
     uint32_t lanes;  // threads x vector lanes of a team
+    ReactorOptions options;
 
     KOKKOS_INLINE_FUNCTION void operator()(const uint32_t c) const {
         const uint32_t ns = thermo.n_species;
@@ -217,7 +234,7 @@ struct LanesIgnitionFunctor {
         for (uint32_t k = 0; k < ns; k++) Y[k] = state(c, 3 + k);
         double T = state(c, 1), h = 0.0;
         const RosenbrockResult r = advance_reactor(thermo, kinetics, state(c, 0), 2.0 * state(c, 2), Y, T, h,
-                                                   ReactorOptions(), Y + ns, &pivot(c, 0));
+                                                   options, Y + ns, &pivot(c, 0));
         out(c, 0) = T;
         out(c, 1) = r.steps + r.rejected + (r.status == RosenbrockStatus::SUCCESS ? 0.0 : 1e9);
         for (uint32_t k = 0; k < ns; k++) out(c, 2 + k) = Y[k];
@@ -231,7 +248,7 @@ struct LanesIgnitionFunctor {
         team.sync();
         double T = state(c, 1), h = 0.0;
         const RosenbrockResult r = advance_reactor(team, thermo, kinetics, state(c, 0), 2.0 * state(c, 2), Y, T, h,
-                                                   ReactorOptions(), Y + ns, &pivot(c, 0));
+                                                   options, Y + ns, &pivot(c, 0));
         team.for_each(ns, [&](const uint32_t k) { out(c, 2 + k) = Y[k]; });
         team.single([&]() {
             out(c, 0) = T;
@@ -241,7 +258,7 @@ struct LanesIgnitionFunctor {
 };
 
 Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Table & ref, const uint32_t lanes,
-                                              const uint32_t threads = 1) {
+                                              const uint32_t threads = 1, const ReactorOptions & options = {}) {
     const uint32_t ns = mech.n_species(), n_cases = static_cast<uint32_t>(ref.rows.size());
     const KineticsTable<> kinetics = make_kinetics_table(mech);
     Rows<double> state("state", n_cases, 3 + ns), out("out", n_cases, 2 + ns);
@@ -255,8 +272,8 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
     }
     Kokkos::deep_copy(state, h_state);
     const LanesIgnitionFunctor functor{make_thermo_table(mech), kinetics, state,
-                                       Rows<double>("work", n_cases, ns + reactor_work_size(kinetics)),
-                                       Rows<uint32_t>("pivot", n_cases, ns + 1), out, threads * lanes};
+                                       Rows<double>("work", n_cases, ns + reactor_work_size(kinetics, nullptr, options.method)),
+                                       Rows<uint32_t>("pivot", n_cases, ns + 1), out, threads * lanes, options};
     if (lanes == 0) {
         Kokkos::parallel_for("ignition_threads", n_cases, functor);
     } else {
@@ -268,9 +285,8 @@ Rows<double>::host_mirror_type lanes_ignition(const Mechanism & mech, const Tabl
     return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
 }
 
-} // namespace
-
-TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
+/** @brief The team path against one thread, for the integrator of options.method. */
+void expect_lanes_integrate_like_one_thread(const ReactorOptions & options, const double count_tolerance) {
     // The team path (rates, Jacobian rows, LU and solves across lanes, reductions
     // in a fixed order) gives the one-thread result to round-off, with the
     // largest vector length of the backend (a warp, 32 or 64 lanes, on GPUs; 1
@@ -283,24 +299,36 @@ TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) {
                                             std::array<std::string, 3>{"gri30", SOURCE_DIR + "/mechanisms/gri30.yaml", ""}}) {
         const Mechanism mech = read_mechanism(file, phase);
         const Table ref = read_table(name + "_ignition.csv");
-        const auto one = lanes_ignition(mech, ref, 0);
-        const auto team = lanes_ignition(mech, ref, lanes);
+        const auto one = lanes_ignition(mech, ref, 0, 1, options);
+        const auto team = lanes_ignition(mech, ref, lanes, 1, options);
         for (uint32_t c = 0; c < ref.rows.size(); c++) {
             EXPECT_LT(one(c, 1), 1e9) << name << " case " << c;
             EXPECT_NEAR(team(c, 0), one(c, 0), 1e-6 * one(c, 0)) << name << " case " << c;
-            EXPECT_NEAR(team(c, 1), one(c, 1), 0.1 * one(c, 1) + 2) << name << " case " << c;
+            EXPECT_NEAR(team(c, 1), one(c, 1), count_tolerance * one(c, 1) + 2) << name << " case " << c;
             for (uint32_t k = 0; k < mech.n_species(); k++) {
                 EXPECT_NEAR(team(c, 2 + k), one(c, 2 + k), 1e-6) << name << " case " << c << " Y_" << k;
             }
         }
         // Several warps per cell (the expensive cells of large mechanisms) give the same bits as one
         if (gpu) {
-            const auto wide = lanes_ignition(mech, ref, lanes, 4);
+            const auto wide = lanes_ignition(mech, ref, lanes, 4, options);
             for (uint32_t c = 0; c < ref.rows.size(); c++) {
                 for (uint32_t i = 0; i < 2 + mech.n_species(); i++) EXPECT_EQ(wide(c, i), team(c, i)) << name << " case " << c << " " << i;
             }
         }
     }
+}
+
+} // namespace
+
+TEST(ChemistryReactorTest, VectorLanesIntegrateLikeOneThread) { expect_lanes_integrate_like_one_thread(ReactorOptions(), 0.1); }
+
+TEST(ChemistryReactorTest, BdfVectorLanesIntegrateLikeOneThread) {
+    // The same for BDF: its Newton iterations, differences and order changes across lanes. Its sub-step
+    // counts follow round-off more (discrete order and step changes): within 25%
+    ReactorOptions options;
+    options.method = Integrator::BDF;
+    expect_lanes_integrate_like_one_thread(options, 0.25);
 }
 
 TEST(ChemistryReactorTest, RodasIsFourthOrderWithThirdOrderEmbeddedSolution) {
@@ -330,6 +358,86 @@ TEST(ChemistryReactorTest, RodasSolvesTheStiffRobertsonProblem) {
     const double reference[3] = {0.7158270687193e+00, 0.9185534764529e-05, 0.2841637457462e+00};
     for (int i = 0; i < 3; i++) EXPECT_NEAR(y[i], reference[i], 1e-6 * reference[i]) << i;
     EXPECT_LT(r.steps + r.rejected, 1000u);  // about 460 at this tolerance; an unstable scheme needs millions
+}
+
+TEST(ChemistryReactorTest, BdfSolvesTheStiffRobertsonProblem) {
+    const Robertson system;
+    double y[3] = {1.0, 0.0, 0.0}, J[9], vectors[bdf_vectors_size(3)], LU[9], h = 0.0;
+    uint32_t pivot[3];
+    RosenbrockOptions options;
+    options.rtol = 1e-8;
+    const RosenbrockResult r =
+        integrate_bdf(SerialLanes(), system, DenseLU{3, LU, pivot}, 0.0, 40.0, y, h, options, J, vectors);
+    ASSERT_EQ(r.status, RosenbrockStatus::SUCCESS);
+    const double reference[3] = {0.7158270687193e+00, 0.9185534764529e-05, 0.2841637457462e+00};
+    for (int i = 0; i < 3; i++) EXPECT_NEAR(y[i], reference[i], 1e-5 * reference[i]) << i;
+    EXPECT_LT(r.steps + r.rejected, 3000u);
+}
+
+TEST(ChemistryReactorTest, BdfRescaledDifferencesAreThoseOfTheNewStep) {
+    // Backward differences of a polynomial of degree order at step h, rescaled to
+    // step factor h, are its differences at the new step exactly
+    const double coefficients[BDF_MAX_ORDER + 1] = {1.0, 2.0, -3.0, 0.5, 4.0, -1.5};
+    for (uint32_t order = 1; order <= BDF_MAX_ORDER; order++) {
+        auto differences = [&](const double h, double * D) {
+            double v[BDF_MAX_ORDER + 1];
+            for (uint32_t j = 0; j <= order; j++) {  // y_n, y_{n-1}, ...
+                v[j] = 0.0;
+                for (uint32_t k = order + 1; k-- > 0;) v[j] = v[j] * (-h * j) + coefficients[k];
+            }
+            for (uint32_t k = 0; k <= order; k++) {
+                D[k] = v[0];
+                for (uint32_t j = 0; j + k < order; j++) v[j] -= v[j + 1];
+            }
+        };
+        for (const double factor : {0.25, 0.7, 1.5, 10.0}) {
+            double D[BDF_MAX_ORDER + 1], expected[BDF_MAX_ORDER + 1];
+            differences(0.1, D);
+            bdf_rescale(SerialLanes(), 1, order, factor, D);
+            differences(0.1 * factor, expected);
+            for (uint32_t k = 0; k <= order; k++) {
+                EXPECT_NEAR(D[k], expected[k], 1e-12 * (1.0 + std::abs(expected[k]))) << order << " " << factor << " " << k;
+            }
+        }
+    }
+}
+
+/** @brief One explicit_step() of size h from y (updated if accepted); whether it was accepted. */
+template <typename System, uint32_t N>
+bool explicit_step(const System & system, const double h, const double rtol, double (&y)[N]) {
+    double k_data[4 * N], y_new[N], y_tmp[N];
+    double * const k[4] = {k_data, k_data + N, k_data + 2 * N, k_data + 3 * N};
+    const SerialLanes lanes;
+    system.rhs(lanes, y, k[0]);
+    if (!explicit_step(lanes, system, N, h, rtol, y, k, y_new, y_tmp)) return false;
+    for (uint32_t i = 0; i < N; i++) y[i] = y_new[i];
+    return true;
+}
+
+TEST(ChemistryReactorTest, ExplicitStepIsThirdOrderAndRejectsStiffSteps) {
+    // Van der Pol at t = 1 in n accepted explicit steps (atol 1: the error test passes)
+    auto explicit_steps = [](const uint32_t n) {
+        double y[2] = {2.0, 0.0};
+        for (uint32_t s = 0; s < n; s++) EXPECT_TRUE(explicit_step(VanDerPol(), 1.0 / n, 1e-6, y));
+        return std::array<double, 2>{y[0], y[1]};
+    };
+    double err_ref;
+    const auto reference = van_der_pol(4096, err_ref);
+    double error[2];
+    for (int i = 0; i < 2; i++) {
+        const auto y = explicit_steps(32u << i);
+        error[i] = std::hypot(y[0] - reference[0], y[1] - reference[1]);
+    }
+    verification::expect_order({"time", "Bogacki-Shampine (chemistry explicit step)", "",
+                                "error, Van der Pol oscillator", {32, 64}, {error[0], error[1]}, 3.0, 2.8, 3.3});
+
+    // From 1e-14 with lambda h = 10 the error estimate (1.25e-11) passes the test, but the step is unstable and
+    // would amplify y 126 times: the stiffness estimate rejects it. With lambda h = 2 the step is stable
+    double y[1] = {1e-14};
+    EXPECT_FALSE(explicit_step(Decay{10.0}, 1.0, 1e-6, y));
+    EXPECT_EQ(y[0], 1e-14);
+    EXPECT_TRUE(explicit_step(Decay{2.0}, 1.0, 1e-6, y));
+    EXPECT_NEAR(y[0], -1e-14 / 3.0, 1e-20);  // times 1 + z + z^2 / 2 + z^3 / 6 at z = -2
 }
 
 TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
@@ -399,7 +507,9 @@ TEST(ChemistryReactorTest, ReactorJacobianMatchesFiniteDifferences) {
     }
 }
 
-TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) {
+namespace {
+
+void expect_ignition_matches_cantera(const ReactorOptions & options) {
     // V1/V2: H2/air (h2o2) and CH4/air (GRI-3.0), T0 1000-1500 K, phi 0.5-2,
     // 1 and 10 atm, default tolerances, integrated in device kernels
     const std::vector<std::array<std::string, 3>> cases = {
@@ -411,7 +521,7 @@ TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) {
         const uint32_t ns = mech.n_species();
         const Table ref = read_table(name + "_ignition.csv");
         ASSERT_EQ(ref.rows.size(), 18u) << name;
-        const IgnitionResults r = device_ignition(mech, ref);
+        const IgnitionResults r = device_ignition(mech, ref, options);
         EXPECT_EQ(r.failures, 0u) << name;
         const size_t c_Y = ref.column("Yeq_" + mech.species[0].name);
         double worst_tau = 0.0;
@@ -429,8 +539,23 @@ TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) {
                 EXPECT_NEAR(r.Y_eq[c][k], row[c_Y + k], 1e-4) << where << " Y_" << mech.species[k].name;
             }
         }
-        std::cout << name << ": max ignition delay error " << worst_tau << ", " << r.steps << " sub-steps\n";
+        std::cout << name << (options.method == Integrator::BDF ? " (BDF)" : " (RODAS)") << ": max ignition delay error "
+                  << worst_tau << ", " << r.steps << " sub-steps\n";
     }
+}
+
+} // namespace
+
+TEST(ChemistryReactorTest, IgnitionDelaysAndEquilibriumMatchCantera) { expect_ignition_matches_cantera(ReactorOptions()); }
+
+TEST(ChemistryReactorTest, BdfIgnitionDelaysAndEquilibriumMatchCantera) {
+    // The same criteria with BDF, at atol 1e-14: its error estimate is that of the solution it keeps (RODAS
+    // keeps its order-4 solution and estimates the order-3 one's error), so at atol 1e-10 the radicals below
+    // it are left to drift during H2's induction, and its delays come out up to 3% early
+    ReactorOptions options;
+    options.method = Integrator::BDF;
+    options.atol_Y = 1e-14;
+    expect_ignition_matches_cantera(options);
 }
 
 TEST(ChemistryReactorTest, FractionalOrdersIgniteToDepletionLikeCantera) {
@@ -613,6 +738,46 @@ TEST(ChemistryReactorTest, LargeMechanismIgnitesLikeCanteraWithDenseAndSparseLU)
         }
         std::cout << (sparse ? "sparse" : "dense") << " LU: max ignition delay error " << worst << "\n";
     }
+}
+
+TEST(ChemistryReactorTest, LargeMechanismIgnitesLikeCanteraWithBdf) {
+    // V3 at 100 species as above, integrated by BDF with the sparse LU
+    const Mechanism mech = read_mechanism(SOURCE_DIR + "/mechanisms/nDodecane_Reitz.yaml", "nDodecane_IG");
+    const auto thermo = make_thermo_table<Kokkos::HostSpace>(mech);
+    const auto kinetics = make_kinetics_table<Kokkos::HostSpace>(mech);
+    const auto pattern = make_sparse_lu_pattern<Kokkos::HostSpace>(mech);
+    const uint32_t ns = mech.n_species();
+    const Table ref = read_table("ndodecane_ignition.csv");
+    ReactorOptions options;
+    options.method = Integrator::BDF;
+    std::vector<double> work(reactor_work_size(kinetics, &pattern, options.method)), Y(ns);
+    std::vector<uint32_t> pivot(ns + 1);
+    double worst = 0.0;
+    uint32_t steps = 0;
+    for (const auto & row : ref.rows) {
+        for (uint32_t k = 0; k < ns; k++) Y[k] = row[ref.column("Y0_" + mech.species[k].name)];
+        const double rho = row[ref.column("rho")], tau = row[ref.column("tau")];
+        double T = row[ref.column("T0")], h = 0.0, t = 0.0;
+        IgnitionObserver observer;
+        observer.index = ns;
+        double T_at[2];
+        const double ends[2] = {0.5 * tau, 2.0 * tau};
+        for (int s = 0; s < 2; s++) {
+            observer.t_offset = t;
+            const RosenbrockResult r = advance_reactor(thermo, kinetics, rho, ends[s] - t, Y.data(), T, h, options,
+                                                       work.data(), pivot.data(), observer, &pattern);
+            ASSERT_EQ(r.status, RosenbrockStatus::SUCCESS);
+            steps += r.steps + r.rejected;
+            t = ends[s];
+            T_at[s] = T;
+        }
+        const std::string where = "T0 " + std::to_string(row[0]) + " phi " + std::to_string(row[2]);
+        worst = std::max(worst, std::abs(observer.t_ignition / tau - 1.0));
+        EXPECT_NEAR(observer.t_ignition, tau, 5e-3 * tau) << where;
+        EXPECT_NEAR(T_at[0], row[ref.column("T_half_tau")], 1e-2 * row[ref.column("T_half_tau")]) << where;
+        EXPECT_NEAR(T_at[1], row[ref.column("T_2tau")], 1e-2 * row[ref.column("T_2tau")]) << where;
+    }
+    std::cout << "BDF, sparse LU: max ignition delay error " << worst << ", " << steps << " sub-steps\n";
 }
 
 TEST(ChemistryReactorTest, LeanIgnitionIsReportedAtTheSteepestTemperatureRise) {

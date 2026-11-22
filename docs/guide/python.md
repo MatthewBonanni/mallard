@@ -21,26 +21,27 @@ Every function and class: [Python API](python_api.md).
 
 ## Installing
 
-Every installer installs the package with Mallard, so `import mallard` works
-after its usual command:
+Every installer but the [relocatable archive](../installation.md#relocatable-archive)
+installs the package with Mallard, so `import mallard` works after its usual
+command:
 
 | Installer | Command | Opt out |
 |---|---|---|
 | [Container](../installation.md#container) | `docker run --rm -v "$PWD:/work" ghcr.io/matthewbonanni/mallard python3 script.py` | |
 | [Spack](../installation.md#spack) | `spack install mallard && spack load mallard` | `~python` |
-| [From source](../installation.md#from-source) | `cmake --install build`, then `pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
+| [From source](../installation.md#from-source) | `cmake --install build`, then `uv pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
 
 The package is `tools/mallard` of the Mallard repository
-(`share/mallard/tools/mallard` of an install; its distribution name, for pip,
+(`share/mallard/tools/mallard` of an install; its distribution name, for uv,
 is `mallard-python`). A build writes its library,
 `build/src/libmallard2d.so` (`.dylib` on macOS), next to `build/src/mallard`,
 and `cmake --install` installs it in `PREFIX/lib`; a build with
 `-DMallard_DIM=3` gives `libmallard3d`, and either reads the output of both
 dimensions. From a build or an install, add the package to a Python
-environment with [uv](https://docs.astral.sh/uv/) or pip:
+environment with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv && uv pip install -e tools        # in the repository; or: pip install -e tools
+uv venv && uv pip install -e tools        # in the repository
 uv pip install PREFIX/share/mallard/tools  # from an install
 ```
 
@@ -254,7 +255,18 @@ out = mallard.post.extract("solut/flow.vtkhdf", region="domain", fields=["RHO"],
                            reductions=["integral"], latest=True, output="extract")
 mallard.open(out["written"][0]["path"])                  # the file it wrote
 
+derived = mallard.post.derive("solut/flow.vtkhdf", ["MACH", "Q_CRITERION"], latest=True)
+mallard.open(derived["written"][0]["path"]).read("MACH")
+
+avg = mallard.post.average("solut/flow.vtkhdf", times="40:80", fields=["U_X", "U_Y", "P"], favre=True)
+mallard.open(avg["written"][0]).read("RMS_U_X")         # avg["window"], each snapshot's weight
+
 conv = mallard.post.convergence(["coarse", "medium", "fine"], quantity="forces_cylinder:Fx_pressure")
+
+mallard.report("runs/cylinder")["report"]                # rebuilds runs/cylinder/report.html
+archive = mallard.pack("runs/cylinder", output="cylinder.tar.gz", with_outputs="all")
+archive["rerun"]["command"], [f["path"] for f in archive["files"] if f["role"] == "output"]
+check = mallard.pack("cylinder.tar.gz", verify=True)     # check["result"]: 'ok' or 'differs'
 ```
 
 `nprocs=4` runs a command on four MPI ranks (`mpirun -n 4`, or the launcher
@@ -263,7 +275,8 @@ directory it runs in. A command that fails raises `mallard.CommandError`, with
 its exit status, output and error message; `mallard.diff` and
 `mallard.post.convergence` return differences beyond tolerance and diverging
 quantities as results (`d["exit_status"]` is 1), since those are their
-verdicts. `mallard.command` runs any other command that has `--format json`:
+verdicts, and so does `mallard.pack(archive, verify=True)` with the files that
+differ from the archive's manifest. `mallard.command` runs any other command that has `--format json`:
 `mallard.command("check", "input.toml")`, `mallard.command("list", "fields", "input.toml")`.
 
 ## Pitfalls
@@ -277,8 +290,9 @@ verdicts. `mallard.command` runs any other command that has `--format json`:
 - **Cell order.** Values of a region snapshot or a VTU piece are not in the
   mesh's global order; line them up with their own `geometry()`, not with the
   whole mesh's.
-- **Memory.** A field is read whole: `read_all` of a large series holds every
-  snapshot at once. Loop over `read(field, k)` to hold one.
+- **Memory.** A field is read whole, into the array returned without a copy:
+  `read_all` of a large series holds every snapshot at once. Loop over
+  `read(field, k)` to hold one.
 - **Old builds.** The library reads the format versions of its own Mallard and
   earlier, and refuses newer files with a message saying so: use the package and
   library of the newer Mallard.
@@ -290,6 +304,7 @@ verdicts. `mallard.command` runs any other command that has `--format json`:
   `mallard info` through `mallard post extract`, `post derive`, `post average` and `post convergence` to figures
   drawn with the package
 - [Output](output.md): what a run writes, units, run block and snapshot metadata
-- [Command line](cli.md): `mallard info`, `mallard diff`, `mallard post extract`, `mallard post convergence`
+- [Command line](cli.md): `mallard info`, `mallard diff`, `mallard post extract`, `post derive`, `post average`,
+  `post convergence`, `mallard pack`
 - [Tools](../../tools/README.md): the plotting and animation scripts in `tools/`
 - Design notes: [Reading output](../design/output_reader.md), [The Python package](../design/python_package.md)

@@ -1,0 +1,71 @@
+# Plane Poiseuille flow fed by its own profile: an inlet_mass_flow whose
+# profile is written in the inlet's own coordinate u, which runs from 0 at
+# one end of the inlet to 1 at the other. u (1 - u) is the parabola
+# y (1 - y) of the developed flow, so the flow enters developed and stays so:
+# u = 6 U y (1 - y) with the bulk velocity U = 0.1 (Mach 0.1, Re = 200: a uniform inlet would still be 13% off at x = 3.5).
+# Check the profile near x = 3.5 against the exact one (6.6e-3 U at 16 cells) with
+#   python plot_channel_inlet.py channel_inlet.png solut/channel_<step>.vtkhdf
+
+[run]
+t_stop = 120.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 16
+Lx = 4.0
+Ly = 1.0
+
+[initialize]
+type = "constant"
+u = [0.1, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "left"
+type = "inlet_mass_flow"
+mdot = 0.1               # bulk velocity 0.1 across the channel of height 1
+profile = "u * (1 - u)"  # zero at both ends of the inlet (u = 0 and 1), largest at its middle
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 0.7142857142857143
+
+[[boundaries]]
+name = "bottom"
+type = "wall_isothermal"
+T = 0.7142857142857143
+
+[[boundaries]]
+name = "top"
+type = "wall_isothermal"
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.0005
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/channel"
+time_interval = 120.0
+fields = ["RHO", "U_X", "U_Y", "P", "T"]

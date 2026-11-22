@@ -14,6 +14,7 @@
 #include <array>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <regex>
@@ -29,7 +30,12 @@ namespace input_upgrade {
 
 namespace {
 
-std::string plus_one(const std::string & text) { return std::to_string(std::stoll(text) + 1); }
+std::string plus_one(const std::string & text) {
+    const Input value = parse_input_string("x = " + text).at("x");
+    if (!value.is_integer()) throw std::invalid_argument("is " + text + ", but must be an integer");
+    if (value.as_integer() == std::numeric_limits<int64_t>::max()) throw std::invalid_argument(text + " is out of range");
+    return std::to_string(value.as_integer() + 1);
+}
 
 // geometry = "all" wrote the whole mesh, which region calls "domain"
 std::string all_to_domain(const std::string & text) { return text == "\"all\"" || text == "'all'" ? "\"domain\"" : text; }
@@ -271,7 +277,7 @@ bool is_removed(const std::string & removed, const std::string & version) {
 }
 
 // The release whose removals this source has made, which rejects them before its version bump
-constexpr const char * REMOVALS = "0.10.0";
+constexpr const char * REMOVALS = "0.11.0";
 
 std::string this_release() { return is_removed(REMOVALS, MALLARD_VERSION) ? MALLARD_VERSION : REMOVALS; }
 
@@ -432,7 +438,12 @@ std::vector<Finding> transform(V & root, const Rules & table, const std::string 
                                      to_string(key) + " is the old name of " + to_string(to) + ": remove it.");
                 }
                 if (rule.convert) {
-                    const std::string text = rule.convert(bare_text(value));
+                    std::string text;
+                    try {
+                        text = rule.convert(bare_text(value));
+                    } catch (const std::invalid_argument & e) {
+                        throw InputError(Diagnostic{.key = to_string(key), .line = line_of(value), .message = e.what()});
+                    }
                     value = parse_toml<typename V::config_type>("x = " + text).at("x");
                 }
                 V * new_parent = at(root, parent(to), true);
@@ -764,8 +775,8 @@ std::vector<std::string> notices(const std::string & text) {
             }
             const std::string prefix =
                 entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
-            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
-                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output writes the series file " + prefix +
+                          ".vtkhdf over a file per snapshot by default; add series = false for each snapshot whole, " +
                           prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
         }
     }

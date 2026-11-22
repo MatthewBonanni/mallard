@@ -1,6 +1,7 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [
   "examples/turbulent_hot_spot_2d/input.toml"

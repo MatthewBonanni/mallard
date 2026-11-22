@@ -29,8 +29,8 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 | OpenMP, 2D, HDF5, CGNS, zlib | x86-64 CPU | Run | Full suite (2 threads); upgrading every release's inputs; output units through h5py; the Python package's tests | every PR | `ci.yml/openmp` |
 | OpenMP, single precision, 2D, zlib | x86-64 CPU | Run | Full suite, two copies at once | every PR | `ci.yml/float` |
 | OpenMP, single precision, 3D, HDF5, CGNS | x86-64 CPU | Run | Full suite | every PR | `ci.yml/float-3d` |
-| Serial, MPI, 2D, dKaMinPar, HDF5, zlib | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 2 jobs | every PR | `ci.yml/mpi` |
-| Serial, MPI, 3D, HDF5 | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 4 jobs | every PR | `ci.yml/mpi-3d` |
+| Serial, MPI, 2D, dKaMinPar, HDF5, zlib, Kokkos bounds checking | x86-64 CPU | Run | Full suite on 3 ranks; MPI tests on 1, 2 and 4 ranks; rank report on 2 and 3; split across 3 jobs | every PR | `ci.yml/mpi` |
+| Serial, MPI, 3D, HDF5, Kokkos bounds checking | x86-64 CPU | Run | Full suite on 3 ranks, and on 1 rank on main (PRs: the MPI tests on 1 rank); MPI tests on 2 and 4 ranks; split across 6 jobs | every PR | `ci.yml/mpi-3d` |
 | Serial, MPI, HDF5, 2D and 3D, installed | x86-64 CPU | Run | Every [tutorial](../tutorials/index.md) at reduced size on 2 ranks, with its Gmsh mesh and scripts; every case template; the installed bash, zsh and fish completion | main | `ci.yml/tutorials` |
 | Serial, 2D | x86-64 CPU | Run | Full suite | main | `ci.yml/serial` |
 | Serial, 3D, HDF5 | x86-64 CPU | Run | Full suite | main | `ci.yml/serial-3d` |
@@ -53,8 +53,8 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 | CUDA 13.5 (sm_80), OpenMP host, MPI, GPU-aware MPI, 2D and 3D | | Compile | | main, device PRs | `ci.yml/cuda-13.5` |
 | CUDA 13.4 (sm_80), same options | | Compile | | main | `ci.yml/cuda-13.4` |
 | CUDA 13.5 (sm_90), same options | arm64 (Grace) | Compile | | main | `ci.yml/cuda-13.5-arm64` |
-| HIP (ROCm 10.1, gfx90a), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an AMD GPU | device PRs | `ci.yml/hip` |
-| SYCL (oneAPI 2026.2, Intel GEN), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an Intel GPU | device PRs | `ci.yml/sycl` |
+| HIP (ROCm 10.1, gfx90a), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an AMD GPU. Steps kernel by kernel, one at a time: HIP's graphs have no conditional nodes ([steps by backend](parallel.md#mpi)) | device PRs | `ci.yml/hip` |
+| SYCL (oneAPI 2026.2, Intel GEN), MPI, GPU-aware MPI, 2D and 3D | | Compile | Never run on an Intel GPU. Steps kernel by kernel, one at a time: SYCL's graphs have no conditional nodes ([steps by backend](parallel.md#mpi)) | device PRs | `ci.yml/sycl` |
 | Serial, MPI, HDF5, 2D, AddressSanitizer and UBSan | x86-64 CPU | Run | Full suite on 1 rank; MPI tests on 2 ranks | nightly | `sanitizers.yml/asan-ubsan` |
 | Serial, HDF5, CGNS, Clang, libFuzzer, ASan and UBSan | x86-64 CPU | Run | Input and mesh reader harnesses: a minute each in 2D (every PR); ten minutes each in 2D and 3D (nightly) | main, nightly | `ci.yml/fuzz`, `fuzz.yml/fuzz` |
 | Serial, 2D and 3D | x86-64 CPU | Run | [Convergence studies](../verification/index.md) | by hand | `verification.yml/verification` |
@@ -65,6 +65,7 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 |---|---|---|---|---|---|
 | CPU image: OpenMP, MPI, dKaMinPar, HDF5, CGNS, zlib, 2D and 3D | x86-64 and arm64 CPU | Run | Examples compared with reference solutions (`docker/smoke`); also through Apptainer on x86-64 | release | `release.yml/cpu` |
 | CUDA image: sm_80, 86, 89 and 90, OpenMP host, MPI, NCCL, HDF5, CGNS, zlib, 2D and 3D | | Compile | Libraries resolve and the executables start (no GPU) | release | `release.yml/cuda` |
+| Relocatable archive: OpenMP, MPICH ABI, HDF5, CGNS, zlib, 2D and 3D, built with GCC 16 on glibc 2.28 (manylinux_2_28) | x86-64 and arm64 CPU | Run | Unpacked on Ubuntu 26.04: examples compared with reference solutions (`docker/smoke`), and Sod on two ranks of Ubuntu's MPICH in place of the archive's | release | `release.yml/archive` |
 | Spack `mallard@main`: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D, with Ubuntu's GCC, CMake and Open MPI | x86-64 CPU | Run | `spack test run` and the container smoke test | release | `release.yml/spack` |
 | Spack `+cuda`, `+rocm`, `+cuda +nccl`, `~mpi precision=single` | | Concretized only | | release | `release.yml/spack` |
 

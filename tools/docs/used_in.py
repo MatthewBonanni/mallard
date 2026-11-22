@@ -71,6 +71,8 @@ RULES = {
         (lambda t: num(t).get("convective_flux") == "hybrid", None),
     ("les.md", "## Thickened flames: `[les.combustion]`"):
         (lambda t: t.get("les", {}).get("combustion", {}).get("model") == "tfles", None),
+    ("les.md", "### Non-premixed and partially premixed flames"):
+        (lambda t: t.get("les", {}).get("combustion", {}).get("sensor") == "reaction", "no example yet"),
     ("les.md", "### PaSR (experimental)"):
         (lambda t: t.get("les", {}).get("combustion", {}).get("model") == "pasr", "no example yet"),
     ("les.md", "## Wall models: `wall_model`"): (lambda t: any("wall_model" in b for b in boundaries(t)), None),
@@ -105,6 +107,7 @@ RULES = {
     ("statistics.md", "## Phase averages: `[statistics.phase]`"): (lambda t: "phase" in t.get("statistics", {}), None),
     ("statistics.md", "## Conditional statistics and PDFs: `[[statistics.conditional]]`"):
         (lambda t: "conditional" in t.get("statistics", {}), None),
+    ("particles.md", "## Tracers: `[particles]`"): (lambda t: "particles" in t, None),
     ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("probes.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),

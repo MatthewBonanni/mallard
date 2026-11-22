@@ -68,6 +68,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 - <a id="diskin-2010"></a>B. Diskin, J. L. Thomas, E. J. Nielsen, H. Nishikawa and J. A. White, Comparison of node-centered and cell-centered unstructured finite-volume discretizations: viscous fluxes, *AIAA J.* 48, 1326–1338 (2010). [doi:10.2514/1.44940](https://doi.org/10.2514/1.44940)
   Used in: the viscous face gradients, the average of the two cell gradients corrected along the face normal so that their component along the line of centroids equals the direct difference (`src/numerics/viscous_flux.h`).
+- <a id="nishikawa-2010"></a>H. Nishikawa, Beyond interface gradient: a general principle for constructing diffusion schemes, AIAA Paper 2010-5093 (2010). [doi:10.2514/6.2010-5093](https://doi.org/10.2514/6.2010-5093)
+  Used in: the damping of the jump of the two polynomials' values in the face gradients of `[numerics] viscous_gradients = "reconstruction"` (`src/numerics/viscous_flux.h`).
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
 - <a id="wilke-1950"></a>C. R. Wilke, A viscosity equation for gas mixtures, *J. Chem. Phys.* 18, 517–519 (1950). [doi:10.1063/1.1747673](https://doi.org/10.1063/1.1747673)
@@ -137,6 +139,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
   Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
+- <a id="hendrickson-2018"></a>T. R. Hendrickson, A. Kartha and G. V. Candler, An improved Ducros sensor for the simulation of compressible flows with shocks, AIAA Paper 2018-3710 (2018). [doi:10.2514/6.2018-3710](https://doi.org/10.2514/6.2018-3710)
+  Used in: `[numerics.hybrid] dilatation_scale`, the Ducros sensor's `eps`, which discounts small dilatations.
 - <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
   Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
 - <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
@@ -148,7 +152,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="volpiani-2016"></a>P. S. Volpiani, T. Schmitt and D. Veynante, A posteriori tests of a dynamic thickened flame model for large eddy simulations of turbulent premixed combustion, *Combust. Flame* 174, 166–178 (2016). [doi:10.1016/j.combustflame.2016.08.007](https://doi.org/10.1016/j.combustflame.2016.08.007)
   Used in: the dynamic efficiency as the default, and its a posteriori test against filtered DNS over several filter widths ([design/les.md](design/les.md), section 8.3).
 - <a id="legier-2002"></a>J.-P. Légier, T. Poinsot, B. Varoquié, F. Lacas and D. Veynante, Large eddy simulation of a non-premixed turbulent burner using a dynamically thickened flame model, in *Advances in LES of Complex Flows*, Springer, 315–326 (2002). [doi:10.1007/978-94-017-1998-8_27](https://doi.org/10.1007/978-94-017-1998-8_27)
-  Used in: thickening only where the flame sensor is on (dynamic thickening).
+  Used in: thickening only where the flame sensor is on (dynamic thickening), and the reaction-rate sensor for non-premixed and partially premixed flames ([design/les.md](design/les.md), section 6.7).
 - <a id="butler-orourke-1977"></a>T. D. Butler and P. J. O'Rourke, A numerical method for two dimensional unsteady reacting flows, *Proc. Combust. Inst.* 16, 1503–1515 (1977). [doi:10.1016/S0082-0784(77)80432-3](https://doi.org/10.1016/S0082-0784%2877%2980432-3)
   Used in: the thickening transformation `D -> F D`, `omega -> omega / F` that keeps the laminar flame speed.
 
@@ -267,6 +271,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: collapsed (conical product) Gauss rules on triangles and tetrahedra, for TENO-E moments and 3D analytical initial conditions (`src/numerics/teno.cpp`, `src/solver/solver_initialize.cpp`). Gauss–Legendre rules integrate the faces.
 - <a id="kuhn-1960"></a>H. W. Kuhn, Some combinatorial lemmas in topology, *IBM J. Res. Dev.* 4, 518–524 (1960). [doi:10.1147/rd.45.0518](https://doi.org/10.1147/rd.45.0518)
   Used in: `type = "cartesian_tet"`, six tetrahedra per block of a generated box.
+- <a id="baerentzen-aanaes-2005"></a>J. A. Bærentzen and H. Aanæs, Signed distance computation using the angle weighted pseudonormal, *IEEE Trans. Vis. Comput. Graph.* 11, 243–253 (2005). [doi:10.1109/TVCG.2005.49](https://doi.org/10.1109/TVCG.2005.49)
+  Used in: the sign of the distance to the closed surfaces of regions from STL and OBJ files (`src/common/geometry.h`).
+- <a id="ericson-2005"></a>C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann (2005).
+  Used in: the closest point on a triangle (§5.1.5) and the bounding volume hierarchy of regions from STL and OBJ files.
 
 ## Parallelism, meshes and software
 
@@ -318,6 +326,19 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
 
+## Lagrangian particles
+
+- <a id="schiller-naumann-1933"></a>L. Schiller and A. Naumann, Über die grundlegenden Berechnungen bei der Schwerkraftaufbereitung, *Z. Ver. Dtsch. Ing.* 77, 318–320 (1933).
+  Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`).
+- <a id="singh-2022"></a>N. Singh, M. Kroells, C. Li, E. Ching, M. Ihme, C. J. Hogan and T. E. Schwartzentruber, General drag coefficient for flow over spherical particles, *AIAA J.* 60, 587–597 (2022). [doi:10.2514/1.J060648](https://doi.org/10.2514/1.J060648), [arXiv:2012.04813](https://arxiv.org/abs/2012.04813)
+  Used in: `drag = "singh"` of solid particles (`src/particles/particle_forces.h`, Appendix C).
+- <a id="maxey-riley-1983"></a>M. R. Maxey and J. J. Riley, Equation of motion for a small rigid sphere in a nonuniform flow, *Phys. Fluids* 26, 883–889 (1983). [doi:10.1063/1.864230](https://doi.org/10.1063/1.864230)
+  Used in: the `"pressure_gradient"` and `"added_mass"` forces of solid particles.
+- <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
+  Used in: the `"saffman_lift"` force of solid particles.
+- <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
+  Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
+
 ## Derived output fields
 
 - <a id="hunt-wray-moin-1988"></a>J. C. R. Hunt, A. A. Wray and P. Moin, Eddies, streams, and convergence zones in turbulent flows, Center for Turbulence Research, Proceedings of the Summer Program 1988, 193–208 (1988).
@@ -327,7 +348,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="bilger-starner-kee-1990"></a>R. W. Bilger, S. H. Stårner and R. J. Kee, On reduced mechanisms for methane-air combustion in nonpremixed flames, *Combust. Flame* 80, 135–149 (1990). [doi:10.1016/0010-2180(90)90122-8](https://doi.org/10.1016/0010-2180%2890%2990122-8)
   Used in: the `MIXTURE_FRACTION` output field, Bilger's element-based mixture fraction (`src/solver/derived_fields.cpp`).
 - <a id="yamashita-shimada-takeno-1996"></a>H. Yamashita, M. Shimada and T. Takeno, A numerical study on flame stability at the transition point of jet diffusion flames, *Proc. Combust. Inst.* 26, 27–34 (1996). [doi:10.1016/S0082-0784(96)80196-2](https://doi.org/10.1016/S0082-0784%2896%2980196-2)
-  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`).
+  Used in: the `FLAME_INDEX` output field, Takeno's flame index normalized to [-1, 1] (`src/solver/derived_fields.h`); the premixed-only reaction sensor of thickened flames ([design/les.md](design/les.md), section 6.7).
 - <a id="peters-2000"></a>N. Peters, *Turbulent Combustion*, Cambridge University Press (2000). [doi:10.1017/CBO9780511612701](https://doi.org/10.1017/CBO9780511612701)
   Used in: the `SCALAR_DISSIPATION` output field, χ = 2 D \|∇Z\|² of the mixture fraction (`src/solver/derived_fields.cpp`).
 
@@ -431,3 +452,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="hawkes-2006"></a>E. R. Hawkes, R. Sankaran, P. P. Pébay and J. H. Chen, Direct numerical simulation of ignition front propagation in a constant volume with temperature inhomogeneities: II. Parametric study, *Combust. Flame* 145, 145–159 (2006). [doi:10.1016/j.combustflame.2005.09.018](https://doi.org/10.1016/j.combustflame.2005.09.018)
 - <a id="passot-pouquet-1987"></a>T. Passot and A. Pouquet, Numerical simulation of compressible homogeneous flows in the turbulent regime, *J. Fluid Mech.* 181, 441–466 (1987). [doi:10.1017/S0022112087002167](https://doi.org/10.1017/S0022112087002167)
   Used in: `examples/autoignition_2d` (the configuration of Chen et al. and Hawkes et al., the displacement-speed diagnostic of their fronts, and the regime criterion of Sankaran et al. in `examples/autoignition_2d/autoignition_analysis.py`; the Passot–Pouquet spectrum of the initial temperature and velocity fields in `examples/autoignition_2d/autoignition_restart.py`); `spectrum = "passot_pouquet"` of synthetic turbulence (`[initialize.turbulence]`).
+- <a id="widnall-tsai-1977"></a>S. E. Widnall and C.-Y. Tsai, The instability of the thin vortex ring of constant vorticity, *Phil. Trans. R. Soc. Lond. A* 287, 273–305 (1977). [doi:10.1098/rsta.1977.0146](https://doi.org/10.1098/rsta.1977.0146)
+- <a id="blanco-rodriguez-le-dizes-2016"></a>F. J. Blanco-Rodríguez and S. Le Dizès, Elliptic instability of a curved Batchelor vortex, *J. Fluid Mech.* 804, 224–247 (2016), and its corrigendum (2017, [hal-01430558](https://hal.science/hal-01430558)). [doi:10.1017/jfm.2016.533](https://doi.org/10.1017/jfm.2016.533)
+- <a id="hattori-2019"></a>Y. Hattori, F. J. Blanco-Rodríguez and S. Le Dizès, Numerical stability analysis of a vortex ring with swirl, *J. Fluid Mech.* 878, 5–36 (2019). [doi:10.1017/jfm.2019.621](https://doi.org/10.1017/jfm.2019.621)
+- <a id="saffman-1970"></a>P. G. Saffman, The velocity of viscous vortex rings, *Stud. Appl. Math.* 49, 371–380 (1970). [doi:10.1002/sapm1970494371](https://doi.org/10.1002/sapm1970494371)
+  Used in (these four): `examples/vortex_ring_3d` and `examples/vortex_ring_3d/vortex_ring.py`: the azimuthal instability of a Gaussian vortex ring against the elliptic-instability growth rate of the corrigendum, `σ 2πR²/Γ = 0.5171 ln(8R/a) − 0.9285` (Widnall & Tsai's mechanism for a Lamb–Oseen core), with the viscous damping of its figure 8 and the most unstable wavenumber `k a = 2.33` of Hattori et al.; the ring's self-induced speed from Saffman.

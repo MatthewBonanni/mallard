@@ -33,6 +33,7 @@
 #include "region_motion.h"
 #include "run_status.h"
 #include "units.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -50,15 +51,6 @@ std::string bytes(const double b) { return logging::si(b) + "B"; }
 constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
-
-/** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
-double cfl_limit(const TimeIntegratorType type) {
-    switch (type) {
-        case TimeIntegratorType::SSPRK3: return 1.2;
-        case TimeIntegratorType::RK4: return 1.35;
-        default: return std::numeric_limits<double>::infinity();
-    }
-}
 
 } // namespace
 
@@ -373,6 +365,21 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
 }
 
 void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
+    r.view_entries_per_cell = comm::allreduce(view_entries::entries_per_cell(), comm::Op::MAX);
+    if (r.view_entries_per_cell > 0.0) {
+        r.view_max_local_cells = static_cast<uint64_t>(static_cast<double>(view_entries::MAX) / r.view_entries_per_cell);
+    }
+    const uint64_t target_cells = r.target_owned + r.target_halo;
+    if (r.view_max_local_cells > 0 && target_cells > r.view_max_local_cells) {
+        r.error(diagnostic_code::VIEW_ENTRIES,
+                "the largest part on " + std::to_string(r.target_ranks) + " ranks holds " +
+                    logging::count(target_cells, "cell") + ", halo included, and a multi-dimensional View of " +
+                    logging::format("%.0f", r.view_entries_per_cell) + " entries per cell addresses " +
+                    logging::count(view_entries::MAX) + " entries, at most " +
+                    logging::count(r.view_max_local_cells, "cell") + " per rank: run on at least " +
+                    std::to_string((target_cells + r.view_max_local_cells - 1) / r.view_max_local_cells) +
+                    " times as many ranks");
+    }
     if (options.memory > 0) {
         r.sizing_name = options.memory_name;
         r.sizing_memory = options.memory;
@@ -411,9 +418,16 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
                                                 ": size the run for a larger memory (--memory)");
         return;
     }
+    if (r.view_max_local_cells > 0 && static_cast<double>(r.view_max_local_cells) < n_max) {
+        n_max = static_cast<double>(r.view_max_local_cells);
+        r.sizing_view_entries = true;
+    }
     r.max_local_cells = static_cast<uint64_t>(n_max);
 
-    auto fits = [&](const PartSize & p) { return peak(double(p.owned + p.halo)) <= usable; };
+    auto fits = [&](const PartSize & p) {
+        return peak(double(p.owned + p.halo)) <= usable &&
+               (r.view_max_local_cells == 0 || p.owned + p.halo <= r.view_max_local_cells);
+    };
     auto record = [&](const int n, const PartSize & p) {
         r.min_ranks = n;
         r.min_owned = p.owned;
@@ -520,6 +534,22 @@ void Solver::check_settings(CheckReport & r) const {
         r.warning(diagnostic_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
                                                          "limit of %s for smooth flow: lower run.cfl (or run.dt)",
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
+    }
+    const double t0 = static_cast<double>(t);
+    const double t_end = t_stop > 0 ? static_cast<double>(t_stop) : std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const std::string which = "triggers[" + std::to_string(i) + "] (" + trigger.name + ")";
+        if (trigger.hold > t_end - t0) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + " must hold for " + logging::real(trigger.hold) + " s, longer than the run's " +
+                          logging::real(t_end - t0) + " s to t_stop: lower its for, or raise run.t_stop");
+        } else if (triggers.never_true(i, t0, t_end)) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + ": \"" + trigger.when + "\" is false at every t from " + logging::real(t0) +
+                          (std::isfinite(t_end) ? " s to t_stop = " + logging::real(t_end) + " s" : " s on") +
+                          ": check its numbers and their units (seconds)");
+        }
     }
 }
 
@@ -813,6 +843,34 @@ void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
     block = std::move(out);
 }
 
+/**
+ * @brief Warnings for a region from a surface file whose box (in m) is likely in the wrong units, far smaller
+ *        or larger than the domain's, or reaches outside it (covers: it touches cells).
+ */
+void check_surface_file(CheckReport & r, const std::string & label, const Box & b, const Box & domain, const bool covers) {
+    double size = 0.0, across = 0.0;
+    bool beyond = false;
+    for (size_t i = 0; i < N_DIM; i++) {
+        if (!std::isfinite(b[0][i]) || !std::isfinite(b[1][i])) return;
+        size += (b[1][i] - b[0][i]) * (b[1][i] - b[0][i]);
+        across += (domain[1][i] - domain[0][i]) * (domain[1][i] - domain[0][i]);
+        const double margin = 1e-9 * (domain[1][i] - domain[0][i]);
+        beyond = beyond || b[0][i] < domain[0][i] - margin || b[1][i] > domain[1][i] + margin;
+    }
+    size = std::sqrt(size);
+    across = std::sqrt(across);
+    const std::string spans = "region " + label + " spans " + box_text(b) + " m (" + logging::real(size) +
+                              " m across), the domain " + box_text(domain) + " m (" + logging::real(across) + " m across)";
+    if (size > 10.0 * across || size < 1e-3 * across) {
+        r.warning(diagnostic_code::REGION_SCALE,
+                  spans + ": " + logging::real(size > across ? size / across : across / size) + " times " +
+                      (size > across ? "larger" : "smaller") + ", which is likely a unit error: check its units");
+    } else if (beyond && covers) {
+        r.warning(diagnostic_code::REGION_PARTLY_OUTSIDE,
+                  spans + ": its part outside the domain is left out (--view shows both)");
+    }
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -872,7 +930,14 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
-        r.regions.push_back(entry(*mesh, label, *region, m, false));
+        CheckRegion g = entry(*mesh, label, *region, m, false);
+        g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
+                                  [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
+        if (g.from_file) {
+            g.box = region::bounds(*region);
+            check_surface_file(r, label, g.box, domain, m.cells > 0);
+        }
+        r.regions.push_back(g);
         if (m.cells == 0) {
             const Box b = region::bounds(*region);
             bool outside = false;

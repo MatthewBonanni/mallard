@@ -11,11 +11,14 @@
 #define DERIVED_FIELDS_H
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
 #include "derived_catalog.h"
+#include "flamelet.h"
 #include "gradient.h"
 #include "input.h"
 #include "physics.h"
@@ -221,6 +224,7 @@ struct Settings {
     Kokkos::View<rtype *> progress_weights;
     rtype T_unburnt = 0.0, T_burnt = 1.0;
     bool mixture = false, viscous = false;
+    bool tabulated = false;  // a flamelet gas: no species thermodynamics (ENTROPY) nor species (the mixture group)
 
     /**
      * @brief From [output] reference, [output.mixture] and, for a perfect gas,
@@ -237,6 +241,25 @@ struct Settings {
      */
     void require(Field f, const Input & input) const;
 };
+
+/**
+ * @brief Bilger's mixture fraction of two streams, Z = offset + sum_k weights[k] Y_k (1 in the fuel, 0 in the
+ *        oxidizer), and the streams' most abundant fuel species (with C or H) and oxidizer species (with O and
+ *        neither C nor H), -1 if none.
+ */
+struct MixtureFraction {
+    std::vector<double> weights;
+    double offset = 0.0;
+    int32_t fuel_species = -1, oxidizer_species = -1;
+};
+
+/**
+ * @brief The mixture fraction of the keys fuel and oxidizer of `table` (at `where`, e.g. "output.mixture"): each a
+ *        composition {X = {...}} or {Y = {...}}, or the name of a [[boundaries]] entry of uniform composition. Errors
+ *        point to `docs`.
+ */
+MixtureFraction mixture_fraction(const Input & input, const Input & table, const std::string & where,
+                                 const MixtureModel & mixture, const char * docs);
 
 /** @brief Scratch of the mass-fraction gradients (allocated if the selection needs them). */
 struct Workspace {
@@ -269,6 +292,7 @@ struct Inputs {
     Kokkos::View<rtype *[N_PRIMITIVE]> primitives{};          ///< u, p, T, h of each cell
     Kokkos::View<rtype **, Kokkos::LayoutRight> Y{};          ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
     chemistry::ThermoTable<> thermo{};                        ///< mixtures: species thermodynamics
+    flamelet::Gas<> flamelet{};                               ///< a flamelet gas: its table (Y holds Z, C)
     Kokkos::View<rtype *[3]> transport{};                     ///< viscous mixtures: (cell, [mu, lambda, -])
     Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients{};  ///< Workspace::gradients
 };

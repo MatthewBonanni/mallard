@@ -9,6 +9,7 @@
   "examples/explosion_3d/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_vortex/input.toml",
   "examples/pulsed_jet/input.toml",
   "examples/riemann_2d/input.toml",
   "examples/riemann_2d_quads/coarse.toml",
@@ -23,8 +24,14 @@
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
+  "examples/tracer_vortex/input.toml",
   "examples/turbulent_hot_spot_2d/input.toml",
   "examples/viscous_shock_tube/input.toml",
+  "examples/vortex_ring_3d/coarse.toml",
+  "examples/vortex_ring_3d/input.toml",
+  "tools/dev/catalog_inputs/2d/boundary_data.toml",
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tutorials/cluster/input.toml"
  ],
  "type": "integer"

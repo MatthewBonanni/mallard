@@ -1,6 +1,7 @@
 {
  "dimension": "temperature (K)",
  "dims": [
+  2,
   3
  ],
  "required": true,

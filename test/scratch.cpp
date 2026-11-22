@@ -18,18 +18,19 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "run_log.h"
 
 namespace {
 
 std::filesystem::path current;
 
-std::filesystem::path make_unique_directory(const testing::TestInfo & test) {
-    std::string name = std::string(test.test_suite_name()) + "." + test.name();
+std::filesystem::path make_unique_directory(std::string name) {
     auto other = [](char ch) { return !std::isalnum(static_cast<unsigned char>(ch)) && ch != '.'; };
     std::replace_if(name.begin(), name.end(), other, '_');
     const std::string pattern = (std::filesystem::temp_directory_path() / ("mallard-" + name + "-XXXXXX")).string();
@@ -39,38 +40,36 @@ std::filesystem::path make_unique_directory(const testing::TestInfo & test) {
     return std::filesystem::path(buffer.data());
 }
 
-/** @brief Rank 0's path, on every rank. */
-std::filesystem::path from_root(const std::filesystem::path & path) {
+/** @brief Rank 0's string, on every rank. */
+std::string from_root(std::string s) {
 #ifdef Mallard_HAS_MPI
-    std::string s = path.string();
     int n = static_cast<int>(s.size());
     MPI_Bcast(&n, 1, MPI_INT, 0, comm::communicator());
     s.resize(static_cast<size_t>(n));
     MPI_Bcast(s.data(), n, MPI_CHAR, 0, comm::communicator());
-    return s;
-#else
-    return path;
 #endif
+    return s;
 }
 
 class ScratchDirectories : public testing::EmptyTestEventListener {
     public:
         void OnTestStart(const testing::TestInfo & test) override {
-            current = from_root(comm::is_root() ? make_unique_directory(test) : std::filesystem::path());
+            current = from_root(comm::is_root() ? make_unique_directory(std::string(test.test_suite_name()) + "." + test.name()).string() : "");
             previous = std::filesystem::current_path();
             std::filesystem::current_path(current);
         }
 
         void OnTestEnd(const testing::TestInfo & test) override {
             std::filesystem::current_path(previous);
+            // Rank 0 keeps a distributed run's log open after the run, and NFS cannot remove an open file
+            run_log::close();
             const bool passed = comm::allreduce(int32_t(test.result()->Failed()), comm::Op::MAX) == 0;
-            if (comm::is_root()) {
-                if (passed) {
-                    std::filesystem::remove_all(current);
-                } else {
-                    std::cerr << "Files of " << test.test_suite_name() << "." << test.name() << " kept in "
-                              << current.string() << "\n";
-                }
+            if (passed) {
+                const std::string failure = remove_shared_directory(current);
+                if (!failure.empty()) ADD_FAILURE() << failure;
+            } else if (comm::is_root()) {
+                std::cerr << "Files of " << test.test_suite_name() << "." << test.name() << " kept in "
+                          << current.string() << "\n";
             }
             current.clear();
         }
@@ -96,6 +95,28 @@ std::string serial_name(const std::string & name) {
     return comm::is_root() ? name : name + std::to_string(comm::rank());
 }
 
-void install_scratch_directories() {
-    testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
+std::string remove_shared_directory(const std::filesystem::path & dir) {
+    comm::barrier();
+    std::string failure;
+    if (comm::is_root()) {
+        std::error_code error;
+        std::filesystem::remove_all(dir, error);
+        if (error) failure = "cannot remove " + dir.string() + ": " + error.message();
+    }
+    return from_root(failure);
+}
+
+bool install_scratch_directories() {
+    const std::filesystem::path probe = from_root(comm::is_root() ? make_unique_directory("shared").string() : "");
+    std::error_code error;
+    const bool seen = std::filesystem::is_directory(probe, error);
+    if (!seen) {
+        std::cerr << "[rank " << comm::rank() << "] " << probe.string()
+                  << ", made by rank 0, is not here: the tests need a temporary directory every rank shares (set TMPDIR "
+                     "to one)\n";
+    }
+    const bool shared = comm::allreduce(int32_t(seen), comm::Op::MIN) == 1;
+    if (comm::is_root()) std::filesystem::remove(probe);
+    if (shared) testing::UnitTest::GetInstance()->listeners().Append(new ScratchDirectories);
+    return shared;
 }
