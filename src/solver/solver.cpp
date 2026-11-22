@@ -2584,6 +2584,10 @@ void Solver::finish_output_arrays() {
                 const double Zvar = h_flamelet_variance.extent(0) > 0 ? static_cast<double>(h_flamelet_variance(c)) : 0.0;
                 mixture_model->flamelet().outputs(rho, static_cast<double>(h_Y(c, 0)), static_cast<double>(h_Y(c, 1)),
                                                   Zvar, out.data());
+                // The thickened flame's modeled heat release, E / F times the table's, as the source of C
+                if (tfles_on && mixture_model->flamelet().heat_release() && h_tfles_fields(c, 0) > 0.0_r) {
+                    out[1] *= static_cast<double>(h_tfles_fields(c, 1)) / static_cast<double>(h_tfles_fields(c, 0));
+                }
                 for (size_t i = 0; i < out.size(); i++) h_table_fields(c, i) = static_cast<rtype>(out[i]);
             }
         }
@@ -2778,7 +2782,10 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     for (const auto & name : Particles::field_names(input)) names.push_back(name);
     if (LES::in_input(input)) {
         names.emplace_back("MU_T");
-        if (mixture_model && mixture_model->tabulated()) names.emplace_back("MIXTURE_FRACTION_VARIANCE");
+        if (mixture_model && mixture_model->tabulated() &&
+            mixture_model->flamelet().variance() != flamelet::FlameletModel::Variance::NONE) {
+            names.emplace_back("MIXTURE_FRACTION_VARIANCE");
+        }
         if (input.at("les").contains("combustion")) {
             if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
                 names.emplace_back("PASR_KAPPA");
