@@ -193,6 +193,24 @@ std::string box_region(const std::string & extra = "") {
            ", size = " + size + extra + "}";
 }
 
+/** @brief The signed distance of a region on the host, callable from the sampler's KOKKOS_INLINE_FUNCTION templates. */
+struct HostDistance {
+    const region::RegionView<Kokkos::HostSpace> & view;
+
+    KOKKOS_INLINE_FUNCTION double operator()(const double * x) const { return view.distance(x); }
+};
+
+/** @brief Node k of straight cell c on the host. */
+struct HostNodes {
+    const Mesh & mesh;
+    uint32_t c;
+
+    KOKKOS_INLINE_FUNCTION void operator()(const uint32_t k, double * x) const {
+        const uint32_t n = mesh.h_nodes_of_cell(mesh.h_offsets_nodes_of_cell(c) + k);
+        for (size_t d = 0; d < 3; d++) x[d] = d < N_DIM ? double(mesh.h_node_coords(n, d)) : 0.0;
+    }
+};
+
 } // namespace
 
 TEST(RegionSurfaceTest, DistancesAreThoseOfTheBoxTheFileHolds) {
@@ -337,15 +355,11 @@ TEST(RegionSurfaceTest, CellFractionsAreTheBoxes) {
     const std::vector<double> stl = region::cell_fractions(*mesh, read(stl_region(file("cells.stl", stl_ascii(cube(LO, HI))))));
     // Surfaces are sampled, not clipped as the box's planes are: the box's distance sampled the same way
     const region::Region box = read(box_region());
-    const region::sampler::Shape shape{[&](const double * x) { return box.distance(x); }, 0.0, true};
+    const region::sampler::Shape<HostDistance> shape{HostDistance{box.host()}, 0.0, true};
     double total = 0.0;
     for (uint32_t i = 0; i < mesh->n_cells; i++) {
-        const auto node = [&](const uint32_t k, double * x) {
-            const uint32_t n = mesh->h_nodes_of_cell(mesh->h_offsets_nodes_of_cell(i) + k);
-            for (size_t d = 0; d < 3; d++) x[d] = d < N_DIM ? double(mesh->h_node_coords(n, d)) : 0.0;
-        };
         double inside = 0.0, measure = 0.0;
-        region::sampler::straight_cell(shape, false, mesh->h_n_nodes_of_cell(i), node, inside, measure);
+        region::sampler::straight_cell(shape, false, mesh->h_n_nodes_of_cell(i), HostNodes{*mesh, i}, inside, measure);
         EXPECT_NEAR(stl[i], inside / measure, 1e-12) << i;
         total += stl[i];
     }
