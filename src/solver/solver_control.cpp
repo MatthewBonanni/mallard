@@ -11,6 +11,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -115,7 +116,7 @@ void Solver::save_last_good() {
 
 void Solver::save_last_good_if_valid(const Kokkos::View<rtype *> & reduced) {
     const StateView from = conservatives, to = last_good.flow;
-    Kokkos::parallel_for("save_last_good", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("save_last_good", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         if (reduced(0) > 0.0_r) {
             FOR_I_CONSERVATIVE to(c, i) = from(c, i);
         }

@@ -1,0 +1,8 @@
+{
+ "default": "\"particle_probe_core.csv\"",
+ "dims": [
+  2
+ ],
+ "set_in": [],
+ "type": "string"
+}

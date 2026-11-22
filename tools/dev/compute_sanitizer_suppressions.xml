@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ComputeSanitizerOutput>
+  <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back -->
+  <record>
+    <kind>Api</kind>
+    <what>
+      <api>cudaGetDriverEntryPointByVersion|cudaGetLastError</api>
+      <error>cudaErrorInvalidValue</error>
+    </what>
+    <hostStack>
+      <frame>
+        <module>.*lib(cuda|nccl)\.so.*</module>
+      </frame>
+      <frame>
+        <module>.*libnccl\.so.*</module>
+      </frame>
+    </hostStack>
+  </record>
+  <!-- Open MPI's CUDA accelerator component unregisters host memory it never registered at MPI_Finalize -->
+  <record>
+    <kind>Api</kind>
+    <what>
+      <api>cuMemHostUnregister</api>
+      <error>CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED</error>
+    </what>
+    <hostStack>
+      <frame>
+        <module>.*(libcuda|mca_accelerator_cuda)\.so.*</module>
+      </frame>
+      <frame>
+        <module>.*(mca_accelerator_cuda|libopen-pal)\.so.*</module>
+      </frame>
+    </hostStack>
+  </record>
+</ComputeSanitizerOutput>
