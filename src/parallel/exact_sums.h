@@ -41,31 +41,45 @@ constexpr uint32_t EXACT_SUMS_LIMBS = 67;
 constexpr uint32_t EXACT_SUMS_WIDTH = EXACT_SUMS_LIMBS + 1;
 
 /**
- * @brief Adds term exactly to the sum acc (EXACT_SUMS_WIDTH integers): its 53 bits to the three limbs they cover,
- *        each by less than 2^32, so 2^31 terms fit in 63 bits.
+ * @brief Splits a finite term into the three limbs its 53 bits cover, from limb j up, each part below 2^32 in
+ *        magnitude (so 2^31 terms fit in 63 bits); false for a term that is not finite.
  */
-KOKKOS_INLINE_FUNCTION void exact_sums_add(int64_t * acc, const double term) {
+KOKKOS_INLINE_FUNCTION bool exact_sums_split(const double term, uint32_t & j, int64_t (&parts)[3]) {
     const uint64_t bits = Kokkos::bit_cast<uint64_t>(term);
     const uint32_t biased = static_cast<uint32_t>((bits >> 52) & 0x7ff);
-    if (biased == 0x7ff) {
+    if (biased == 0x7ff) return false;
+    const uint64_t m = (bits & ((uint64_t(1) << 52) - 1)) | (biased ? uint64_t(1) << 52 : 0);
+    const uint32_t p = biased ? biased - 1 : 0;  // of m's lowest bit above 2^-1074
+    const uint32_t r = p % 32;
+    j = p / 32;
+    const uint64_t a = (m & 0xffffffff) << r, b = (m >> 32) << r, t = (a >> 32) + (b & 0xffffffff);
+    const int64_t sign = (bits >> 63) ? -1 : 1;
+    parts[0] = sign * static_cast<int64_t>(a & 0xffffffff);
+    parts[1] = sign * static_cast<int64_t>(t & 0xffffffff);
+    parts[2] = sign * static_cast<int64_t>((b >> 32) + (t >> 32));
+    return true;
+}
+
+/** @brief Adds term exactly to the sum acc (EXACT_SUMS_WIDTH integers). */
+KOKKOS_INLINE_FUNCTION void exact_sums_add(int64_t * acc, const double term) {
+    uint32_t j = 0;
+    int64_t parts[3];
+    if (!exact_sums_split(term, j, parts)) {
         acc[EXACT_SUMS_LIMBS]++;
         return;
     }
-    const uint64_t m = (bits & ((uint64_t(1) << 52) - 1)) | (biased ? uint64_t(1) << 52 : 0);
-    const uint32_t p = biased ? biased - 1 : 0;  // of m's lowest bit above 2^-1074
-    const uint32_t j = p / 32, r = p % 32;
-    const uint64_t a = (m & 0xffffffff) << r, b = (m >> 32) << r, t = (a >> 32) + (b & 0xffffffff);
-    const int64_t c0 = static_cast<int64_t>(a & 0xffffffff), c1 = static_cast<int64_t>(t & 0xffffffff),
-                  c2 = static_cast<int64_t>((b >> 32) + (t >> 32));
-    if (bits >> 63) {
-        acc[j] -= c0;
-        acc[j + 1] -= c1;
-        acc[j + 2] -= c2;
-    } else {
-        acc[j] += c0;
-        acc[j + 1] += c1;
-        acc[j + 2] += c2;
-    }
+    for (uint32_t x = 0; x < 3; x++) acc[j + x] += parts[x];
+}
+
+/** @brief Limbs a column's rows add to in registers, from three below its largest term's lowest limb up. */
+constexpr uint32_t EXACT_SUMS_WINDOW = 6;
+
+/** @brief The lowest limb of the window of a column whose largest magnitude is largest. */
+KOKKOS_INLINE_FUNCTION uint32_t exact_sums_window_base(const double largest) {
+    if (!(largest > 0.0) || !Kokkos::isfinite(largest)) return 0;
+    const uint32_t biased = static_cast<uint32_t>(Kokkos::bit_cast<uint64_t>(largest) >> 52);
+    const uint32_t top = (biased ? biased - 1 : 0) / 32 + 3;  // past the largest term's highest limb
+    return top < EXACT_SUMS_WINDOW ? 0 : top - EXACT_SUMS_WINDOW;
 }
 
 /** @brief The same sum acc with every limb but the last in [0, 2^32), so that sums of 2^31 such sums fit too. */
@@ -136,6 +150,59 @@ struct ExactSumsColumn {
     }
 };
 
+/** @brief The limbs of a column's window, then its count of terms that are not finite. */
+struct ExactSumsWindow {
+    int64_t limbs[EXACT_SUMS_WINDOW + 1];
+};
+
+/**
+ * @brief A reduction of column k of terms (its first count() rows if counted) into the window of limbs below its
+ *        largest magnitude largest(k), in registers; parts outside it (terms 2^-64 or less of the largest) go to
+ *        acc's limbs with atomics.
+ */
+template <typename Terms>
+struct ExactSumsWindowed {
+    using value_type = ExactSumsWindow;
+    Terms terms;
+    Kokkos::View<const uint32_t> count = {};
+    Kokkos::View<const double *> largest = {};
+    Kokkos::View<int64_t *> acc = {};  // the column's EXACT_SUMS_WIDTH limbs
+    uint32_t k = 0;
+    bool counted = false;
+
+    KOKKOS_FUNCTION void operator()(const uint32_t c, value_type & v) const {
+        if (counted && c >= count()) return;
+        uint32_t j = 0;
+        int64_t parts[3];
+        if (!exact_sums_split(static_cast<double>(terms(c, k)), j, parts)) {
+            v.limbs[EXACT_SUMS_WINDOW]++;
+            return;
+        }
+        const int32_t base = static_cast<int32_t>(exact_sums_window_base(largest(k)));
+        for (uint32_t x = 0; x < 3; x++) {
+            const int32_t i = static_cast<int32_t>(j + x) - base;
+            if (i >= 0 && i < static_cast<int32_t>(EXACT_SUMS_WINDOW)) {
+                for (int32_t q = 0; q < static_cast<int32_t>(EXACT_SUMS_WINDOW); q++) v.limbs[q] += i == q ? parts[x] : 0;
+            } else if (parts[x] != 0) {
+                Kokkos::atomic_add(&acc(j + x), parts[x]);
+            }
+        }
+    }
+    KOKKOS_FUNCTION void init(value_type & v) const {
+        for (uint32_t q = 0; q <= EXACT_SUMS_WINDOW; q++) v.limbs[q] = 0;
+    }
+    KOKKOS_FUNCTION void join(value_type & dst, const value_type & src) const {
+        for (uint32_t q = 0; q <= EXACT_SUMS_WINDOW; q++) dst.limbs[q] += src.limbs[q];
+    }
+};
+
+/** @brief Adds a column's window (of largest magnitude largest) to its limbs acc. */
+KOKKOS_INLINE_FUNCTION void exact_sums_merge(int64_t * acc, const ExactSumsWindow & window, const double largest) {
+    const uint32_t base = exact_sums_window_base(largest);
+    for (uint32_t q = 0; q < EXACT_SUMS_WINDOW; q++) acc[base + q] += window.limbs[q];
+    acc[EXACT_SUMS_LIMBS] += window.limbs[EXACT_SUMS_WINDOW];
+}
+
 /**
  * @brief Sums over all ranks of the owned cells' terms, each the exact sum rounded once, so independent of the rank
  *        count and order.
@@ -171,7 +238,8 @@ class ExactSums {
          * @param use_nccl_ Whether to reduce over the ranks with NCCL (comm::allreduce_device).
          */
         ExactSums(const uint32_t n_columns, const uint32_t n_rows, const bool distributed_, const bool use_nccl_)
-            : limbs("exact_sums_limbs", size_t(n_columns) * EXACT_SUMS_WIDTH), totals("exact_sums", n_columns),
+            : largest("exact_sums_largest", n_columns), windows("exact_sums_windows", n_columns),
+              limbs("exact_sums_limbs", size_t(n_columns) * EXACT_SUMS_WIDTH), totals("exact_sums", n_columns),
               distributed(distributed_), use_nccl(use_nccl_) {
             if (n_rows >= uint32_t(1) << 31) throw std::invalid_argument("ExactSums: 2^31 rows or more on a rank");
         }
@@ -188,28 +256,46 @@ class ExactSums {
             sum_rows(terms, count);
         }
 
-        /** @brief The sums of the rows of terms (the first count() if counted) (public: nvcc rejects device lambdas in
-         *         private members). */
+        /**
+         * @brief The sums of the rows of terms (the first count() if counted): each column's largest magnitude
+         *        places its window, its rows add to the window and their few parts below it to its limbs, which
+         *        sums() leaves zero for the next call (public: nvcc rejects device lambdas in private members).
+         */
         template <typename Terms>
         void sum_rows(const Terms & terms, const Kokkos::View<const uint32_t> & count) const {
+            using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
             const uint32_t n_rows = static_cast<uint32_t>(terms.extent(0));
             const uint32_t n_columns = static_cast<uint32_t>(totals.extent(0));
+            const bool counted = count.is_allocated();
+            const Kokkos::View<double *> m = largest;
+            for (uint32_t k = 0; k < n_columns; k++) {
+                gated::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
+                    if (!counted || c < count()) x = Kokkos::fmax(x, Kokkos::fabs(static_cast<double>(terms(c, k))));
+                }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(m.data() + k)));
+            }
+            const Kokkos::View<ExactSumsWindow *> w = windows;
             const Kokkos::View<int64_t *> acc = limbs;
             for (uint32_t k = 0; k < n_columns; k++) {
+                const Kokkos::View<int64_t *> column(acc.data() + size_t(k) * EXACT_SUMS_WIDTH, EXACT_SUMS_WIDTH);
                 gated::parallel_reduce("exact_sums", n_rows,
-                                       ExactSumsColumn<Terms>{.terms = terms, .count = count, .k = k,
-                                                              .counted = count.is_allocated()},
-                                       Kokkos::View<int64_t *>(acc.data() + size_t(k) * EXACT_SUMS_WIDTH, EXACT_SUMS_WIDTH));
+                                       ExactSumsWindowed<Terms>{.terms = terms, .count = count, .largest = m,
+                                                                .acc = column, .k = k, .counted = counted},
+                                       Kokkos::View<ExactSumsWindow, DeviceMemory>(w.data() + k));
             }
             if (distributed) {
                 gated::parallel_for("exact_sums_carry", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
+                    exact_sums_merge(acc.data() + size_t(k) * EXACT_SUMS_WIDTH, w(k), m(k));
                     exact_sums_carry(acc.data() + size_t(k) * EXACT_SUMS_WIDTH);
                 });
                 comm::allreduce_device(acc, comm::Op::SUM, use_nccl);
             }
             const Kokkos::View<double *> out = totals;
+            const bool merged = distributed;
             gated::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
-                out(k) = exact_sums_total(acc.data() + size_t(k) * EXACT_SUMS_WIDTH);
+                int64_t * a = acc.data() + size_t(k) * EXACT_SUMS_WIDTH;
+                if (!merged) exact_sums_merge(a, w(k), m(k));
+                out(k) = exact_sums_total(a);
+                for (uint32_t i = 0; i < EXACT_SUMS_WIDTH; i++) a[i] = 0;
             });
         }
 
@@ -217,7 +303,9 @@ class ExactSums {
         const Kokkos::View<double *> & sums() const { return totals; }
 
     private:
-        Kokkos::View<int64_t *> limbs;  // EXACT_SUMS_WIDTH a column
+        Kokkos::View<double *> largest;
+        Kokkos::View<ExactSumsWindow *> windows;
+        Kokkos::View<int64_t *> limbs;  // EXACT_SUMS_WIDTH a column, zero between calls
         Kokkos::View<double *> totals;
         bool distributed = false, use_nccl = false;
 };
