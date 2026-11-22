@@ -386,6 +386,13 @@ class Mesh {
         void release_setup_data();
 
         /**
+         * @brief Bytes that release_setup_data frees in device builds but not
+         *        in this build, whose device views are their host mirrors: what
+         *        a host build's memory check leaves out when it sizes a GPU run.
+         */
+        uint64_t released_on_devices = 0;
+
+        /**
          * @brief Initialize the mesh as a cartesian grid.
          * 
          * @param nx Number of cells in the x-direction.
