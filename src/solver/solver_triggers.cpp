@@ -10,8 +10,10 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "comm.h"
@@ -75,6 +77,20 @@ void Solver::init_triggers() {
     }
     for (const auto & writer : data_writers) writers.push_back(writer->get_prefix());
     triggers.init(input, monitored_names, writers, statistics.enabled());
+    for (size_t i = 0; i < triggers.size(); i++) {
+        for (const auto & act : triggers[i].actions) {
+            for (const auto & [key, value] : act.settings) {
+                const auto [accepted, what] = apply_setting(key, value, false);
+                if (accepted) continue;
+                const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
+                throw InputError({.key = "triggers[" + std::to_string(i) + "].do",
+                                  .line = line_of(entries[i], "do"),
+                                  .message = "\"set " + key + "=" + value + "\": " + what,
+                                  .fix = "Set what mallard ctl set can, with a value it takes",
+                                  .docs = "docs/guide/running.md#triggers"});
+            }
+        }
+    }
     if (!triggers.starts_statistics()) return;
     const Input & table = input.at("statistics");
     for (const std::string section : {"", "spectra", "phase"}) {
@@ -107,6 +123,19 @@ std::vector<double> Solver::trigger_values() const {
         }
     }
     return values;
+}
+
+rtype Solver::next_landing_time() const {
+    rtype next = std::numeric_limits<rtype>::infinity();
+    const double tol = precision_tol<double>(1e-9, 1e-5);
+    for (const double c : triggers.landing_times()) {
+        // Within round-off of a step that landed there; in rtype, at c or just after, where t >= c holds
+        if (!(static_cast<double>(t) < c - tol * std::fabs(c))) continue;
+        rtype at = static_cast<rtype>(c);
+        if (static_cast<double>(at) < c) at = std::nextafter(at, std::numeric_limits<rtype>::infinity());
+        next = std::min(next, at);
+    }
+    return next;
 }
 
 bool Solver::triggers_on_device() const {
@@ -158,7 +187,7 @@ void Solver::load_trigger_values() {
     const rtype * const step_dt = step_dt_device();
     const rtype * const wall = step_wall_device();
     const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
-    Kokkos::parallel_for("step_trigger_values", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_trigger_values", 1, KOKKOS_LAMBDA(const int) {
         const step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
         const step_queue::Record & record = records((L.seq - 1) % n_records);
@@ -184,7 +213,7 @@ void Solver::evaluate_triggers() {
     const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
     const kexpr::ProgramTable<> table = trigger_conditions;
     const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
-    Kokkos::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
         step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
         step_queue::Record & record = records((L.seq - 1) % n_records);
@@ -267,7 +296,7 @@ void Solver::act_on_triggers() {
         conditions = triggers.evaluate(values);
     }
     if (is_distributed()) conditions = comm::broadcast(conditions);
-    for (const size_t i : triggers.advance(conditions, static_cast<double>(t))) {
+    for (const size_t i : triggers.advance(conditions, step, static_cast<double>(t))) {
         const Triggers::Trigger & trigger = triggers[i];
         json::Object read;
         if (!values.empty()) {
@@ -286,6 +315,21 @@ void Solver::act_on_triggers() {
                 case Triggers::Action::START_STATISTICS:
                     statistics.set_start(t);
                     statistics.start(t);
+                    break;
+                case Triggers::Action::STOP_STATISTICS: statistics.set_start(std::numeric_limits<rtype>::infinity()); break;
+                case Triggers::Action::LOG:
+                    // Rank 0 logs, and holds the values
+                    if (!values.empty()) {
+                        logging::event(step, double(t), "log", triggers.message(act, values),
+                                       {{"trigger", json::quote(trigger.name)}});
+                    }
+                    break;
+                case Triggers::Action::SET:
+                    for (const auto & [key, value] : act.settings) {
+                        const auto [accepted, what] = apply_setting(key, value);
+                        logging::event(step, double(t), "set", accepted ? what : "refused: " + what,
+                                       {{"trigger", json::quote(trigger.name)}});
+                    }
                     break;
                 case Triggers::Action::WRITE: {
                     const auto writer = std::find_if(data_writers.begin(), data_writers.end(),

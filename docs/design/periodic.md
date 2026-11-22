@@ -57,7 +57,12 @@ a clear error.
 - `cells_of_cell_shift`: a `uint8` row index per vertex-neighbor entry. Vertex
   neighbors are found through shared node keys and become (cell, shift) pairs.
   When no entry crosses a periodic boundary it holds no rows, and readers
-  (`ShiftRows`) see row 0 for every entry: 26 B per hexahedron saved.
+  (`ShiftRows`) see row 0 for every entry: 26 B per hexahedron saved. The
+  vertex neighbors are built on first use (`Mesh::vertex_neighbors`), not with
+  the mesh, but their rows are numbered with it, after the faces', so the
+  `shifts` table is complete once the mesh is built and building them again
+  gives the same rows. The mesh build also rejects the periodic directions of
+  fewer than 3 cells there.
 
 On a non-periodic mesh every index is 0, and kernels add the zero row as
 `(x_c1 + 0) - x_c0` or `(x_f - 0) - x_c1`, which round exactly like the
@@ -100,23 +105,24 @@ cell-to-face distance for the hydrostatic ghost pressure.
 
 - `DistributedMesh` finds the node classes first, without gathering the
   zones, in the pattern of the face matching:
-  - Each pair's `h` is an `allreduce` minimum over the ranks' zone faces, so
-    grid and tolerance are the serial ones.
-  - Each node of `A`, translated by `T`, goes to the rank its grid cell hashes
-    to (pair index and cell coordinates). Each node of `B` goes to the ranks of
-    all 3^d cells around its own, so a rank sees every candidate the serial
-    search would see, and pairs the matches with the same arithmetic.
-  - Each match becomes a link to the ranks whose node blocks hold its two
-    nodes. Classes resolve there by lowest-key propagation: every node takes
-    the lowest key its links offer, with the implied lattice offset, until no
-    key changes (a few rounds: a class has at most 8 nodes, at a box corner).
-    An offer of the settled key at another offset is the serial matcher's
-    "maps a node onto itself" error.
-  - Each rank asks for the classes of its block's nodes; cell records carry
-    them on to the cells' owners and halos.
+    - Each pair's `h` is an `allreduce` minimum over the ranks' zone faces, so
+      grid and tolerance are the serial ones.
+    - Each node of `A`, translated by `T`, goes to the rank its grid cell hashes
+      to (pair index and cell coordinates). Each node of `B` goes to the ranks of
+      all 3^d cells around its own, so a rank sees every candidate the serial
+      search would see, and pairs the matches with the same arithmetic.
+    - Each match becomes a link to the ranks whose node blocks hold its two
+      nodes. Classes resolve there by lowest-key propagation: every node takes
+      the lowest key its links offer, with the implied lattice offset, until no
+      key changes (a few rounds: a class has at most 8 nodes, at a box corner).
+      An offer of the settled key at another offset is the serial matcher's
+      "maps a node onto itself" error.
+    - Each rank asks for the classes of its block's nodes; cell records carry
+      them on to the cells' owners and halos.
 
-  Keys and offsets are identical to the serial matcher's (tested on 1-4
-  ranks), and every rank holds only the classes of nodes it uses.
+    Keys and offsets are identical to the serial matcher's (tested on 1-4
+    ranks), and every rank holds only the classes of nodes it uses.
+
 - Faces are hashed by their node keys, so seam faces pair into interior faces
   (and dual-graph edges, which the graph partitioner sees); boundary faces of
   periodic zones are not posted.
@@ -167,15 +173,15 @@ axis (2D: about a point).
   included: the halo exchange copies states as before, and the rotation is
   applied where a cell reads a neighbor across the seam.
 
-  | Where | Rotation |
-  |---|---|
-  | Face and vertex LSQ gradients, limiter extrema | neighbor velocity by `Q` (`Q^T` from cell 1) |
-  | Face states | each side is reconstructed in its own cell's frame; one pass turns side 1 of the rotated faces into the face's (cell 0's) frame, so every flux sees one frame |
-  | Flux sums | the momentum flux of a face into its cell 1 turns by `Q^T` (also double flux and the kinetic-energy budget) |
-  | Viscous fluxes | cell 1's velocity by `Q`, its gradients by `Q G Q^T` (velocity) and `Q g` (temperature, species) |
-  | TENO | below |
-  | LES | the dynamic procedure's neighbor velocity and tensors (`Q A Q^T`), TFLES vorticity and its gradient |
-  | Time step | the face normal in cell 1's frame |
+    | Where | Rotation |
+    |---|---|
+    | Face and vertex LSQ gradients, limiter extrema | neighbor velocity by `Q` (`Q^T` from cell 1) |
+    | Face states | each side is reconstructed in its own cell's frame; one pass turns side 1 of the rotated faces into the face's (cell 0's) frame, so every flux sees one frame |
+    | Flux sums | the momentum flux of a face into its cell 1 turns by `Q^T` (also double flux and the kinetic-energy budget) |
+    | Viscous fluxes | cell 1's velocity by `Q`, its gradients by `Q G Q^T` (velocity) and `Q g` (temperature, species) |
+    | TENO | below |
+    | LES | the dynamic procedure's neighbor velocity and tensors (`Q A Q^T`), TFLES vorticity and its gradient |
+    | Time step | the face normal in cell 1's frame |
 
 - **TENO.** A stencil entry is a cell of the stencil search at a lattice
   offset. The setup (`CellSetup2D`, `CellSetup`) maps node coordinates,

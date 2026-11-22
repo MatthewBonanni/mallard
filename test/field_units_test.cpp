@@ -632,7 +632,7 @@ TEST(FieldUnitsTest, FieldsFromTheInputAloneAreThoseOfTheSetup) {
         "mechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
     const std::string les = std::string("[les]\nmodel = \"") + (N_DIM == 3 ? "sigma" : "wale") + "\"\n";
     const std::vector<std::string> cases = {
-        gas + "[numerics]\npreset = \"robust\"\n",
+        gas + "[numerics]\npreset = \"second_order\"\n",
         gas + "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n[[sources]]\nrhoE = \"1.0 + x\"\n"
               "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*RHO\"]\nbatch = 1.0e-3\n"
               "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.01\n",

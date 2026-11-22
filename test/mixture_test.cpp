@@ -676,7 +676,7 @@ TEST(MixtureTest, InvalidMixtureInputsAreRejected) {
                                 "type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n", "type = \"symmetry\"\n") +
                      mixture(H2O2),
                  "farfield");
-    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"bdf\"\n",
+    expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\nintegrator = \"rkc\"\n",
                  "chemistry.integrator");
     expect_error(base + init + "X = { N2 = 1.0 }\n" + bcs + mixture(PERFECT_AIR) + "[chemistry]\n", "no reactions");
     expect_error(base + init + "X = { H2 = 1.0 }\n" + bcs + mixture(H2O2) + "[chemistry]\ncoupling = \"sdc\"\n",
@@ -876,8 +876,8 @@ namespace {
  * @brief A cold H2 slab crossing a periodic channel of hot air at uniform
  *        pressure and velocity (V4): the largest relative deviations of p
  *        and u after a quarter of a flow-through. The slab's edges lie on
- *        faces, so no cell starts mixed; air at 1200 K keeps clear of the
- *        1000 K breakpoint of the NASA-7 fits, where e(T) jumps.
+ *        faces, so no cell starts mixed. Mixed cells cross the 1000 K bound
+ *        of the NASA-7 fits, where the fits blend so that e(T) has no jump.
  */
 std::array<double, 2> contact_errors(const std::string & reconstruction, bool double_flux,
                                      const std::string & riemann = "HLLC") {
