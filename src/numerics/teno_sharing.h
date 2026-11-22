@@ -26,6 +26,7 @@
 
 #include "comm.h"
 #include "common.h"
+#include "gated.h"
 
 namespace teno {
 
@@ -173,7 +174,7 @@ class TableStore {
             std::vector<std::pair<uint32_t, uint32_t>> taken;
             const auto shape = add(n, canonical, gid, [&](const std::vector<Match> & m) {
                 std::vector<uint8_t> same(m.size(), 0);
-                Kokkos::parallel_for("teno_share", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, m.size()),
+                gated::parallel_for("teno_share", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, m.size()),
                                      [&](const size_t i) {
                     const T * a = ordered(m[i].cell);
                     const T * b = m[i].held >= 0 ? ordered(uint32_t(m[i].held)) : shapes[m[i].shape].values.data();

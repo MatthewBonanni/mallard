@@ -23,6 +23,7 @@
 #include "common_typedef.h"
 #include "index_set.h"
 #include "mesh.h"
+#include "face_weights.h"
 #include "quadrature.h"
 #include "boundary.h"
 #include "gradient.h"
@@ -257,8 +258,9 @@ class FaceReconstruction {
         // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
         // (twice the area over face_area on curved faces) and are zero on padding points
         Kokkos::View<rtype ***> face_quad_points;
-        Kokkos::View<rtype **> face_quad_weights;
+        FaceWeights<> face_quad_weights;
         Kokkos::View<rtype ***> face_quad_normals;  // curved meshes: (face, q, dim) unit normals out of cell 0
+        bool share_weights = true;  // false keeps a row of face_quad_weights per face (tests)
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;

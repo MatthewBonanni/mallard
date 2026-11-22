@@ -6,6 +6,7 @@
  */
 
 #include "derived_fields.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -323,7 +324,7 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
     const Kokkos::View<rtype **, Kokkos::LayoutRight> values = workspace.values;
     const Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients = workspace.gradients;
     const uint32_t n_species = static_cast<uint32_t>(weights.extent(1));
-    Kokkos::parallel_for("derived_scalars", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_scalars", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         for (uint32_t v = 0; v < N_SCALARS; v++) {
             rtype sum = 0.0;
             for (uint32_t k = 0; k < n_species; k++) sum += weights(v, k) * Y(c, k);
@@ -331,7 +332,7 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
         }
     });
     const LSQVertexGradientFunctor s = stencil;
-    Kokkos::parallel_for("derived_scalar_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_scalar_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const LSQGradientFunctor & f = s.faces;
         rtype g[N_SCALARS][N_DIM] = {};
         for (uint32_t k = s.offsets_cells_of_cell(c); k < s.offsets_cells_of_cell(c + 1); k++) {
@@ -391,7 +392,7 @@ void compute(const Selection & selection, const Settings & settings, const Input
     const rtype p_inf = settings.p_inf, q_inf = settings.q_inf, z_offset = settings.z_offset;
     const rtype T_unburnt = settings.T_unburnt, T_burnt = settings.T_burnt;
     const uint32_t n_species = mixture ? thermo.n_species : 0;
-    Kokkos::parallel_for("derived_fields", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_fields", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const auto put = [&](Field f, rtype value) {
             if (sel.column[f] >= 0) out(c, static_cast<uint32_t>(sel.column[f])) = value;
         };
