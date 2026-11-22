@@ -10,6 +10,7 @@
  */
 
 #include "stencil_shapes.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -94,7 +95,7 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
     std::vector<std::array<double, N_DIM>> center(n_all);
     std::vector<double> h(n_all);
     std::vector<Key> own(n_all);
-    Kokkos::parallel_for("stencil_shapes_cells", Kokkos::RangePolicy<Host>(0, n_all), [&](const uint32_t c) {
+    gated::parallel_for("stencil_shapes_cells", Kokkos::RangePolicy<Host>(0, n_all), [&](const uint32_t c) {
         h[c] = std::pow(double(mesh.h_cell_volume(c)), 1.0 / N_DIM);
         const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
         std::array<double, N_DIM> x{};
@@ -126,7 +127,7 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
         std::vector<Key> window(own.begin() + block.first, own.begin() + block.first + size), next(size);
         // Windows of 2 reach + 1 descriptors along each axis in turn
         for (uint32_t a = 0; a < N_DIM; a++) {
-            Kokkos::parallel_for("stencil_shapes_windows", Kokkos::RangePolicy<Host>(0, size), [&](const uint32_t l) {
+            gated::parallel_for("stencil_shapes_windows", Kokkos::RangePolicy<Host>(0, size), [&](const uint32_t l) {
                 const auto x = index(l);
                 Key k;
                 if (x[a] < reach || x[a] + reach >= e[a]) {
@@ -167,7 +168,7 @@ StencilShapes stencil_shapes(const Mesh & mesh, const uint32_t reach) {
     }
     // Built here: the threads only read them
     const VertexNeighbors & neighbors = mesh.vertex_neighbors();
-    Kokkos::parallel_for("stencil_shapes_near_faces", Kokkos::RangePolicy<Host>(0, n), [&](const uint32_t c) {
+    gated::parallel_for("stencil_shapes_near_faces", Kokkos::RangePolicy<Host>(0, n), [&](const uint32_t c) {
         if (has[c]) return;
         Reached at;
         at.insert(c, {});

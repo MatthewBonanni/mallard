@@ -6,6 +6,7 @@
  */
 
 #include "favre_average.h"
+#include "gated.h"
 
 FavreAverage::FavreAverage(const std::vector<std::string> & fields_in,
                            const std::vector<std::pair<uint32_t, uint32_t>> & products_in,
@@ -37,7 +38,7 @@ void FavreAverage::sample(rtype w, const CellSampler & sampler, uint32_t n_owned
     const auto code = codes;
     const auto pair = pairs;
     const uint32_t n_fields = static_cast<uint32_t>(fields.size()), n_products = static_cast<uint32_t>(products.size());
-    Kokkos::parallel_for("favre_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("favre_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const rtype w_c = w * sampler(c, CellSampler::RHO);
         W(c) += w_c;
         const rtype a = w_c / W(c);

@@ -23,6 +23,8 @@ faces, and its own stencil selection by a Lebesgue bound.
 | `src/numerics/teno.h` | Monomials, Euler eigenvectors, the adaptive cutoff, packed stencil storage |
 | `src/numerics/teno.cpp` | Options, the cache, and the reconstruction kernels |
 | `src/numerics/teno_setup.h`, `teno_setup.cpp` | The setup on the device: stencil search, ranking metric, moments, fits |
+| `src/numerics/teno_shapes.h`, `teno_shapes.cpp` | Stencil-shape keys, so that the setup fits one cell per shape |
+| `src/numerics/teno_sharing.h` | The store of tables shared by the cells of one stencil shape |
 | `src/numerics/teno_scalars.h` | Mixture scalars reconstructed with the flow's stencil choices |
 | `src/numerics/face_reconstruction.h`, `face_reconstruction.cpp` | Face quadrature, and the interface shared with first order and MUSCL |
 
@@ -606,6 +608,9 @@ which costs memory only. The tables of the shapes are packed like the cells'
 stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
 own through `pinv_index` (block and lane); on a mesh with a shape per cell this
 is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+The device setup ranks, hashes and compares the tables where it computes them;
+only the hashes, and the tables that the shapes keep, reach the host, which
+matches the hashes in cell order.
 A caller that knows its stencil shapes, such as a structured block's offset
 pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
 tables; such shapes are agreed over the ranks by their key in the same way.
@@ -616,8 +621,41 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
+**One fit per stencil shape.** With shared tables the setup groups the cells
+before fitting any table (`teno_shapes.h`), on the device, so that every backend
+groups them alike and gives the same tables. A cell's search reads the geometry of the cells in its
+vertex-neighbor layers, as many as the layers' cell counts make it take, and
+its own faces; its key hashes exactly that, relative to the cell and in units of
+its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
+and its boundary faces with their conditions, sorted by position so that the
+key does not depend on the numbering, and the cell's own faces in its own order.
+The cell with the lowest global id of each key, over the ranks, is fitted, and
+the other cells of the key take its stencil, each entry mapped to the cell at
+the same position of their own sorted layers, its pseudo-inverses, basis means
+and smoothness-indicator matrix. Batches of fitted cells and cells taken from their
+keys then go through the table comparison above. The tables of a key are
+bitwise equal, so a batch ranks and compares them once, at the key's first cell
+there: the store sees each table once, with the lowest global id of its cells,
+which gives the shapes of ranking every cell, and the key's other cells take its
+shape and canonical order. Cells whose key no other cell
+has, whose layers reach the outermost halo layer or hold two periodic copies of
+a cell, and cells whose layers do not match their key's representative, are
+fitted on their own, so a mesh with a shape per cell is set up as before; so
+are the cells of axisymmetric meshes, whose tables depend on the radius. Once
+the halo is as deep as the searches need, the layers of every reconstructed
+halo cell lie within the complete layers, and the cell counts that decide
+whether a cell has a key are taken over the ranks, halo cells' included, so
+each cell has the same key and the same tables on every rank. Cells of one
+key have geometries that agree to within $2^{-30} h$ in every coordinate the
+key reads, so the tables a cell takes differ from its own fit by what such a
+difference changes, besides round-off. The shared tables are those of the table
+comparison, except where the cells of one key fall on either side of its grid:
+they take one table instead of two. In 2D, a cell whose search reads a wall
+with another boundary behind it (a thin body, whose far side can drop mirror
+images) has no key and is fitted on its own.
+
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 25; one file per MPI rank). The file is used
+on later runs (format version 26; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -788,6 +826,63 @@ lattice (it appears below `cfl` of about 0.8 on `cartesian_tri` and between
 `TENOLattice` (2D) and `TENO3DKuhnLattice` record the semi-discrete rates
 above and fail when they change.
 
+**Graded hexahedra** (#1232). Orders 4 and 6 grow on hexahedra graded along
+one axis from 5% cell-to-cell growth, the default order 5 and order 3 do not.
+On a periodic box of 24 cells along x with `stretching = [β, 0, 0]` and cells
+of the mean spacing across, the fastest mode is a sound wave along the grading,
+uniform across, of 4 to 6 cells per wavelength. Largest real part of the
+eigenvalues of the linearized operator (acoustics at rest, HLLC; sound speeds
+over the mean cell size), the column as the block of a Bloch analysis:
+
+| β (largest cell-to-cell ratio) | 0.6 (1.05) | 0.9 (1.11) | 1.5 (1.25) |
+|---|---|---|---|
+| order 3, order 5 | < 1e-9 | < 1e-9 | < 1e-9 |
+| order 4 | 7.5e-7 | 5.7e-2 | 5.1e-2 |
+| order 6 | 5.7e-2 | 4.7e-2 | 5.1e-5 |
+
+The cause is the ranking by physical distance. On the uniform box every cell
+takes the same 56 entries, symmetric along x (5, 13, 20, 13 and 5 cells at
+x offsets −2 to 2). Grading splits each equidistant shell of the lattice by
+the side and the direction of its members: at β = 1.5 neighbors take 39 to 79
+entries, mostly three layers along x plus single cells two or three layers
+away on the finer side only, and the size jumps between neighbors (39, 43, 63
+entries in a row). An odd degree's own dissipation does not cover the
+mismatch between the face values of such neighbors. Ranking experiments (a
+scratch build, both orders, β = 0.6 / 0.9 / 1.5):
+
+| Ranking | Order 4 | Order 6 |
+|---|---|---|
+| physical distance | 7.5e-7 / 5.7e-2 / 5.1e-2 | 5.7e-2 / 4.7e-2 / 5.1e-5 |
+| no cut within 1% of the cut distance | < 1e-9 / 3.9e-2 / 8.1e-3 | 5.7e-2 / 4.1e-2 / 4.1e-5 |
+| offsets scaled per axis by $2s_i/(s_i + s_j)$ | < 1e-9 / 4.1e-2 / 3.3e-3 | 3.2e-2 / 4.2e-2 / 1.1e-6 |
+| both | < 1e-9 / < 1e-9 / 1.4e-9 | < 1e-9 / < 1e-9 / 3.8e-7 |
+| both, with $s$ the cube root of the volume | < 1e-9 / 4.0e-2 / 4.6e-2 | 5.9e-3 / 4.1e-2 / 1.1e-2 |
+
+with $s_i$ and $s_j$ the widths of the target cell and of the candidate
+along each axis, a distance in which a geometric grading leaves every shell
+whole. Neither part removes the growth alone, and a scalar size does not:
+the ranking has to undo the grading direction by direction and close the
+shells it nearly restores. None of it is adopted:
+
+- Widths per axis exist only for hexahedra aligned with the axes. The
+    tensor spacing of the vertex neighbors (the [ranking metric's](#candidates)
+    second moment) differs between the cells of the Kuhn and pyramid tilings,
+    so it changes their stencils: the Kuhn rate of #1136 rises from 1.20e-5 to
+    1.48e-5, and pyramids at order 4 grow again. A spacing summed over the
+    centroids around each node of the cell keeps every regular tiling's
+    stencils, but it needs a 2% closure, still grows at β = 1.8 (2.1e-2 at
+    order 4, 1.0e-3 at order 6), and fails to set up order 6 on walled
+    $8^3$ and $16^3$ boxes.
+- Accuracy is not kept everywhere. Order 4's face-value error on walled
+    graded boxes changes by −3% to +7%; applied to every degree it raises
+    order 5's by 35% to 100% at `stretching = [1, 1, 1]`.
+- Each key needs the spacing of every candidate, which a partition's
+    outermost halo layer lacks.
+
+`TENO3DGradedLattice` records the rates of order 4 at β = 0.9 and 1.5 and of
+order 6 at β = 0.6 and 0.9, and keeps orders 3 and 5 below 1e-7 at β = 1.5;
+a fix gives orders 4 and 6 that bound.
+
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
 small centroid offsets. That fit has full rank and Lebesgue constants within
@@ -839,10 +934,10 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     ([order-4 study](../design/teno4_robustness.md)): it amplifies an
     outgoing acoustic wave on a radially stretched O-grid (#975) and grows
     acoustic modes on graded hexahedra from 5% cell-to-cell grading, as
-    order 6 does (#1232). Its undershoots ahead of plane shocks, once about
-    10 times order 5's (#977), are down to order 5's on quads
-    ([troubled cells](#troubled-cells)); where shocks start from a corner it
-    still undershoots. The odd-even wall
+    order 6 does ([graded hexahedra](#3d-stability), #1232). Its undershoots
+    ahead of plane shocks, once about 10 times order 5's (#977), are down to
+    order 5's on quads ([troubled cells](#troubled-cells)); where shocks start
+    from a corner it still undershoots. The odd-even wall
     pressure it left at the closed trailing edge of the NACA 0012 tutorial
     mesh (#976) came from mirror images past the far side of the body, which
     the setup now rejects ([candidates](#candidates)).

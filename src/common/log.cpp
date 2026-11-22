@@ -322,7 +322,7 @@ void written(uint64_t step, double t, std::string_view kind, std::string_view pa
         if (list.size() > 1) list += ",";
         json::Object o;
         o.add("path", f.path).add("bytes", f.bytes);
-        if (!f.sha256.empty()) o.add("sha256", f.sha256);
+        file_hash::add(o, f.hash);
         list += o.str();
         bytes += f.bytes;
     }

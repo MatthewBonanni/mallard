@@ -1,0 +1,16 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/particle_vortex/input.toml",
+  "examples/tracer_vortex/input.toml",
+  "tools/dev/catalog_inputs/2d/solid_particles.toml"
+ ],
+ "type": "string",
+ "values": [
+  "solid",
+  "tracer"
+ ]
+}

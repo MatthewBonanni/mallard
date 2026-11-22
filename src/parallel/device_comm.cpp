@@ -19,6 +19,8 @@
 #include <string>
 #include <type_traits>
 
+#include "gated.h"
+
 namespace comm {
 
 #ifdef Mallard_HAS_NCCL
@@ -34,9 +36,9 @@ ncclComm_t nccl() {
     ncclUniqueId id;
     if (rank() == 0 && ncclGetUniqueId(&id) != ncclSuccess) throw std::runtime_error("NCCL: ncclGetUniqueId failed");
     MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, communicator());
-    // NCCL's graph mixing support adds event nodes to captured graphs, which the step's conditional node cannot
-    // hold. Mallard needs no mixing: its NCCL calls share one stream, and the host drains the step queue before
-    // it calls NCCL outside a step graph.
+    // NCCL's graph mixing support adds event nodes to captured graphs, which a launch of the step graph after a
+    // stop would still run. Mallard needs no mixing: its NCCL calls share one stream, and the host drains the step
+    // queue before it calls NCCL outside a step graph.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
     config.graphUsageMode = 1;
@@ -211,7 +213,7 @@ void enqueue_wait(const Kokkos::DefaultExecutionSpace & waiter, const Kokkos::De
     cudaStreamWaitEvent(waiter.cuda_stream(), event, 0);
     if (wait_delay > 0) {
         const long long cycles = static_cast<long long>(wait_delay);
-        Kokkos::parallel_for("wait_delay", Kokkos::RangePolicy<>(waiter, 0, 1), KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("wait_delay", Kokkos::RangePolicy<>(waiter, 0, 1), KOKKOS_LAMBDA(const int) {
             KOKKOS_IF_ON_DEVICE((for (const long long start = clock64(); clock64() - start < cycles;) {}))
             KOKKOS_IF_ON_HOST(((void)cycles;))
         });
