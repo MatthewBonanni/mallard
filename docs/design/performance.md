@@ -350,7 +350,7 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+- The troubled passes' scratch holds an eighth of the cells (`troubled_capacity`); more troubled cells are done in
   further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
