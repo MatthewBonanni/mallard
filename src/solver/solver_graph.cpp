@@ -1312,6 +1312,10 @@ step_queue::Horizon Solver::step_horizon() const {
     step_queue::Horizon h;
     if (n_steps > 0) h.at_step(n_steps);
     if (t_stop > 0) h.at_time(t_stop_reached());
+    h.at_step(pause_step);
+    if (pause_time < std::numeric_limits<rtype>::infinity()) {
+        h.at_time(pause_time - precision_tol(1e-9, 1e-5) * Kokkos::abs(pause_time));
+    }
     if (!triggers.empty() && !triggers_on_device()) h.at_step(step + 1);
     // The host takes up the next landing time once a step reaches it
     if (const rtype landing = next_landing_time(); landing < std::numeric_limits<rtype>::infinity()) {

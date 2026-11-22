@@ -253,7 +253,8 @@ struct VorticityGradientFunctor {
  *        line of centroids, as the viscous fluxes); boundary faces carry none.
  *        With the reaction sensor, Omega is SENSOR_GAIN times the filtered sensor
  *        within the flame table's range of the cell's mixture fraction (0 outside),
- *        and s_L, delta_L those of the table there.
+ *        and s_L, delta_L those of the table there. With the progress sensor (gas = "flamelet"), Omega is the
+ *        sensor of the table's normalized progress variable Lambda.
  */
 struct ThickenedFlameFunctor {
     ThickenedFlame tf;
@@ -276,8 +277,9 @@ struct ThickenedFlameFunctor {
     Kokkos::View<rtype *> time_scale;
     Kokkos::View<rtype *[3]> sgs;  // [mu_t, ...]
     Kokkos::View<double *> state;  // [..., beta] (Solver::les_state)
-    Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;  // sensor = "reaction": (cell, [Y, ...])
+    Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;  // sensor = "reaction": (cell, [Y, ...]); "progress": [Z, C]
     Kokkos::View<rtype *[3]> reaction;                     // sensor = "reaction": [filtered sensor, ., .]
+    flamelet::Gas<> flamelet;                              // sensor = "progress"
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -333,6 +335,10 @@ struct ThickenedFlameFunctor {
                 s_L = flame.s_L;
                 delta_L = flame.delta_L;
             }
+        } else if (tf.sensor_type == ThickenedFlame::Sensor::PROGRESS) {
+            using G = flamelet::Gas<>;
+            omega = ThickenedFlame::progress_sensor(flamelet.lambda(
+                static_cast<double>(scalars(c, G::Z)), flamelet.cell_variance(c), static_cast<double>(scalars(c, G::C))));
         } else {
             omega = tf.sensor(static_cast<double>(values(c, N_DIM)));
         }
@@ -811,7 +817,8 @@ void Solver::update_thickened_flame() {
                                                cell_transport, les_delta, tfles_fields, chem_time_scale,
                                                les_coefficients, les_state, cell_scalars,
                                                reaction ? tfles_test[ThickenedFlame::SENSOR_PASSES % 2]
-                                                        : Kokkos::View<rtype *[3]>()});
+                                                        : Kokkos::View<rtype *[3]>(),
+                                               mixture.flamelet});
     // Halo cells take their owners' fields: the face diffusivities need them
     exchange_cell_vectors(tfles_fields);
 }
@@ -849,11 +856,16 @@ void Solver::update_dynamic_efficiency() {
     if (tfles_test_passes == 0) return;
     const uint32_t n_owned = mesh->n_owned();
     const ThickenedFlame tf = thickened_flame;
-    Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values;
+    Kokkos::View<rtype **, Kokkos::LayoutRight> values = transport_values, scalars = cell_scalars;
+    const flamelet::Gas<> gas = mixture.flamelet;
     Kokkos::View<rtype *[3]> progress = tfles_test[0], filtered = tfles_test[1];
     gated::parallel_for("tfles_progress", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
-        const double T = static_cast<double>(values(c, N_DIM));
-        progress(c, 0) = static_cast<rtype>(Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - tf.T_u) / (tf.T_b - tf.T_u))));
+        using G = flamelet::Gas<>;
+        progress(c, 0) = static_cast<rtype>(
+            tf.sensor_type == ThickenedFlame::Sensor::PROGRESS
+                ? gas.lambda(static_cast<double>(scalars(c, G::Z)), gas.cell_variance(c),
+                             static_cast<double>(scalars(c, G::C)))
+                : tf.progress(static_cast<double>(values(c, N_DIM))));
     });
     gated::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 1});
     exchange_cell_vectors(progress);
@@ -1034,8 +1046,9 @@ void Solver::read_les() {
                          "(docs/guide/les.md).");
     }
     if (!input.at("les").contains("combustion")) return;
-    if (!reacting || !is_viscous()) {
-        throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, [chemistry]).");
+    if (!(reacting || mixture.tabulated()) || !is_viscous()) {
+        throw InputError("[les.combustion] needs a reacting viscous mixture (gas = \"mixture\", navier_stokes, "
+                         "[chemistry]) or gas = \"flamelet\" with navier_stokes.");
     }
     const Input & combustion = input.at("les").at("combustion");
     if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
@@ -1043,7 +1056,7 @@ void Solver::read_les() {
         pasr_on = true;
         return;
     }
-    thickened_flame = ThickenedFlame::from_input(combustion);
+    thickened_flame = ThickenedFlame::from_input(combustion, mixture.tabulated());
     tfles_on = true;
     if (thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION) read_reaction_sensor(combustion);
 }
@@ -1081,7 +1094,7 @@ void Solver::init_les() {
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
-    if (mixture.tabulated()) {
+    if (mixture.tabulated() && mixture_model->flamelet().variance() != flamelet::FlameletModel::Variance::NONE) {
         flamelet_variance = Kokkos::View<rtype *>("flamelet_variance", mesh->n_cells);
         h_flamelet_variance = pinned_mirrors(flamelet_variance);
         if (halo.active() && !mixture.flamelet.second_moment) {
