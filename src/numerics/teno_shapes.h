@@ -70,7 +70,8 @@ struct ShapeSearch {
     struct Result {
         uint32_t n = 0;      // cells visited
         uint32_t layers = 0;
-        bool ok = false;     // within the scratch, every cell once, none in the outermost halo layer, no ties
+        bool walked = false; // the layers fit the scratch and hold every cell once
+        bool ok = false;     // walked, none in the outermost halo layer, no ties
     };
 
     KOKKOS_INLINE_FUNCTION ShapeLanes lanes(const size_t slot) const {
@@ -143,6 +144,13 @@ class ShapeKeys {
          *        on the order of the visits and needs no sort.
          */
         std::vector<ShapeKey> keys(uint32_t n) const;
+
+        /**
+         * @brief The cells that the searches of cells visit, which are those
+         *        whose geometry their setups read; complete is false if a
+         *        search does not fit its scratch or meets a cell twice.
+         */
+        std::vector<uint8_t> reach(const std::vector<uint32_t> & cells, bool & complete) const;
 
         /**
          * @brief Rewrites the stencils of slots [0, n) of batch, the tables of

@@ -258,6 +258,7 @@ struct Options {
     double stencil_factor = 2.0;     // central stencil size per fitted monomial
     std::vector<double> face_points;  // 2D: the face quadrature's points on [-1, 1]
     bool sector_stencils = true;      // false: the central stencils alone, without sectors or smoothness matrices
+    bool defer_moments = false;       // 3D: no cell moments until compute_moments() or compute_all_moments()
 };
 
 /** @brief Timings of the last setup, in seconds. */
@@ -305,6 +306,14 @@ class SetupHandle {
          *        them (3D; empty in 2D).
          */
         teno::Moments moments(uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const;
+
+        /**
+         * @brief With defer_moments, the moments of the given cells, or of
+         *        every cell: a cell's tables read the moments of the cells its
+         *        search visits (3D; nothing in 2D).
+         */
+        void compute_moments(const std::vector<uint32_t> & cells);
+        void compute_all_moments();
 
     private:
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;
