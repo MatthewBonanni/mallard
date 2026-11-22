@@ -49,6 +49,7 @@ struct ScalarLimiterFunctor {
     rtype venkat_K;
     uint32_t n_species;
     chemistry::ThermoTable<> thermo;
+    bool independent;  // flamelet scalars: each bounded by its own slope, no composition to keep summing to one
 
     /**
      * @brief Offset to the neighbor across face f: the neighbor cell
@@ -208,7 +209,7 @@ struct ScalarLimiterFunctor {
         double R = 0.0, cv = 0.0;
         const double gamma_d = static_cast<double>(gamma_c);
         for (uint32_t k = 0; k < n_species; k++) {
-            if (k == major || phi <= 0.0_r) continue;
+            if ((k == major && !independent) || phi <= 0.0_r) continue;
             const rtype S_c = scalars(c, k);
             rtype g[N_DIM];
             FOR_I_DIM g[i] = gradients(c, k, i);
@@ -222,6 +223,10 @@ struct ScalarLimiterFunctor {
             }
             if (phi_k >= phi) continue;
             const rtype s_k = Kokkos::fmax(phi_k, 0.0_r) / phi;
+            if (independent) {
+                FOR_I_DIM gradients(c, k, i) = s_k * g[i];
+                continue;
+            }
             const rtype w_k = shared_cut_weight((1.0_r - s_k) * phi * d_max);
             if (w_k >= 1.0_r) {
                 shared_cut = Kokkos::fmin(shared_cut, s_k);
@@ -270,6 +275,7 @@ struct ScalarLimiterFunctor {
         for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
             if (m >= n_faces) continue;
             for (const uint32_t j : shared) {
+                if (independent && j < n_species) continue;
                 rtype d = 0.0_r;
                 FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
@@ -384,11 +390,12 @@ struct ScalarThetaFunctor {
 } // namespace
 
 void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryData & boundaries_in,
-                                const chemistry::ThermoTable<> & thermo_in, const FaceReconstruction & flow) {
+                                const Mixture & gas, const FaceReconstruction & flow) {
     mesh = mesh_in;
     boundaries = boundaries_in;
-    thermo = thermo_in;
-    n_species = thermo.n_species;
+    thermo = gas.thermo;
+    n_species = gas.n_species;
+    independent = gas.tabulated();
     switch (flow.get_type()) {
         case FaceReconstructionType::FIRST_ORDER:
             linear = false;
@@ -471,7 +478,8 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
             ScalarLimiterFunctor<decltype(rotations)::value> functor{
                 mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
                 mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume,
-                boundaries, scalars, W, gradients, density_slope, limiter, limiter_type, venkat_K, n_species, thermo};
+                boundaries, scalars, W, gradients, density_slope, limiter, limiter_type, venkat_K, n_species, thermo,
+                independent};
             Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
         });
     }

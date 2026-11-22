@@ -13,6 +13,7 @@
 #define TENO_SETUP_H
 
 #include <array>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -212,6 +213,21 @@ inline bool one_sided_face(const Mesh & mesh, const BoundaryCondition & bc, cons
     return mesh.curved_geometry && !curved_mirrors && mesh.curved_geometry->face_is_curved(f) &&
            (bc.is_wall() || bc.type == BoundaryType::SYMMETRY);
 }
+
+/** @brief A cell's size h, which scales its tables: the cube root of its volume (2D: square root of its area). */
+inline double cell_scale(const Mesh & mesh, const uint32_t c) {
+    return N_DIM == 3 ? std::cbrt(double(mesh.h_cell_volume(c))) : std::sqrt(double(mesh.h_cell_volume(c)));
+}
+
+#if N_DIM == 2
+/**
+ * @brief (face): whether it is a boundary face with other boundary faces of the
+ *        domain in the strip behind it, which can drop its mirror images past
+ *        the far side of a thin body: the fit then depends on more than the
+ *        cells and faces around it.
+ */
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries);
+#endif
 
 /** @brief Whether batches interleave their cells (GPUs). */
 bool batch_interleaved();

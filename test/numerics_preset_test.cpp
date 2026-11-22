@@ -233,6 +233,8 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"shock_bubble_2d/input.toml", "second_order", 2, "", {}, ""},
     {"shu_osher/input.toml", "high_order", 2, "", {}, ""},
     {"sod/input.toml", "high_order", 2, "", {}, ""},
+    {"tracer_vortex/input.toml", "high_order", 2, "", {}, ""},
+    {"particle_vortex/input.toml", "high_order", 2, "", {}, ""},
     {"source_regions/input.toml", "second_order", 2, "", {}, ""},
     {"hot_gas_regions/input.toml", "second_order", 2, "", {}, ""},
     {"sphere_axisymmetric/input.toml", "high_order", 2, "",
