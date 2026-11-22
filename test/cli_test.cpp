@@ -1041,7 +1041,9 @@ TEST(CliTest, KeyCatalogHasNoValueStandingForOffOrAutomatic) {
     };
     for (const std::string & key : catalog.keys()) {
         const json::Value & entry = catalog[key];
-        if (const json::Value * d = entry.find("default")) EXPECT_FALSE(sentinel(d->string)) << key << " = " << d->string;
+        if (const json::Value * d = entry.find("default")) {
+            EXPECT_FALSE(sentinel(d->string)) << key << " = " << d->string;
+        }
         if (const json::Value * by_dim = entry.find("defaults_by_dim")) {
             for (const std::string & dim : by_dim->keys()) {
                 EXPECT_FALSE(sentinel((*by_dim)[dim].string)) << key << " (" << dim << "D) = " << (*by_dim)[dim].string;

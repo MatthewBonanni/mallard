@@ -1251,7 +1251,7 @@ TEST(ReactingTest, SimplerSplittingKeepsASteadyStateThatStrangSplittingMoves) {
     const auto kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech);
     const uint32_t ns = mech.n_species();
     Solver fresh;
-    fresh.init(parse_toml(stirred_reactor(uniform_state("1000.0", "{ H2 = 2.0, O2 = 1.0, N2 = 3.76 }"), 0, dt,
+    fresh.init(parse_toml(stirred_reactor(uniform_state("1000.0", "{ H2 = 2.0, O2 = 1.0, N2 = 3.76 }"), 1, dt,
                                           "simpler", dir + "/fresh")));
     fresh.copy_device_to_host();
     const double rho = double(steady.h_conservatives(0, 0));
