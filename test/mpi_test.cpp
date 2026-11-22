@@ -94,7 +94,7 @@ TEST(MPITest, HaloExchangeFillsEveryHaloCellFromItsOwner) {
     Solver solver;
     solver.init(parse_toml(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                      bcs("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
-                                         "type = \"symmetry\"\n", "type = \"symmetry\"\n"), 0)));
+                                         "type = \"symmetry\"\n", "type = \"symmetry\"\n"), 1)));
     if (!solver.is_distributed()) GTEST_SKIP() << "needs more than one rank";
     const auto & dist = solver.get_distribution();
     const uint32_t n_local = solver.get_mesh()->n_cells;
