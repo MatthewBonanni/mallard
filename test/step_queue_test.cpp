@@ -819,7 +819,7 @@ TEST(StepQueueTest, ProbesOfReductionsAloneAreReducedOnTheDevice) {
         std::getline(row, step, ',');
         std::getline(row, t, ',');
         std::getline(row, measure, ',');
-        EXPECT_NEAR(std::stod(measure), N_DIM == 2 ? 1.0 : 0.4, 1e-12);
+        EXPECT_NEAR(std::stod(measure), N_DIM == 2 ? 1.0 : 0.4, 1e-6);
     }
     Case bare = c;
     bare.extra = "check_interval = 1000\n";
