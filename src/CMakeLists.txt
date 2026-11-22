@@ -70,6 +70,7 @@ add_library(MallardCore STATIC
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
     numerics/teno_setup.cpp
+    numerics/teno_shapes.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
@@ -292,7 +293,7 @@ endforeach()
 # contract either. [statistics.convergence] updates its estimate on the device
 # as the host does, bit for bit, and the device cuts isosurfaces into the host's
 # quadrature points (region_motion.cpp, as region_mesh.cpp cuts them on the host)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno_shapes.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
                        solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp
                        common/region_mesh.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse

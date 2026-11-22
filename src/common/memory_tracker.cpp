@@ -61,6 +61,10 @@ constexpr Rule RULES[] = {
     {"teno_small_size_rows", false, C::SETUP}, {"teno_scale_rows", false, C::SETUP},
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
     {"teno_entry_rotations", false, C::SETUP}, {"teno_boundary_faces", false, C::SETUP},
+    // Stencil shape searches: slots sized by the device and the setup's batch
+    {"teno_shape_cells", false, C::SETUP}, {"teno_shape_lattice", false, C::SETUP}, {"teno_shape_order", false, C::SETUP},
+    {"teno_shape_q", false, C::SETUP}, {"teno_shape_hash", false, C::SETUP}, {"teno_shape_sizes", false, C::SETUP},
+    {"teno_shape_bad", false, C::SETUP},
     {"teno_", true, C::TABLES},
     {"muscl_table_", true, C::SETUP}, {"muscl_", true, C::TABLES},
     // Mesh, geometry and quadrature

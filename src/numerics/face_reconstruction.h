@@ -487,6 +487,9 @@ class TENO : public FaceReconstruction {
         // cells of a cell shape one row of basis_mean and si_matrix or moments
         // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // This rank's cells whose tables the last full setup fitted; with shared tables the
+        // others take those of their stencil shape's cell with the lowest global id
+        uint32_t n_cells_fitted = 0;
         // false: the central stencils alone, which cell_gradients and point_values read, and no
         // face values (output of states read from files); such tables are never written to the cache
         bool sector_stencils = true;
@@ -636,9 +639,11 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
-        // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        // Setup: on the host only (tests), the cells per device batch (0: from the device memory), and
+        // cells refitted after taking their stencil shape's tables (tests)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
+        std::vector<uint32_t> setup_refit_cells;
 
         // Gas mixtures: the flow block is reconstructed in primitive variables
         // W with characteristic projections on the primitive system, whose
