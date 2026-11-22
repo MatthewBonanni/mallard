@@ -1,7 +1,8 @@
 {
  "default": "0",
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [],
  "type": "integer"

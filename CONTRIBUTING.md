@@ -93,26 +93,26 @@ cmake --build build -j
   common cases. A run and `mallard check` report it the same way, and
   `test/error_messages_test.cpp` holds an example of each kind.
 - **Kokkos device code** must run on CUDA and HIP, not only on the CPU backends:
-  - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
-    references to host objects. Copy the members a kernel needs into locals first.
-  - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
-    calls, no allocation, no I/O. Functions called from kernels are
-    `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
-  - Kokkos computes a View's offset in the common type of the indices, so at
-    least one index is 32 bits or wider: indices that are all `uint8_t` or
-    `uint16_t` wrap the offset, and the build rejects them.
-  - Data lives in `Kokkos::View`s in the default memory space; copy to the host
-    with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
-  - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
-    in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
-    (`src/CMakeLists.txt`), and every allocation is checked
-    (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
-    with 64 bits, as `teno::PackedStencils` does.
-  - Results must not depend on the backend, thread count or rank count: reductions
-    that feed the solution must be deterministic (the suite checks bitwise
-    reproducibility across ranks and restarts; see [Reproducibility](#reproducibility)).
-  - nvcc compiles every source, including host-only code, so a host-only change can
-    still break the CUDA build; the CUDA compile jobs in CI catch this.
+    - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
+      references to host objects. Copy the members a kernel needs into locals first.
+    - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
+      calls, no allocation, no I/O. Functions called from kernels are
+      `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
+    - Kokkos computes a View's offset in the common type of the indices, so at
+      least one index is 32 bits or wider: indices that are all `uint8_t` or
+      `uint16_t` wrap the offset, and the build rejects them.
+    - Data lives in `Kokkos::View`s in the default memory space; copy to the host
+      with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
+    - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
+      in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
+      (`src/CMakeLists.txt`), and every allocation is checked
+      (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
+      with 64 bits, as `teno::PackedStencils` does.
+    - Results must not depend on the backend, thread count or rank count: reductions
+      that feed the solution must be deterministic (the suite checks bitwise
+      reproducibility across ranks and restarts; see [Reproducibility](#reproducibility)).
+    - nvcc compiles every source, including host-only code, so a host-only change can
+      still break the CUDA build; the CUDA compile jobs in CI catch this.
 
 ## Adding a feature, end to end
 
@@ -145,17 +145,17 @@ that adds or changes behavior includes:
    combination of features lists them in [test/features.toml](test/features.toml)
    for the [feature matrix](docs/guide/features.md).
 3. **Documentation**, following [docs/design/documentation.md](docs/design/documentation.md):
-   - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
-     defaults, pitfalls) in the topic's page of `docs/guide/`;
-   - every new key with its default in [docs/input.md](docs/input.md);
-   - equations and sources in `docs/theory/`, design rationale and measurements in
-     `docs/design/`, and new references in [docs/references.md](docs/references.md);
-   - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
-     (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
-     hand-edited images;
-   - a new output field in the units table of `src/io/field_units.cpp` (or the
-     derived-field catalog `src/solver/derived_catalog.h`), and in the output
-     guide's field table (`python tools/docs/fields.py --mallard build/src/mallard`).
+    - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
+      defaults, pitfalls) in the topic's page of `docs/guide/`;
+    - every new key with its default in [docs/input.md](docs/input.md);
+    - equations and sources in `docs/theory/`, design rationale and measurements in
+      `docs/design/`, and new references in [docs/references.md](docs/references.md);
+    - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
+      (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
+      hand-edited images;
+    - a new output field in the units table of `src/io/field_units.cpp` (or the
+      derived-field catalog `src/solver/derived_catalog.h`), and in the output
+      guide's field table (`python tools/docs/fields.py --mallard build/src/mallard`).
 4. **An example** in `examples/<case>/` with its `input.toml` and a row in
    [examples/README.md](examples/README.md), ideally compared with a reference
    (exact solution, experiment, DNS). Add it to the example list in
@@ -209,16 +209,16 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   tidy; push new commits rather than rewriting history once a review has started.
 - Pull requests open at the same time edit the same docs, so write them to merge
   without conflicts:
-  - in the README and the docs, one item per line (a bullet or a table row): a new
-    item is a line of its own, not more text on another item's line;
-  - where the order of a list carries no meaning (the README's command-line tools,
-    the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
-    items in their place, so that additions of different pull requests land on
-    different lines;
-  - in a merge, generated text is regenerated, not merged by hand: the "Used in"
-    lines (`python tools/docs/used_in.py`), the feature matrix
-    (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
-    (`python tools/dev/input_catalog.py build ...`).
+    - in the README and the docs, one item per line (a bullet or a table row): a new
+      item is a line of its own, not more text on another item's line;
+    - where the order of a list carries no meaning (the README's command-line tools,
+      the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
+      items in their place, so that additions of different pull requests land on
+      different lines;
+    - in a merge, generated text is regenerated, not merged by hand: the "Used in"
+      lines (`python tools/docs/used_in.py`), the feature matrix
+      (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
+      (`python tools/dev/input_catalog.py build ...`).
 - **Before asking for CI**, run `tools/dev/precheck.sh`: in a few seconds and without a
   build, it checks that the branch merges into `main` and runs CI's checks that need no
   build (spelling, docs, feature matrix, changelog) on the merge.
@@ -284,7 +284,10 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)), so the sanitized tests run
   with `MALLARD_TEST_CUDA_GRAPHS=off`: every solver as with `[run] cuda_graphs = false`, and
   the assertions that steps were graphed are skipped. `racecheck` fails on hazards it rates as
-  errors, not on its warnings, which Kokkos' reductions of large values raise. `--full` adds
+  errors, not on its warnings, which Kokkos' reductions of large values raise. `memcheck` and
+  `initcheck` skip the CUDA API errors that NCCL and Open MPI make and handle
+  (`tools/dev/compute_sanitizer_suppressions.xml`), and `memcheck` reports explicit API errors
+  only: the driver's log lines cannot be suppressed. `--full` adds
   `initcheck`, `memcheck` on the whole suite but the chemistry reactor tests (hours), and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
   across the network).
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on

@@ -99,10 +99,11 @@ struct Walker {
 
     /**
      * @brief Move from cell c across interior face f into its other cell, with
-     *        x, and the velocity v if not null, into that cell's frame.
+     *        x, and the n_vectors vectors of v (N_DIM each) if not null, into
+     *        that cell's frame.
      */
     KOKKOS_INLINE_FUNCTION
-    void cross(uint32_t & c, const uint32_t f, rtype * x, rtype * v = nullptr) const {
+    void cross(uint32_t & c, const uint32_t f, rtype * x, rtype * v = nullptr, const uint32_t n_vectors = 1) const {
         const bool side1 = cells_of_face(f, 0) != static_cast<int32_t>(c);
         const uint8_t s = face_shift(f);
         if (s) {
@@ -114,10 +115,12 @@ struct Walker {
             }
             FOR_I_DIM x[i] = y[i];
             if (v && maps.rotated()) {
-                if (side1) {
-                    maps.rotate(s, v);
-                } else {
-                    maps.unrotate(s, v);
+                for (uint32_t k = 0; k < n_vectors; k++) {
+                    if (side1) {
+                        maps.rotate(s, v + N_DIM * k);
+                    } else {
+                        maps.unrotate(s, v + N_DIM * k);
+                    }
                 }
             }
         }
@@ -126,11 +129,12 @@ struct Walker {
 
     /**
      * @brief Walk from cell c to the cell holding x (in c's frame), updating
-     *        both, and the velocity v if not null. Stops at the first face
-     *        whose action is not CROSS (BOUNDARY, face set), or after MAX_STEPS.
+     *        both, and the n_vectors vectors of v if not null. Stops at the
+     *        first face whose action is not CROSS (BOUNDARY, face set), or
+     *        after MAX_STEPS.
      */
     KOKKOS_INLINE_FUNCTION
-    Outcome walk(uint32_t & c, rtype * x, int32_t & face, rtype * v = nullptr) const {
+    Outcome walk(uint32_t & c, rtype * x, int32_t & face, rtype * v = nullptr, const uint32_t n_vectors = 1) const {
         for (uint32_t step = 0; step < MAX_STEPS; step++) {
             const rtype h = Kokkos::pow(cell_volume(c), 1.0_r / static_cast<rtype>(N_DIM));
             rtype best = precision_tol(1e-10, 1e-5) * h;
@@ -149,17 +153,21 @@ struct Walker {
                 face = exit;
                 return BOUNDARY;
             }
-            cross(c, static_cast<uint32_t>(exit), x, v);
+            cross(c, static_cast<uint32_t>(exit), x, v, n_vectors);
         }
         return STUCK;
     }
 };
 
-/** @brief A particle as output reports it: its id, position, velocity (solid particles, else 0) and quantities. */
+/**
+ * @brief A particle as output reports it: its id, position, velocity (solid
+ *        particles, else 0), temperature (with heat transfer, else NaN) and quantities.
+ */
 struct Record {
     uint64_t id;
     std::array<double, N_DIM> x;
     std::array<double, N_DIM> v;
+    double T;
     std::vector<double> q;
 };
 
@@ -177,8 +185,8 @@ struct Record {
  * Storage is a fixed number of slots per rank (structure of arrays on the
  * device); an empty slot has id particles::EMPTY. Kernels run over every slot.
  * Each slot has width() values in the block, its position first, then its
- * velocity (solid particles), and n_aux() values outside it (extrema and
- * first times).
+ * velocity (solid particles) and temperature (with heat transfer), and n_aux()
+ * values outside it (extrema and first times).
  */
 class Particles {
     public:
@@ -201,7 +209,11 @@ class Particles {
         /** @brief The values of the particle block of a State: width() per slot. */
         size_t n_values() const { return size_t(capacity) * width; }
 
-        /** @brief Values per slot in the block: the position, the velocity of solid particles, the integrated quantities. */
+        /**
+         * @brief Values per slot in the block: the position, the velocity of
+         *        solid particles and their temperature with heat transfer, the
+         *        integrated quantities.
+         */
         uint32_t get_width() const { return width; }
 
         /** @brief The particle block of the solver's state. */
@@ -216,11 +228,16 @@ class Particles {
         /** @brief Whether the particles are solid, with a velocity of their own. */
         bool inertial() const { return is_solid; }
 
-        /** @brief Whether start_velocity() has yet to give solid particles the gas velocity. */
-        bool starts_at_gas_velocity() const { return start_at_gas; }
+        /** @brief Whether solid particles have yet to take the gas velocity or temperature (start_from_gas()). */
+        bool starts_at_gas() const { return start_v_at_gas || start_T_at_gas; }
 
-        /** @brief Give solid particles the gas velocity at their positions, from the cell states W (halo included). */
-        void start_velocity(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+        /**
+         * @brief Give solid particles the gas velocity, and with heat transfer
+         *        the gas temperature, at their positions, where neither the
+         *        input nor the restart file gives them, from the cell states W
+         *        (halo included).
+         */
+        void start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
                             const LSQVertexGradientFunctor & gradient,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
 
@@ -231,9 +248,10 @@ class Particles {
          *        (FaceReconstruction::point_values) where the scheme has one,
          *        else from that cell's least-squares gradient. Within a step
          *        the velocity is one smooth function of the position, so the
-         *        integrator keeps its order. Solid particles: dx/dt = v and dv/dt
-         *        from drag and gravity at the same gas state (particles::Solid,
-         *        with its stiff limit for relaxation times below the step dt).
+         *        integrator keeps its order. Solid particles: dx/dt, dv/dt
+         *        and dT_p/dt from the forces and heat transfer at the same gas
+         *        state and its least-squares gradient (particles::Solid, which
+         *        integrates exponentially the relaxations faster than the step).
          *        The rates of the integrated quantities follow from the same
          *        state, and at the first stage of a step (the step's start) the
          *        extrema and first times are updated.
@@ -270,7 +288,8 @@ class Particles {
         /**
          * @brief After a step: the cell holding each particle, reflections off
          *        walls and symmetry planes (rebounds with the restitution
-         *        coefficients of [[particles.walls]] for solid particles),
+         *        coefficients of [[particles.walls]] for solid particles, from
+         *        the time within the step at which they reached the wall),
          *        removal of those that left the domain or stuck to a wall. On
          *        the device only, capturable in a step graph.
          */
@@ -298,7 +317,8 @@ class Particles {
          * @brief The particles as stage_output() last staged them, by
          *        increasing id, on every rank (collective): PARTICLE_ID,
          *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle),
-         *        PARTICLE_V (solid particles, likewise), PARTICLE_Q_<name> (per
+         *        PARTICLE_V (solid particles, likewise), PARTICLE_T (with heat
+         *        transfer), PARTICLE_Q_<name> (per
          *        quantity) and PARTICLE_REMOVED (left the domain, lost, stuck).
          */
         RestartArrays restart_arrays() const;
@@ -331,7 +351,9 @@ class Particles {
         uint32_t n_owned = 0;
         double R = 0.0;
         bool is_solid = false;
-        bool start_at_gas = false;
+        bool heated = false;
+        bool start_v_at_gas = false;
+        bool start_T_at_gas = false;
         particles::Solid solid;
         particles::Quantities quantities;
         particles::ParticleProbes probes;
@@ -340,12 +362,13 @@ class Particles {
         bool distributed = false;
         std::string file;
 
-        ParticleView x;                     // (width slot + k): position, velocity (solid), integrated quantities
+        ParticleView x;                     // (width slot + k): position, velocity (solid), temperature (heated), integrated quantities
         Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
         Kokkos::View<uint64_t[3]> n_removed;  // left the domain, lost, stuck
         Kokkos::View<rtype *[2]> restitution;  // (face): normal and tangential, at walls solid particles rebound off
+        Kokkos::View<rtype **, Kokkos::LayoutRight> step_start;  // (slot, k): solid particles at the step's start (Solid::Start)
 
         // Stage scratch
         Kokkos::View<uint32_t *> point_cell;  // cell, 0 in empty slots
