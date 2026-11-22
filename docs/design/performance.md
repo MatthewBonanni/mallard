@@ -973,9 +973,22 @@ row below.
   for the dynamic TFLES efficiency (4 columns), against 26 and 49 us for plain sums (Nsight Systems): the
   difference is 0.5% and 0.2% of a step. On CPUs (48 threads as 1, 2, 4 or 8 ranks, `air_3d` with
   `les.dynamic`) it stays inside the run-to-run spread (5%). Distributed, exact sums add one all-reduce of the
-  column maxima per call to the one of the sums. The flame shows what the plain sums would cost: last
-  bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
-  or a restart on another partition, could no longer be checked against the original.
+  column maxima per call to the one of the sums. Over NCCL on A100s (main 9da4ab1e7, 221k cells, median ms per
+  step of two runs, exact / plain):
+
+    | GPUs | `air_3d` with `les.dynamic` | `flame_3d` with `efficiency = "dynamic"` |
+    |---|---|---|
+    | 1 | 5.27 / 5.23 (+0.7%) | 27.16 / 27.12 (+0.1%) |
+    | 2 | 3.25 / 3.23 (+0.8%) | 20.57 / 20.56 (+0.1%) |
+    | 4 | 2.36 / 2.30 (+2.3%) | 17.12 / 17.11 (+0.1%) |
+    | 8 | 1.65 / 1.60 (+3.2%) | 15.32 / 15.24 (+0.5%) |
+    | 7 + 7, two nodes | 1.81 / 1.71 (+6.0%) | 15.75 / 15.61 (+0.9%) |
+
+    On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
+    us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+    The flame shows what the plain sums would cost: last
+    bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
+    or a restart on another partition, could no longer be checked against the original.
 
 **Contract.** Within one build and version, results stay bitwise independent of the rank count, partition,
 thread count, step queue depth, CUDA graphs and restarts: it costs at most 0.5% per step here, and it is what
@@ -1177,7 +1190,12 @@ Notes:
   GPUs; the comparison with the domain grown instead is in progress.
 - At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
-- Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
+- 3D TENO5 Taylor-Green, $64^3$ hexahedra per A100 (Nx = 64 N, multi-jagged, NCCL, CUDA graphs; main
+  9da4ab1e7, median of the progress intervals from step 60 to 160, two runs): 1 GPU 30.58 ms, 2 GPUs 30.77 ms
+  (99.4%), 4 GPUs 31.10 ms (98.3%), 8 GPUs 31.04 ms (98.5%); over two nodes (HDR InfiniBand) 1 + 1 31.09 ms,
+  4 + 4 31.05 ms and 7 + 7 31.06 ms (98.5%). With the step queue (#787) the step graph runs across nodes too,
+  so crossing nodes costs nothing measurable; before it, two-node runs fell back to one step per launch and
+  paid a flat 0.5 ms per step.
 
 ## Partitions
 
