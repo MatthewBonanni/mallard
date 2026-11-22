@@ -162,6 +162,7 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                               const bool viscous) {
     Settings s;
     s.mixture = mixture != nullptr;
+    s.tabulated = mixture && mixture->tabulated();
     s.viscous = viscous;
     if (!mixture) {
         s.cp = physics.cp;
@@ -184,6 +185,14 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                                     .message = "describes the streams and species of a gas mixture, and this case "
                                                "is a perfect gas",
                                     .fix = "Remove [output.mixture], or set physics.gas = \"mixture\"",
+                                    .docs = DOCS});
+    }
+    if (s.tabulated) {
+        throw InputError(Diagnostic{.key = "output.mixture",
+                                    .line = line_of(*output, "mixture"),
+                                    .message = "describes the streams and species of a gas mixture, and a flamelet "
+                                               "gas transports Z and C, which the output holds as Y_Z and Y_C",
+                                    .fix = "Remove [output.mixture]",
                                     .docs = DOCS});
     }
     const chemistry::Mechanism & mech = mixture->mechanism();
@@ -250,7 +259,9 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
 bool Settings::available(const Field f) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
-    return !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
+    if (tabulated && (f == MIXTURE_FRACTION || f == C_NORM)) return true;
+    if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) return false;
+    return !needs(need::FLAMELET) && !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
            !(needs(need::VISCOUS) && !viscous) && !(needs(need::REFERENCE) && !reference) &&
            !(needs(need::STREAMS) && !streams) && !(needs(need::PROGRESS) && progress == Progress::NONE) &&
            !(needs(need::SPECIES_PAIR) && (fuel_species < 0 || oxidizer_species < 0));
@@ -268,7 +279,14 @@ void Settings::require(const Field f, const Input & input) const {
             if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "fields");
         }
     }
-    if (needs(need::THREE_D) && N_DIM != 3) {
+    if (needs(need::FLAMELET)) {
+        d.message = name + " is a field of the flamelet table, and this case has no flamelet gas";
+        d.fix = "Remove " + name + ", or set physics.gas = \"flamelet\"";
+    } else if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) {
+        d.message = name + " needs the species of a gas mixture, and a flamelet gas has a table in their place";
+        d.fix = f == PROGRESS_VARIABLE ? "Write C_NORM, the table's normalized progress variable, in its place"
+                                       : "Remove " + name;
+    } else if (needs(need::THREE_D) && N_DIM != 3) {
         d.message = name + " is zero in 2D, where the vorticity is normal to the velocity";
         d.fix = "Run the case with mallard3d, or remove " + name;
     } else if (needs(need::MIXTURE) && !mixture) {
@@ -367,6 +385,8 @@ void compute(const Selection & selection, const Settings & settings, const Input
     const Kokkos::View<rtype **, Kokkos::LayoutRight> weights = settings.scalar_weights;
     const Kokkos::View<rtype *> progress_weights = settings.progress_weights;
     const bool mixture = settings.mixture;
+    const flamelet::Gas<> flamelet = inputs.flamelet;
+    const bool tabulated = settings.tabulated;
     const bool progress_T = settings.progress == Settings::Progress::TEMPERATURE;
     const rtype cp = settings.cp, R = settings.R, T_ref = settings.T_ref, p_ref = settings.p_ref;
     const rtype p_inf = settings.p_inf, q_inf = settings.q_inf, z_offset = settings.z_offset;
@@ -431,7 +451,14 @@ void compute(const Selection & selection, const Settings & settings, const Input
             FOR_I_DIM g2 += g(c, 0, i) * g(c, 0, i);
             put(SCHLIEREN, Kokkos::sqrt(g2));
         }
-        if (wants(MIXTURE_FRACTION)) {
+        if (tabulated) {
+            put(MIXTURE_FRACTION, Y(c, flamelet::Gas<>::Z));
+            if (wants(C_NORM)) {
+                put(C_NORM, static_cast<rtype>(flamelet.lambda(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
+                                                               flamelet.cell_variance(c),
+                                                               static_cast<double>(Y(c, flamelet::Gas<>::C)))));
+            }
+        } else if (wants(MIXTURE_FRACTION)) {
             rtype z = z_offset;
             for (uint32_t k = 0; k < n_species; k++) z += weights(Z, k) * Y(c, k);
             put(MIXTURE_FRACTION, z);

@@ -68,7 +68,7 @@ struct MarginsFunctor {
         double T;
         if (mixture) {
             rtype gamma, e0, T_c;
-            gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T_c);
+            gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), gas.flamelet.cell_variance(c), W, gamma, e0, T_c);
             T = static_cast<double>(T_c);
             for (uint32_t k = 0; k < gas.n_species; k++) {
                 take(m, MASS_FRACTION, static_cast<double>(rhoY(c, k) / W[0]), int64_t(c) * gas.n_species + k);

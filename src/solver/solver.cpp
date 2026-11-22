@@ -822,13 +822,13 @@ void Solver::init_physics() {
                                  "and the gas properties, e.g. gamma = 1.4"});
     }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
-    record_options("physics.gas", {"perfect", "mixture"});
+    record_options("physics.gas", {"perfect", "mixture", "flamelet"});
     const std::string unit_system = find_value_or<std::string>(input, "physics", "units", "SI");
     record_options("physics.units", {"SI", "nondimensional"});
     if (unit_system != "SI" && unit_system != "nondimensional") {
         throw not_accepted(input.at("physics"), "physics.units", unit_system, {"SI", "nondimensional"});
     }
-    if (unit_system == "nondimensional" && gas == "mixture") {
+    if (unit_system == "nondimensional" && (gas == "mixture" || gas == "flamelet")) {
         throw InputError({.key = "physics.units",
                           .line = line_of(input.at("physics"), "units"),
                           .message = "a gas mixture reads real thermochemistry, so its numbers are always in SI units",
@@ -847,10 +847,12 @@ void Solver::init_physics() {
         physics = Euler::from_input(input);
         return;
     }
-    if (gas != "mixture") {
-        throw not_accepted(input.at("physics"), "physics.gas", gas, {"mixture", "perfect"});
+    if (gas != "mixture" && gas != "flamelet") {
+        throw not_accepted(input.at("physics"), "physics.gas", gas, {"flamelet", "mixture", "perfect"});
     }
-    mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
+    if (gas == "flamelet") check_flamelet_input();
+    mixture_model = std::make_shared<MixtureModel>(gas == "flamelet" ? MixtureModel::flamelet_from_input(input)
+                                                                      : MixtureModel::from_input(input));
     mixture = mixture_model->device();
     species_names = mixture_model->species_names();
     physics = Euler();
@@ -1301,7 +1303,7 @@ void Solver::init_boundaries() {
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
-        boundary_data.thermo = mixture.thermo;
+        boundary_data.mixture_gas = mixture;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
         if (is_viscous()) {
@@ -1572,7 +1574,12 @@ void Solver::copy_boundary_gas() {
     for (size_t i_bc = 0; i_bc < h_values.extent(0); i_bc++) {
         if (bc_mass_fractions[i_bc].empty()) continue;
         const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
-        h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+        // A flamelet gas conducts enthalpy (unity Lewis number), so its gradient variable is h
+        const double T = bc_temperatures[i_bc];
+        h_values(i_bc, 0) = static_cast<rtype>(
+            mixture.tabulated() ? mixture_model->energy(T, bc_mass_fractions[i_bc]) +
+                                      mixture_model->gas_constant(bc_mass_fractions[i_bc]) * T
+                                : T);
         for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
     }
     Kokkos::deep_copy(bc_transport_values, h_values);
@@ -1591,7 +1598,7 @@ void Solver::apply_boundary_fields() {
     gas.R = double(physics.R);
     if (is_mixture()) {
         gas.mixture = true;
-        gas.thermo = boundary_data.thermo;
+        gas.gas = boundary_data.mixture_gas;
         gas.bc_Y = boundary_data.bc_Y;
         gas.bc_thermo = boundary_data.bc_thermo;
         gas.transport = bc_transport_values;
@@ -1672,7 +1679,7 @@ void Solver::init_numerics() {
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture() && !state_reader) {
         scalar_reconstruction.own_scratch = false;
-        scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
+        scalar_reconstruction.init(mesh, boundary_data, mixture, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
@@ -2275,6 +2282,10 @@ void Solver::allocate_memory() {
         }
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+        if (mixture.tabulated()) {
+            h_table_fields = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
+                "table_fields", mesh->n_cells, mixture_model->flamelet().output_names().size());
+        }
         if (reacting) allocate_chemistry();
         if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
@@ -2410,6 +2421,7 @@ void Solver::output_arrays_to_host() {
             // Coefficients of the current state; W and the scalars are work arrays the next RHS refills
             update_cell_states(state(), false);
             update_transport();
+            if (flamelet_variance.is_allocated()) copy(h_flamelet_variance, flamelet_variance);
             copy(h_cell_transport, cell_transport);
             copy(h_cell_diffusion, cell_diffusion);
         }
@@ -2470,7 +2482,14 @@ void Solver::allocate_restart_mirrors() {
 
 void Solver::finish_output_arrays() {
     if (is_mixture()) {
-        if (is_viscous()) {
+        if (is_viscous() && mixture.tabulated()) {
+            // rho D = kappa / cp for every scalar
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                for (size_t k = 0; k < h_D.extent(1); k++) {
+                    h_D(c, k) = static_cast<rtype>(h_cell_diffusion(c, k) / static_cast<double>(h_conservatives(c, 0)));
+                }
+            }
+        } else if (is_viscous()) {
             const auto & mech = mixture_model->mechanism();
             for (uint32_t c = 0; c < mesh->n_cells; c++) {
                 const double rho = static_cast<double>(h_conservatives(c, 0));
@@ -2496,6 +2515,16 @@ void Solver::finish_output_arrays() {
                 h_X(c, k) = static_cast<rtype>(X[k]);
             }
         }
+        if (mixture.tabulated()) {
+            std::vector<double> out(h_table_fields.extent(1));
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const double rho = static_cast<double>(h_conservatives(c, 0));
+                const double Zvar = h_flamelet_variance.extent(0) > 0 ? static_cast<double>(h_flamelet_variance(c)) : 0.0;
+                mixture_model->flamelet().outputs(rho, static_cast<double>(h_Y(c, 0)), static_cast<double>(h_Y(c, 1)),
+                                                  Zvar, out.data());
+                for (size_t i = 0; i < out.size(); i++) h_table_fields(c, i) = static_cast<rtype>(out[i]);
+            }
+        }
     }
     if (radiating) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -2516,15 +2545,23 @@ void Solver::register_data() {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
     if (is_mixture()) {
-        data.reserve(data.size() + 4 * species_names.size() + 6 + PRIMITIVE_NAMES.size() + 2);
+        data.reserve(data.size() + 4 * species_names.size() + h_table_fields.extent(1) + 6 + PRIMITIVE_NAMES.size() +
+                     2);
         for (size_t k = 0; k < species_names.size(); k++) {
             data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
-            data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
+            if (!mixture.tabulated()) data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
         }
         data.push_back(Data("T_SEED", h_T_seed));
+        if (mixture.tabulated()) {
+            const std::vector<std::string> & names = mixture_model->flamelet().output_names();
+            for (size_t i = 0; i < names.size(); i++) {
+                data.push_back(Data(names[i], Kokkos::subview(h_table_fields, Kokkos::ALL(), i)));
+            }
+        }
         if (is_viscous()) {
             data.push_back(Data("MU", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 0)));
-            data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
+            // A flamelet gas's column holds kappa / cp, the conductivity of enthalpy, which D_ shows
+            if (!mixture.tabulated()) data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
             for (size_t k = 0; k < species_names.size(); k++) {
                 data.push_back(Data("D_" + species_names[k], Kokkos::subview(h_D, Kokkos::ALL(), k)));
             }
@@ -2562,6 +2599,7 @@ void Solver::register_data() {
         }
     }
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
+    if (flamelet_variance.is_allocated()) data.push_back(Data("MIXTURE_FRACTION_VARIANCE", h_flamelet_variance));
     if (tfles_on) {
         data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));
         data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
@@ -2636,14 +2674,18 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & s : species_names) names.push_back("RHOY_" + s);
     if (is_mixture()) {
+        const bool tabulated = mixture_model->tabulated();
         for (const auto & s : species_names) {
             names.push_back("Y_" + s);
-            names.push_back("X_" + s);
+            if (!tabulated) names.push_back("X_" + s);
         }
         names.emplace_back("T_SEED");
+        if (tabulated) {
+            for (const auto & name : mixture_model->flamelet().output_names()) names.push_back(name);
+        }
         if (is_viscous()) {
             names.emplace_back("MU");
-            names.emplace_back("LAMBDA");
+            if (!tabulated) names.emplace_back("LAMBDA");
             for (const auto & s : species_names) names.push_back("D_" + s);
             if (mixture.transport.thermal_diffusion) {
                 for (const auto & s : species_names) names.push_back("DT_" + s);
@@ -2663,6 +2705,7 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     }
     if (LES::in_input(input)) {
         names.emplace_back("MU_T");
+        if (mixture_model && mixture_model->tabulated()) names.emplace_back("MIXTURE_FRACTION_VARIANCE");
         if (input.at("les").contains("combustion")) {
             if (find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
                 names.emplace_back("PASR_KAPPA");
@@ -4087,6 +4130,7 @@ void Solver::update_derived_fields() {
         inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
         inputs.Y = cell_scalars;
         inputs.thermo = mixture.thermo;
+        inputs.flamelet = mixture.flamelet;
         if (derived_selection.need(derived::need::VISCOUS)) {
             update_transport();
             inputs.transport = cell_transport;

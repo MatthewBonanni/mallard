@@ -59,6 +59,7 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -72,6 +73,7 @@ add_library(MallardCore STATIC
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
+    physics/flamelet.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -109,6 +111,7 @@ add_library(MallardCore STATIC
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
+    solver/solver_flamelet.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
