@@ -67,17 +67,14 @@ mpi() { [ "${mpiexec[*]}" != none ]; }
 # (hazards it does not rate as errors) include Kokkos' CUDA reductions of values over 16 bytes: every lane of the
 # first warp stores the result, and thread 0 reads it for final() with no __syncwarp between. memcheck and
 # initcheck skip the CUDA API errors NCCL and Open MPI make and handle (the suppressions file); memcheck
-# reports explicit API errors only, as the driver's log lines ("extended" errors) cannot be suppressed. synccheck
-# and initcheck leave NCCL's kernels out: across nodes its SendRecv and ring kernels report barrier and
-# uninitialized-read errors in NCCL's own code
+# reports explicit API errors only, as the driver's log lines ("extended" errors) cannot be suppressed
 suppressions=$(cd "$(dirname "$0")" && pwd)/compute_sanitizer_suppressions.xml
 sanitizer() {
     sanitize=(env MALLARD_TEST_CUDA_GRAPHS=off compute-sanitizer --tool "$1" --target-processes application-only
               --error-exitcode 99 --print-limit 20)
     case $1 in
         memcheck) sanitize+=(--report-api-errors explicit --suppressions "$suppressions") ;;
-        initcheck) sanitize+=(--suppressions "$suppressions" --kernel-name-exclude kns=ncclDevKernel) ;;
-        synccheck) sanitize+=(--kernel-name-exclude kns=ncclDevKernel) ;;
+        initcheck) sanitize+=(--suppressions "$suppressions") ;;
         racecheck) sanitize+=(--racecheck-detect-level error) ;;
     esac
 }
