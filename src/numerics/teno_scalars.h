@@ -51,7 +51,7 @@ struct TENOScalarValues {
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;
-    Kokkos::View<rtype **> face_quad_weights;
+    FaceWeights<> face_quad_weights;
     Kokkos::View<rtype *> scale;
     Kokkos::View<uint32_t *> cell_shape;
     Kokkos::View<rtype **> basis_mean;
