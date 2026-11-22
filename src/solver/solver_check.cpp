@@ -21,6 +21,7 @@
 #include "check.h"
 #include "common_io.h"
 #include "distributed_mesh.h"
+#include "gated.h"
 #include "input.h"
 #include "log.h"
 #include "memory_tracker.h"
@@ -559,7 +560,7 @@ namespace {
 /** @brief The largest value of a column over the first n rows. */
 double largest_in_column(const Kokkos::View<rtype **, Kokkos::LayoutRight> & v, const uint32_t n, const uint32_t column) {
     rtype m = 0.0_r;
-    Kokkos::parallel_reduce("largest_in_column", n, KOKKOS_LAMBDA(const uint32_t c, rtype & x) {
+    gated::parallel_reduce("largest_in_column", n, KOKKOS_LAMBDA(const uint32_t c, rtype & x) {
         x = Kokkos::fmax(x, v(c, column));
     }, Kokkos::Max<rtype>(m));
     return static_cast<double>(m);

@@ -23,6 +23,7 @@
 #include "comm.h"
 #include "distribution.h"
 #include "face_reconstruction.h"
+#include "gated.h"
 #include "log.h"
 #include "mesh.h"
 #include "mixture.h"
@@ -655,7 +656,7 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
     const auto xs = x_stage;
     const uint32_t w = width;
     const auto cell_coords = mesh->cell_coords;
-    Kokkos::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) {
             pc(s) = 0;
             FOR_I_DIM off(s, i) = 0.0_r;
@@ -667,14 +668,14 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
         Kokkos::atomic_store(&mark(c), 1u);
     });
     const LSQVertexGradientFunctor grad = gradient;
-    Kokkos::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         if (mark(c) == 0) return;
         mark(c) = 0;
         grad(c);
     });
     const LinearW linear{W, gradients};
     const auto Wp = W_point;
-    Kokkos::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype r[N_DIM], out[N_CONSERVATIVE];
         FOR_I_DIM r[i] = off(s, i);
         linear(pc(s), r, out);
@@ -713,7 +714,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const auto Y = scalars;
     const auto scratch = work;
     const double d_solid = is_solid ? static_cast<double>(solid.diameter) : Kokkos::Experimental::quiet_NaN_v<double>;
-    Kokkos::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype * rate = dxdt.data() + size_t(w) * s;
         if (ids(s) == EMPTY) {
             for (uint32_t k = 0; k < w; k++) rate[k] = 0.0_r;
@@ -772,7 +773,7 @@ void Particles::couple(const ParticleView & x_stage, const State & rhs,
     const auto V = mesh->cell_measure;
     const bool vapor = is_droplet;
     const uint32_t k_v = droplet.liquid.vapor;
-    Kokkos::parallel_for("particle_coupling", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_coupling", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         FOR_I_CONSERVATIVE r(c, i) += q(c, i) / V(c);
         if (vapor) r_species(c, k_v) += q(c, 0) / V(c);
     });
@@ -790,7 +791,7 @@ void Particles::remove_evaporated(const State & state, const std::function<void(
     const auto values = deposition.slot_values();
     const auto removed = n_removed;
     // What the gas receives from the droplets removed, 0 from the others; positions are in the start cells' frames
-    Kokkos::parallel_for("particle_evaporated", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_evaporated", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         const rtype * y = xs.data() + size_t(w) * s + N_DIM;
         const bool gone = !(static_cast<double>(y[particles::Droplet::MASS]) >= m_min);
@@ -805,12 +806,12 @@ void Particles::remove_evaporated(const State & state, const std::function<void(
         const SpeciesView rhoY = state.species;
         const auto V = mesh->cell_measure;
         const uint32_t k_v = droplet.liquid.vapor;
-        Kokkos::parallel_for("particle_evaporated_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("particle_evaporated_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE U(c, i) += q(c, i) / V(c);
             rhoY(c, k_v) += q(c, 0) / V(c);
         });
     }
-    Kokkos::parallel_for("particle_evaporated_remove", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_evaporated_remove", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         if (static_cast<double>(xs(size_t(w) * s + N_DIM + particles::Droplet::MASS)) >= m_min) return;
         ids(s) = EMPTY;
@@ -848,7 +849,7 @@ void Particles::fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
     const auto V = mesh->cell_measure;
     const bool drops = is_droplet;
     // Volume, number and momentum of the particles
-    Kokkos::parallel_for("particle_field_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_field_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const rtype * y = xs.data() + size_t(w) * s + N_DIM;
         const rtype m = drops ? Kokkos::fmax(y[particles::Droplet::MASS], 0.0_r) : sphere.mass();
         values(s, 0) = static_cast<double>(parcel * m / sphere.density);
@@ -858,7 +859,7 @@ void Particles::fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
     deposition.deposit(ids, cell, xs, w, exchange);
     {
         const StateView q = deposition.result().flow;
-        Kokkos::parallel_for("particle_fields", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("particle_fields", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             out(c, 0) = q(c, 0) / V(c);
             out(c, 1) = q(c, 1) / V(c);
             FOR_I_DIM out(c, 2 + i) = q(c, 0) > 0.0_r ? q(c, 2 + i) / (sphere.density * q(c, 0)) : 0.0_r;
@@ -875,7 +876,7 @@ void Particles::fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
     const auto scratch = work;
     constexpr uint32_t MAX_START = particles::Droplet::N_START;
     static_assert(particles::Solid::TAU_T + 1 <= MAX_START);
-    Kokkos::parallel_for("particle_field_sources", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_field_sources", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         const rtype * y = xs.data() + size_t(w) * s + N_DIM;
         rtype Ws[N_CONSERVATIVE], G[N_CONSERVATIVE * N_DIM] = {}, start[MAX_START], rate[2 * N_DIM + 2], o[N_CONSERVATIVE];
@@ -894,7 +895,7 @@ void Particles::fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
     });
     deposition.deposit(ids, cell, xs, w, exchange);
     const StateView q = deposition.result().flow;
-    Kokkos::parallel_for("particle_field_source_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_field_source_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         FOR_I_CONSERVATIVE out(c, N_DIM + 2 + i) = q(c, i) / V(c);
         if (drops) out(c, N_DIM + 2 + N_CONSERVATIVE) = q(c, 0) / V(c);
     });
@@ -922,7 +923,7 @@ void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReco
     const particles::Solid sphere = solid;
     const bool drops = is_droplet;
     const particles::Droplet drop = droplet;
-    Kokkos::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         rtype * y = values.data() + size_t(w) * s + N_DIM;
         if (drops) {
@@ -1036,7 +1037,7 @@ void Particles::write_probes(const uint64_t step, const double t) {
         throw InputError("particles.probes: at most " + std::to_string(particles::MAX_REGIONS) + " probes have regions.");
     }
     for (uint32_t r = 0; r < n_regions; r++) regions[r] = probes.regions()[r];
-    Kokkos::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
         if (ids(s) == EMPTY) {
             for (uint32_t j = 0; j < n; j++) fields(s, j) = nan;
@@ -1081,7 +1082,7 @@ void Particles::relocate() {
     const bool inertia = is_solid, drops = is_droplet;
     const auto e = restitution;
     const auto step = step_start;
-    Kokkos::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
         // The velocity, then the gas velocity and acceleration of the step's start, which turn with it
@@ -1138,14 +1139,14 @@ void Particles::migrate() {
     // Slots of the particles that left the owned cells, in slot order
     const auto slot = slots;
     uint32_t n_out = 0;
-    Kokkos::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool out = ids(s) != EMPTY && start(s) >= owned;
         if (last && out) slot(k) = s;
         k += out ? 1u : 0u;
     }, n_out);
     const size_t WIDTH = 2 + persistent();  // id, cell, bits of the block values and aux
     Kokkos::View<uint64_t **, Kokkos::LayoutRight> packed("particle_packed", n_out, WIDTH);
-    Kokkos::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         packed(k, 0) = ids(s);
         packed(k, 1) = start(s);
@@ -1188,7 +1189,7 @@ void Particles::migrate() {
 
     // Into the free slots, in slot order
     uint32_t n_free = 0;
-    Kokkos::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool free = ids(s) == EMPTY;
         if (last && free) slot(k) = s;
         k += free ? 1u : 0u;
@@ -1206,7 +1207,7 @@ void Particles::migrate() {
         }
         Kokkos::deep_copy(incoming, h_in);
     }
-    Kokkos::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         ids(s) = incoming(k, 0);
         start(s) = static_cast<uint32_t>(incoming(k, 1));
@@ -1215,7 +1216,7 @@ void Particles::migrate() {
     });
     if (lost > 0) {
         const auto removed = n_removed;
-        Kokkos::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
+        gated::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
     }
 }
 
@@ -1230,7 +1231,7 @@ particles::Validity Particles::validity(const double limit) const {
     const particles::Droplet drop = droplet;
     const auto xs = x;
     const uint32_t w = width;
-    Kokkos::parallel_reduce("particle_size_ratio", capacity, KOKKOS_LAMBDA(const uint32_t s, double & m, uint64_t & n) {
+    gated::parallel_reduce("particle_size_ratio", capacity, KOKKOS_LAMBDA(const uint32_t s, double & m, uint64_t & n) {
         if (ids(s) == EMPTY) return;
         const double d = drops ? drop.diameter_of(static_cast<double>(xs(size_t(w) * s + N_DIM + particles::Droplet::MASS)))
                                : d_solid;
@@ -1248,7 +1249,7 @@ particles::Validity Particles::validity(const double limit) const {
 uint64_t Particles::count() const {
     const auto ids = id;
     uint64_t n = 0;
-    Kokkos::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
+    gated::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
         s += ids(i) != EMPTY ? 1u : 0u;
     }, n);
     return distributed ? comm::allreduce(n, comm::Op::SUM) : n;

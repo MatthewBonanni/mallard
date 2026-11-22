@@ -7,6 +7,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -67,7 +68,7 @@ struct MarginsFunctor {
         double T;
         if (mixture) {
             rtype gamma, e0, T_c;
-            gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), W, gamma, e0, T_c);
+            gas.cell_state(cons, cell_species(rhoY, c), T_seed(c), gas.flamelet.cell_variance(c), W, gamma, e0, T_c);
             T = static_cast<double>(T_c);
             for (uint32_t k = 0; k < gas.n_species; k++) {
                 take(m, MASS_FRACTION, static_cast<double>(rhoY(c, k) / W[0]), int64_t(c) * gas.n_species + k);
@@ -232,7 +233,7 @@ void Solver::health_reductions() {
     using Memory = Kokkos::DefaultExecutionSpace::memory_space;
     step_queue::ProgressLocals * const out = progress_device.data();
     const uint32_t n_owned = mesh->n_owned();
-    Kokkos::parallel_reduce("health_margins", Kokkos::RangePolicy<>(0, n_owned),
+    gated::parallel_reduce("health_margins", Kokkos::RangePolicy<>(0, n_owned),
                             MarginsFunctor{physics, mixture, is_mixture(), conservatives, species, T_seed,
                                            mesh->cell_measure},
                             Kokkos::View<step_queue::Margins, Memory>(&out->margins));
@@ -240,7 +241,7 @@ void Solver::health_reductions() {
     auto * muscl = dynamic_cast<MUSCL *>(face_reconstruction.get());
     const bool limiting = muscl && muscl->limiter != LimiterType::NONE;
     if (teno || limiting || hybrid_flux) {
-        Kokkos::parallel_reduce("health_activity", n_owned,
+        gated::parallel_reduce("health_activity", n_owned,
                                 ActivityFunctor{teno ? teno->troubled : Kokkos::View<rtype *>(),
                                                 teno ? teno->sigma_threshold : rtype(0),
                                                 limiting ? muscl->limiters : Kokkos::View<rtype *[N_CONSERVATIVE]>(),
@@ -260,7 +261,7 @@ void Solver::health_reductions() {
     run_health.repairs.local_values(mesh->n_owned(), part(n_totals + n_drift, run_health.repairs.n_values()));
     if (const Kokkos::View<double *> sums = ledger.run_sums(); sums.is_allocated()) {
         const Kokkos::View<step_queue::ProgressLocals> p = progress_device;
-        Kokkos::parallel_for("progress_run_sums", sums.extent(0), KOKKOS_LAMBDA(const size_t i) {
+        gated::parallel_for("progress_run_sums", sums.extent(0), KOKKOS_LAMBDA(const size_t i) {
             p().run_sum[i] = sums(i);
         });
     }

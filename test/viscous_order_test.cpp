@@ -441,7 +441,7 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     f.face_flux = decltype(f.face_flux)("face_flux", 1);
     f.face_solution = decltype(f.face_solution)("face_solution", 1, 1);
     f.quad_weights = decltype(f.quad_weights)("quad_weights", 1);
-    f.face_weights = decltype(f.face_weights)("face_weights", 1, 1);
+    f.face_weights = share_face_weights("face_weights", 1, 1, [](uint32_t, rtype * w) { w[0] = 2.0_r; });
     f.points.face_quad_points = decltype(f.points.face_quad_points)("face_quad_points", 1, 1, N_DIM);
     f.polynomials = CellPolynomials{decltype(f.polynomials.coefficients)("coefficients", 1, teno::n_dof(3)),
                                     f.cell_coords, 3};
@@ -469,7 +469,6 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     Kokkos::deep_copy(f.cells_of_face, h_cells);
     Kokkos::deep_copy(f.face_solution, h_W);
     Kokkos::deep_copy(f.quad_weights, 2.0_r);
-    Kokkos::deep_copy(f.face_weights, 2.0_r);
     const auto flux = flux_of_face_0(f);
 
     double d_n = 0.0, a[N_DIM], a_n = 0.0;

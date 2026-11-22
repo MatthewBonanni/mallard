@@ -49,7 +49,7 @@ const std::vector<BoundarySubtype> & boundary_subtypes() {
 const std::vector<std::string> & boundary_option_keys(const std::string & option) {
     static const std::unordered_map<std::string, std::vector<std::string>> keys = {
         {"nscbc", {"nscbc"}},           {"average", {"average"}}, {"turbulence", {"turbulence"}},
-        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance"}}, {"u-field", {}},
+        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance", "Z", "C"}}, {"u-field", {}},
     };
     return keys.at(option);
 }

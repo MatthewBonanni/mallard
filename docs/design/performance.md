@@ -240,8 +240,29 @@ before, 1.59 / 2.66 / 5.47 / 14.6 s after; double Mach 2.56 / 4.19 / 10.8 / 26.8
 and on the host, for every case above.
 
 The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
-wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. The packing of the shared tables, on the host,
-takes 7-37 s on these meshes, more than the tables (#1031).
+wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. On the host, the packing of the shared tables
+took 7-37 s on these meshes, more than the tables; it now runs on the device (#1031, below).
+
+**Shared tables** (#1031). With shared tables (#994, #972), the packing copied every batch's tables to
+the host, where each cell's pseudo-inverse was ranked, hashed and compared with its shape's, and the
+rows of basis means and moments were then downloaded and matched the same way. Now the device ranks the
+slots (an insertion sort per cell, stable like the host's), hashes each table and row, and compares the
+cells with their shapes' tables; the host only looks up the hashes in cell order and receives the
+tables that its shapes keep. One A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`), the same machine for
+both; restart files at step 2 are bitwise identical:
+
+| packing / numerics setup (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 25.7 / 29.4 | 36.7 / 49.6 | 70.2 / 87 | 108 / 168 |
+| double Mach, device | **0.87 / 2.64** | **0.91 / 3.25** | **1.10 / 6.54** | **1.22 / 21.7** |
+| box, 1024 x 1024 quadrilaterals (1M), host | 16.6 / 20.5 | 23.1 / 30.9 | 33.8 / 44.6 | 62.7 / 93 |
+| box, device | **0.45 / 3.05** | **0.53 / 3.53** | **0.54 / 6.23** | **0.65 / 20.6** |
+
+The numerics setup is now the tables phase plus 1-3 s; on the host it was the tables phase plus 25-150
+s. Per family (central and sector stencils) and per 2.1M cells, the device ranking takes 10-70 ms, the
+comparisons 25-100 ms and the host's matching 0.1-0.25 s; the rest of the packing is the cells' stencils,
+as without sharing. Packing times vary by up to 3 s from run to run with the host's load (one box run at
+order 5 took 3.2 s; the table gives the repeat).
 
 ### 5. Reacting mixtures (#257)
 
@@ -498,10 +519,29 @@ which the reduction's minimum gives every rank for the triggers that read `wall`
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4, a failed capture of NCCL operations under one, tried on every rank before the first step, and
-HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host reading each IF node's flag. A graph without them
-would run every IF body at every step: the statistics' samples, the fused chemistry's flushes and the staged
-probes would then happen at steps that are not due.
+before 12.4, and HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host
+reading each IF node's flag.
+
+Where NCCL communicates over a network, it adds host nodes to the operations it captures, which a conditional
+node's body cannot hold; a capture of NCCL operations under one is tried on every rank before the first step.
+If it fails, the step graph gates every IF body instead. Gating only the bodies with NCCL operations and keeping
+IF nodes for the others does not capture: an IF node inside a gated body ends the capture of the graph around it
+and starts another one of it, and NCCL (2.32) fails the next operation captured there ("dependency created on
+uncaptured work in another stream"). A gated body runs in every
+launch: a kernel copies its flag, and the gate of the code around it, into a gate of its own, which every kernel
+of the body tests, so the body's kernels follow the flag as it was when the body began even where the body clears
+it. Every top-level kernel launches through `src/common/gated.h` (a CMake check rejects Kokkos's own launches),
+which tests the innermost gate; a reduction that does nothing leaves its destination as it was, by copying it
+into the result in the reduction's final step. Copies and fills there are kernels too (the tests'
+`StepGraphGuard` reports others). On CUDA a thread of a parallel_for that does nothing exits rather than
+returns: a return would leave the rest of the kernel in a divergent region, which costs TENO's kernels about
+0.4% of a step also where nothing is gated. The NCCL operations always run, on the same buffers on every rank,
+since the flags come from values reduced over the ranks. Nothing outside a gated body may therefore read a buffer
+that an NCCL collective reduces in place: while the body is gated, a `SUM` buffer that its kernels no longer refill
+grows by the rank count at each launch. A gated body costs its kernel launches (and its NCCL
+latency) whether or not it is due: in every step for an output due only every few steps (a probe's reductions,
+say), and in each launch after a stop, `step_queue` - 1 times per stop, instead of nothing. Off CUDA, the tests'
+launches of the code a capture records gate every body.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
@@ -522,7 +562,16 @@ staged sample instead). Confidence intervals `CI_<average>` are computed at each
 device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
 Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
 half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
-Probes reading cell data are left to the host:
+Probes of moving and `where` regions reduce the cells covered at the write, the first `count()` of the
+selection, weighed by their `f V`; the fixed point's unit depends on the number of terms summed over the ranks,
+which only the device knows, so `ExactSums::sum(terms, count)` sums that count over the ranks and takes the unit
+from it in a kernel, as `exact_sums_unit` (integer arithmetic, the same on the host) gives it. Their time
+averages are kept per owned cell, as the host's per global cell (`accumulate_cells`): each cell held or covered
+takes `mean += a (x - mean)` of `f V` and of `f V q`, `x` zero where the sample does not cover it, and the
+reduction compacts the cells held and divides as `Probe::mean_fields` does. The sums do not depend on the order
+of the terms, so the per-cell layout gives the host's values on any number of ranks. Isosurfaces (the weights of
+those sampled per cell come from the host's extraction, and their averages sum each cell's points in the host's
+order) and probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
@@ -924,9 +973,22 @@ row below.
   for the dynamic TFLES efficiency (4 columns), against 26 and 49 us for plain sums (Nsight Systems): the
   difference is 0.5% and 0.2% of a step. On CPUs (48 threads as 1, 2, 4 or 8 ranks, `air_3d` with
   `les.dynamic`) it stays inside the run-to-run spread (5%). Distributed, exact sums add one all-reduce of the
-  column maxima per call to the one of the sums. The flame shows what the plain sums would cost: last
-  bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
-  or a restart on another partition, could no longer be checked against the original.
+  column maxima per call to the one of the sums. Over NCCL on A100s (main 9da4ab1e7, 221k cells, median ms per
+  step of two runs, exact / plain):
+
+    | GPUs | `air_3d` with `les.dynamic` | `flame_3d` with `efficiency = "dynamic"` |
+    |---|---|---|
+    | 1 | 5.27 / 5.23 (+0.7%) | 27.16 / 27.12 (+0.1%) |
+    | 2 | 3.25 / 3.23 (+0.8%) | 20.57 / 20.56 (+0.1%) |
+    | 4 | 2.36 / 2.30 (+2.3%) | 17.12 / 17.11 (+0.1%) |
+    | 8 | 1.65 / 1.60 (+3.2%) | 15.32 / 15.24 (+0.5%) |
+    | 7 + 7, two nodes | 1.81 / 1.71 (+6.0%) | 15.75 / 15.61 (+0.9%) |
+
+    On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
+    us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+    The flame shows what the plain sums would cost: last
+    bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
+    or a restart on another partition, could no longer be checked against the original.
 
 **Contract.** Within one build and version, results stay bitwise independent of the rank count, partition,
 thread count, step queue depth, CUDA graphs and restarts: it costs at most 0.5% per step here, and it is what
@@ -1037,6 +1099,67 @@ under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), a
 1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
 recomputes the central coefficients, so 2D keeps 1.
 
+### 20. TENO setup: one fit per stencil shape (#986)
+
+With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
+cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
+packing of #1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
+restart file (`--fields Q_CRITERION`):
+
+| $64^3$ TENO5, Threads | numerics setup | of it: tables / packing / keys | run, wall / CPU | run, peak RSS | post derive, wall / CPU | post derive, peak RSS |
+|---|---|---|---|---|---|---|
+| base | 56.9 s | 33.5 / 12.1 / - s | 63.1 / 104.4 s | 2.43 GB | 59.6 / 95.1 s | 1.82 GB |
+| keyed | 34.1 s | 0.01 / 18.5 / 4.4 s | 42.4 / 62.2 s | 2.46 GB | 47.6 / 59.8 s | 1.85 GB |
+
+27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. Results are bitwise
+those of the base except where cells of one key used to fall on either side of the table comparison's grid:
+of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixed, tetrahedra, prisms; orders
+3-6) only the periodic order-3 box differs (restart files after 3 steps, at most 6.7e-16 in density), and of
+2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
+ranks give the 1-rank result bit for bit.
+
+On one A100 (base = #1069, device packing), restart files after 3 steps are bitwise those of the base, and a
+GPU run that reads the tables cache an OpenMP run wrote gives its own result bit for bit; the two caches differ
+only in the producer's name. Seconds of the numerics setup:
+
+| A100 | base: tables / packing | keyed: tables / packing / shapes | fitted |
+|---|---|---|---|
+| double Mach $2048 \times 512 \times 2$, TENO3 | 0.87 / 0.96 | 0.17 / 1.17 / 0.40 | 323 of 2,097,152 |
+| TENO4 | 1.43 / 0.96 | 0.20 / 1.24 / 0.40 | 323 |
+| TENO5 | 4.52 / 1.16 | 0.32 / 1.47 / 0.46 | 323 |
+| TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
+| $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
+| 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+| TENO5 | 90.10 / 30.83 | 90.05 / 31.19 / 0.18 | 750,000 |
+
+The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
+tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
+base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
+
+**Ranking a key's table once** (#1079). The packing ranked, hashed and compared every cell's table although the
+cells of a key carry it bit for bit. Each batch now does that once per key, at its first cell there, with the
+lowest global id of its cells, so the store sees the same tables in the same order and gives the same shapes.
+The $64^3$ Taylor-Green vortex at TENO5 as above, under a load average of about 140, two alternating runs, base =
+the keyed setup above (#986); the packing includes the decode of the records:
+
+| $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
+|---|---|---|---|---|
+| base | 77.2 / 92.5 s | 21.9 / 0.07 / 28.0 / 9.2 s, 23.9 / 0.03 / 41.2 / 10.6 s | 86.1 / 100.2 s | 2.43 / 2.35 GB |
+| once per key | 70.0 / 60.1 s | 25.8 / 0.07 / 11.7 / 14.6 s, 18.3 / 0.04 / 11.6 / 12.8 s | 77.1 / 68.0 s | 2.32 / 2.43 GB |
+
+On one A100 (16 host threads, two alternating runs each) the packing, which ranks on the device, gains less:
+
+| one A100, packing | base | once per key |
+|---|---|---|
+| $96^3$ symmetry box, TENO3 / TENO5 | 1.49-1.53 / 1.93-2.05 s | 1.30-1.37 / 1.63-1.70 s |
+| 1,053,696 tetrahedra, TENO3 / TENO5 | 2.89-2.90 / 4.34-6.94 s | 2.61-2.66 / 3.57-3.65 s |
+
+The $96^3$ box at TENO3 on 8 OpenMP threads packs in 4.8 s instead of 11.4 s. Restart files are bitwise those of
+the base on the A100, on OpenMP (orders 3, 5 and 6; hexahedra, tetrahedra and prisms) and on 1, 2 and 3 ranks, and
+the tables in the caches the A100 and OpenMP write are the same bytes. What remains: the decode's search of
+every layer (#1178), the per-cell geometry (#1166) and the keys (#1167).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
@@ -1067,7 +1190,12 @@ Notes:
   GPUs; the comparison with the domain grown instead is in progress.
 - At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
-- Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
+- 3D TENO5 Taylor-Green, $64^3$ hexahedra per A100 (Nx = 64 N, multi-jagged, NCCL, CUDA graphs; main
+  9da4ab1e7, median of the progress intervals from step 60 to 160, two runs): 1 GPU 30.58 ms, 2 GPUs 30.77 ms
+  (99.4%), 4 GPUs 31.10 ms (98.3%), 8 GPUs 31.04 ms (98.5%); over two nodes (HDR InfiniBand) 1 + 1 31.09 ms,
+  4 + 4 31.05 ms and 7 + 7 31.06 ms (98.5%). With the step queue (#787) the step graph runs across nodes too,
+  so crossing nodes costs nothing measurable; before it, two-node runs fell back to one step per launch and
+  paid a flat 0.5 ms per step.
 
 ## Partitions
 
