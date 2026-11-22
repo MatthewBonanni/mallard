@@ -1521,9 +1521,10 @@ class KeyedSetup {
                 for (uint32_t j = 0; j < nb; j++) records[rep_group[r0 + j]] = std::move(chunk[j]);
             }
             // 3D runs with smoothness matrices: the key's cells take its representative's moments too
-            if (N_DIM == 3 && scheme.sector_stencils && !reps.empty()) {
+            // (on every rank: its cells may take the records of other ranks' representatives)
+            if (N_DIM == 3 && scheme.sector_stencils) n_moments = teno_setup::n_moments(scheme.degree);
+            if (n_moments > 0 && !reps.empty()) {
                 const teno::Moments all = setup.moments(uint32_t(mesh.n_cells), {});
-                n_moments = static_cast<uint32_t>(all.extent(1));
                 const uint32_t nm = n_moments;
                 const auto h_picked = moment_rows(all, reps);
                 for (size_t k = 0; k < reps.size(); k++) {
