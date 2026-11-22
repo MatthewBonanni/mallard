@@ -23,7 +23,7 @@
 #include "gmsh_fixtures.h"
 #include "input.h"
 #include "region_input.h"
-#include "region_sampler.h"
+#include "region_clip.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -203,6 +203,26 @@ struct CellCorners {
         for (int i = 0; i < 3; i++) out[i] = x[k][i];
     }
 };
+
+/** @brief The fraction of the axis-aligned cell from lo to hi in region r, by clipped_cell. */
+double box_cell_fraction(const region::Region & r, const Point & lo, const Point & hi) {
+    const region::RegionView<Kokkos::HostSpace> & view = r.host();
+    const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+    const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                         view.vertices.data()};
+    CellCorners nodes;
+    constexpr uint32_t n = N_DIM == 2 ? 4 : 8;
+    for (uint32_t k = 0; k < n; k++) {
+        // Counterclockwise in x and y, then the same above in 3D
+        const bool x_hi = (k & 3) == 1 || (k & 3) == 2, y_hi = (k & 3) >= 2, z_hi = k >= 4;
+        nodes.x[k][0] = x_hi ? hi[0] : lo[0];
+        nodes.x[k][1] = y_hi ? hi[1] : lo[1];
+        nodes.x[k][2] = N_DIM == 3 ? (z_hi ? hi[2] : lo[2]) : 0.0;
+    }
+    double inside = 0.0, total = 0.0;
+    region::sampler::clipped_cell(shape, planes, false, n, nodes, inside, total);
+    return inside / total;
+}
 
 std::shared_ptr<Mesh> coarse_unstructured_mesh() {
     auto mesh = std::make_shared<Mesh>();
@@ -391,7 +411,7 @@ TEST(RegionTest, FractionsAreExactlyOneInsideAndZeroOutside) {
 
 TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
     // cell_fractions skips the straight cells outside the bounds of a region without a smooth edge;
-    // sampling every cell gives zero in each of them, and the same fractions elsewhere
+    // sampling (or clipping) every cell gives zero in each of them, and the same fractions elsewhere
     const auto mesh = coarse_unstructured_mesh();
     std::vector<std::string> tables;
     for (const Case & c : cases()) tables.push_back(c.table);
@@ -416,6 +436,8 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
         const std::vector<double> f = region::cell_fractions(*mesh, r);
         const region::RegionView<Kokkos::HostSpace> & view = r.host();
         const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+        const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                             view.vertices.data()};
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
             CellCorners nodes;
             for (uint32_t k = 0; k < mesh->h_n_nodes_of_cell(c); k++) {
@@ -423,7 +445,7 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
                 for (size_t i = 0; i < 3; i++) nodes.x[k][i] = i < N_DIM ? double(mesh->h_node_coords(node, i)) : 0.0;
             }
             double inside = 0.0, total = 0.0;
-            region::sampler::straight_cell(shape, false, mesh->h_n_nodes_of_cell(c), nodes, inside, total);
+            region::sampler::clipped_cell(shape, planes, false, mesh->h_n_nodes_of_cell(c), nodes, inside, total);
             const double sampled = inside / total;
             EXPECT_EQ(f[c] == 0.0, sampled == 0.0) << table << " cell " << c << ": " << f[c] << " " << sampled;
             EXPECT_NEAR(f[c], sampled, 1e-12) << table << " cell " << c;
@@ -431,6 +453,174 @@ TEST(RegionTest, CellsOutsideARegionsBoundsAreZeroAsSamplingThemGives) {
         }
     }
     EXPECT_GT(skipped, 0);
+}
+
+TEST(RegionTest, RegionsOfPlanarFacesHaveExactFractions) {
+    // Cut along their faces, the fractions integrate to the volume to rounding; sampling is off by about 1e-5
+    struct Exact {
+        std::string table;
+        double volume;
+    };
+    std::vector<Exact> exact;
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.5, 0.5], size = [0.5, 0.3], rotate = 40, pivot = [0.5, 0.5]}"
+                                       : "{type = \"box\", center = [0.5, 0.5, 0.5], size = [0.5, 0.3, 0.2], "
+                                         "rotate = {axis = [1, 2, 3], angle = 40}, pivot = [0.5, 0.5, 0.5]}";
+    const double box_volume = N_DIM == 2 ? 0.15 : 0.03;
+    if constexpr (N_DIM == 2) {
+        exact = {{"{type = \"half_space\", point = [0.35, 0.35], normal = [1, 1]}", 0.245},
+                 {"{type = \"polygon\", vertices = [[0.1, 0.1], [0.9, 0.2], [0.5, 0.5], [0.6, 0.9]]}", 0.2},
+                 {"{type = \"union\", regions = [{type = \"rectangle\", center = [0.3, 0.3], size = [0.4, 0.4]}, "
+                  "{type = \"rectangle\", center = [0.55, 0.4], size = [0.5, 0.4]}]}",
+                  0.3},
+                 {"{type = \"difference\", a = {type = \"rectangle\", center = [0.5, 0.5], size = [0.6, 0.5]}, "
+                  "b = {type = \"rectangle\", center = [0.45, 0.55], size = [0.2, 0.1], rotate = 25, pivot = [0.45, 0.55]}}",
+                  0.28},
+                 {"{type = \"rectangle\", center = [0.5, 0.5, 0.3], size = [0.4, 0.3]}", 0.12}};
+    } else {
+        exact = {{"{type = \"half_space\", point = [0.3, 0.3, 0.3], normal = [1, 1, 1]}", 0.1215},
+                 {"{type = \"union\", regions = [{type = \"box\", center = [0.3, 0.3, 0.3], size = [0.4, 0.4, 0.4]}, "
+                  "{type = \"box\", center = [0.55, 0.4, 0.45], size = [0.5, 0.4, 0.5]}]}",
+                  0.146},
+                 {"{type = \"difference\", a = {type = \"box\", center = [0.5, 0.5, 0.5], size = [0.6, 0.5, 0.4]}, "
+                  "b = {type = \"box\", center = [0.45, 0.55, 0.5], size = [0.2, 0.1, 0.1], "
+                  "rotate = {axis = [1, 1, 0], angle = 25}, pivot = [0.45, 0.55, 0.5]}}",
+                  0.118}};
+    }
+    exact.push_back({box, box_volume});
+    // Halved by any plane through its center
+    exact.push_back({"{type = \"intersection\", regions = [" + box + ", {type = \"half_space\", point = " +
+                         (N_DIM == 2 ? "[0.5, 0.5], normal = [1, -2]" : "[0.5, 0.5, 0.5], normal = [1, -2, 0.5]") + "}]}",
+                     0.5 * box_volume});
+    const auto mesh = coarse_unstructured_mesh();
+    for (const Exact & e : exact) {
+        const std::vector<double> f = region::cell_fractions(*mesh, make_region(e.table));
+        double volume = 0.0;
+        int cut = 0;
+        for (uint32_t i = 0; i < mesh->n_cells; i++) {
+            volume += f[i] * double(mesh->h_cell_volume(i));
+            cut += f[i] > 0.0 && f[i] < 1.0;
+        }
+        EXPECT_GT(cut, 0) << e.table;
+        EXPECT_NEAR(volume, e.volume, roundoff(1e-13)) << e.table;
+    }
+}
+
+TEST(RegionTest, MeshFacesOnARegionsFacesGiveExactlyZeroOrOne) {
+    // Faces at x = 0.3, 0.7 and y = 0.2, 0.5 (z = 0.4, 0.8) of a grid of cells 0.1 wide, all within rounding
+    std::vector<std::string> tables;
+    for (const int angle : {0, 90, 180, 270}) {
+        const std::string size = angle % 180 == 0 ? "0.4, 0.3" : "0.3, 0.4";
+        tables.push_back(N_DIM == 2 ? "{type = \"rectangle\", center = [0.5, 0.35], size = [" + size +
+                                          "], rotate = " + std::to_string(angle) + ", pivot = [0.5, 0.35]}"
+                                    : "{type = \"box\", center = [0.5, 0.35, 0.6], size = [" + size +
+                                          ", 0.4], rotate = {axis = [0, 0, 1], angle = " + std::to_string(angle) +
+                                          "}, pivot = [0.5, 0.35, 0.6]}");
+    }
+    for (const std::string & table : tables) {
+        const region::Region r = make_region(table);
+        int ones = 0;
+        const int nz = N_DIM == 2 ? 1 : 10;
+        for (int i = 0; i < 10; i++) {
+            for (int j = 0; j < 10; j++) {
+                for (int k = 0; k < nz; k++) {
+                    const Point lo = {0.1 * i, 0.1 * j, 0.1 * k}, hi = {0.1 * (i + 1), 0.1 * (j + 1), 0.1 * (k + 1)};
+                    const double f = box_cell_fraction(r, lo, hi);
+                    EXPECT_TRUE(f == 0.0 || f == 1.0) << table << " cell " << i << " " << j << " " << k << ": " << f;
+                    ones += f == 1.0;
+                }
+            }
+        }
+        EXPECT_EQ(ones, N_DIM == 2 ? 12 : 48) << table;
+    }
+}
+
+/** @brief Faces much smaller than the unit simplex, around its centroid: more than CLIP_DEPTH cuts. */
+std::string past_the_clip_budget() {
+    std::string table;
+    if constexpr (N_DIM == 2) {
+        table = "{type = \"polygon\", vertices = [";
+        for (int k = 0; k < 64; k++) {
+            const double t = 2.0 * PI * k / 64;
+            table += (k > 0 ? ", [" : "[") + std::to_string(0.3 + 0.15 * std::cos(t)) + ", " +
+                     std::to_string(0.3 + 0.15 * std::sin(t)) + "]";
+        }
+    } else {
+        table = "{type = \"intersection\", regions = [";
+        for (const std::string axis : {"[1, 2, 3]", "[3, -1, 2]", "[-2, 3, 1]"}) {
+            table += std::string(axis == "[1, 2, 3]" ? "" : ", ") +
+                     "{type = \"box\", center = [0.25, 0.25, 0.25], size = [0.2, 0.2, 0.2], rotate = {axis = " + axis +
+                     ", angle = 30}, pivot = [0.25, 0.25, 0.25]}";
+        }
+    }
+    return table + "]}";
+}
+
+TEST(RegionTest, SimplicesPastTheClipBudgetAreSampledAsBefore) {
+    const double exact = 0.5 * 64 * 0.0225 * std::sin(2.0 * PI / 64);  // 2D: the 64-gon's area
+    const region::Region r = make_region(past_the_clip_budget());
+    const region::RegionView<Kokkos::HostSpace> & view = r.host();
+    const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+    const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                         view.vertices.data()};
+    const double v[4][3] = {{0.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+    const double measure = N_DIM == 2 ? 0.5 : 1.0 / 6.0;
+    double clipped = 0.0, sampled = 0.0, total = 0.0;
+    region::sampler::clipped_simplex(shape, planes, false, v, measure, clipped, total);
+    region::sampler::simplex(shape, false, v, measure, sampled, total);
+    EXPECT_EQ(clipped, sampled);
+    if (N_DIM == 2) {
+        EXPECT_GT(std::abs(sampled - exact), 1e-9);
+    }
+}
+
+TEST(RegionTest, TeamsClipWhatOneThreadClips) {
+    // A rotated box, cut exactly, and faces past the clip budget, sampled by the team
+    const std::string box = N_DIM == 2 ? "{type = \"rectangle\", center = [0.45, 0.5], size = [0.5, 0.3], rotate = 20}"
+                                       : "{type = \"box\", center = [0.45, 0.5, 0.55], size = [0.5, 0.3, 0.4], "
+                                         "rotate = {axis = [1, 2, 3], angle = 20}}";
+    const std::string small = past_the_clip_budget();
+    CellCorners nodes;
+    constexpr uint32_t n = N_DIM == 2 ? 4 : 8;
+    for (uint32_t k = 0; k < n; k++) {
+        nodes.x[k][0] = (k & 3) == 1 || (k & 3) == 2 ? 1.0 : 0.0;
+        nodes.x[k][1] = (k & 3) >= 2 ? 1.0 : 0.0;
+        nodes.x[k][2] = k >= 4 ? 1.0 : 0.0;
+    }
+    for (const std::string & table : {box, small}) {
+        const region::Region r = make_region(table);
+        const region::RegionView<Kokkos::HostSpace> & view = r.host();
+        const region::sampler::Shape<ViewDistance> shape{ViewDistance{&view}, view.edge, r.bounded()};
+        const region::sampler::Planes planes{view.nodes.data(), static_cast<uint32_t>(view.nodes.extent(0)),
+                                             view.vertices.data()};
+        double inside = 0.0, total = 0.0, sampled = 0.0, sampled_total = 0.0;
+        region::sampler::clipped_cell(shape, planes, false, n, nodes, inside, total);
+        region::sampler::straight_cell(shape, false, n, nodes, sampled, sampled_total);
+        if (table == small) {
+            EXPECT_EQ(inside, sampled);
+        } else {
+            EXPECT_NE(inside, sampled);
+        }
+        using Policy = Kokkos::TeamPolicy<Kokkos::DefaultHostExecutionSpace>;
+        const int size =
+            std::min(4, Policy(1, 1).team_size_max([](const Policy::member_type &) {}, Kokkos::ParallelForTag()));
+        Policy policy(2, size);
+        policy.set_scratch_size(0, Kokkos::PerTeam(region::sampler::team_bytes(size)));
+        Kokkos::View<double *[2], Kokkos::HostSpace> out("region_test_team_clip", 2 * size);
+        Kokkos::parallel_for("region_test", policy, [=](const Policy::member_type & member) {
+            const auto scratch = region::sampler::team_scratch(member);
+            double in = 0.0, all = 0.0;
+            region::sampler::team_clipped_cell<false>(member, scratch, shape, planes, false, n, nodes, in, all);
+            const int i = member.league_rank() * member.team_size() + member.team_rank();
+            out(i, 0) = in;
+            out(i, 1) = all;
+        });
+        Kokkos::fence();
+        EXPECT_GT(inside, 0.0) << table;
+        for (size_t i = 0; i < out.extent(0); i++) {
+            EXPECT_EQ(out(i, 0), inside) << table << " thread " << i;
+            EXPECT_EQ(out(i, 1), total) << table << " thread " << i;
+        }
+    }
 }
 
 TEST(RegionTest, SmoothEdgesFollowTheSmoothstepAndKeepTheVolume) {

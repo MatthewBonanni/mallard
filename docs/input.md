@@ -1739,9 +1739,11 @@ another dimension is an error naming the one needed. Filled regions of
 primitives have a signed distance (negative inside) that never exceeds the
 distance to their surface, which gives smooth edges their width and lets cell
 volume fractions skip cells away from the surface. Volume fractions are cell
-averages of the region's indicator, sampled on each cell's triangles (2D) or
-tetrahedra (3D), subdivided where the surface or the smooth edge crosses them:
-cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
+averages of the region's indicator over each cell's triangles (2D) or
+tetrahedra (3D): cut exactly along flat faces (without a smooth edge, and
+unless faces smaller than a cell need more cuts than a cell allows), and
+elsewhere sampled, subdivided where the surface or the smooth edge crosses
+them; cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
 slices of the 3D primitives (`z` components may be left out). Lengths take
 units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 `axis`, `normal`, `reference`, `axes` and `scale` are plain numbers.
