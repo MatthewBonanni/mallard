@@ -17,6 +17,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
+#include <stdexcept>
 
 #include <Kokkos_Core.hpp>
 
@@ -45,10 +47,13 @@ struct ThermoTable {
     Kokkos::View<double *, MemorySpace> inv_W;                           // kmol/kg
     Kokkos::View<uint32_t *, MemorySpace> range_offset;                  // (n_species + 1): ranges of species k
     Kokkos::View<double *, MemorySpace> range_upper;                     // (range): upper bound, unused for a species' last range
-    Kokkos::View<uint8_t *, MemorySpace> upper_closed;                   // (species): a bound belongs to the range below it (NASA-7)
     Kokkos::View<double *[9], Kokkos::LayoutRight, MemorySpace> coeffs;  // (range, coefficient)
     double T_low = 1.0;                          // bracket of T(e)
     double T_high = 1.0e5;
+
+    // Fits on either side of a range bound need not meet there; blending them
+    // over a band keeps h, s and e continuous in T, so T(e) has a solution
+    static constexpr double BLEND_WIDTH = 1.0;  // K
 
     /** @brief Powers of T shared by all species. */
     struct Powers {
@@ -65,36 +70,39 @@ struct ThermoTable {
     uint32_t range(const uint32_t k, const double T) const {
         uint32_t r = range_offset(k);
         const uint32_t last = range_offset(k + 1) - 1;
-        if (upper_closed(k)) {
-            while (r < last && T > range_upper(r)) r++;
-        } else {
-            while (r < last && T >= range_upper(r)) r++;
-        }
+        while (r < last && T >= range_upper(r)) r++;
         return r;
     }
 
-    /** @brief cp_k / R. */
+    /**
+     * @brief Whether T lies in the band of BLEND_WIDTH below a range bound of
+     *        species k, where the polynomials of the lower range r and of the
+     *        range above blend, and x in (0, 1] across the band.
+     */
     KOKKOS_INLINE_FUNCTION
-    double cp_R(const uint32_t k, const Powers & p) const {
-        const uint32_t r = range(k, p.T);
+    bool blends(const uint32_t k, const double T, uint32_t & r, double & x) const {
+        r = range(k, T);
+        if (r + 1 == range_offset(k + 1) || !(T > range_upper(r) - BLEND_WIDTH)) return false;
+        x = 1.0 - (range_upper(r) - T) / BLEND_WIDTH;
+        return true;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    double cp_R_range(const uint32_t r, const Powers & p) const {
         const double T = p.T;
         return coeffs(r, 0) * p.inv_T2 + coeffs(r, 1) * p.inv_T +
                (coeffs(r, 2) + T * (coeffs(r, 3) + T * (coeffs(r, 4) + T * (coeffs(r, 5) + T * coeffs(r, 6)))));
     }
 
-    /** @brief d(cp_k / R) / dT. */
     KOKKOS_INLINE_FUNCTION
-    double dcp_R_dT(const uint32_t k, const Powers & p) const {
-        const uint32_t r = range(k, p.T);
+    double dcp_R_dT_range(const uint32_t r, const Powers & p) const {
         const double T = p.T;
         return -2.0 * coeffs(r, 0) * p.inv_T2 * p.inv_T - coeffs(r, 1) * p.inv_T2 +
                (coeffs(r, 3) + T * (2.0 * coeffs(r, 4) + T * (3.0 * coeffs(r, 5) + T * 4.0 * coeffs(r, 6))));
     }
 
-    /** @brief h_k / (R T), molar enthalpy including the formation enthalpy. */
     KOKKOS_INLINE_FUNCTION
-    double h_RT(const uint32_t k, const Powers & p) const {
-        const uint32_t r = range(k, p.T);
+    double h_RT_range(const uint32_t r, const Powers & p) const {
         const double T = p.T;
         return -coeffs(r, 0) * p.inv_T2 + coeffs(r, 1) * p.log_T * p.inv_T +
                (coeffs(r, 2) + T * (coeffs(r, 3) / 2.0 + T * (coeffs(r, 4) / 3.0 +
@@ -102,14 +110,59 @@ struct ThermoTable {
                coeffs(r, 7) * p.inv_T;
     }
 
-    /** @brief s_k / R at the standard pressure. */
     KOKKOS_INLINE_FUNCTION
-    double s_R(const uint32_t k, const Powers & p) const {
-        const uint32_t r = range(k, p.T);
+    double s_R_range(const uint32_t r, const Powers & p) const {
         const double T = p.T;
         return -0.5 * coeffs(r, 0) * p.inv_T2 - coeffs(r, 1) * p.inv_T + coeffs(r, 2) * p.log_T +
                T * (coeffs(r, 3) + T * (coeffs(r, 4) / 2.0 + T * (coeffs(r, 5) / 3.0 + T * coeffs(r, 6) / 4.0))) +
                coeffs(r, 8);
+    }
+
+    // In a band the enthalpy is H = (1 - w) H_r + w H_{r+1} with the smoothstep
+    // w = x^2 (3 - 2x), and cp = dH/dT, continuous across the band's edges
+
+    /** @brief cp_k / R. */
+    KOKKOS_INLINE_FUNCTION
+    double cp_R(const uint32_t k, const Powers & p) const {
+        uint32_t r;
+        double x;
+        if (!blends(k, p.T, r, x)) return cp_R_range(r, p);
+        const double w = x * x * (3.0 - 2.0 * x), dw_dT = 6.0 * x * (1.0 - x) / BLEND_WIDTH;
+        return (1.0 - w) * cp_R_range(r, p) + w * cp_R_range(r + 1, p) +
+               dw_dT * p.T * (h_RT_range(r + 1, p) - h_RT_range(r, p));
+    }
+
+    /** @brief d(cp_k / R) / dT. */
+    KOKKOS_INLINE_FUNCTION
+    double dcp_R_dT(const uint32_t k, const Powers & p) const {
+        uint32_t r;
+        double x;
+        if (!blends(k, p.T, r, x)) return dcp_R_dT_range(r, p);
+        const double w = x * x * (3.0 - 2.0 * x), dw_dT = 6.0 * x * (1.0 - x) / BLEND_WIDTH;
+        const double d2w_dT2 = 6.0 * (1.0 - 2.0 * x) / (BLEND_WIDTH * BLEND_WIDTH);
+        return (1.0 - w) * dcp_R_dT_range(r, p) + w * dcp_R_dT_range(r + 1, p) +
+               2.0 * dw_dT * (cp_R_range(r + 1, p) - cp_R_range(r, p)) +
+               d2w_dT2 * p.T * (h_RT_range(r + 1, p) - h_RT_range(r, p));
+    }
+
+    /** @brief h_k / (R T), molar enthalpy including the formation enthalpy. */
+    KOKKOS_INLINE_FUNCTION
+    double h_RT(const uint32_t k, const Powers & p) const {
+        uint32_t r;
+        double x;
+        if (!blends(k, p.T, r, x)) return h_RT_range(r, p);
+        const double w = x * x * (3.0 - 2.0 * x);
+        return (1.0 - w) * h_RT_range(r, p) + w * h_RT_range(r + 1, p);
+    }
+
+    /** @brief s_k / R at the standard pressure, blended as h so that g is continuous. */
+    KOKKOS_INLINE_FUNCTION
+    double s_R(const uint32_t k, const Powers & p) const {
+        uint32_t r;
+        double x;
+        if (!blends(k, p.T, r, x)) return s_R_range(r, p);
+        const double w = x * x * (3.0 - 2.0 * x);
+        return (1.0 - w) * s_R_range(r, p) + w * s_R_range(r + 1, p);
     }
 
     /** @brief Mixture gas constant R_u sum_k Y_k / W_k [J/(kg K)]. */
@@ -204,12 +257,10 @@ ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
     table.inv_W = Kokkos::View<double *, MemorySpace>("thermo_inv_W", n);
     table.range_offset = Kokkos::View<uint32_t *, MemorySpace>("thermo_range_offset", n + 1);
     table.range_upper = Kokkos::View<double *, MemorySpace>("thermo_range_upper", n_ranges);
-    table.upper_closed = Kokkos::View<uint8_t *, MemorySpace>("thermo_upper_closed", n);
     table.coeffs = Kokkos::View<double *[9], Kokkos::LayoutRight, MemorySpace>("thermo_coeffs", n_ranges);
     auto h_inv_W = Kokkos::create_mirror_view(table.inv_W);
     auto h_offset = Kokkos::create_mirror_view(table.range_offset);
     auto h_upper = Kokkos::create_mirror_view(table.range_upper);
-    auto h_closed = Kokkos::create_mirror_view(table.upper_closed);
     auto h_coeffs = Kokkos::create_mirror_view(table.coeffs);
 
     // Common range of the fits, where every species is fitted
@@ -219,7 +270,6 @@ ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
         const Species & sp = mechanism.species[k];
         h_inv_W(k) = 1.0 / sp.molecular_weight;
         h_offset(k) = r;
-        h_closed(k) = sp.thermo.model == ThermoModel::NASA7;
         for (size_t i = 0; i < sp.thermo.coeffs.size(); i++, r++) {
             h_upper(r) = sp.thermo.T_bounds[i + 1];
             for (size_t j = 0; j < 9; j++) h_coeffs(r, j) = sp.thermo.coeffs[i][j];
@@ -228,6 +278,34 @@ ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
         T_max = std::min(T_max, sp.thermo.T_bounds.back());
     }
     h_offset(n) = r;
+
+    // The blend adds dw/dT (h_{r+1} - h_r) to cp across its band: refuse fits
+    // whose ranges are narrower than the band or whose jump would halve cp
+    ThermoTable<Kokkos::HostSpace> host;
+    host.coeffs = h_coeffs;
+    for (uint32_t k = 0; k < n; k++) {
+        const Species & sp = mechanism.species[k];
+        for (size_t i = 0; i < sp.thermo.coeffs.size(); i++) {
+            std::ostringstream error;
+            error << "Species " << sp.name << ": ";
+            if (sp.thermo.coeffs.size() > 1 && !(sp.thermo.T_bounds[i + 1] - sp.thermo.T_bounds[i] > table.BLEND_WIDTH)) {
+                error << "a temperature range is narrower than the " << table.BLEND_WIDTH << " K blend between fits.";
+                throw std::runtime_error(error.str());
+            }
+            if (i == 0) continue;
+            const uint32_t lower = h_offset(k) + static_cast<uint32_t>(i) - 1;
+            const double T = sp.thermo.T_bounds[i];
+            const auto p = ThermoTable<Kokkos::HostSpace>::powers(T);
+            const double jump = T * (host.h_RT_range(lower + 1, p) - host.h_RT_range(lower, p));
+            const double cp = std::min(host.cp_R_range(lower, p), host.cp_R_range(lower + 1, p));
+            if (!(1.5 * std::abs(jump) / table.BLEND_WIDTH < 0.5 * cp)) {
+                error << "h jumps by " << jump * GAS_CONSTANT * 1e-3 << " J/mol at " << T
+                      << " K between its fits, more than the " << table.BLEND_WIDTH
+                      << " K blend absorbs; refit the species so its ranges meet.";
+                throw std::runtime_error(error.str());
+            }
+        }
+    }
     // T(e) may extrapolate somewhat past the common range; constant cp has no bounds
     table.T_low = std::max(0.5 * T_min, 1.0);
     table.T_high = std::isfinite(T_max) ? 2.0 * T_max : 1.0e5;
@@ -235,7 +313,6 @@ ThermoTable<MemorySpace> make_thermo_table(const Mechanism & mechanism) {
     Kokkos::deep_copy(table.inv_W, h_inv_W);
     Kokkos::deep_copy(table.range_offset, h_offset);
     Kokkos::deep_copy(table.range_upper, h_upper);
-    Kokkos::deep_copy(table.upper_closed, h_closed);
     Kokkos::deep_copy(table.coeffs, h_coeffs);
     return table;
 }

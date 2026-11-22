@@ -110,8 +110,8 @@ def main():
                         'name = "right"\ntype = "outlet_pressure"\np = 101325.0\n\n[[boundaries]]\nname = "bottom"\n'
                         'type = "symmetry"\n\n[[boundaries]]\nname = "top"\ntype = "symmetry"\n')
     fuel = "CH4" if "Y_CH4" in open(args.full).readline() else "H2"
-    variables = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])
-    text = re.sub(r"fields = \[.*\]", "fields = [" + ", ".join(f'"{v}"' for v in variables) + "]", text)
+    fields = ["RHO", "U", "P", "T", "HRR", "Y_" + fuel, "Y_O2"] + (["QRAD"] if args.radiation else [])
+    text = re.sub(r"fields = \[.*\]", "fields = [" + ", ".join(f'"{v}"' for v in fields) + "]", text)
     dx = delta / args.cells
     nx = int(re.search(r"Nx = (\d+)", text).group(1))
     ny = H_cells

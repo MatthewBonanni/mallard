@@ -114,19 +114,22 @@ other fields.
 |  | `LAMBDA` | `kg m s-3 K-1` | thermal conductivity | a mixture with navier_stokes | write_data |
 |  | `D_<s>` | `m2 s-1` | diffusion coefficient of species s | a mixture with navier_stokes | write_data |
 |  | `DT_<s>` | `kg m-1 s-1` | thermal diffusion coefficient of species s | a mixture with navier_stokes and soret = true | write_data |
-| mixture | `MIXTURE_FRACTION` | `1` | Bilger mixture fraction | a mixture with [output.mixture] fuel and oxidizer | write_data, post derive |
+| mixture | `MIXTURE_FRACTION` | `1` | Bilger mixture fraction | a mixture with [output.mixture] fuel and oxidizer, or gas = "flamelet" (its Z) | write_data, post derive |
 |  | `PROGRESS_VARIABLE` | `1` | progress variable | a mixture with [output.mixture] progress | write_data, post derive |
+|  | `C_NORM` | `1` | normalized progress variable Lambda of the flamelet table | gas = "flamelet" | write_data, post derive |
 |  | `FLAME_INDEX` | `1` | Takeno flame index | a mixture with [output.mixture] fuel and oxidizer, or fuel_species and oxidizer_species | write_data, post derive |
 |  | `SCALAR_DISSIPATION` | `s-1` | scalar dissipation rate of the mixture fraction | a mixture with navier_stokes and [output.mixture] fuel and oxidizer | write_data, post derive |
 |  | `T_SEED` | `K` | temperature guess of the thermodynamic state | a mixture | write_data |
+|  | `T_TABLE` | `K` | temperature of the flamelet table at the cell's Z and C | gas = "flamelet" | write_data |
 |  | `Y_<s>` | `1` | mass fraction of species s | a mixture | write_data, probes, statistics |
 |  | `X_<s>` | `1` | mole fraction of species s | a mixture | write_data |
-| chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry] | write_data |
+| chemistry | `HRR` | `kg m-1 s-3` | heat release rate | a mixture with [chemistry], or gas = "flamelet" with a table that has HRR | write_data |
 |  | `CHEM_H` | `s` | last chemistry sub-step, negated after a failed explicit step | a mixture with [chemistry] | write_data |
 |  | `CHEM_COST` | `1` | chemistry sub-steps in the last step | a mixture with [chemistry] | write_data |
 |  | `QRAD` | `kg m-1 s-3` | radiative heat source | [radiation] | write_data |
 |  | `OMEGA_<s>` | `kg m-3 s-1` | net production rate of species s | a mixture with [chemistry] | write_data |
 | LES | `MU_T` | `kg m-1 s-1` | eddy viscosity | [les] | write_data |
+|  | `MIXTURE_FRACTION_VARIANCE` | `1` | subgrid variance of the mixture fraction | gas = "flamelet" with [les] | write_data |
 |  | `TF_F` | `1` | flame thickening factor | [les.combustion] (TFLES) | write_data |
 |  | `TF_E` | `1` | flame wrinkling efficiency | [les.combustion] (TFLES) | write_data |
 |  | `TF_OMEGA` | `1` | flame sensor | [les.combustion] (TFLES) | write_data |
@@ -253,6 +256,7 @@ fields = ["T", "HRR", "MIXTURE_FRACTION", "PROGRESS_VARIABLE", "FLAME_INDEX", "S
 |---|---|---|
 | `MIXTURE_FRACTION` | `1` | Bilger's mixture fraction Z = (β − β_O) / (β_F − β_O), β = 2 Z_C / W_C + Z_H / (2 W_H) − Z_O / W_O of the element mass fractions ([Bilger, Stårner & Kee 1990](../references.md#bilger-starner-kee-1990)), β_F and β_O those of the `fuel` and `oxidizer` streams: 1 in the fuel, 0 in the oxidizer, conserved by reactions |
 | `PROGRESS_VARIABLE` | `1` | c of `progress`: Σ Y_k of its `species` divided by `burnt` (without `burnt`, the raw sum); or (T − T_unburnt) / (T_burnt − T_unburnt) |
+| `C_NORM` | `1` | `gas = "flamelet"` only, without `[output.mixture]`: the table's normalized progress variable Λ = (C − C_min) / (C_max − C_min) at the cell's Z, FPVgen's Λ ([Tabulated chemistry](flamelet.md#output)) |
 | `FLAME_INDEX` | `1` | Takeno's flame index ∇Y_F·∇Y_O / (\|∇Y_F\| \|∇Y_O\|) of `fuel_species` and `oxidizer_species` ([Yamashita, Shimada & Takeno 1996](../references.md#yamashita-shimada-takeno-1996)): +1 where the gradients align (premixed), −1 where they oppose (non-premixed), 0 where either vanishes. Euler runs too |
 | `SCALAR_DISSIPATION` | `s-1` | χ = 2 D \|∇Z\|² ([Peters 2000](../references.md#peters-2000)), with D = λ / (ρ c_p) of each cell (a unity-Lewis diffusivity). Needs `navier_stokes`, which has λ |
 

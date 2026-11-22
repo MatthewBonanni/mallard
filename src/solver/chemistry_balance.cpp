@@ -10,6 +10,7 @@
  */
 
 #include "chemistry_balance.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -148,7 +149,7 @@ void ChemistryBalance::reserve_guests(const uint32_t n) {
 }
 
 void ChemistryBalance::begin_step() {
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), asked, 0u);
+    gated::fill(asked, 0u);
 }
 
 uint32_t ChemistryBalance::steps_to_window_end() const { return SHRINK_STEPS - window_steps; }
@@ -190,7 +191,7 @@ void ChemistryBalance::plan(const Kokkos::View<uint32_t *> & range) {
     const Kokkos::View<uint32_t> grow = grows;
     const uint32_t P = static_cast<uint32_t>(n_ranks), self = static_cast<uint32_t>(me);
     const double thr = threshold;
-    Kokkos::parallel_for("chemistry_balance_plan", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_balance_plan", 1, KOKKOS_LAMBDA(const int) {
         const uint32_t n_queued = r(2);
         p(KEPT) = n_queued;
         p(GUESTS) = 0;
@@ -255,16 +256,16 @@ void ChemistryBalance::send(const ChemistryCells & cells, const Kokkos::View<uin
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Kokkos::View<double *> mine = load;
     const Kokkos::View<uint32_t *> r = range;
-    Kokkos::parallel_reduce("chemistry_balance_load", queue.extent(0), KOKKOS_LAMBDA(const uint32_t i, double & sum) {
+    gated::parallel_reduce("chemistry_balance_load", queue.extent(0), KOKKOS_LAMBDA(const uint32_t i, double & sum) {
         if (i < r(2)) sum += Kokkos::fmax(1.0, static_cast<double>(previous(queue(i))));
     }, Kokkos::Sum<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mine.data())));
-    Kokkos::parallel_for("chemistry_balance_queued", 1, KOKKOS_LAMBDA(const int) { mine(1) = static_cast<double>(r(2)); });
+    gated::parallel_for("chemistry_balance_queued", 1, KOKKOS_LAMBDA(const int) { mine(1) = static_cast<double>(r(2)); });
     comm::allgather_device(load, loads, use_nccl);
     plan(range);
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), asked_host, asked);
+    gated::copy(asked_host, asked);
     const Kokkos::View<uint32_t *> p = d_plan;
     const Kokkos::View<uint64_t *> t = tally;
-    Kokkos::parallel_for("chemistry_balance_kept", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_balance_kept", 1, KOKKOS_LAMBDA(const int) {
         t(sent) += r(2) - p(KEPT);
         r(2) = p(KEPT);
         if (r(1) > r(2)) r(1) = r(2);
@@ -301,7 +302,7 @@ void ChemistryBalance::pack(const ChemistryCells & cells, const Kokkos::View<uin
     const Kokkos::View<rtype *> buf = send_buffer;
     const Kokkos::View<uint32_t *> p = d_plan, rank = out_rank, base = d_out_base;
     const ChemistryCells c = cells;
-    Kokkos::parallel_for("chemistry_balance_pack", n_out, KOKKOS_LAMBDA(const uint32_t slot) {
+    gated::parallel_for("chemistry_balance_pack", n_out, KOKKOS_LAMBDA(const uint32_t slot) {
         const uint32_t d = rank(slot), k = slot - base(d);
         if (k >= p(PLAN_HEADER + d)) return;
         const uint32_t cell = queue(p(PLAN_HEADER + P + d) + k);
@@ -371,12 +372,12 @@ void ChemistryBalance::unpack() {
     const ChemistryCells g = guests;
     const Kokkos::View<uint32_t *> q = guest_queue, p = d_plan, rank = in_rank, base = d_in_base, gr = guest_range;
     const Kokkos::View<float *> key = guest_cost;
-    Kokkos::parallel_for("chemistry_balance_guest_range", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_balance_guest_range", 1, KOKKOS_LAMBDA(const int) {
         gr(0) = 0;
         gr(1) = 0;
         gr(2) = p(GUESTS);
     });
-    Kokkos::parallel_for("chemistry_balance_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("chemistry_balance_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = rank(k), j = k - base(s);
         if (j >= p(PLAN_HEADER + 2 * P + s)) return;
         const rtype * b = &buf(static_cast<size_t>(k) * S);
@@ -407,7 +408,7 @@ void ChemistryBalance::pack_results() {
     const ChemistryCells g = guests;
     const Kokkos::View<uint32_t *> p = d_plan, rank = in_rank, base = d_in_base;
     // Results in place of the states (each cell's results fit in its state's slot)
-    Kokkos::parallel_for("chemistry_balance_results", n_in, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("chemistry_balance_results", n_in, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = rank(k);
         if (k - base(s) >= p(PLAN_HEADER + 2 * P + s)) return;
         rtype * b = &buf(static_cast<size_t>(k) * R);
@@ -425,7 +426,7 @@ void ChemistryBalance::take_results(const ChemistryCells & cells, const Kokkos::
     const ChemistryCells c = cells;
     const SpeciesView out = forced ? c.rhoY_end : c.rhoY;
     const Kokkos::View<uint32_t *> p = d_plan, rank = out_rank, base = d_out_base;
-    Kokkos::parallel_for("chemistry_balance_return", n_out, KOKKOS_LAMBDA(const uint32_t slot) {
+    gated::parallel_for("chemistry_balance_return", n_out, KOKKOS_LAMBDA(const uint32_t slot) {
         const uint32_t d = rank(slot), k = slot - base(d);
         if (k >= p(PLAN_HEADER + d)) return;
         const uint32_t cell = queue(p(PLAN_HEADER + P + d) + k);

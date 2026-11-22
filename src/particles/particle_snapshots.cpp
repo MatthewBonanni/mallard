@@ -14,6 +14,7 @@
 #include <algorithm>
 
 #include "particles.h"
+#include "gated.h"
 
 using particles::EMPTY;
 
@@ -127,7 +128,7 @@ void Particles::stage_snapshot(const uint32_t k) {
     const region::RegionView<> where = snap.region;
     const auto members = trajectory_members;
     const uint32_t bit = snap.bit;
-    Kokkos::parallel_for("particle_snapshot", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_snapshot", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const rtype * values = xs.data() + size_t(w) * s;
         const double p[3] = {static_cast<double>(values[0]), static_cast<double>(values[1]),
                              N_DIM == 3 ? static_cast<double>(values[N_DIM - 1]) : 0.0};
