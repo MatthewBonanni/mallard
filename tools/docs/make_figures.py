@@ -28,6 +28,7 @@ import inlets
 import les_models
 import limiters
 import mesh_fields
+import particles
 import probes
 import python
 import regions
@@ -56,6 +57,7 @@ def main():
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    particles.figures(args.mallard)
     schematics.figures()
     teno.figures()
     theory.figures()

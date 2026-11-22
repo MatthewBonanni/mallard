@@ -1,7 +1,9 @@
 # Lagrangian particles
 
 Design of the particle core (#766), the first layer of the Euler-Lagrange model
-of #291. User docs: [Particles](../guide/particles.md). Later layers (#756-#765,
+of #291. User docs: [Particles](../guide/particles.md); equations and their
+accuracy: [theory](../theory/particles.md) and
+[verification](../verification/index.md#lagrangian-particles). Later layers (#756-#765,
 output in #753) build on the decisions here; what this layer leaves to them is
 listed at the end.
 
