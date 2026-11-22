@@ -23,7 +23,7 @@ Pr = 0.72
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 54 more.
+and 59 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -36,7 +36,7 @@ and 54 more.
 | `T_mu_ref` | 273.15 (`sutherland`); required (`power_law`) | Temperature at which the viscosity is `mu` |
 | `sutherland_S` | 110.4 | Sutherland temperature |
 | `viscosity_exponent` | required (`power_law`) | `mu (T / T_mu_ref)^viscosity_exponent` |
-| `gas` | `"perfect"` | `perfect` or `mixture` ([Thermochemistry](thermochemistry.md)) |
+| `gas` | `"perfect"` | `perfect`, `mixture` ([Thermochemistry](thermochemistry.md)) or `flamelet` ([Tabulated chemistry](flamelet.md)) |
 | `axisymmetric` | `false` | 2D only: flows symmetric about the x axis, [below](#axisymmetric-flows) |
 
 When to use which:

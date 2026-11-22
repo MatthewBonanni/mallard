@@ -33,18 +33,19 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient`; `particles.temperature` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference` |
-| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density` |
+| Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L`; `particles.velocity` |
 | Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
-| Acceleration (m/s^2) | `source.gravity` |
+| Acceleration (m/s^2) | `source.gravity`; `particles.gravity` |
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
+| Specific heat (J/(kg K)) | `particles.specific_heat` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
 | Mass flow (kg/s; per meter of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
@@ -95,7 +96,7 @@ statistics = "run1/restart_020000.restart"
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
 | `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
-| `cuda_graphs` | CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL), before CUDA 12.4, or where NCCL fails under a graph's conditional node (across a network); the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
+| `cuda_graphs` | CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL) or before CUDA 12.4; the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
 | `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, a moving region's probe outgrowing its staging, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; CUDA runs without graphs, and HIP and SYCL builds (whose graphs have no conditional nodes), take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
 At least one stop condition is required.
@@ -370,7 +371,11 @@ zones = ["back", "front"]
 | `viscosity_model` | (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T / T_mu_ref)^viscosity_exponent`) |
 | `T_mu_ref`, `sutherland_S` | (`sutherland`) Reference temperature (default 273.15) and Sutherland temperature (default 110.4) |
 | `T_mu_ref`, `viscosity_exponent` | (`power_law`) Reference temperature and exponent, both required |
-| `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`) |
+| `gas` | `perfect` (default): a calorically perfect gas set by the keys above; `mixture`: a thermally perfect mixture of the species of a mechanism (no `gamma`, `p_ref`, `T_ref`, `rho_ref`); `flamelet`: tabulated chemistry from a flamelet table, transporting the mixture fraction `Z` and progress variable `C` ([Tabulated chemistry](guide/flamelet.md); no `gamma`, `p_ref`, `T_ref`, `rho_ref`, `mechanism`, `transport`) |
+| `table` | (`flamelet`) The flamelet table, an FPV table in [Mallard's format](design/table_format.md) with `saghafian2015` thermodynamics, its path relative to the directory the run starts in; needs a build with HDF5 |
+| `variance` | (`flamelet`, with `[les]` only) Closure of the subgrid variance of `Z` in the table lookups: `algebraic` (default without `[les.combustion]`), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce & Moin 1998) with the LES filter width; `transported`: `Z2 - Z^2` of the transported second moment `Z2` (output `Y_Z2`), with the sink `2 rho D |grad Z|^2 + C_chi rho (D + D_t) Zvar / Delta^2`; `none`: zero variance, the table's `Sz = 0` slice (default, and the only choice, with `[les.combustion]`: the thickened flame is resolved); see [LES of flamelets](guide/flamelet.md#les) |
+| `C_Z` | (`flamelet`, `variance = "algebraic"`) The constant of the algebraic variance, non-negative, default 0.1 |
+| `C_chi` | (`flamelet`, `variance = "transported"`) The constant of the subgrid dissipation rate `chi_sgs = C_chi (D + D_t) Zvar / Delta^2`, positive, default 2 |
 | `mechanism` | (`mixture`) A [Cantera YAML](https://cantera.org/stable/yaml/index.html) file, e.g. `mechanisms/h2o2.yaml` (see `mechanisms/README.md`); Chemkin files convert with Cantera's `ck2yaml` |
 | `phase` | (`mixture`) Phase of the file to use; default the first |
 | `transport` | (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the file |
@@ -416,11 +421,13 @@ periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
 ## `[les]`
 
 Large-eddy simulation with an explicit subgrid-scale (SGS) model
-(`navier_stokes` only, single gases and mixtures, planar runs). The model's
-eddy viscosity `mu_t = rho nu_t` is added to the molecular viscosity, with
-`cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to every
-species' diffusivity (mixtures: in the mixture-averaged form, so the
-diffusive fluxes still sum to zero). Wall faces keep the molecular fluxes. The
+(`navier_stokes` only, single gases, mixtures and the flamelet gas, planar
+runs). The model's eddy viscosity `mu_t = rho nu_t` is added to the molecular
+viscosity, with `cp mu_t / Pr_t` added to the conductivity and `mu_t / Sc_t` to
+every species' diffusivity (mixtures: in the mixture-averaged form, so the
+diffusive fluxes still sum to zero; the flamelet gas: `mu_t / Sc_t` to `Z` and
+`C` and `mu_t / Pr_t` to the conduction of enthalpy, with the subgrid variance
+of `Z` in its lookups, [guide](guide/flamelet.md#les)). Wall faces keep the molecular fluxes. The
 eddy viscosity of each cell comes from its least-squares velocity gradient
 `g_ij = du_i/dx_j`, with the filter width `Delta` of the cell
 (`filter_width`); the time step includes it. Design, choices and validation:
@@ -432,7 +439,7 @@ the [LES guide](guide/les.md) ([design notes](design/les.md)).
 | `C` | Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky) |
 | `Pr_t` | Turbulent Prandtl number, default 0.9 |
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
-| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
+| `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity and the flamelet gas's subgrid variance only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
 | `gradients` | The models' velocity gradients: `least_squares` (the least-squares gradients on the face neighbors, as the viscous fluxes'), or `reconstruction` (`TENO` only): in the cells TENO finds smooth (`TENO_SIGMA` below `troubled_threshold`), the gradient at the centroid of the central polynomial, which the reconstruction computes with it; troubled cells keep the least-squares gradients. Decaying isotropic turbulence with TENO5 and HLLC at $32^3$: spectral error 0.091 / 0.094 against 0.112 / 0.113 with `least_squares` at $32^3$, but 0.120 / 0.156 against 0.117 / 0.140 at $64^3$: experimental, for under-resolved meshes. See the [LES guide](guide/les.md#gradients-of-the-reconstruction). Default `least_squares` |
 | `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
 
@@ -450,7 +457,7 @@ how much from the scheme.
 ### `[les.combustion]`
 
 Turbulence-chemistry interaction of reacting LES (a viscous mixture with
-`[chemistry]`) by the dynamically thickened flame model (TFLES; Colin et al.
+`[chemistry]`, or the flamelet gas: [thickened flamelets](guide/flamelet.md#thickened-flames)) by the dynamically thickened flame model (TFLES; Colin et al.
 2000, Légier et al. 2002): where a flame is, its species diffusivities and
 conductivity are multiplied by `E F` and its reaction rates by `E / F`, which
 keeps the laminar flame speed and thickens the flame by $F$ so that it spans
@@ -478,16 +485,16 @@ for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed 
 | Key | Description |
 |---|---|
 | `model` | `tfles` |
-| `sensor` | `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
-| `delta_L` | `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
-| `s_L` | `temperature` only: laminar flame speed (m/s) |
+| `sensor` | `progress` (the default and only sensor with `gas = "flamelet"`): the sensor $\Omega$ above of the table's normalized progress variable, $c = \Lambda$ (`C_NORM`), with `delta_L` and `s_L`; the table is looked up at zero subgrid variance ([guide](guide/flamelet.md#thickened-flames)). `temperature` (default with mixtures): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
+| `delta_L` | `temperature` and `progress` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
+| `s_L` | `temperature` and `progress` only: laminar flame speed (m/s) |
 | `T_unburnt`, `T_burnt` | `temperature` only: temperatures of the fresh and burnt gas (K) |
 | `flame_table` | `reaction` only, required: CSV file of premixed flames against the mixture fraction, columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption rate of `sensor_species`); other columns are ignored. Linear in `Z`. Built by `tools/setup/flame_table.py` |
 | `fuel`, `oxidizer` | `reaction` only, required: the streams of the mixture fraction, as in [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform composition; those the table was built with |
 | `sensor_species` | `reaction` only: the species of `omega_max` and of the flame index; default the fuel stream's most abundant species with C or H |
 | `efficiency_max` | Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none |
 | `n_res` | Cells across the thickened flame, default 5 |
-| `efficiency` | `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
+| `efficiency` | `dynamic` (default with `sensor = "temperature"` and `"progress"`; not available with `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the [design notes](design/les.md), section 8.3 |
 | `beta` | `charlette` only: exponent of the efficiency, default 0.5 |
 | `subgrid_velocity` | `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L` |
 | `C_u` | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`) |
@@ -516,6 +523,7 @@ filter widths and overcorrects on coarse meshes; not validated beyond this case.
 | `rho`, `p`, `T` | `constant`: `p` and `T`; `analytical`: exactly two of the three, as expressions in `x`, `y`, `z` |
 | `X` or `Y` | (mixtures) Mole or mass fractions by species, e.g. `X = { H2 = 2.0, O2 = 1.0, AR = 7.0 }`; normalized, unlisted species are zero. `analytical`: expressions (or numbers) per listed species |
 | `balance` | (mixtures, `analytical`) Species taking `1 - sum` of the listed fractions; without it the listed fractions are normalized |
+| `Z`, `C` | (`flamelet`) Mixture fraction in [0, 1] and progress variable within the table's range at `Z`, both default 0; numbers (`constant`) or expressions (`analytical`); `C = "burnt"` takes the table's burnt value at `Z`. No `X`, `Y` or `balance` |
 | `n_subdivisions` | (`analytical`, and any state with regions or turbulence) Resolution of the cell averages. 2D: each cell's triangles are split into `n_subdivisions`² sub-triangles (default 4). 3D: each of the cell's tetrahedra is split into `n_subdivisions`³ sub-tetrahedra, each with a 14-point degree-5 rule (default 1) |
 | `file` | (`restart`) Restart file to resume from. Restart files list their variables by name (format version 2, 3 when they also hold the weights of `[statistics]` averages or the snapshot counts of `time_interval` writers, 4 when they also hold the state of characteristic boundary faces, 5 when compressed, or 6 when they also hold averaged `[statistics.spectra]`) and are read by name; files of version 1 (Mallard 0.3 and earlier) are still read, and files of a newer version are rejected ([compatibility](guide/output.md#formats-and-compatibility)) |
 
@@ -532,7 +540,7 @@ priority: see [Initialization: regions](guide/initialization.md#regions).
 |---|---|
 | `region` | The [region](#regions) (required), with an optional smooth `edge` |
 | `u`, `rho`, `p`, `T` | Values inside: numbers, quantities with units, or expressions. At most two of `rho`, `p`, `T`; one alone keeps the pressure below (else its temperature). Unset keys keep the state below |
-| `X` or `Y`, `balance` | (mixtures) The composition inside, as in `[initialize]`; unset keeps the composition below |
+| `X` or `Y`, `balance` | (mixtures) The composition inside, as in `[initialize]`; unset keeps the composition below; `Z` and `C` with `gas = "flamelet"` |
 | `priority` | Integer: higher priorities go on top, equal ones in the order listed (default 0) |
 | `cells` | `volume_fraction` (default): cell averages, cut cells mixing by volume; `center`: cells whose centroid is inside take the region's state whole |
 | `turbulence` | Synthetic turbulence added to the velocity inside, a table as [`[initialize.turbulence]`](#initializeturbulence): on the region's `u` if given, else on the velocity below |
@@ -621,9 +629,9 @@ type that takes them; which options each type takes is the guide's
 | `wall_adiabatic` | Wall (no-slip for `navier_stokes`, slip for `euler`) with zero heat flux | `u` (wall velocity, optional: a vector, or a speed with `direction`), `wall_model` (optional, below) |
 | `wall_isothermal` | Wall at temperature `T` | `T`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
 | `wall_heat_flux` | Wall with heat flux `q` [W/m^2] into the fluid | `q`, `u` and `wall_model` (optional, as `wall_adiabatic`) |
-| `inlet_state` | The full inflow state: exact for supersonic inflow; for subsonic inflow it also fixes `p` and reflects acoustic waves, unless `nscbc` | `u` (a vector, or a speed along `direction`, default the inward normal), `p`, `T`; `X` or `Y` for mixtures (numbers or expressions, with an optional `balance` species as in `[initialize]`); options `nscbc` (below) and, with it, `turbulence` (below) |
-| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction: numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face), `X` or `Y` for mixtures (as `inlet_state`) |
-| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]: a number or an expression of `t`, non-negative) with an optional `profile` (expression of `x`, `y`, `z`, `t`, non-negative, default uniform) shaping it along the inlet, rescaled to `mdot` at every stage; `direction` (numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures (as `inlet_state`) |
+| `inlet_state` | The full inflow state: exact for supersonic inflow; for subsonic inflow it also fixes `p` and reflects acoustic waves, unless `nscbc` | `u` (a vector, or a speed along `direction`, default the inward normal), `p`, `T`; `X` or `Y` for mixtures (numbers or expressions, with an optional `balance` species as in `[initialize]`), `Z` and `C` with `gas = "flamelet"` (numbers or expressions; `C = "burnt"` for the table's burnt value at `Z`); options `nscbc` (below) and, with it, `turbulence` (below) |
+| `inlet_stagnation` | Subsonic inflow at stagnation pressure `p0` and temperature `T0`, for nozzles, ducts and intakes where the mass flow is part of the solution: the outgoing Riemann invariant of the interior sets the speed, and the state lies on the isentrope through (`T0`, `p0`) with `h(T) + |u|^2 / 2 = h(T0)`, with the mixture's own `h(T)` and `s(T, p)` for thermally perfect gases. An interior above `p0` sees the stagnation state at rest; supersonic inflow keeps the interior speed. See [docs/design/inlets.md](design/inlets.md) | `p0`, `T0`, `direction` (flow direction: numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face), `X` or `Y` for mixtures, `Z` and `C` with `gas = "flamelet"` (as `inlet_state`) |
+| `inlet_mass_flow` | Subsonic inflow at a given mass flux and temperature: the outgoing acoustic wave of the interior sets the pressure, the density follows, and the face flux is the physical flux of that state, so the mass entering is exactly the target whatever the inlet density | `T`; `mass_flux` (`rho u` into the domain [kg/(m^2 s)]: a number or expression, or a vector `m`, which flows along `m / |m|` with `m . n_in` at each face) or `mdot` (the total over the entry's faces [kg/s; per unit depth in 2D, per radian in axisymmetric runs]: a number or an expression of `t`, non-negative) with an optional `profile` (expression of `x`, `y`, `z`, `t`, non-negative, default uniform) shaping it along the inlet, rescaled to `mdot` at every stage; `direction` (numbers or expressions of `x`, `y`, `z`, `t`, into the domain at every face and time; default the inward normal of each face; not with a `mass_flux` vector); `X` or `Y` for mixtures, `Z` and `C` with `gas = "flamelet"` (as `inlet_state`) |
 | `outlet_pressure` | Outlet: imposes `p` on subsonic faces, keeping the interior temperature and velocity; supersonic faces take the interior state | `p`; options `average` (`true`: on subsonic faces, shift the local pressure so that its area average over the boundary equals `p`, preserving the transverse profile, for mixed subsonic/supersonic outflow; `p` then may depend on `t` only; default `false`; not with mixtures) or `nscbc` (below) |
 | `outlet_extrapolation` | Transmissive: the exterior state is the solution translated from inside the domain | |
 | `farfield` | Characteristic far field for a free stream: the outgoing Riemann invariant comes from the interior, the incoming one from the free stream, so waves leave and the boundary works for inflow, outflow and tangential flow alike (single gases) | `u` (a vector), `p`, `T` (free stream) |
@@ -852,13 +860,13 @@ T = 300.0
 
 | Key | Description |
 |---|---|
-| `preset` | `high_order` (TENO-E 5), `second_order` (MUSCL), `first_order`, `les` (second order) or `reacting` (second order): a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). `robust` and `accurate`, their names before 0.10, are read as `second_order` and `high_order`, with a warning, until 0.11. Default: `high_order` when the input has no `[numerics.face_reconstruction]` table; none (the defaults below) when it has one |
+| `preset` | `high_order` (TENO-E 5), `second_order` (MUSCL), `first_order`, `les` (second order) or `reacting` (second order): a validated combination of `face_reconstruction` (`type` and its `order` or `limiter`), `riemann_solver`, `convective_flux`, `time_integrator` and `[run] cfl`, each used only where the input does not set that key (a reconstruction option only when the reconstruction type is the preset's; `cfl` only when `[run]` sets neither `cfl` nor `dt`). What each chooses and why: [Numerics: presets](guide/numerics.md#presets). `robust` and `accurate`, their names before 0.10, were removed in 0.11.0; `mallard input upgrade` rewrites them to `second_order` and `high_order`. Default: `high_order` when the input has no `[numerics.face_reconstruction]` table; none (the defaults below) when it has one |
 | `riemann_solver` | `Rusanov`, `HLL`, `HLLC` (default), `Roe`, or `RHLL` (rotated hybrid HLL-Roe, carbuncle-free except at shocks at rest on cell faces; see [numerics](numerics/overview.md#stationary-shocks-on-cell-faces)) |
 | `time_integrator` | `FE`, `SSPRK3` (default), `RK4`, `SSPRK54` (five-stage fourth-order SSP, low storage), `CK45` (Carpenter-Kennedy five-stage fourth-order, 2N storage) or `RDPK3Sp35` (five-stage third order with an embedded error estimate, for `[numerics.error_control]`). See [time integrators](numerics/overview.md#time-integrators) for their stability limits and cost |
 | `check_nan` | Check every conservative and partial density for non-finite values right after each step, so a diverging step writes no output (one more reduction per step). Without it the run still stops at the next step, through the time-step reduction; see [run control](guide/running.md). Default `false` |
 | `double_flux` | (gas mixtures) `true` for the double-flux scheme: each cell's energy is updated with its own `cp / cv` and energy offset frozen over the time step on both sides of its faces, and reset to the true equation of state after the step, so pressure and velocity stay exactly uniform across contacts between different gases. Energy is then not exactly conserved (about 0.2% over a multicomponent shock tube). Default `false` |
 | `low_mach_cutoff` | Low-Mach correction of the convective flux: the velocity jump across each interior face is scaled by `z = min(1, max(M_L, M_R, low_mach_cutoff))` before the Riemann solver, so that upwind dissipation scales with the flow speed rather than the sound speed. Default 0.1; 1 disables it. See [`numerics/overview.md`](numerics/overview.md) |
-| `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2)` with `div u < 0`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
+| `convective_flux` | `riemann` (default): the Riemann solver at every face; `hybrid`: the kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the same reconstructed states, blended into the Riemann solver where a shock sensor fires, `F = F_KEEP + phi (F_Riemann - F_KEEP)`. For large-eddy simulation: the central flux adds no dissipation, so the SGS model does the work (see `[integrals] budget`). `phi` is the larger of the face's two cells': 1 where the Ducros sensor restricted to compressions, `(div u)^2 / ((div u)^2 + |omega|^2 + eps)` with `div u < 0` and `eps = (dilatation_scale c / h)^2`, exceeds `sensor_threshold`, else `upwind_floor`. Boundary faces other than walls and symmetry planes use the Riemann solver. Species stay upwinded with the blended mass flux. Contacts and expansions are central: on Sod's problem the density error is about 1.8 times the Riemann solver's, with a 0.1% overshoot at the contact |
 | `viscous_gradients` | (`navier_stokes`) Face gradients of the viscous stress and heat flux: `least_squares` (default; the mean of the two cells' least-squares gradients, second order) or `reconstruction` (`TENO` of order 4 or more, single gas, planar, no LES, hybrid flux, curved faces or rotational periodicity; the viscous time-step limit is 2.05 times as strict): on faces between cells TENO finds smooth, the gradients of the two cells' central polynomials at each face quadrature point, averaged, plus the jump of their values over the distance of the cell centers by 4/3 (Nishikawa 2010), so order `order - 1`; other faces keep `least_squares`. See [Numerics: viscous gradients](guide/numerics.md#viscous-gradients) |
 
 ### `[numerics.error_control]`
@@ -877,6 +885,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 |---|---|
 | `sensor_threshold` | Ducros sensor above which a cell compressing the flow is a shock, default 0.65 (1 disables the Riemann solver) |
 | `upwind_floor` | Upwind fraction of the other cells, default 0; a small value (e.g. 0.05) damps grid-scale noise on very irregular meshes, at the cost of numerical dissipation the budget then reports |
+| `dilatation_scale` | `kappa` in the sensor's `eps = (kappa c / h)^2`, with each cell's sound speed `c` and size `h = V^(1/d)`, default 1e-5: a compression without vorticity is a shock only above `|div u| = kappa sqrt(sensor_threshold / (1 - sensor_threshold)) c / h`, so round-off compressions of uniform flow are not. Up to about 0.01 every shock is still flagged (`|div u| h / c` of order 0.05 and more) and acoustic noise (about 3e-3) stops being; but upwinding the noise's compressions is what damps it, and Sod's problem is 25% less accurate at 0.01. 0 drops `eps`. [Design](design/les.md#43-low-dissipation-convective-flux-decision-7) |
 | `central` | The central flux's states: `cell_averages`, KEEP on the two cells' values, which changes the kinetic energy by exactly the pressure work on interior faces (second order where the sensor is off; the reconstructed states still feed the Riemann part); or `reconstructed`, KEEP on the reconstructed face states, which conserves kinetic energy only to the reconstruction's accuracy and can add it. Default `cell_averages` with TENO (with TENO's states the central flux adds kinetic energy), `reconstructed` with MUSCL and first order (the `les` preset's; with no viscosity or SGS model to remove energy, MUSCL's states add it too, so Euler runs set `cell_averages`). With a gas mixture, `cell_averages` takes each cell's `gamma` and `e0` (with `double_flux`, the cell's frozen ones). [Design](design/les.md#44-central-flux-for-teno-689) |
 
 ### `[numerics.face_reconstruction]`
@@ -1149,7 +1158,7 @@ the same bit for bit on any number of ranks, and every rank holds them.
 |---|---|
 | `on` | One variable (a PDF) or an array of two (a joint PDF): any of the `[statistics]` fields. Required |
 | `bins` | Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to 65536 and at most 1048576 in all (default 50) |
-| `range` | `[low, high]` of the variable (`[[low, high], [low, high]]` for two), in its units; default `[0.0, 1.0]` for `MIXTURE_FRACTION` and `PROGRESS_VARIABLE`, required for other variables. The upper end falls in the last bin |
+| `range` | `[low, high]` of the variable (`[[low, high], [low, high]]` for two), in its units; default `[0.0, 1.0]` for `MIXTURE_FRACTION`, `PROGRESS_VARIABLE` and `C_NORM`, required for other variables. The upper end falls in the last bin |
 | `fields` | Variables whose conditional mean and variance to keep: any of the `[statistics]` fields (default none: the PDF only) |
 | `weight` | `"volume"` (default) or `"mass"`: density-weighted (Favre) PDFs and moments |
 | `region` | A region of the mesh's dimension, its name, or a region of the mesh: each cell weighted by its fraction in it (default the whole mesh) |
@@ -1475,7 +1484,8 @@ for curves), indexed by the `.pvd` series; `vtkhdf` writes one VTKHDF PolyData
 file (the same vertices or polylines, `arc_length`, and each variable's point
 values at every output, with `Steps/Values` the times). A restarted run cuts the
 HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
-continues them.
+continues them; a rewind first copies the HDF5 or VTKHDF file to
+`.rewound/<run_id>/` in its directory.
 
 **Reductions.** Rows `step, t, length` (curves, 2D boundaries), `area` (3D boundaries) or `count` (points), then
 `<reduction>_<variable>` for each reduction and variable: `integral` is
@@ -1549,6 +1559,85 @@ time_interval = 1.0e-4
 format = "vtp"
 reductions = ["mean", "rms"]
 ```
+
+## `[particles]`
+
+Lagrangian particles: massless tracers or solid spheres
+([Particles](guide/particles.md); equations in the theory manual's
+[Lagrangian particles](theory/particles.md)). Restart files carry them and their
+quantities: a run restarted from a file with particles continues them and does
+not seed; a file without particles (or a `remap` start) seeds them from these
+keys.
+
+| Key | Description |
+|---|---|
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
+| `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
+| `density` | Material density (`"solid"`). Required for solid particles |
+| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
+| `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
+| `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, default none |
+| `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
+| `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
+| `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |
+| `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id), default none |
+| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
+
+### `[particles.lattice]`
+
+Seeds on a lattice, after the `points` in id order (`x` varying fastest).
+
+| Key | Description |
+|---|---|
+| `lo`, `hi` | Opposite corners. Required |
+| `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
+### `[[particles.walls]]`
+
+How solid particles interact with walls and symmetry planes, per boundary zone
+([Solid particles](guide/particles.md#solid-particles)); by default they
+rebound elastically.
+
+| Key | Description |
+|---|---|
+| `zones` | Wall or symmetry boundary zones. Required |
+| `interaction` | `"rebound"` or `"stick"` (removed, counted as deposited), default `"rebound"` |
+| `restitution` | Normal restitution coefficient in [0, 1] (rebound), default 1 |
+| `tangential_restitution` | Tangential restitution coefficient in [0, 1] (rebound), default 1 |
+
+### `[[particles.quantities]]`
+
+A value each particle follows along its path
+([Per-particle quantities](guide/particles.md#per-particle-quantities)).
+Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
+`U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
+`V_Z` and temperature `T_P`, the quantities before this one, and `in(name)` of a region of
+`[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
+`winding`.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `integral` | Expression whose time integral along the path it is, at the time integrator's order |
+| `max`, `min` | Expression whose largest (smallest) value at the steps' starts it is |
+| `first_time` | Condition: the first step start's `t` at which it holds, `nan` until then |
+| `winding` | Table `point`, `axis` (3D only): the signed turns about the axis through the point |
+| `while` | Condition gating the quantity: it integrates or samples only where this holds, default none |
+
+### `[[particles.probes]]`
+
+Statistics of particle expressions over the particles in a region
+([Particle probes](guide/particles.md#particle-probes)): per row `step`, `t`,
+`count`, and each field's mean, standard deviation, min and max.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | A filled region of primitives that does not move, or its name, default every particle |
+| `fields` | Expressions as in `[[particles.quantities]]`, the quantities among their variables, default none (the count only) |
+| `interval` | Steps between rows, default 1 |
+| `file` | Its CSV file, default `particle_probe_<name>.csv` |
 
 ## `[[triggers]]`
 
@@ -1651,9 +1740,11 @@ another dimension is an error naming the one needed. Filled regions of
 primitives have a signed distance (negative inside) that never exceeds the
 distance to their surface, which gives smooth edges their width and lets cell
 volume fractions skip cells away from the surface. Volume fractions are cell
-averages of the region's indicator, sampled on each cell's triangles (2D) or
-tetrahedra (3D), subdivided where the surface or the smooth edge crosses them:
-cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
+averages of the region's indicator over each cell's triangles (2D) or
+tetrahedra (3D): cut exactly along flat faces (without a smooth edge, and
+unless faces smaller than a cell need more cuts than a cell allows), and
+elsewhere sampled, subdivided where the surface or the smooth edge crosses
+them; cells entirely inside get exactly 1. In 2D, filled regions are the z = 0
 slices of the 3D primitives (`z` components may be left out). Lengths take
 units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 `axis`, `normal`, `reference`, `axes` and `scale` are plain numbers.
@@ -1899,7 +1990,7 @@ forces color, e.g. under `mpirun`); logs written to files are plain ASCII.
 |---|---|
 | `prefix` | Output path prefix; directories are created as needed |
 | `format` | Which to choose: [output](guide/output.md#which-format). `vtkhdf` (default: VTK's HDF5 format, see below; ParaView 5.12+, PyVista, the [Python package](guide/python.md), h5py), `vtu` (with a `.pvd` series next to it; any VTK XML reader, e.g. Tecplot, and builds without HDF5), `xdmf` (XDMF indexes over HDF5 files, see below; VisIt, meshio, ParaView of any version) or `restart`. `hdf5`, the name of `xdmf` before 0.10.0, is an error (VTKHDF is HDF5 too); `mallard input upgrade` rewrites it to `vtkhdf`. Builds without HDF5, or without parallel HDF5 on several ranks, default to `vtu` with a warning |
-| `series` | (`vtkhdf`) `true` (default): every snapshot in one file, `PREFIX.vtkhdf` (VTKHDF temporal data), which a restarted run continues after its snapshots up to the restart time; `false`: one file per snapshot, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`, for scripts that take one snapshot file at a time or delete snapshots as they go |
+| `series` | (`vtkhdf`) `true` (default): a file per snapshot, `PREFIX_NNNNNN.vtkhdf`, written once, its mesh arrays linked to `PREFIX_mesh.vtkhdf`, and the series file `PREFIX.vtkhdf` (VTKHDF temporal data: HDF5 virtual datasets over the snapshots' files), which a restarted run continues after its snapshots up to the restart time; `false`: each snapshot whole, `PREFIX_NNNNNN.vtkhdf`, indexed by `PREFIX.vtkhdf.series`, for scripts that take one snapshot file at a time or move or delete snapshots as they go |
 | `interval` / `time_interval` | Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step is shortened to land on each output time. |
 | `fields` | (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`, `VORTICITY_Y`, `VORTICITY_Z`; 2D: the scalar dv/dx - du/dy), `Q_CRITERION` (the Q-criterion: half the squared norm of the rotation rate minus that of the strain rate, with the hoop strain in axisymmetric runs; called `Q` before 0.10.0, which is now an error), `LAMBDA2` (the middle eigenvalue of S² + Ω², negative in vortex cores) and `SCHLIEREN` (the density gradient magnitude, kg/m⁴), with the gradients of the `[integrals]` monitor (TENO reconstruction polynomials, else least squares; see [derived fields](guide/output.md#derived-fields)), with TENO `TENO_SIGMA` (the troubled-cell indicator; stencil selection is active where it exceeds `troubled_threshold`), and for mixtures `Y_<species>`, `X_<species>` and `RHOY_<species>` (with `navier_stokes` also `MU`, `LAMBDA` and the diffusion coefficients `D_<species>`, and with `soret` the thermal diffusion coefficients `DT_<species>` [kg/(m s)]; with `[chemistry]` also `HRR`, `CHEM_COST` and the mass production rates `OMEGA_<species>` [kg/(m³ s)]; with `[radiation]` also `QRAD` [W/m³]), with `[[sources]]` (or `[source]` expressions) `SOURCE_<conservative>` and `SOURCE_RHOY_<species>`, the sources per unit volume, and `P_MAX`, the largest pressure of each cell at the end of any step so far (a numerical soot foil of detonation cells; restart files then carry it, so it continues across restarts), the `[statistics]` averages `MEAN_<A>`, `COV_<A>_<B>` and `PHASE_<bin>_<A>`, and the [mesh and stencil fields](guide/output.md#mesh-and-stencil-fields) `NON_ORTHOGONALITY`, `SKEWNESS`, `ASPECT_RATIO`, `VOLUME_RATIO` and `STENCIL_SIZE`, `STENCIL_SECTORS`, `STENCIL_DEGREE`, `STENCIL_CONDITION`, `STENCIL_WALL`, `STENCIL_SEAM`, `STENCIL_PARTITION`. A trailing `*` selects every field with that prefix, e.g. `Y_*`; `mallard list fields input.toml` lists those of a case |
 | `region` | (`vtkhdf`, `vtu`) Default none, the whole mesh. A [region](#regions), inline or by name, whose snapshot to write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and `REGION_FRACTION`, each cell's volume fraction of it (a [moving](guide/geometry.md#moving-regions) one, or one [defined by the solution](guide/geometry.md#regions-defined-by-the-solution), the cells it covers at each write); a boundary zone (by name), another surface, curve or points of a region (one sample at each of its [elements](guide/geometry.md#surfaces-and-curves-on-a-mesh)) or a probe type as a region (`cut_plane`, `line`, ...) writes the point values a `[[probes]]` entry with `sampling = "point"` writes there, as one `PREFIX.vtkhdf` PolyData of every snapshot (`vtkhdf`) or `PREFIX_NNNNNN.vtp` files and `PREFIX.pvd` (`vtu`): the `[[probes]]` `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole mesh. Every region is written at the end of the run too. Not for `xdmf` |
@@ -1923,7 +2014,8 @@ cell, or three for vectors) and `FieldData/TIME`. Cells touching a curved wall
 Lagrange cells (VTK types 69 to 73, and 27 for pyramids), their extra nodes
 on the curved geometry, after the mesh's nodes. A filled region's file is the
 `UnstructuredGrid` of its cells, renumbered in global order, and of their nodes.
-In the series file (`series = true`, the default) the mesh is stored once and
+In the series file (`series = true`, the default; an index of HDF5 virtual
+datasets over the snapshots' files, which hold the arrays) the mesh is stored once and
 VTKHDF's `Steps` group holds every snapshot's time (`Steps/Values`) and where its cell values start
 (`Steps/CellDataOffsets/<name>`); a region whose cells change between writes
 stores each snapshot's mesh after the previous ones', where `Steps/PartOffsets`,

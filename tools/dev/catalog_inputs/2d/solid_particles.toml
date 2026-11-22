@@ -1,0 +1,67 @@
+# For the key catalog only (tools/dev/input_catalog.py): solid particles with
+# every key of [particles] and [[particles.walls]] given.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+p = 1.0
+T = 1.0
+u = [0.0, 0.0]
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+mu = 0.01
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "solid"
+diameter = 0.01
+density = 1000.0
+drag = "singh"
+gravity = [0.0, -1.0]
+forces = ["pressure_gradient", "added_mass", "saffman_lift"]
+specific_heat = 1.0
+velocity = [0.1, 0.0]
+temperature = 1.2
+points = [[0.5, 0.5]]
+
+[[particles.walls]]
+zones = ["bottom"]
+interaction = "rebound"
+restitution = 0.8
+tangential_restitution = 0.9
+
+[[particles.walls]]
+zones = ["left", "right"]
+interaction = "stick"

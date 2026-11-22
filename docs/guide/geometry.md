@@ -25,6 +25,8 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces; a [moving region](#moving-regions) where it is at `t = 0` | [Initialization](initialization.md#regions) |
 | `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | a surface (2D: a curve), e.g. `{type = "sphere", ..., filled = false}` or a `circle` | [Curved boundaries](meshes.md#curved-boundaries) |
+| `[[particles.probes]]` `region` | a filled [region](#regions) of primitives or its [name](#named-regions), that does not move: the particles inside it | [Particles](particles.md#particle-probes) |
+| `[[particles.quantities]]` `in(name)` | the [name](#named-regions) of a filled region of primitives that does not move: 1 inside, 0 outside, smooth across its `edge` | [Particles](particles.md#per-particle-quantities) |
 
 Every region may be [repeated](#arrays-of-copies), and wraps across
 [periodic boundaries](#periodic-boundaries). Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as
@@ -798,12 +800,16 @@ itself. A region with more than 4096 images that meet the domain is an error.
 ### Regions on a mesh
 
 Each cell gets its **volume fraction**: the average of the region's indicator
-over the cell. Mallard splits each cell into triangles (2D) or tetrahedra (3D)
-and subdivides them where the surface may cross them (where `|φ|` is less than
-their size), up to 8 levels in 2D and 5 in 3D. Cells entirely inside get
-exactly 1, cells outside 0. A region much smaller than a cell can fall
-between the samples of the deepest level; a region that then covers no part of
-any cell is an error.
+over the cell. Mallard splits each cell into triangles (2D) or tetrahedra (3D).
+Where only flat faces cross them (of rectangles, boxes, half-spaces and
+polygons, and booleans of them, without a smooth `edge`), it cuts them along
+those faces, so those fractions are exact to rounding, unless faces smaller
+than a cell need more cuts than a cell allows; it then samples that triangle or
+tetrahedron as below. Elsewhere it subdivides them where the surface may cross
+them (where `|φ|` is less than their size), up to 8 levels in 2D and 5 in 3D,
+and samples the deepest level. Cells entirely inside get exactly 1, cells
+outside 0. A region much smaller than a cell can fall between the samples of
+the deepest level; a region that then covers no part of any cell is an error.
 
 ![Three triangles cut by a circle, with no subdivision, two levels and six levels, and their fractions](../images/guide/geometry-subdivision-light.svg#gh-light-mode-only)
 ![Three triangles cut by a circle, with no subdivision, two levels and six levels, and their fractions](../images/guide/geometry-subdivision-dark.svg#gh-dark-mode-only)

@@ -241,18 +241,18 @@ for it to preserve.
 
 - **First order**: cell averages.
 - **MUSCL** ([van Leer 1979](../references.md#van-leer-1979)):
-  - Variables: $\mathbf{W} = [\rho, \mathbf{u}, p]$.
-  - Gradients: weighted least squares ([Mavriplis 2003](../references.md#mavriplis-2003)) over face neighbors, with boundary ghost states placed at the mirror image of the cell centroid; on tetrahedra, over vertex neighbors. A tetrahedron's four face neighbors make weakly limited MUSCL unstable: a 1% acoustic pulse grows without bound in a box of generated tetrahedra with symmetry walls, and in a Delaunay tetrahedral mesh. Vertex neighbors are not used everywhere because their one-sided stencils at boundaries break the exact one-dimensionality of flows along aligned quadrilaterals.
-  - Limiter: Barth-Jespersen ([Barth & Jespersen 1989](../references.md#barth-jespersen-1989)) or Venkatakrishnan ([Venkatakrishnan 1995](../references.md#venkatakrishnan-1995)).
-  - Faces whose density or pressure would be non-positive fall back to first order.
+    - Variables: $\mathbf{W} = [\rho, \mathbf{u}, p]$.
+    - Gradients: weighted least squares ([Mavriplis 2003](../references.md#mavriplis-2003)) over face neighbors, with boundary ghost states placed at the mirror image of the cell centroid; on tetrahedra, over vertex neighbors. A tetrahedron's four face neighbors make weakly limited MUSCL unstable: a 1% acoustic pulse grows without bound in a box of generated tetrahedra with symmetry walls, and in a Delaunay tetrahedral mesh. Vertex neighbors are not used everywhere because their one-sided stencils at boundaries break the exact one-dimensionality of flows along aligned quadrilaterals.
+    - Limiter: Barth-Jespersen ([Barth & Jespersen 1989](../references.md#barth-jespersen-1989)) or Venkatakrishnan ([Venkatakrishnan 1995](../references.md#venkatakrishnan-1995)).
+    - Faces whose density or pressure would be non-positive fall back to first order.
 - **TENO-E** ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025), extending TENO, [Fu, Hu & Adams 2016](../references.md#fu-hu-adams-2016); see [TENO-E details](teno_e.md)):
-  - k-exact least squares ([Barth & Frederickson 1990](../references.md#barth-frederickson-1990)) in the cell-scaled frame $\boldsymbol{\xi} = (\mathbf{x} - \mathbf{x}_i)/h_i$, $h_i = \lvert\Omega_i\rvert^{1/d}$, with a zero-mean monomial basis; orders 3 to 6 on every 2D and 3D cell type.
-  - Stencils:
-    - One large central stencil of about `stencil_factor` (2) times as many cells as coefficients, grown until its Lebesgue constant at the face quadrature points is at most 10 (2D) or 4 (3D). It never splits equidistant candidates, and in 3D ranks them in a metric of the local mesh spacing on strongly anisotropic cells.
-    - One degree-2 sector stencil per face.
-    - Mirror images of cells across straight boundary lines and planes, carrying the boundary condition's ghost state; none across curved walls, where the central degree is capped at 3 instead.
-  - Smooth cells, as judged by a density-jump variance indicator, use the high-order polynomial on the conservative variables.
-  - Troubled cells select stencils per characteristic variable at each face, using an adaptive cutoff; `bound_preserving` limits their density and pressure.
+    - k-exact least squares ([Barth & Frederickson 1990](../references.md#barth-frederickson-1990)) in the cell-scaled frame $\boldsymbol{\xi} = (\mathbf{x} - \mathbf{x}_i)/h_i$, $h_i = \lvert\Omega_i\rvert^{1/d}$, with a zero-mean monomial basis; orders 3 to 6 on every 2D and 3D cell type.
+    - Stencils:
+        - One large central stencil of about `stencil_factor` (2) times as many cells as coefficients, grown until its Lebesgue constant at the face quadrature points is at most 10 (2D) or 4 (3D). It never splits equidistant candidates, and in 3D ranks them in a metric of the local mesh spacing on strongly anisotropic cells.
+        - One degree-2 sector stencil per face.
+        - Mirror images of cells across straight boundary lines and planes, carrying the boundary condition's ghost state; none across curved walls, where the central degree is capped at 3 instead.
+    - Smooth cells, as judged by a density-jump variance indicator, use the high-order polynomial on the conservative variables.
+    - Troubled cells select stencils per characteristic variable at each face, using an adaptive cutoff; `bound_preserving` limits their density and pressure.
 
 ## Riemann solvers
 
@@ -313,18 +313,18 @@ worth adopting (#244); all were measured on the setup above:
 
 - **Davis bounds**, `S_l = min(u_L - a_L, u_Roe - a_Roe, u_R - a_R)` and
   `S_r = max(u_R + a_R, u_Roe + a_Roe, u_L + a_L)`:
-  - They remove the sign dependence. At rest on faces, HLL and RHLL decay to
-    1e-11-1e-14 by 10000 steps with FE, RK4 and SSPRK3, for a density bump or
-    a dip behind the shock.
-  - They spread every slow, strong shock over two cells instead of one. The
-    L1 density error at the shock grows 1.7-1.9 times for the Mach 6 shock
-    moving at ±0.5 (first order), and 2 times at rest (MUSCL). On weaker or
-    faster shocks the cost is small: L1 errors grow by 0.1-0.4% for Sod,
-    0.1-0.6% for Shu-Osher, and 0.6-1.4% for the double Mach reflection.
-  - In RHLL the smeared shock grows a carbuncle: 2e-2 to 7e-2 for drifts of
-    0.003 to 0.03, against 1e-5 for the drift of 0.03 with Einfeldt speeds.
-    RHLL would fail its carbuncle test.
-  - HLLC grows a carbuncle on these shocks with either bounds.
+    - They remove the sign dependence. At rest on faces, HLL and RHLL decay to
+      1e-11-1e-14 by 10000 steps with FE, RK4 and SSPRK3, for a density bump or
+      a dip behind the shock.
+    - They spread every slow, strong shock over two cells instead of one. The
+      L1 density error at the shock grows 1.7-1.9 times for the Mach 6 shock
+      moving at ±0.5 (first order), and 2 times at rest (MUSCL). On weaker or
+      faster shocks the cost is small: L1 errors grow by 0.1-0.4% for Sod,
+      0.1-0.6% for Shu-Osher, and 0.6-1.4% for the double Mach reflection.
+    - In RHLL the smeared shock grows a carbuncle: 2e-2 to 7e-2 for drifts of
+      0.003 to 0.03, against 1e-5 for the drift of 0.03 with Einfeldt speeds.
+      RHLL would fail its carbuncle test.
+    - HLLC grows a carbuncle on these shocks with either bounds.
 - **Snapping a near-zero `S_l` to 0** (a deterministic tie-break, here
   `|S_l| < 1e-10 a_Roe`): it keeps the shock at rest at 1e-14 when a density
   bump behind it pushes `S_l` up. A dip of the same size pushes `S_l` down
@@ -379,9 +379,9 @@ the Riemann solver.
 - **Periodic boundaries**: no ghost states; the paired zones are joined into interior faces whose second cell is translated next to the first (see `docs/design/periodic.md`), so every scheme treats the seam as interior.
 - **Characteristic far field**: the outgoing Riemann invariant comes from the interior and the incoming one from the free stream ([Blazek 2015](../references.md#blazek-2015)).
 - **Transmissive boundaries**: take the exterior state from an *image face*, the interior face reached by translating the boundary face inward by the depth of the boundary cell (by one cell where that lands mid-cell, as at a pyramid's apex), or where no face lies there (unstructured triangles and tetrahedra) the image cell's reconstruction polynomial at the translated quadrature points. This is exactly what an interior face sees for a solution that does not vary normal to the boundary. Gradient stencils continue across `extrapolation` boundaries the same way, through the image cells.
-  - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
-  - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
-  - The image cell's average instead of its polynomial is first order against TENO-E's interior state; on unstructured triangles it amplified round-off at a subsonic inflow to vacuum states.
+    - A zero-gradient copy of the boundary cell is not used, because at inflow boundaries it feeds the cell back to itself.
+    - On triangles, where boundary-cell centroids are offset from the face, the copy creates an O(1) mass imbalance at every moving shock.
+    - The image cell's average instead of its polynomial is first order against TENO-E's interior state; on unstructured triangles it amplified round-off at a subsonic inflow to vacuum states.
 - **Characteristic boundaries** (`outlet_pressure` with `nscbc`, `inlet_state` with `nscbc`): outgoing waves come from the interior and the incoming acoustic wave from the face's own pressure and normal velocity, advanced each step by the LODI relations of [Poinsot & Lele (1992)](../references.md#poinsot-lele-1992) with relaxation toward a target and the transverse terms of [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008); see `docs/design/nscbc.md`. An inlet's target velocity is per face and may carry synthetic turbulence: the digital filter of [Klein et al. (2003)](../references.md#klein-2003) with the Reynolds stress of [Lund et al. (1998)](../references.md#lund-1998), entering through the incoming wave as [Guézennec & Poinsot (2009)](../references.md#guezennec-poinsot-2009) propose; see `docs/design/synthetic_inflow.md`. MUSCL boundary cells reconstruct without the ghosts across them: the zero normal gradient of a ghost leaves a jump at the cell's inner face, which the low-Mach correction turns into a reflected acoustic wave (15 to 34% of a normal pulse through `extrapolation`, with MUSCL or TENO).
 
 ## Viscous fluxes

@@ -1,0 +1,1 @@
+- Setting up regions' cell fractions (region-subset `[[write_data]]`, sources, statistics and the rest) no longer samples the cells that lie outside a region's bounds, which are 0; the fractions are unchanged, bit for bit (#1173).
