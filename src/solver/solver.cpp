@@ -990,6 +990,7 @@ void Solver::init_boundaries() {
         const std::string entry = "boundaries[" + std::to_string(i_bc) + "]";
         std::string name, where_name;
         FaceZone * zone = nullptr;
+        std::optional<BoundaryProfiles> profiles;
         const bool read = independently(entry, [&] {
             if (!bound.contains("name")) {
                 throw missing_key(bound, entry + ".name",
@@ -1029,10 +1030,10 @@ void Solver::init_boundaries() {
                                          "bottom, top (back, front in 3D) for generated meshes",
                                   .docs = "docs/guide/boundary_conditions.md"});
             }
+            profiles.emplace(bound, where_name);
             bcs.push_back(BoundaryCondition::from_input(bound, physics));
         });
         if (!read) continue;
-        const BoundaryProfiles profiles(bound, where_name);
         WallModelSpec wall_model_spec;
         if (bound.contains("wall_model")) {
             wall_model_spec = WallModelSpec::from_input(bound.at("wall_model"), bcs.back(),
@@ -1099,7 +1100,7 @@ void Solver::init_boundaries() {
                 if (!where || selected[i] != 0.0) entry_faces.push_back(zone->h_faces(i));
             }
             std::vector<uint16_t> used = local_coordinates_used(bound);
-            for (const uint16_t i : profiles.coordinates_used()) {
+            for (const uint16_t i : profiles->coordinates_used()) {
                 if (std::find(used.begin(), used.end(), i) == used.end()) used.push_back(i);
             }
             std::sort(used.begin(), used.end());
@@ -1160,12 +1161,12 @@ void Solver::init_boundaries() {
                 if (!reads_patch) throw unused_key(key, "u or v");
             }
             const uint64_t n_entry = comm::allreduce(static_cast<uint64_t>(entry_faces.size()), comm::Op::SUM);
-            if ((!used.empty() || !profiles.empty()) && n_entry > 0) {
+            if ((!used.empty() || !profiles->empty()) && n_entry > 0) {
                 const WallDistance none;
                 const WallDistance & walls = !reads_n ? none : named ? *named : default_wall_distance();
                 std::vector<FacePoint> points = local_coordinates(*mesh, entry_faces, bound, where_name, used, walls,
                                                                   is_distributed(), coordinates);
-                if (!profiles.empty()) data_summary = profiles.evaluate(*mesh, entry_faces, points, is_distributed());
+                if (!profiles->empty()) data_summary = profiles->evaluate(*mesh, entry_faces, points, is_distributed());
                 for (size_t k = 0; k < entry_faces.size(); k++) boundary_points[entry_faces[k]] = points[k];
             }
         }
