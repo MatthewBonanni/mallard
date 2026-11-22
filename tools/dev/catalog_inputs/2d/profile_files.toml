@@ -1,0 +1,60 @@
+# For the key catalog only (tools/dev/input_catalog.py): a described profile file
+# (# mallard-profile metadata) rescaled at an inlet and in the initial state.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 4
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+p = 101325.0
+T = "bl_T"
+u = ["bl_u", 0.0]
+
+[[initialize.data]]
+name = "bl"
+file = "profile_files.csv"
+at = ["y"]
+columns = ["u", "T"]
+scale = { length = 0.5 }
+reference = { length = 0.025 }
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 101325.0
+T_ref = 300.0
+rho_ref = 1.177
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = ["bl_u", 0.0]
+p = 101325.0
+T = "bl_T"
+
+[[boundaries.data]]
+name = "bl"
+file = "profile_files.csv"
+columns = ["u", "T"]
+scale = { length = 0.5, velocity = 12.0 }
+outside = "error"
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "wall_adiabatic"

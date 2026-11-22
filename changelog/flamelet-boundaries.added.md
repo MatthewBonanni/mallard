@@ -1,0 +1,1 @@
+- Flamelet boundaries (#631): with `gas = "flamelet"`, isothermal and heat-flux walls, `inlet_stagnation` and `inlet_mass_flow` now work, and `T`, `Z` and `C` at inlets can be expressions of space and time. Walls conduct the enthalpy at unity Lewis number, and inlets take the table's gas constant, energy and isentrope at their `Z` and `C`.

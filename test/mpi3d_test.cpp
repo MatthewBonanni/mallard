@@ -335,6 +335,24 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     comm::barrier();
 }
 
+TEST(MPI3DTest, StencilShapeKeysAcrossRanksTakeTheTablesOfTheirLowestGlobalId) {
+    // Tetrahedra periodic along x, numbered along a Hilbert curve: keys whose tables are equal on the
+    // comparison grid share the table of the cell with the lowest global id, which is seldom the first
+    // cell of its key in a rank's batch
+    std::string input = blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n");
+    for (const std::string zone : {"left", "right"}) {
+        const std::string bc = "[[boundaries]]\nname = \"" + zone + "\"\n";
+        const size_t at = input.find(bc);
+        input.erase(at, input.find("[", at + bc.size()) - at);
+    }
+    const std::string box = "Lz = 1.0\n";
+    input.insert(input.find(box) + box.size(), "cell_order = \"hilbert\"\n");
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+             "[parallel]\npartitioner = \"hilbert\"\n";
+    expect_matches_serial(input);
+    comm::barrier();
+}
+
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     // Ranks whose part of the mesh does not touch the zone have no faces to send
     const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();

@@ -19,7 +19,7 @@ across, periodic in y, whose flame is displaced along x by a sum of
 random-phase modes 1..--modes of the width, scaled to a largest displacement
 of --perturb reference thicknesses. Writes RUN_DIR/input.toml and
 RUN_DIR/flame.restart (float64, double builds); the output series
-RUN_DIR/solut/flame is what tools/post/flame_speed.py reads.
+RUN_DIR/solut/flame is what mallard post flame reads.
 """
 import argparse
 import os

@@ -87,6 +87,26 @@ MixtureModel MixtureModel::from_input(const Input & input) {
     return model;
 }
 
+MixtureModel MixtureModel::flamelet_from_input(const Input & input) {
+    for (const char * key : {"mechanism", "phase", "transport", "lewis", "soret"}) {
+        if (input.at("physics").contains(key)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(input.at("physics"), key),
+                              .message = "is not read with gas = \"flamelet\": the table holds the thermodynamics, "
+                                         "transport and species",
+                              .fix = std::string("Remove ") + key,
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
+    MixtureModel model;
+    model.tabulated_gas = std::make_shared<const flamelet::FlameletModel>(flamelet::FlameletModel::from_input(input));
+    model.gas.flamelet = model.tabulated_gas->device();
+    model.gas.n_species = static_cast<uint32_t>(model.tabulated_gas->species_block().size());
+    model.gas.viscous = model.tabulated_gas->viscous();
+    model.transport_name = "flamelet table";
+    return model;
+}
+
 InputError MixtureModel::unknown_species(const Input & table, const std::string & key, const std::string & name) const {
     std::vector<std::string> names = species_names();
     const std::string suggestion = suggest_value(name, names);
@@ -101,6 +121,31 @@ InputError MixtureModel::unknown_species(const Input & table, const std::string 
 }
 
 std::vector<double> MixtureModel::mass_fractions(const Input & table, const std::string & where) const {
+    if (tabulated()) {
+        for (const char * key : {"X", "Y", "balance"}) {
+            if (table.contains(key)) {
+                throw InputError(where + "." + key + ": a flamelet gas takes its composition as Z and C, not species.");
+            }
+        }
+        const double Z = static_cast<double>(find_real_or(table, "Z", dim::none, 0.0_r));
+        if (!(Z >= 0.0 && Z <= 1.0)) throw InputError(where + ".Z must be in [0, 1].");
+        double C = 0.0;
+        if (table.contains("C") && table.at("C").is_string()) {
+            const std::string text = find_value<std::string>(table, "C");
+            if (text != "burnt") {
+                throw InputError(where + ".C must be a number or \"burnt\" (the table's burnt state at Z).");
+            }
+            C = tabulated_gas->burnt_progress(Z);
+        } else {
+            C = static_cast<double>(find_real_or(table, "C", dim::none, 0.0_r));
+            if (!(C >= 0.0)) throw InputError(where + ".C must not be negative.");
+        }
+        std::vector<double> Y(n_species(), 0.0);
+        Y[flamelet::Gas<>::Z] = Z;
+        Y[flamelet::Gas<>::C] = C;
+        tabulated_gas->host().complete(Y);
+        return Y;
+    }
     const bool has_X = table.contains("X"), has_Y = table.contains("Y");
     if (has_X == has_Y) {
         throw InputError(where + ": give the composition as exactly one of X and Y.");
@@ -129,6 +174,10 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
 
 bool MixtureModel::composition_varies(const Input & table) {
     if (table.contains("balance")) return true;
+    for (const char * key : {"Z", "C"}) {
+        if (table.contains("X") || table.contains("Y")) break;
+        if (table.contains(key) && table.at(key).is_string() && table.at(key).as_string() != "burnt") return true;
+    }
     for (const char * key : {"X", "Y"}) {
         if (!table.contains(key) || !table.at(key).is_table()) continue;
         for (const auto & [name, value] : table.at(key).as_table()) {
@@ -150,6 +199,7 @@ std::vector<double> MixtureModel::mass_fractions_from_mole(const std::vector<dou
 }
 
 std::vector<double> MixtureModel::mole_fractions(const std::vector<double> & Y) const {
+    if (tabulated()) return Y;
     std::vector<double> X(Y.size());
     double sum = 0.0;
     for (size_t k = 0; k < Y.size(); k++) {
@@ -161,16 +211,22 @@ std::vector<double> MixtureModel::mole_fractions(const std::vector<double> & Y) 
 }
 
 double MixtureModel::gas_constant(const std::vector<double> & Y) const {
+    if (tabulated()) return tabulated_gas->thermo(Y[0], Y[1]).R;
     return host_thermo.gas_constant(chemistry::MassFractions{Y.data()});
 }
 
 double MixtureModel::energy(double T, const std::vector<double> & Y) const {
+    if (tabulated()) return tabulated_gas->thermo(Y[0], Y[1]).energy(T);
     double e, cv;
     host_thermo.e_cv(T, chemistry::MassFractions{Y.data()}, e, cv);
     return e;
 }
 
 void MixtureModel::surrogates(double T, const std::vector<double> & Y, double & gamma, double & e0) const {
+    if (tabulated()) {
+        tabulated_gas->surrogates(T, Y[0], Y[1], gamma, e0);
+        return;
+    }
     const chemistry::MassFractions y{Y.data()};
     double e, cv;
     host_thermo.e_cv(T, y, e, cv);
@@ -190,6 +246,7 @@ void MixtureModel::conservatives(double p, double T, const rtype * u, const std:
 }
 
 report::Summary MixtureModel::summary() const {
+    if (tabulated()) return tabulated_gas->summary();
     report::Summary s;
     s.setting("Gas", "thermally perfect mixture, " + std::to_string(n_species()) + " species");
     s.setting("Mechanism", mech.file + (mech.phase.empty() ? "" : ", phase " + mech.phase));
@@ -201,6 +258,11 @@ chemistry::ReactorOptions reactor_options(const Input & input) {
     chemistry::ReactorOptions options;
     if (!input.contains("chemistry")) return options;
     const Input & table = input.at("chemistry");
+    const std::string integrator = find_value_or<std::string>(table, "integrator", "rosenbrock");
+    if (integrator != "rosenbrock" && integrator != "bdf") {
+        throw not_accepted(table, "chemistry.integrator", integrator, {"bdf", "rosenbrock"});
+    }
+    options.method = integrator == "bdf" ? chemistry::Integrator::BDF : chemistry::Integrator::RODAS;
     options.integrator.rtol = find_double_or(table, "rtol", dim::none, options.integrator.rtol);
     options.atol_Y = find_double_or(table, "atol", dim::none, options.atol_Y);
     if (!(options.integrator.rtol > 0.0)) throw InputError("chemistry.rtol must be positive.");

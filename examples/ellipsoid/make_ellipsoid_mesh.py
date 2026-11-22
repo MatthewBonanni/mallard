@@ -14,7 +14,7 @@ both by s for mesh studies. Physical surfaces: "ellipsoid", "inflow"
 (x = x-min), "outflow" (x = x-max), "lateral" (y, z = half-width),
 "symmetry_y" (y = 0) and "symmetry_z" (z = 0). The faces on the spheroid are
 flat: Mallard curves them onto the analytic surface ([[mesh.curved]]).
-Needs the gmsh Python module (pip install gmsh).
+Needs the gmsh Python module (uv pip install gmsh).
 """
 import argparse
 

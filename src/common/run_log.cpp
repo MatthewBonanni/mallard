@@ -7,10 +7,12 @@
 
 #include "run_log.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -25,7 +27,9 @@ namespace run_log {
 namespace {
 
 std::ofstream out;
+std::string log_file;
 std::optional<uint64_t> recorded_step;
+std::string superseded_files;
 bool holding = false;
 std::vector<std::string> held;
 std::optional<run_page::Page> page;
@@ -88,6 +92,8 @@ std::optional<uint64_t> last_step_in(const std::string & file) {
 void open(const std::string & file, bool append, const std::string & report) {
     close();
     recorded_step.reset();
+    superseded_files.clear();
+    log_file = file;
     if (!comm::is_root()) return;
     if (!report.empty()) {
         page = append && !file.empty() ? run_page::from_file(file) : run_page::Page{};
@@ -109,6 +115,59 @@ void close() {
 bool is_open() { return out.is_open(); }
 
 std::optional<uint64_t> last_step() { return recorded_step; }
+
+std::string rewound_path(const std::string & file, const std::string & run_id) {
+    const std::filesystem::path p(file);
+    return (p.parent_path() / ".rewound" / run_id / p.filename()).string();
+}
+
+void supersede(uint64_t step, const std::string & run_id, const std::vector<std::string> & writers) {
+    superseded_files.clear();
+    if (!comm::is_root() || !recorded_step || *recorded_step <= step || log_file.empty()) return;
+    // A file that a record up to step also gives (one written in place) is kept
+    std::vector<std::string> later;
+    std::set<std::string> kept;
+    std::ifstream in(log_file);
+    for (std::string line; std::getline(in, line);) {
+        if (line.find("\"type\":\"output\"") == std::string::npos) continue;
+        json::Value v;
+        try {
+            v = json::parse(line);
+        } catch (const std::exception &) {
+            continue;
+        }
+        const json::Value * at = v.find("step");
+        const json::Value * files = v.find("files");
+        const json::Value * writer = v.find("writer");
+        if (!at || !files || files->type != json::Value::Type::ARRAY) continue;
+        const bool mine = writer && std::find(writers.begin(), writers.end(), writer->string) != writers.end();
+        for (const json::Value & f : files->array) {
+            const json::Value * path = f.find("path");
+            if (!path || path->type != json::Value::Type::STRING) continue;
+            if (at->number > static_cast<double>(step) && mine) {
+                later.push_back(path->string);
+            } else {
+                kept.insert(path->string);
+            }
+        }
+    }
+    std::string list;
+    std::set<std::string> moved;
+    for (const std::string & file : later) {
+        if (kept.contains(file) || moved.contains(file) || !std::filesystem::exists(file)) continue;
+        const std::string to = rewound_path(file, run_id);
+        std::error_code error;
+        std::filesystem::create_directories(std::filesystem::path(to).parent_path(), error);
+        if (!error) std::filesystem::rename(file, to, error);
+        if (error) throw std::runtime_error("Could not set aside " + file + ", which the rewound steps wrote, as " + to + ": " +
+                                            error.message());
+        moved.insert(file);
+        list += (list.empty() ? "[" : ",") + json::Object().add("path", file).add("to", to).str();
+    }
+    if (!list.empty()) superseded_files = list + "]";
+}
+
+const std::string & superseded() { return superseded_files; }
 
 void write(const json::Object & record, bool held_record) {
     if (holding && held_record) {

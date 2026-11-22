@@ -309,14 +309,14 @@ namespace {
 
 /**
  * @brief Largest |p' - u'| (rho = c = 1) of the wave reflected by the right
- *        boundary at t = 1, from a right-running pulse of 1e-3 that reaches it
- *        at t = 0.5, in a box of 200 x 2 x 2 blocks with symmetry sides.
+ *        boundary at t = 0.5, from a right-running pulse of 1e-3 that reaches it
+ *        at t = 0.25, in a box of 100 x 2 x 2 blocks with symmetry sides.
  */
 double reflection_3d(const std::string & mesh, const std::string & right) {
-    const std::string pulse = "1e-3 * exp(-((x - 0.5) / 0.05)^2)";
+    const std::string pulse = "1e-3 * exp(-((x - 0.25) / 0.05)^2)";
     const std::string p0 = "0.7142857142857143";
-    std::string input = "[run]\nt_stop = 1.0\ncfl = 0.2\n[mesh]\ntype = \"" + mesh +
-                        "\"\nNx = 200\nNy = 2\nNz = 2\nLx = 1.0\nLy = 0.01\nLz = 0.01\n"
+    std::string input = "[run]\nt_stop = 0.5\ncfl = 0.2\n[mesh]\ntype = \"" + mesh +
+                        "\"\nNx = 100\nNy = 2\nNz = 2\nLx = 0.5\nLy = 0.01\nLz = 0.01\n"
                         "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + " + pulse + "\"\nu = [\"" + pulse +
                         "\", \"0.0\", \"0.0\"]\np = \"" + p0 + " + " + pulse + "\"\n"
                         "[[boundaries]]\nname = \"left\"\ntype = \"outlet_extrapolation\"\n"
@@ -336,7 +336,7 @@ double reflection_3d(const std::string & mesh, const std::string & right) {
     double reflected = 0.0;
     for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
         const double x = double(solver.get_mesh()->h_cell_coords(c, 0));
-        if (x < 0.2 || x > 0.8) continue;
+        if (x < 0.1 || x > 0.4) continue;
         const double p = double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4;
         reflected = std::max(reflected, std::abs(p - double(solver.h_primitives(c, 0))));
     }

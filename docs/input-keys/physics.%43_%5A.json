@@ -1,0 +1,12 @@
+{
+ "default": "0.1",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/flamelet.toml",
+  "tools/dev/catalog_inputs/3d/flamelet.toml"
+ ],
+ "type": "number"
+}

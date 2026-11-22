@@ -62,7 +62,7 @@ def q_surface(path, q_level, spacing, sigma):
     if path.endswith(".vtp"):
         return mesh
     if "Q_CRITERION" not in mesh.cell_data:
-        raise SystemExit(f"{path} has no Q_CRITERION: add \"Q_CRITERION\" to the variables of [[write_data]]")
+        raise SystemExit(f"{path} has no Q_CRITERION: add \"Q_CRITERION\" to the fields of [[write_data]]")
     lo, hi = np.array(BOUNDS[0::2]), np.array(BOUNDS[1::2])
     margin = 4 * (sigma + 1) * spacing
     c = mesh.cell_centers().points

@@ -210,6 +210,74 @@ TEST(TriggersTest, StartedStatisticsEqualThoseOfTheSameStartTime) {
     EXPECT_NE(*a.attribute("STATISTICS_WEIGHT"), 0.0);
 }
 
+TEST(TriggersTest, StoppedStatisticsEqualThoseOfARunEndingAtTheTimeTheConditionNames) {
+    // The step lands on t = 0.05 exactly, where the averages stop; resumed from there they stay stopped
+    const std::string dir = fresh_dir("stop_statistics");
+    const std::string statistics = "[statistics]\nfields = [\"P\"]\nproducts = [\"P*U_X\"]\n";
+    Solver triggered;
+    triggered.init(parse_toml(case_input(dir + "/a", "t_stop = 0.08\ncfl = 0.25\n",
+                                         statistics + "[[triggers]]\nwhen = \"t >= 0.05\"\n"
+                                                      "do = [\"stop statistics\", \"checkpoint\"]\n")));
+    run(triggered);
+    const std::vector<uint64_t> steps = restart_steps(dir + "/a");
+    ASSERT_EQ(steps.size(), 3u);
+    const RestartData at_stop = read_restart(restart_file(dir + "/a", steps[1]));
+    EXPECT_EQ(at_stop.t, static_cast<double>(static_cast<rtype>(0.05)));
+    Solver ended;
+    ended.init(parse_toml(case_input(dir + "/b", "t_stop = 0.05\ncfl = 0.25\n", statistics)));
+    run(ended);
+    std::string input = case_input(dir + "/c", "t_stop = 0.08\ncfl = 0.25\n",
+                                   statistics + "[[triggers]]\nwhen = \"t >= 0.05\"\n"
+                                                "do = [\"stop statistics\", \"checkpoint\"]\n");
+    const size_t begin = input.find("type = \"analytical\""), end = input.find("[[boundaries]]");
+    input.replace(begin, end - begin, "type = \"restart\"\nfile = \"" + restart_file(dir + "/a", steps[1]) + "\"\n");
+    Solver resumed;
+    resumed.init(parse_toml(input));
+    run(resumed);
+    const RestartData b = read_restart(restart_file(dir + "/b", steps[1]));
+    for (const std::string & other : {restart_file(dir + "/a", steps[2]), restart_file(dir + "/c", steps[2])}) {
+        const RestartData a = read_restart(other);
+        EXPECT_GT(a.t, b.t);
+        for (const char * name : {"MEAN_P", "COV_P_U_X"}) {
+            ASSERT_NE(a.find(name), nullptr) << name;
+            ASSERT_NE(b.find(name), nullptr) << name;
+            EXPECT_EQ(*a.find(name), *b.find(name)) << other << " " << name;
+        }
+        EXPECT_EQ(*a.attribute("STATISTICS_WEIGHT"), *b.attribute("STATISTICS_WEIGHT")) << other;
+    }
+}
+
+TEST(TriggersTest, LogWritesItsMessageWithValuesAndSetChangesASettingFromTheNextStep) {
+    const std::string dir = fresh_dir("log_set");
+    Solver solver;
+    solver.init(parse_toml(case_input(dir, "n_steps = 9\ncfl = 0.25\n",
+                                      TRIGGER_CASE_PROBE + "[[triggers]]\nname = \"tick\"\nwhen = \"step == 3\"\n"
+                                                           "do = [\"log gauge at {gauge_P}, step {step}\", \"set write_data." +
+                                          dir + "/restart.interval=2\"]\n")));
+    run(solver);
+    EXPECT_EQ(restart_steps(dir), std::vector<uint64_t>({0, 4, 6, 8, 9}));
+    std::ifstream log(dir + "/mallard.jsonl");
+    const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("\"kind\":\"log\",\"text\":\"gauge at "), std::string::npos) << text;
+    EXPECT_NE(text.find(", step 3\",\"trigger\":\"tick\""), std::string::npos) << text;
+    EXPECT_NE(text.find("\"kind\":\"set\",\"text\":\"write_data." + dir + "/restart.interval = 2\""), std::string::npos)
+        << text;
+}
+
+TEST(TriggersTest, StatesShowWhatFiredWhenAndWhatHolds) {
+    Triggers triggers;
+    triggers.init(parse_toml("[[triggers]]\nname = \"once\"\nwhen = \"step >= 2\"\ndo = \"stop\"\n"
+                             "[[triggers]]\nname = \"held\"\nwhen = \"step >= 1\"\nfor = 1.0\ndo = \"stop\"\n"),
+                  {}, {}, false);
+    for (uint64_t step = 1; step <= 3; step++) {
+        triggers.advance(triggers.evaluate({0.25 * double(step), double(step), 0.25, 0.0}), step, 0.25 * double(step));
+    }
+    const auto states = triggers.states();
+    ASSERT_EQ(states.size(), 2u);
+    EXPECT_EQ(states[0].second, "fired 1x, last at step 2, t = 0.5 s; done");
+    EXPECT_EQ(states[1].second, "armed, condition true since t = 0.25 s (fires at t = 1.25 s)");
+}
+
 TEST(TriggersTest, ResumedRunKeepsWhatFiredAndHowLongAConditionHeld) {
     // once fired at step 3 must not fire again at 6 or 9; held fires at 8, its clock started at 4 before the restart
     const std::string triggers = "[[triggers]]\nname = \"once\"\nwhen = \"step % 3 == 0\"\ndo = \"checkpoint\"\n"
@@ -248,7 +316,8 @@ TEST(TriggersTest, UnknownNameInAConditionIsAnInputErrorWithItsLine) {
 
 TEST(TriggersTest, UnknownActionOrWriterIsAnInputError) {
     const std::string dir = fresh_dir("unknown_action");
-    for (const char * action : {"halt", "write nowhere"}) {
+    for (const char * action : {"halt", "write nowhere", "set cfl=0.5", "set n_steps=-1", "set n_steps", "log {nowhere}",
+                                "stop statistics"}) {
         Solver solver;
         EXPECT_THROW(solver.init(parse_toml(case_input(dir, "n_steps = 2\ncfl = 0.25\n",
                                                        std::string("[[triggers]]\nwhen = \"t > 1\"\ndo = \"") + action +
@@ -272,7 +341,7 @@ std::map<uint64_t, std::string> csv_rows(const std::string & file) {
 
 std::string convergence_case(const std::string & dir) {
     // The pressure ahead of the expansion is steady until it arrives
-    return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nvariables = [\"P\"]\ninterval = 1\nfile = \"" + dir +
+    return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nfields = [\"P\"]\ninterval = 1\nfile = \"" + dir +
            "/far.csv\"\n[statistics]\nfields = [\"P\"]\n[statistics.convergence]\nsignals = [\"far_P\"]\n"
            "min_samples = 10\nbatches = 4\ntolerance = 1e-3\nfile = \"" + dir + "/convergence.csv\"\n"
            "[[triggers]]\nname = \"steady\"\nwhen = \"convergence_stationary\"\ndo = \"start statistics\"\n";

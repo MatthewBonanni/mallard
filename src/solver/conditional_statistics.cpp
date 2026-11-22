@@ -7,6 +7,7 @@
  */
 
 #include "conditional_statistics.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -141,7 +142,7 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
         t->record_use("range", input_detail::real_use("array", dim::none, "[0.0, 1.0]", false));
     }
     for (uint32_t v = 0; v < n_on; v++) {
-        const bool unit_range = on[v] == "MIXTURE_FRACTION" || on[v] == "PROGRESS_VARIABLE";
+        const bool unit_range = on[v] == "MIXTURE_FRACTION" || on[v] == "PROGRESS_VARIABLE" || on[v] == "C_NORM";
         if (!entry.contains("range")) {
             if (!unit_range) {
                 throw InputError(key + ".range: give the range of " + on[v] + " to bin, as [low, high]" +
@@ -250,7 +251,7 @@ void ConditionalStatistics::sample(rtype t, const CellSampler & sampler, uint32_
 void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler & sampler, uint32_t n_owned) {
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Kokkos::View<Clock> k = clock;
-    Kokkos::parallel_for("conditional_clock", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("conditional_clock", 1, KOKKOS_LAMBDA(const int) {
         const double t = double(*t_device);
         k().w = t - k().t_last;
         k().t_last = t;
@@ -263,7 +264,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
                       n_bins[0], n_on == 2 ? n_bins[1] : 1u, lo[0], lo[1],
                       double(n_bins[0]) / (hi[0] - lo[0]), n_on == 2 ? double(n_bins[1]) / (hi[1] - lo[1]) : 1.0};
     for (uint32_t q = 0; q < Q; q++) {
-        Kokkos::parallel_reduce("conditional_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+        gated::parallel_reduce("conditional_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
             m = Kokkos::fmax(m, Kokkos::fabs(terms.term(c, q)));
         }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(largest.data() + q)));
     }
@@ -272,7 +273,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
     const Kokkos::View<double *> big = largest;
     const Kokkos::View<int64_t *> s = sums;
     const double top = std::ldexp(1.0, bits), lo_scale = std::ldexp(1.0, bits + 1);
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), s, int64_t(0));
+    gated::fill(s, int64_t(0));
     const uint32_t slots = B * Q * 2;
     // A cell's limbs of quantity q at scale 2^bits / largest(q)
     const auto add = KOKKOS_LAMBDA(const uint32_t c, int64_t * hist) {
@@ -292,7 +293,7 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
     if (bytes <= TEAM_SCRATCH_BYTES && league > 0) {
         // Each team bins its cells in scratch memory, then adds its sums to the global ones
         using Policy = Kokkos::TeamPolicy<>;
-        Kokkos::parallel_for("conditional_bins", Policy(int(league), Kokkos::AUTO).set_scratch_size(0, Kokkos::PerTeam(bytes)),
+        gated::parallel_for("conditional_bins", Policy(int(league), Kokkos::AUTO).set_scratch_size(0, Kokkos::PerTeam(bytes)),
                              KOKKOS_LAMBDA(const Policy::member_type & team) {
             Scratch local(team.team_scratch(0), slots);
             Kokkos::parallel_for(Kokkos::TeamThreadRange(team, slots), [&](const uint32_t i) { local(i) = 0; });
@@ -306,14 +307,14 @@ void ConditionalStatistics::sample_at(const rtype * t_device, const CellSampler 
             });
         });
     } else {
-        Kokkos::parallel_for("conditional_bins", n_owned, KOKKOS_LAMBDA(const uint32_t c) { add(c, s.data()); });
+        gated::parallel_for("conditional_bins", n_owned, KOKKOS_LAMBDA(const uint32_t c) { add(c, s.data()); });
     }
     if (distributed) comm::allreduce_device(sums, comm::Op::SUM, nccl);
 
     // Each bin's sample (weight, mean and M2 of each field) joins its accumulators (Chan et al. 1979)
     const Kokkos::View<double *> a = acc;
     const uint32_t F = static_cast<uint32_t>(fields.size());
-    Kokkos::parallel_for("conditional_accumulate", B, KOKKOS_LAMBDA(const uint32_t b) {
+    gated::parallel_for("conditional_accumulate", B, KOKKOS_LAMBDA(const uint32_t b) {
         const auto sum = [&](uint32_t q) {
             const size_t i = (size_t(b) * Q + q) * 2;
             return big(q) > 0.0 ? from_limbs(s(i), s(i + 1), top / big(q), lo_scale) : 0.0;

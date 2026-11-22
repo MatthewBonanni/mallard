@@ -41,6 +41,7 @@
   "examples/isotropic_turbulence/input.toml",
   "examples/moving_heaters/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_vortex/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/premixed_flame/ch4/input.toml",
   "examples/premixed_flame/input.toml",
@@ -62,6 +63,7 @@
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
+  "examples/tracer_vortex/input.toml",
   "examples/triple_flame/input.toml",
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
@@ -72,6 +74,7 @@
   "examples/vortex_ring_3d/input.toml",
   "examples/wedge/input.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tutorials/wedge/input.toml"
  ],
  "type": "string",

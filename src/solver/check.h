@@ -90,6 +90,8 @@ struct CheckRegion {
     double own_surface = std::numeric_limits<double>::quiet_NaN();
     double own_tolerance = 0.0;  // relative; 0 in closed form
     bool solution = false;       // defined by the solution: measured and counted on the initial solution
+    bool from_file = false;      // holds a surface read from a file (STL, OBJ): box is its bounding box
+    std::array<std::array<double, 3>, 2> box{};
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */
@@ -159,7 +161,7 @@ struct CheckReport {
     double dt = 0.0;
     double dt_cfl1 = 0.0;    // the time step at CFL 1
     double cfl = 0.0;        // that dt's CFL number
-    double cfl_limit = 0.0;  // the time integrator's for smooth flow, infinity if it has none
+    double cfl_limit = 0.0;  // the time integrator's for smooth flow
     std::string integrator;
     std::string dt_limit;  // what sets dt: "CFL", "sponge" or "fixed"
     uint64_t limiting_cell = 0;
