@@ -342,10 +342,10 @@ class TimedBoundaryFields {
         struct Gas {
             double R = 0.0;
             bool mixture = false;
-            chemistry::ThermoTable<> thermo;
+            Mixture gas;  // species thermodynamics, or a flamelet table (bc_Y then holds Z, C)
             Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
             Kokkos::View<rtype *[2]> bc_thermo;
-            Kokkos::View<rtype **, Kokkos::LayoutRight> transport;  // (T, X) per condition; empty if inviscid
+            Kokkos::View<rtype **, Kokkos::LayoutRight> transport;  // (T or h, X) per condition; empty if inviscid
         };
 
         /** @brief The faces' conditions at the time held in `time`. */

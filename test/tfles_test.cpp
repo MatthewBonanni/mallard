@@ -263,6 +263,15 @@ TEST(ThickenedFlame, InputErrors) {
                      InputError)
             << extra;
     }
+    // The progress sensor reads a flamelet table's progress variable: a mixture has none
+    Solver m;
+    try {
+        m.init(parse_toml(uniform_box("n_steps = 1\ndt = 1e-6\n", "[les.combustion]\nmodel = \"tfles\"\n"
+                                                                    "sensor = \"progress\"\ndelta_L = 1e-3\ns_L = 2.0\n")));
+        ADD_FAILURE() << "sensor = \"progress\" was accepted with a mixture";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("les.combustion.sensor"), std::string::npos) << e.what();
+    }
 }
 
 namespace {

@@ -277,7 +277,7 @@ bool is_removed(const std::string & removed, const std::string & version) {
 }
 
 // The release whose removals this source has made, which rejects them before its version bump
-constexpr const char * REMOVALS = "0.10.0";
+constexpr const char * REMOVALS = "0.11.0";
 
 std::string this_release() { return is_removed(REMOVALS, MALLARD_VERSION) ? MALLARD_VERSION : REMOVALS; }
 
@@ -775,8 +775,8 @@ std::vector<std::string> notices(const std::string & text) {
             }
             const std::string prefix =
                 entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
-            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output keeps every snapshot in one "
-                          "file, " + prefix + ".vtkhdf, by default; add series = false for one file per snapshot, " +
+            out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output writes the series file " + prefix +
+                          ".vtkhdf over a file per snapshot by default; add series = false for each snapshot whole, " +
                           prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
         }
     }

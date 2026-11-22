@@ -25,6 +25,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
+#include "gated.h"
 #include "run_health.h"
 #include "state.h"
 #include "time_integrator.h"
@@ -201,7 +202,7 @@ template <typename F>
 void ConservationLedger::add_boundary(const F & flux) {
     if (!on()) return;
     if (faces.extent(0) == 0) return;
-    Kokkos::parallel_reduce("ledger_boundary", Kokkos::RangePolicy<>(0, faces.extent(0)),
+    gated::parallel_reduce("ledger_boundary", Kokkos::RangePolicy<>(0, faces.extent(0)),
                             ledger_detail::FaceSum<F>{N_CONSERVATIVE, flux, faces, weighted(BOUNDARY)}, stage_sum);
 }
 
@@ -209,7 +210,7 @@ template <typename F>
 void ConservationLedger::add_sources(const F & source, const uint32_t n) {
     if (!on()) return;
     if (n == 0) return;
-    Kokkos::parallel_reduce("ledger_sources", Kokkos::RangePolicy<>(0, n),
+    gated::parallel_reduce("ledger_sources", Kokkos::RangePolicy<>(0, n),
                             ledger_detail::CellSum<F>{N_CONSERVATIVE, source, weighted(SOURCES)}, stage_sum);
 }
 

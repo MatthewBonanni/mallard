@@ -135,7 +135,7 @@ check_interval = 1000000
 prefix = "w"
 format = "vtu"
 interval = 1000000
-variables = ["RHO"]
+fields = ["RHO"]
 """
 
 

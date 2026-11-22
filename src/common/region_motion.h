@@ -203,6 +203,7 @@ class MovingFractions {
         bool bounded = true;
         bool axisymmetric = false;
         bool implicit_shapes = false;
+        bool clipping = false;  // some shapes cut straight cells along planar faces (region_clip.h)
         bool sharp_leaves = false, smooth_leaves = false;  // whether the straight cells' sharp or SMOOTH ShapeSampler has leaves
         Kokkos::View<Node *> nodes;
         Kokkos::View<const double *> vertices;

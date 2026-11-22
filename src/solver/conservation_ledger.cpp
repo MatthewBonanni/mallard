@@ -6,6 +6,7 @@
  */
 
 #include "conservation_ledger.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -65,7 +66,7 @@ void ConservationLedger::uncheck(const uint32_t component, const std::string & n
 
 void ConservationLedger::begin_stage() {
     if (!on()) return;
-    if (stage % n_stages == 0) Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), step_sum, 0.0);
+    if (stage % n_stages == 0) gated::fill(step_sum, 0.0);
     stage++;
 }
 
@@ -76,13 +77,13 @@ ledger_detail::Weighted ConservationLedger::weighted(const Term term) const {
 void ConservationLedger::end_step(const double dt) {
     if (!on()) return;
     const Kokkos::View<double *> from = step_sum, to = run_sum;
-    Kokkos::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) { to(i) += dt * from(i); });
+    gated::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) { to(i) += dt * from(i); });
 }
 
 void ConservationLedger::end_step(const rtype * dt, const uint32_t * accepted) {
     if (!on()) return;
     const Kokkos::View<double *> from = step_sum, to = run_sum;
-    Kokkos::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("ledger_commit", N_TERMS * N, KOKKOS_LAMBDA(const uint32_t i) {
         if (*accepted) to(i) += static_cast<double>(*dt) * from(i);
     });
 }
@@ -128,7 +129,7 @@ struct TotalsFunctor {
 
 void ConservationLedger::local_totals(const StateView & U, const SpeciesView & rhoY,
                                       const Kokkos::View<double *> & out) const {
-    Kokkos::parallel_reduce("ledger_totals", Kokkos::RangePolicy<>(0, n_owned),
+    gated::parallel_reduce("ledger_totals", Kokkos::RangePolicy<>(0, n_owned),
                             TotalsFunctor{n_totals(), U, rhoY, volume, elements}, out);
 }
 
@@ -180,21 +181,21 @@ void ConservationLedger::chemistry_begin(const SpeciesView & rhoY, const Kokkos:
         element_after = Kokkos::View<double *>("ledger_elements_after", n_elements);
         repair_before = Kokkos::View<double *>("ledger_repair_before", species_repairs.extent(0));
     }
-    Kokkos::parallel_reduce("ledger_elements", Kokkos::RangePolicy<>(0, n_owned),
+    gated::parallel_reduce("ledger_elements", Kokkos::RangePolicy<>(0, n_owned),
                             ElementsFunctor{n_elements, rhoY, volume, elements}, element_before);
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), repair_before, species_repairs);
+    gated::copy(repair_before, species_repairs);
 }
 
 void ConservationLedger::chemistry_end(const SpeciesView & rhoY, const Kokkos::View<double *> & species_repairs) {
     if (n_elements == 0) return;
-    Kokkos::parallel_reduce("ledger_elements", Kokkos::RangePolicy<>(0, n_owned),
+    gated::parallel_reduce("ledger_elements", Kokkos::RangePolicy<>(0, n_owned),
                             ElementsFunctor{n_elements, rhoY, volume, elements}, element_after);
     const Kokkos::View<double *> before = element_before, after = element_after, r0 = repair_before;
     const Kokkos::View<double *> r1 = species_repairs;
     const Kokkos::View<double **> a = elements;
     const Kokkos::View<double *> d = drift;
     const uint32_t ne = n_elements, ns = static_cast<uint32_t>(a.extent(1));
-    Kokkos::parallel_for("ledger_element_drift", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("ledger_element_drift", 1, KOKKOS_LAMBDA(const int) {
         double mass = 0.0;
         for (uint32_t e = 0; e < ne; e++) mass += Kokkos::fabs(before(e));
         d(1) = mass;
@@ -209,7 +210,7 @@ void ConservationLedger::chemistry_end(const SpeciesView & rhoY, const Kokkos::V
 }
 
 void ConservationLedger::local_drift(const Kokkos::View<double *> & out) const {
-    if (n_drift() > 0) Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), out, drift);
+    if (n_drift() > 0) gated::copy(out, drift);
 }
 
 double ConservationLedger::element_drift(const bool balanced, const double * local) const {
