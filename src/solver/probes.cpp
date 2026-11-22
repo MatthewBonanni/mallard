@@ -2611,11 +2611,15 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
         iso.staged_count = Kokkos::View<uint32_t *, Pinned>("probe_staged_crossed_count", n_records);
         return;
     }
-    if (p.samples_nodes()) p.nodes.allocate_staging(n_records, p.nodes.values.extent(0));
-    if (p.samples_quadrature()) {
+    // Writes that need only the reductions take them from the device, and the samples' values stay there
+    const bool on_device = p.reduces_on_device();
+    p.reduced_for_triggers = reduce;
+    p.staged_reductions = {};
+    if (p.samples_nodes() && !on_device) p.nodes.allocate_staging(n_records, p.nodes.values.extent(0));
+    if (p.samples_quadrature() && !on_device) {
         p.quadrature.allocate_staging(n_records, p.motion ? p.motion->capacity : p.quadrature.values.extent(0));
     }
-    if (!reduce) return;
+    if (!reduce && !on_device) return;
     // The samples Probe::reduce sums: of point sets and boundaries, the nodes; of curves and regions, the quadrature
     // (moving regions: the cells covered at each write, weighed by their f V, or the cells their averages hold)
     auto r = std::make_shared<Probe::DeviceReduction>();
@@ -2631,7 +2635,8 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
         throw std::logic_error("probe " + p.name + ": samples and geometry differ");
     }
     r->use_nccl = use_nccl;
-    r->summed = std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
+    // Writes reduced on the device also take the measure, sums[0]
+    r->summed = on_device || std::any_of(outputs.begin(), outputs.end(), [](const ProbeOutput & o) {
         return o.kind != ProbeOutput::MIN && o.kind != ProbeOutput::MAX;
     });
     const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & term) { return term.kind == ProbeTerm::MOMENT; });
@@ -2682,6 +2687,10 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
         r->hi = Kokkos::View<double *>("probe_reduction_hi", p.variables.size());
     }
     if (p.point_value) r->point = Kokkos::View<int64_t *>("probe_reduction_point", p.variables.size());
+    if (on_device) {
+        p.staged_reductions = Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace>(
+            "probe_staged_reductions", n_records, 1 + outputs.size() + r->point.extent(0));
+    }
     if (p.average) {
         using Means = Kokkos::View<double **, Kokkos::LayoutRight>;
         const uint32_t n_cols = static_cast<uint32_t>(p.n_evaluated());
@@ -2746,7 +2755,7 @@ void held_means(const Kokkos::View<const uint32_t *> & held, const Kokkos::View<
 
 } // namespace
 
-void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) const {
+void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out, const uint64_t * seq) const {
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Probe & p = *probes[k];
     const Probe::DeviceReduction & r = *p.device_reduction;
@@ -2825,11 +2834,19 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
     }
     const auto outputs = r.outputs;
     const auto sums = r.sums.sums();
+    const auto staged = seq ? p.staged_reductions : decltype(p.staged_reductions)();
     gated::parallel_for("probe_reduction_values", 1, KOKKOS_LAMBDA(const int) {
-        if (*due == 0) return;
+        double * const to = out && *due != 0 ? out : nullptr;
+        // The slot: the measure, then the values
+        double * const slot = staged.extent(0) > 0 ? &staged((*seq - 1) % staged.extent(0), 0) : nullptr;
+        if (slot) slot[0] = sums(0);
         const uint32_t n_outputs = static_cast<uint32_t>(outputs.extent(0));
-        for (uint32_t j = 0; j < n_outputs; j++) out[j] = probe_output(outputs(j), sums.data(), lo.data(), hi.data());
-        for (uint32_t v = 0; v < point.extent(0); v++) out[n_outputs + v] = Kokkos::bit_cast<double>(point(v));
+        for (uint32_t j = 0; j < n_outputs + point.extent(0); j++) {
+            const double x = j < n_outputs ? probe_output(outputs(j), sums.data(), lo.data(), hi.data())
+                                           : Kokkos::bit_cast<double>(point(j - n_outputs));
+            if (to) to[j] = x;
+            if (slot) slot[1 + j] = x;
+        }
     });
 }
 
@@ -2965,17 +2982,19 @@ void Probes::evaluate_staged(const size_t k, const ProbeFields & fields, const u
         p.stage_crossed(seq);
         return;
     }
+    const bool on_device = p.staged_reductions.is_allocated();
     if (p.samples_nodes()) {
         p.nodes.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients, p.diffusive);
         p.nodes.fill_columns(p.device_columns);
-        p.nodes.copy_to_staging(seq);
+        if (!on_device) p.nodes.copy_to_staging(seq);
     }
     if (p.samples_quadrature()) {
         p.quadrature.evaluate(p.sampling, p.codes, fields, p.reference, p.gradients);
         p.quadrature.fill_columns(p.device_columns);
-        p.quadrature.copy_to_staging(seq);
+        if (!on_device) p.quadrature.copy_to_staging(seq);
     }
     if (p.motion) p.stage_covered(seq);
+    if (on_device && !p.reduced_for_triggers) reduce_staged(k, nullptr, nullptr, seq);
 }
 
 void Probes::write_staged(const size_t k, const uint64_t step, const rtype t, const uint64_t slot) {
@@ -2986,6 +3005,8 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
                          const int64_t slot) {
     {
         if (!p.due_or_forced(step, t, force)) return;
+        // Staged and reduced on the device: the slot's reductions
+        const bool reduced = slot >= 0 && p.staged_reductions.is_allocated();
         p.step_last = step;
         if (p.time_interval > 0.0_r) p.n_written = probe_clock::written_after(p.n_written, p.time_interval, p.time_tol(), t);
         // Averages are written once they hold a sample
@@ -3002,7 +3023,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
             if (p.motion) slot < 0 ? p.move(double(t)) : p.moved(static_cast<uint64_t>(slot));
             if (p.isosurface) slot < 0 ? p.extract(double(t)) : p.extracted(static_cast<uint64_t>(slot));
             if (p.solution) m_region_seconds += timer.seconds();
-            if (!p.average) p.sample(fields, sampled_nodes, sampled_quad, slot);
+            if (!p.average && !reduced) p.sample(fields, sampled_nodes, sampled_quad, slot);
         }
         const std::vector<double> & nodes = p.average ? p.mean_nodes : sampled_nodes;
         const std::vector<double> & quad = p.average && !p.cell_means() ? p.mean_quadrature : sampled_quad;
@@ -3012,9 +3033,15 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
             p.last_step = step;
             p.last_t = double(t);
             p.last.clear();
-            if (!p.reductions.empty()) p.reduce(nodes, quad);
-            if (p.point_value) {
-                for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
+            if (reduced) {
+                const double * const row = &p.staged_reductions(static_cast<size_t>(slot), 0);
+                p.measure = row[0];
+                p.last.assign(row + 1, row + p.staged_reductions.extent(1));
+            } else {
+                if (!p.reductions.empty()) p.reduce(nodes, quad);
+                if (p.point_value) {
+                    for (size_t v = 0; v < p.variables.size(); v++) p.last.push_back(nodes[v]);
+                }
             }
         }
         if (p.spectra && p.spectra->takes(double(t))) {
@@ -3194,6 +3221,10 @@ bool Probes::Probe::samples_nodes() const {
 }
 
 bool Probes::Probe::samples_quadrature() const { return !reductions.empty() && (motion || quadrature.n_global > 0); }
+
+bool Probes::Probe::reduces_on_device() const {
+    return !reductions.empty() && !write_samples && !average && !spectra && !motion && !isosurface;
+}
 
 void Probes::Probe::sample(const ProbeFields * fields, std::vector<double> & node_values,
                            std::vector<double> & quad_values, const int64_t slot) {
