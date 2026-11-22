@@ -238,8 +238,8 @@ block cells the same way
 **Evidence.** On the meshes measured, 83-100% of the cells have their whole
 TENO5 stencil in one structured block (88% on the 96³ Taylor-Green
 performance case, 95% on the graded Volvo combustor). TENO5 tables take
-1.04 kB per hexahedron of a uniform box instead of 32.0 kB, so an A100-80GB
-holds 11.6M cells instead of 2.08M. The speedup is modest: on an A100 the
+1.05 kB per hexahedron of a uniform box instead of 32.0 kB, so an A100-80GB
+holds 13.7M cells instead of 2.08M. The speedup is modest: on an A100 the
 96³ Taylor-Green vortex runs 1.4% faster at order 5 and 6.4% at order 6
 with shared basis means and moments, and reading block stencils by index adds 2.3% at order 5
 with symmetry walls (88% of the cells on the block path) and 4.4% periodic

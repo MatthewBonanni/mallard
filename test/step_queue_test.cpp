@@ -1270,7 +1270,7 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
     const std::string outputs = "check_interval = 4\n"
                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n"
                                 "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ntime_interval = 0.15\n"
-                                "variables = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
+                                "fields = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
     c.extra = outputs + "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("staged_outputs", c);

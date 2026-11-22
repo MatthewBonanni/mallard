@@ -277,7 +277,7 @@ bool is_removed(const std::string & removed, const std::string & version) {
 }
 
 // The release whose removals this source has made, which rejects them before its version bump
-constexpr const char * REMOVALS = "0.10.0";
+constexpr const char * REMOVALS = "0.11.0";
 
 std::string this_release() { return is_removed(REMOVALS, MALLARD_VERSION) ? MALLARD_VERSION : REMOVALS; }
 

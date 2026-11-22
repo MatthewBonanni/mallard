@@ -160,6 +160,7 @@ Unreleased`); release notes start from `python3 tools/dev/changelog.py notes X.Y
 ### Removed
 
 - `tools/post/flame_speed.py`, which `mallard post flame` replaces: `mallard post flame solut/flame.vtkhdf --reference-speed S_L` in place of `python tools/post/flame_speed.py RUN_DIR S_L` (#942).
+- The input names deprecated in 0.10.0 are removed: `[[write_data]]` and `[[probes]]` `variables` (use `fields`), and `[numerics] preset = "robust"` and `"accurate"` (use `"second_order"` and `"high_order"`). A run (and `mallard check`) with one stops with an error naming its replacement, and `mallard input upgrade old.toml > new.toml` still rewrites them.
 
 ### Fixed
 

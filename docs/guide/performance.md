@@ -20,14 +20,14 @@ Mallard is an unstructured solver with an automatic structured fast path. Where 
 
 **When it engages.** With the default `[mesh] cell_order = "auto"`, each rank finds the structured blocks among its owned cells from their nodes alone: boxes of quadrilaterals or hexahedra that meet face to face, at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers (two for TENO5). That covers generated `cartesian` boxes and the hexahedral bulk of mesh files, whatever their numbering or the cells' node order. TENO shares its tables wherever cells have the same stencil shape: lattices, and uniformly stretched or extruded directions, where a stretched channel has one shape per plane of cells.
 
-**Memory and speed.** TENO tables per hexahedron of a uniform periodic box and the most cells per A100-80GB (`mallard check --memory a100-80`, 16³ cells):
+**Memory and speed.** TENO tables per hexahedron of a uniform periodic box and the most cells per A100-80GB (`mallard check --memory a100-80 --steps 1` on an A100, 16³ cells, Euler). In 0.11.0 the setup's peak sets the limit: 5.70 kB per cell at TENO5.
 
-| Order | 0.10.0: tables | cells per GPU | now: tables | cells per GPU |
+| Order | 0.10.0: tables | cells per GPU | 0.11.0: tables | cells per GPU |
 |---|---:|---:|---:|---:|
-| TENO3 | 10.3 kB | 5.64M | 626 B | 18.8M |
-| TENO4 | 18.1 kB | 3.58M | 834 B | 17.1M |
-| TENO5 | 32.0 kB | 2.08M | 1.04 kB | 11.6M |
-| TENO6 | 65.1 kB | 1.10M | 1.46 kB | 10.3M |
+| TENO3 | 10.3 kB | 5.64M | 630 B | 22.5M |
+| TENO4 | 18.1 kB | 3.58M | 845 B | 20.7M |
+| TENO5 | 32.0 kB | 2.08M | 1.05 kB | 13.7M |
+| TENO6 | 65.1 kB | 1.10M | 1.50 kB | 12.3M |
 
 The smooth pass also reads fewer distinct rows: on one A100, the 96³ Taylor-Green vortex of `teno5_3d` runs at 8.20M cells per second against 8.08M with a row per cell at order 5, and 3.83M against 3.60M at order 6. The TENO block kernel ([#1034](https://github.com/MatthewBonanni/mallard/pull/1034)) then reads each block cell's central stencil as the cell plus its block shape's offsets, bitwise as the unstructured path does: on the same A100, the 96³ TENO5 Taylor-Green vortex runs 2.3% faster with symmetry walls (88% of the cells on the block path) and 4.4% faster when periodic (100%). The fast path is mostly a memory saving; its speedup is a few percent. Details: [design notes](../design/performance.md#14-teno-table-memory-431) and [structured blocks](../design/structured_blocks.md).
 

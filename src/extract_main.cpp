@@ -1428,7 +1428,7 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
     }
     if (columns.empty()) {
         throw std::runtime_error(c.path + " holds no [statistics] fields (MEAN_, COV_): average its states "
-                                 "without --statistics, or write them with variables = [\"MEAN_*\", \"COV_*\"]");
+                                 "without --statistics, or write them with fields = [\"MEAN_*\", \"COV_*\"]");
     }
     // COV_<a>_<b> pairs with MEAN_<a> and MEAN_<b> where the file holds both
     for (homogeneous::Column & col : columns) {

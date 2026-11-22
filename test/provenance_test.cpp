@@ -440,7 +440,7 @@ TEST(ProvenanceTest, RecordsTheFilesTheRunRead) {
         std::ofstream(points) << (N_DIM == 3 ? "0.25 0.25 0.5\n0.75 0.75 0.5\n" : "0.25 0.25\n0.75 0.75\n");
     }
     const std::string probe = "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"" + points +
-                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nvariables = [\"RHO\"]\n";
+                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nfields = [\"RHO\"]\n";
     run_box(dir, 4, UNIFORM, probe);
     const std::string first_id = provenance::run_id();
     const Value first = json::parse(provenance::json());
