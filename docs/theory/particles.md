@@ -5,7 +5,8 @@ position and, for solid particles, its own velocity, advanced by the time
 integrator of the flow together with it. This chapter gives the equations of
 motion as implemented (`src/particles/`), the drag laws, the evaluation of
 the gas at a particle from the high-order reconstruction, the integration in
-time and its stiff limit, and the treatment of walls and other boundaries.
+time (exponential for relaxations faster than the step), and the treatment of
+walls and other boundaries.
 Usage: [Particles](../guide/particles.md); measured orders:
 [verification manual](../verification/index.md#lagrangian-particles); design
 rationale: [particles](../design/particles.md).
@@ -38,8 +39,8 @@ Its trajectory is a pathline of the flow: in a steady flow, a streamline.
 A solid particle is a rigid sphere of diameter $d$ and material density
 $\rho_p$ with a velocity $\mathbf{v}$ of its own. Of the forces of the
 Maxey-Riley equation ([Maxey & Riley 1983](../references.md#maxey-riley-1983))
-Mallard keeps the drag, gravity and buoyancy, which dominate for particles
-much denser than the gas, $\rho_p / \rho \gg 1$:
+Mallard always keeps the drag, gravity and buoyancy, which dominate for
+particles much denser than the gas, $\rho_p / \rho \gg 1$:
 
 $$
 \begin{equation}
@@ -64,10 +65,17 @@ where $\rho$, $\mathbf{u}$ and $\mu$ (at the gas temperature
 $T = p / (\rho R)$, from the viscosity law of `[physics]`) are the gas state at
 the particle, and $f = C_D Re_p / 24$ is the drag correction of the drag
 law (below): the drag over Stokes drag
-([Stokes 1851](../references.md#stokes-1851)). The pressure-gradient,
-added-mass and Basset history forces scale with $\rho / \rho_p$ and are left
-out, as are the Saffman and Magnus lift forces; see
-[Crowe et al. 2011](../references.md#crowe-2011) for their magnitudes.
+([Stokes 1851](../references.md#stokes-1851)). The pressure-gradient and
+added-mass forces, which scale with $\rho / \rho_p$, and the Saffman lift
+([Saffman 1965](../references.md#saffman-1965)) are added by `forces`
+([user guide](../guide/particles.md#solid-particles)): they add to
+$\mathbf{g}'$ and, with added mass, $\rho / 2$ to $\rho_p$ in $\tau$. The
+Basset history force and the Magnus lift are left out; see
+[Crowe et al. 2011](../references.md#crowe-2011) for their magnitudes. With
+`specific_heat` the particle's temperature relaxes to the gas's in
+$\tau_T = \rho_p c_p d^2 / (6 k Nu)$, with the Nusselt number of
+[Ranz & Marshall 1952](../references.md#ranz-marshall-1952), and is integrated
+as the velocity is.
 
 The ratio of $\tau$ to a time scale $\tau_f$ of the flow is the **Stokes
 number** $St = \tau / \tau_f$. For $St \ll 1$ the particle follows the gas
@@ -99,25 +107,46 @@ From rest, with Stokes drag, $\mathbf{v}(t) = \mathbf{v}_t (1 - e^{-t/\tau})$.
 - **`stokes`**: $f = 1$, creeping flow around the sphere: the drag is 5% low
   at $Re_p = 0.2$ and 13% at $Re_p = 1$ against Schiller-Naumann.
 - **`schiller_naumann`** (default): the correlation of
-  [Schiller & Naumann 1933](../references.md#schiller-naumann-1933),
+    [Schiller & Naumann 1933](../references.md#schiller-naumann-1933),
 
-  $$
-  \begin{equation}
-  f(Re_p) = \begin{cases} 1 + 0.15\,Re_p^{0.687}, & Re_p < 1000, \\ 0.44\,Re_p / 24, & Re_p \ge 1000, \end{cases}
-  \label{eq:schiller-naumann}
-  \end{equation}
-  $$
+    $$
+    \begin{equation}
+    f(Re_p) = \begin{cases} 1 + 0.15\,Re_p^{0.687}, & Re_p < 1000, \\ 0.44\,Re_p / 24, & Re_p \ge 1000, \end{cases}
+    \label{eq:schiller-naumann}
+    \end{equation}
+    $$
 
-  within about 5% of the standard drag curve of a sphere up to $Re_p = 800$
-  ([Clift, Grace & Weber 1978](../references.md#clift-grace-weber-1978));
-  above $Re_p = 1000$ the drag coefficient takes its Newton-regime
-  value $C_D = 0.44$. The two branches meet within 0.4%.
+    within about 5% of the standard drag curve of a sphere up to $Re_p = 800$
+    ([Clift, Grace & Weber 1978](../references.md#clift-grace-weber-1978));
+    above $Re_p = 1000$ the drag coefficient takes its Newton-regime
+    value $C_D = 0.44$. The two branches meet within 0.4%.
 
-![Drag coefficient of a sphere against its Reynolds number: Stokes drag and the Schiller-Naumann correlation](../images/theory/particle_drag-light.svg#gh-light-mode-only)
-![Drag coefficient of a sphere against its Reynolds number: Stokes drag and the Schiller-Naumann correlation](../images/theory/particle_drag-dark.svg#gh-dark-mode-only)
+- **`singh`**: the correlation of
+  [Singh et al. 2022](../references.md#singh-2022) (their Appendix C), of
+  $Re_p$, the slip Mach number $M = \lvert\mathbf{u} - \mathbf{v}\rvert / c$,
+  the Knudsen number $Kn = \lambda / d = \sqrt{\gamma\pi/2}\,M / Re_p$ and
+  $T_p / T$ (1 without heat transfer). A continuum drag, Abraham's
+  $C_D = (24 / \delta_0^2)(1 + \delta_0 / Re_p^{1/2})^2$, $\delta_0 = 9.4$, at
+  low Mach number, with the pressure drag of a normal shock above Mach 1,
+  tending to $C_D = 0.9$ at hypersonic speed, is reduced by a slip correction
+  in $Kn$ and bridged to the free-molecular drag of a sphere at large $Kn$.
+  It reduces to Stokes drag in creeping continuum flow; fitted to experiments
+  and DSMC from $M = 0.1$ to 10, its relative L2 error against the data is
+  7.6%.
 
-Both laws evaluate $Re_p$, and so $\tau$, from the slip velocity of each stage
-(`particles::Solid::relaxation_time`, `src/particles/particle_forces.h`).
+The [user guide](../guide/particles.md#drag-laws) tabulates where each law is
+valid.
+
+![Drag coefficient of a sphere against its Reynolds number: Stokes drag, the Schiller-Naumann correlation and Singh et al.'s at slip Mach numbers 0.0001, 0.5 and 2 in air](../images/theory/particle_drag-light.svg#gh-light-mode-only)
+![Drag coefficient of a sphere against its Reynolds number: Stokes drag, the Schiller-Naumann correlation and Singh et al.'s at slip Mach numbers 0.0001, 0.5 and 2 in air](../images/theory/particle_drag-dark.svg#gh-dark-mode-only)
+
+*Singh et al.'s drag at a fixed slip Mach number in air ($\gamma = 1.4$): its
+Knudsen number grows as $M / Re_p$, so at low $Re_p$ rarefaction lowers the
+drag below Stokes', and above Mach 1 the shock raises it.*
+
+Every law evaluates $Re_p$ (and $M$, $Kn$), and so $\tau$, from the slip
+velocity of each stage (`particles::Solid::response`,
+`src/particles/particle_forces.h`).
 
 ## The gas at a particle
 
@@ -176,44 +205,50 @@ integrator's order in time and at the reconstruction's order in space, as the
 flow does; a rejected step of the error-controlled integrator restores the
 particles with the flow.
 
-### Stiff limit
+### Relaxations faster than the step
 
 An explicit Runge-Kutta method integrates the relaxation
 $\mathrm{d}\mathbf{v}/\mathrm{d}t = -\mathbf{v}/\tau$ stably only for
-$\Delta t / \tau$ below 2 (FE), 2.51 (SSPRK3) or 2.79 (RK4), and small
+$h = \Delta t / \tau$ below 2 (FE), 2.51 (SSPRK3) or 2.79 (RK4), and small
 particles relax in far less than a step of the flow: a 1 µm droplet in air in
 3 µs. Rather than limit the flow's step by its smallest particle, Mallard
-switches each particle, at each stage, to its equilibrium velocity when
-$\tau < \Delta t$:
+integrates the relaxation of a particle with $h > 1$ (with $\tau$ of the
+step's start) exponentially. With $\mathbf{v}_{eq} = \mathbf{u} + \tau\,\mathbf{a}$
+the equilibrium velocity ($\mathbf{a}$ the acceleration of gravity and the
+other forces), $\mathbf{v}_0$ and $\mathbf{v}_{eq,0}$ their values at the
+step's start and $\varphi_1(h) = (1 - e^{-h}) / h$, each stage's rates are
 
 $$
 \begin{equation}
-\frac{\mathrm{d}\mathbf{x}_p}{\mathrm{d}t} = \mathbf{v}_{eq} = \mathbf{u} + \tau\,\mathbf{g}', \qquad
-\frac{\mathrm{d}\mathbf{v}}{\mathrm{d}t} = \frac{\mathbf{v}_{eq} - \mathbf{v}}{\Delta t}
-\qquad (\tau < \Delta t).
-\label{eq:stiff-limit}
+\begin{aligned}
+\frac{\mathrm{d}\mathbf{v}}{\mathrm{d}t} &= \frac{(1 - e^{-h})(\mathbf{v}_{eq,0} - \mathbf{v}_0)
++ 2 (1 - \varphi_1)(\mathbf{v}_{eq} - \mathbf{v}_{eq,0})}{\Delta t}, \\
+\frac{\mathrm{d}\mathbf{x}_p}{\mathrm{d}t} &= \mathbf{v}_{eq,0} + \varphi_1 (\mathbf{v}_0 - \mathbf{v}_{eq,0})
++ \left(1 - \frac{2 (1 - \varphi_1)}{h}\right)(\mathbf{v}_{eq} - \mathbf{v}_{eq,0}),
+\end{aligned}
+\qquad (h > 1),
+\label{eq:exponential}
 \end{equation}
 $$
 
-For small $\tau$ the velocity of eq. $\eqref{eq:solid}$ approaches
-$\mathbf{v} = \mathbf{u} + \tau\,(\mathbf{g}' - \mathrm{D}\mathbf{u}/\mathrm{D}t) + O(\tau^2)$
-([Maxey 1987](../references.md#maxey-1987),
-[Ferry & Balachandar 2001](../references.md#ferry-balachandar-2001)), so
-$\mathbf{v}_{eq}$ keeps the settling and drops the lag behind the gas's
-acceleration: the position is first order in $\tau$ where the gas
-accelerates, and exact where it does not (settling in gas at rest or in
-uniform flow). The velocity relaxes to $\mathbf{v}_{eq}$ at the rate
-$1/\Delta t$, which every method damps (amplification per step 0 for FE,
-1/3 for SSPRK3, 3/8 for RK4). `dt` is the step of the host, or inside a
-captured step the device's own step size (`step_dt_device`).
+which every Runge-Kutta method with $\sum b_i = 1$ and $\sum b_i c_i = 1/2$
+(every method of order 2 and above) integrates to the exact solution of
+eq. $\eqref{eq:solid}$ for $\mathbf{v}_{eq}$ linear in time over the step.
+Settling in gas at rest or in uniform flow is exact, the lag
+$-\tau\,\mathrm{D}\mathbf{u}/\mathrm{D}t$ of a small particle behind an
+accelerating gas ([Maxey 1987](../references.md#maxey-1987),
+[Ferry & Balachandar 2001](../references.md#ferry-balachandar-2001)) is kept,
+and a particle with $\tau$ near $\Delta t$ keeps its inertia. The particle's
+temperature is integrated the same way when $\Delta t / \tau_T > 1$. `dt` is the
+step of the host, or inside a captured step the device's own step size
+(`step_dt_device`).
 
-The switch is per particle and per stage. The flow's step never depends on
-the particles, and particles far from the switch, $\tau \gg \Delta t$ or
-$\tau \ll \Delta t$, keep their accuracy: the
+The switch is per particle and per step. The flow's step never depends on
+the particles, and the trajectories converge in time on both sides of it: the
 [verification manual](../verification/index.md#lagrangian-particles) measures
 the integrator's order at $\Delta t / \tau = 1/2$ to $1/8$, just below the
-switch, and the first-order convergence in $\tau$ of the stiff limit at a
-fixed step.
+switch, and the convergence of the exponential integration at
+$\Delta t / \tau = 12.5$ to $3.1$.
 
 ## Location and boundaries
 
@@ -261,14 +296,19 @@ particle can bounce off up to 8 faces in one step (corners); one that does
 not settle in a cell within 64 cells of the walk, or reaches the outer edge of
 a rank's halo, is counted as lost.
 
-A bounce applied at the end of the step in which the particle reached the
-wall is exact for motion linear in the position and velocity with no
-external force, such as drag in gas at rest; otherwise its timing is first
-order in the step. Under gravity, a particle that reached the wall a time $s$
-before the end of the step leaves it with a velocity error
-$(1 + e_n)\,\lvert\mathbf{g}'\cdot\mathbf{n}\rvert\,s$ and a tangential
-position error $(1 - e_t)\,\lvert\mathbf{v}_t\rvert\,s$, with $s < \Delta t$
-([verification](../verification/index.md#lagrangian-particles)).
+A solid particle's bounce is located within the step
+(`particles::rebound`, `src/particles/particle_forces.h`): over the step the
+particle is taken to move as eq. $\eqref{eq:solid}$ with $\mathbf{u}$,
+$\mathbf{a}$ and $\tau$ of the step's start, whose position and velocity are
+closed-form; the time $b$ before the step's end at which it reached the wall is
+the root of the normal distance it then travels, eq.
+$\eqref{eq:reflect-velocity}$ is applied at that time, and the particle moves
+on for $b$. That is exact for drag in a gas uniform over the step's travel and
+for constant acceleration, so the timing of bounces does not depend on the
+step there; in a strongly varying gas it is first order in the step. A
+particle with $\tau < \Delta t$ follows the gas within the step and is
+reflected at the step's end by eqs. $\eqref{eq:reflect-position}$ and
+$\eqref{eq:reflect-velocity}$.
 
 ## Quantities along the path
 

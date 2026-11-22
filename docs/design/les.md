@@ -469,26 +469,26 @@ scans on the same set-up, plus 128³ on one A100 (spectral error at stations
   $c \approx 10\,u'$.
 - **Three parameter-free adjustments were tested, and none tracks the best
   constant.**
-  - *Undoing the least-squares attenuation*, $C/\sqrt{r}$. On the
-    hybrid-flux fields $r$ (Sigma's least-squares eddy viscosity over its
-    exact-gradient value) is 0.34, 0.35 and 0.44 at 32³, 64³ and 128³ at
-    station 2 (0.30, 0.34, 0.54 at station 3). On HLLC fields, whose cutoff is
-    damped, it is 0.54, 0.60 and 0.65 at 32³-64³. The correction would set
-    $C \approx 2.0$-$2.3$ at 128³, where 1.35 is best.
-  - *Lilly's argument on a Pao spectrum* ([Pao 1965](../references.md#pao-1965),
-    after [Voke 1996](../references.md#voke-1996)). It gives a parameter-free
-    low-mesh-Reynolds factor: with $\rho = \nu_{t,\infty}/\nu$, solve
-    $q = \exp(-\rho^{-2/3}(1-q)^{1/3})$ and set $\nu_t = \nu\,q/(1-q)$, which
-    recovers Lilly's $C_s = 0.18$ as $\rho \to \infty$. At CBC's $\rho$ of
-    1-6 it lowers $\nu_t$ by 3-20%, far less than the data ask for.
-  - *Subtracting the scheme's own dissipation*,
-    $\nu_t = \max(0, \nu_\mathrm{target} - \nu_\mathrm{num})$, with
-    $\nu_\mathrm{num}$ from the kinetic-energy budget (localizable after
-    [Schranner et al. 2015](../references.md#schranner-2015)). With HLLC,
-    $\varepsilon_\mathrm{num}$ is 1.6-1.8 times Sigma's dissipation at every
-    resolution, so the subtraction removes the model even at 32³-64³, where
-    it is needed: TENO5 without a model scores 0.184 / 0.204 at 32³. It
-    would work only with a fitted fraction of $\nu_\mathrm{num}$.
+    - *Undoing the least-squares attenuation*, $C/\sqrt{r}$. On the
+      hybrid-flux fields $r$ (Sigma's least-squares eddy viscosity over its
+      exact-gradient value) is 0.34, 0.35 and 0.44 at 32³, 64³ and 128³ at
+      station 2 (0.30, 0.34, 0.54 at station 3). On HLLC fields, whose cutoff is
+      damped, it is 0.54, 0.60 and 0.65 at 32³-64³. The correction would set
+      $C \approx 2.0$-$2.3$ at 128³, where 1.35 is best.
+    - *Lilly's argument on a Pao spectrum* ([Pao 1965](../references.md#pao-1965),
+      after [Voke 1996](../references.md#voke-1996)). It gives a parameter-free
+      low-mesh-Reynolds factor: with $\rho = \nu_{t,\infty}/\nu$, solve
+      $q = \exp(-\rho^{-2/3}(1-q)^{1/3})$ and set $\nu_t = \nu\,q/(1-q)$, which
+      recovers Lilly's $C_s = 0.18$ as $\rho \to \infty$. At CBC's $\rho$ of
+      1-6 it lowers $\nu_t$ by 3-20%, far less than the data ask for.
+    - *Subtracting the scheme's own dissipation*,
+      $\nu_t = \max(0, \nu_\mathrm{target} - \nu_\mathrm{num})$, with
+      $\nu_\mathrm{num}$ from the kinetic-energy budget (localizable after
+      [Schranner et al. 2015](../references.md#schranner-2015)). With HLLC,
+      $\varepsilon_\mathrm{num}$ is 1.6-1.8 times Sigma's dissipation at every
+      resolution, so the subtraction removes the model even at 32³-64³, where
+      it is needed: TENO5 without a model scores 0.184 / 0.204 at 32³. It
+      would work only with a fitted fraction of $\nu_\mathrm{num}$.
 - The dynamic procedure, with either gradient, lowers C and is worse at
   32³-48³ (0.114 / 0.119 and 0.114 / 0.118); at 64³ it matches the default
   (0.121 / 0.131).
@@ -606,6 +606,37 @@ at every face quadrature point, with the same reconstructed states.
   0). Shocks therefore keep the full Riemann solver and TENO's
   shock-capturing; vortical and expansion regions, and flames (expansions),
   get the central flux.
+- **`eps = (kappa c / h)^2`**, with the cell's sound speed `c`, its size
+  `h = V^(1/d)` and `kappa` = `dilatation_scale` (default `1e-5`). Without
+  it, any compression with little vorticity has `theta ~ 1`, round-off ones
+  in uniform flow included: 30% of the cells of the double Mach reflection
+  (480 x 120 triangles, TENO 5), mostly in the gas at rest ahead of the
+  shocks, were "shocks" whose decision depended on round-off. With
+  `kappa = 1e-5` a compression without vorticity is a shock above
+  `|div u| h / c = kappa sqrt(theta_* / (1 - theta_*))`, 1.4e-5, about a
+  hundred times single precision's round-off at Mach 1; the double Mach
+  reflection then flags 15%, and the cells compressing at `|div u| h / c`
+  above 0.05 (the shocks) are flagged as before (98.6% of them, as without
+  `eps`). Scaling with `c / h` makes
+  `eps` a rate squared in any units, needs no reference velocity or length
+  from the input, and follows the mesh. A larger `kappa` would also keep
+  acoustic noise central (a freestream's, #1270): a wave of 1% of `c` over
+  20 cells compresses at `|div u| h / c` = 3e-3, a shock at 0.05 and more,
+  so `kappa = 0.01` separates them, as Hendrickson, Kartha & Candler (2018)
+  reduce the sensor where the dilatation is small. But upwinding the
+  compressions of grid-scale noise is what damps it where the central flux
+  has no dissipation of its own: on Sod's problem (200 cells) the L1 density
+  error rises by 1-6% at `kappa = 1e-3` and 24-27% at `0.01` (MUSCL with
+  either central state, TENO 5), while up to `kappa = 3e-5` it is unchanged
+  or lower. On the double Mach reflection, against a run on four times the
+  cells, the density error is 0.8% lower at `kappa = 1e-5` and 46% higher
+  at 0.01. In the Mach 1.7 wall-modeled channel the sensor flags 0.02% of
+  the cells whatever `kappa`, and `Re_tau`, `B_q` and `T_c / T_w` differ by
+  less than their statistical uncertainty between `kappa` = 0, 1e-5, 3e-3
+  and 0.01 (`Re_tau` +3.0% from the DNS without `eps`, +2.8% with the
+  default). So the default only removes round-off; raising `kappa` to 0.01
+  trades the noise damping for less upwinding in quiet, irrotational
+  regions. `dilatation_scale = 0` restores the sensor without `eps`.
 - Species stay upwinded by the mass flux (Larrouturou) with the blended
   mass flux, so mass fractions stay in [0, 1] and sum to one; their
   numerical diffusion is not part of the kinetic-energy budget and is
@@ -1004,21 +1035,21 @@ chemistry stays bitwise independent of rank count and team width.
   its grid-converged 2.3311 m/s), MUSCL and HLLC, strip cells of aspect ratio 10 (`Delta = 3.16
   dx`), `n_res = 5`:
 
-  | Mesh | Model | `F` | Consumption speed | Displacement speed | Thermal thickness |
-  |---|---|---|---|---|---|
-  | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.7%) | 2.615 mm (`F delta_L` = 2.610 mm) |
-  | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.1%) | 2.251 m/s (-3.4%) | |
-  | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-3.9%) | one cell (numerical) |
+    | Mesh | Model | `F` | Consumption speed | Displacement speed | Thermal thickness |
+    |---|---|---|---|---|---|
+    | 2 cells per `delta_L` | TFLES | 7.91 | 2.327 m/s (-0.2%) | 2.291 m/s (-1.7%) | 2.615 mm (`F delta_L` = 2.610 mm) |
+    | 0.5 cells per `delta_L` | TFLES | 31.6 | 2.328 m/s (-0.1%) | 2.251 m/s (-3.4%) | |
+    | 0.5 cells per `delta_L` | none (quasi-laminar) | 1 | 2.273 m/s (-2.5%) | 2.240 m/s (-3.9%) | one cell (numerical) |
 
-  The thickened flame keeps the laminar speed and has the thickness `F
-  delta_L` it is designed to have; the quasi-laminar flame's speed is also
-  within 5% in this one-dimensional case, but its structure is one cell
-  wide, set by the scheme. The displacement speeds include the slow drift
-  of a long domain's flame position (they are fitted over the last half of
-  the run). The thickened post-flame recombination zone is `F` times longer
-  too (rates times `1 / F` while `c < 0.95`), so the peak temperature in a
-  domain of a few thickened thicknesses stays below the adiabatic one
-  (2224 K against 2384 K at `F = 7.9`).
+    The thickened flame keeps the laminar speed and has the thickness `F
+    delta_L` it is designed to have; the quasi-laminar flame's speed is also
+    within 5% in this one-dimensional case, but its structure is one cell
+    wide, set by the scheme. The displacement speeds include the slow drift
+    of a long domain's flame position (they are fitted over the last half of
+    the run). The thickened post-flame recombination zone is `F` times longer
+    too (rates times `1 / F` while `c < 0.95`), so the peak temperature in a
+    domain of a few thickened thicknesses stays below the adiabatic one
+    (2224 K against 2384 K at `F = 7.9`).
 
 ### 6.7 Non-premixed and partially premixed flames (#754)
 
@@ -1464,21 +1495,22 @@ with the mean `E` in the flame:
   filter and global sums), against the wrinkling factor `Xi` of the DNS
   surface at the scale `F delta_L`:
 
-  | Snapshot | `Xi` (`F` = 2 / 4 / 8) | dynamic `E` |
-  |---|---|---|
-  | case 1, 0.2 ms | 1.004 / 1.011 / 1.025 | 1.009 / 1.044 / 1.135 |
-  | case 1, 0.4 ms | 1.082 / 1.203 / 1.404 | 1.095 / 1.332 / 1.368 |
-  | case 2, 0.2 ms | 1.002 / 1.004 / 1.007 | 1.006 / 1.026 / 1.114 |
-  | case 2, 0.35 ms | 1.009 / 1.023 / 1.036 | 1.015 / 1.043 / 1.157 |
+    | Snapshot | `Xi` (`F` = 2 / 4 / 8) | dynamic `E` |
+    |---|---|---|
+    | case 1, 0.2 ms | 1.004 / 1.011 / 1.025 | 1.009 / 1.044 / 1.135 |
+    | case 1, 0.4 ms | 1.082 / 1.203 / 1.404 | 1.095 / 1.332 / 1.368 |
+    | case 2, 0.2 ms | 1.002 / 1.004 / 1.007 | 1.006 / 1.026 / 1.114 |
+    | case 2, 0.35 ms | 1.009 / 1.023 / 1.036 | 1.015 / 1.043 / 1.157 |
 
-  It follows the DNS's wrinkling as it grows (Colin's `E` at 0.125-0.2 ms:
-  1.01 / 1.16 / 1.80) but overpredicts by up to 11% at `F = 8` when the
-  flame is nearly flat: `Delta_e = 8 delta_L` exceeds the integral scale
-  (`l_t` = 2.3-2.4 `delta_L`) and the test-filtered width `gamma Delta_e`
-  = 12 `delta_L` is that of the box (9.6-12.8 `delta_L`), so the surface it removes is large-scale tilt of the
-  front, which the power law extrapolates down to `delta_L`. The thickened
-  LES flame resolves less wrinkling than the filtered DNS, so a posteriori
-  `E` is lower (1.05-1.09 at `F = 8`).
+    It follows the DNS's wrinkling as it grows (Colin's `E` at 0.125-0.2 ms:
+    1.01 / 1.16 / 1.80) but overpredicts by up to 11% at `F = 8` when the
+    flame is nearly flat: `Delta_e = 8 delta_L` exceeds the integral scale
+    (`l_t` = 2.3-2.4 `delta_L`) and the test-filtered width `gamma Delta_e`
+    = 12 `delta_L` is that of the box (9.6-12.8 `delta_L`), so the surface it removes is large-scale tilt of the
+    front, which the power law extrapolates down to `delta_L`. The thickened
+    LES flame resolves less wrinkling than the filtered DNS, so a posteriori
+    `E` is lower (1.05-1.09 at `F = 8`).
+
 - Cost (the `flame_3d` benchmark, 221,184 hexahedra, one A100, two runs
   each): 14.7 ms per step outside the chemistry against 13.6 ms with
   Colin's operator or `eddy_viscosity` (+8%); the chemistry's cost follows
@@ -1733,6 +1765,7 @@ with the stage that implements them.
 - Germano, Piomelli, Moin & Cabot 1991, *Phys. Fluids A* 3, 1760. [doi:10.1063/1.857955](https://doi.org/10.1063/1.857955)
 - Ghosal 1996, *J. Comput. Phys.* 125, 187. [doi:10.1006/jcph.1996.0088](https://doi.org/10.1006/jcph.1996.0088)
 - Haselbacher & Vasilyev 2003, *J. Comput. Phys.* 187, 197. [doi:10.1016/S0021-9991(03)00095-0](https://doi.org/10.1016/S0021-9991%2803%2900095-0)
+- Hendrickson, Kartha & Candler 2018, AIAA Paper 2018-3710. [doi:10.2514/6.2018-3710](https://doi.org/10.2514/6.2018-3710)
 - Jameson 2008, *J. Sci. Comput.* 34, 188. [doi:10.1007/s10915-007-9172-6](https://doi.org/10.1007/s10915-007-9172-6)
 - Kuya, Totani & Kawai 2018, *J. Comput. Phys.* 375, 823. [doi:10.1016/j.jcp.2018.08.058](https://doi.org/10.1016/j.jcp.2018.08.058)
 - Lee & Moser 2015, *J. Fluid Mech.* 774, 395. [doi:10.1017/jfm.2015.268](https://doi.org/10.1017/jfm.2015.268)

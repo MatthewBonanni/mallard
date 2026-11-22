@@ -15,8 +15,8 @@
 #
 # Result: after 0.25 s, about ten relaxation times, every droplet falls at
 # 0.25025 m/s, within 2e-5 of the correlation's terminal velocity.
-# smoke.toml runs 1 um particles, which relax faster than a step: they take
-# their equilibrium velocity, the stiff limit.
+# smoke.toml runs 1 um particles, which relax faster than a step: they relax
+# exponentially within each step to their equilibrium velocity.
 
 [run]
 t_stop = 0.25

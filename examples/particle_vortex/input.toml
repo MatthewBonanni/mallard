@@ -1,0 +1,80 @@
+# Heavy, heated particles in a steady array of vortices (2D build).
+#
+# The low-Mach Taylor-Green cells of tracer_vortex, in a slightly viscous gas
+# that decays by about 8% over the run. The particles start at rest in one
+# vortex and cold. Their Stokes number based on the vortex turnover is about 1:
+# drag spins them up, and their inertia then flings them out of the vortex's
+# core toward the cell boundaries, where the strain is (preferential
+# concentration). The probe "core" counts the particles near the vortex's
+# center, which falls over the run, and their temperature, which relaxes
+# toward the gas temperature 1 / 1.4 at the Ranz-Marshall rate (tau_T of
+# about 2).
+[run]
+t_stop = 10.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Lx = 1.0
+Ly = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.1 * sin(2 * pi * x) * cos(2 * pi * y)", "-0.1 * cos(2 * pi * x) * sin(2 * pi * y)"]
+p = "1 / 1.4 + 0.01 / 4 * (cos(4 * pi * x) + cos(4 * pi * y))"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+mu = 1e-4
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "solid"
+file = "particles.csv"
+# tau = rho_p d^2 / (18 mu f) of about 1, slip Reynolds numbers of about 1
+diameter = 4.2e-3
+density = 100.0
+forces = ["pressure_gradient", "added_mass"]
+velocity = [0.0, 0.0]
+specific_heat = 8.0
+temperature = 0.4
+
+[particles.lattice]
+lo = [0.1, 0.1]
+hi = [0.4, 0.4]
+n = [9, 9]
+
+[[particles.quantities]]
+name = "slip_max"
+max = "hypot(U_X - V_X, U_Y - V_Y)"
+
+# The particles near the vortex's center and their temperature, every 50 steps
+[[particles.probes]]
+name = "core"
+region = {type = "disk", center = [0.25, 0.25], radius = 0.1}
+fields = ["T_P", "hypot(V_X, V_Y)"]
+interval = 50
+
+[output]
+check_interval = 200

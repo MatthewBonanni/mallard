@@ -3,8 +3,9 @@
 Mallard tracks Lagrangian particles through the flow, on the device, in 2D and
 3D, serial and on many ranks. Massless tracers move with the gas velocity at
 their position, for pathlines, residence times and other Lagrangian analyses;
-[solid particles](#solid-particles) have inertia: drag and gravity accelerate
-them, and walls rebound or catch them. Each particle can carry
+[solid particles](#solid-particles) have inertia: drag, gravity and the forces of
+the gas accelerate them, convection heats them, and walls rebound or catch
+them. Each particle can carry
 [quantities](#per-particle-quantities) along its path (time integrals, extrema,
 first times, turns about an axis), and [probes](#particle-probes) give
 statistics of the particles in a region. Particles do not act on the gas yet;
@@ -13,7 +14,7 @@ the final positions follow in later releases ([#291](https://github.com/MatthewB
 
 - [Which particles?](#which-particles)
 - [Tracers](#tracers-particles), [seeding](#seeding), [restarts](#restarts) and [boundaries](#boundaries)
-- [Solid particles](#solid-particles): [drag](#drag-laws), [the stiff limit](#the-stiff-limit), [walls](#walls)
+- [Solid particles](#solid-particles): [drag](#drag-laws), [stiff particles](#stiff-particles), [walls](#walls)
 - [Per-particle quantities](#per-particle-quantities) and [particle probes](#particle-probes)
 - [Accuracy](#accuracy), [performance](#performance) and a [checklist](#checklist)
 
@@ -39,7 +40,7 @@ turnover time, a vortex's period, the time to cross a nozzle), it gives the
 
 | $St$ | The particle | Use |
 |---|---|---|
-| $\ll 1$ (below 0.05) | follows the gas, plus its settling velocity $\tau g$ | `tracer` if settling does not matter; `solid` (stiff limit) for settling smoke, fog, fine dust |
+| $\ll 1$ (below 0.05) | follows the gas, plus its settling velocity $\tau g$ | `tracer` if settling does not matter; `solid` for settling smoke, fog, fine dust ([stiff particles](#stiff-particles)) |
 | about 0.1 to 10 | lags the gas, is flung out of vortices, overshoots turns, hits walls | `solid` |
 | $\gg 1$ (above 10) | moves almost ballistically; the gas changes its course slowly | `solid` |
 
@@ -84,7 +85,8 @@ n = [9, 9]
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
-[`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge).
+[`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -100,7 +102,7 @@ bitwise the same on any number of ranks.
 | `type` | required | `"tracer"` |
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
-| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, then the quantities, by id |
+| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
 | `capacity` | the number of particles | Particles a rank can hold |
 
 ### Seeding
@@ -177,39 +179,67 @@ interaction = "stick"
 *Used in:*
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
-[`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge).
+[`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
 displaces) accelerates:
 
 $$\frac{d\mathbf{v}}{dt} = \frac{\mathbf{u} - \mathbf{v}}{\tau} + \mathbf{g}\left(1 - \frac{\rho}{\rho_p}\right),
-\qquad \tau = \frac{\rho_p d^2}{18 \mu f(Re_p)}, \qquad Re_p = \frac{\rho |\mathbf{u} - \mathbf{v}| d}{\mu}.$$
+\qquad \tau = \frac{\rho_p d^2}{18 \mu f}, \qquad Re_p = \frac{\rho |\mathbf{u} - \mathbf{v}| d}{\mu}.$$
 
 The gas state at the particle (`u`, `rho`, `mu` at its temperature) comes from
 the reconstruction polynomial, as for tracers, and position and velocity are
 part of the time integrator's state: trajectories converge at the
-integrator's order. `f` is the drag correction of the [drag law](#drag-laws).
-The particles do not act on the gas. Of the forces on a sphere, Mallard keeps
-drag, gravity and buoyancy, the ones that matter for particles much denser
-than the gas (droplets, dust, ash, sand, soot in air); for bubbles or
-particles of a density near the gas's, the pressure-gradient, added-mass and
-history forces it leaves out matter as much
-([theory](../theory/particles.md#solid-particles)).
+integrator's order. `f` is the drag correction of the [drag law](#drag-laws)
+(`drag`), `f = 1` for creeping flow. The particles do not act on the gas.
+
+**Forces.** Drag, gravity and buoyancy are the forces that matter for
+particles much denser than the gas (droplets, dust, ash, sand, soot in air).
+For bubbles, particles of a density near the gas's, or particles slipping
+through shear, `forces` adds the forces of
+[Maxey & Riley (1983)](../references.md#maxey-riley-1983) and lift
+([theory](../theory/particles.md#solid-particles)):
+
+| `forces` entry | Adds | Matters when |
+|---|---|---|
+| `"pressure_gradient"` | `-grad p / rho_p` in place of the buoyancy `-g rho / rho_p` (equal in a gas at rest) | the gas accelerates: `rho / rho_p` is not small and the flow has strong pressure gradients (shocks, nozzles, vortex cores) |
+| `"added_mass"` | half the displaced gas mass, accelerated with the gas: `rho_p` becomes `rho_p + rho / 2` in `tau` and the inertia, and `(rho g - grad p) / 2` is added to the force | `rho / rho_p` is not small (bubbles, light particles in dense gas) |
+| `"saffman_lift"` | the shear lift of [Saffman (1965)](../references.md#saffman-1965), `1.615 (6 / (pi d)) sqrt(rho mu / abs(w)) (u - v) x w` per volume, `w` the vorticity | particles slip through shear layers and boundary layers |
+
+The gradients come from the cell's least-squares gradient. The Basset history
+force is not included.
+
+**Heat transfer.** With `specific_heat`, each particle carries a temperature
+`T_p`, which convection relaxes toward the gas temperature at the rate of the
+[Ranz & Marshall (1952)](../references.md#ranz-marshall-1952) Nusselt number:
+
+$$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2}{6 k Nu},
+\qquad Nu = 2 + 0.6 Re_p^{1/2} Pr^{1/3},$$
+
+with `k` the gas conductivity. The particle is isothermal (its Biot number is
+small) and does not heat the gas. Particle expressions read it as `T_P`, the
+`file` has it as a column `T_p`, and restart files carry it.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `type` | required | `"solid"` |
 | `diameter` | required | Sphere diameter |
 | `density` | required | Material density `rho_p` |
-| `drag` | `"schiller_naumann"` | `"stokes"` or `"schiller_naumann"` |
+| `drag` | `"schiller_naumann"` | `"stokes"`, `"schiller_naumann"` or `"singh"` |
 | `gravity` | `[source] gravity`, else none | Gravity on the particles |
+| `forces` | `[]` | Further forces: `"pressure_gradient"`, `"added_mass"`, `"saffman_lift"` |
+| `specific_heat` | none (no heat transfer) | Particle specific heat `c_p`: tracks the particle temperature |
 | `velocity` | the gas velocity at each seed | Velocity of every seeded particle |
+| `temperature` | the gas temperature at each seed | Temperature of every seeded particle (with `specific_heat`) |
 
 The other keys of [`[particles]`](#tracers-particles) (seeds, `file`,
 `capacity`) are the same. Particle expressions read the particle velocity as
-`V_X`, `V_Y`, `V_Z`. Restart files carry the velocities; tracers restarted as
-solid particles start at the gas velocity.
+`V_X`, `V_Y`, `V_Z`. Restart files carry the velocities and temperatures;
+tracers restarted as solid particles start at the gas velocity, and particles
+restarted with heat transfer from a file without temperatures at the gas
+temperature.
 
 `gravity` in `[particles]` acts on the particles only. `[source] gravity`
 acts on the gas too (a hydrostatic pressure gradient builds up in it) and on
@@ -219,43 +249,86 @@ simpler and the same to within the hydrostatic variation of the gas density.
 
 ### Drag laws
 
-| `drag` | `f(Re_p)` | Use |
+`drag` in `[particles]` chooses the drag correlation, `f = C_D Re_p / 24`
+(the drag over Stokes drag):
+
+```toml
+[particles]
+type = "solid"
+drag = "singh"   # "stokes", "schiller_naumann" (default) or "singh"
+```
+
+| `drag` | `f` | Reads |
 |---|---|---|
-| `"stokes"` | 1 | Creeping flow, $Re_p \lesssim 0.1$; exact analytic solutions for verification |
-| `"schiller_naumann"` (default) | `1 + 0.15 Re_p^0.687` below `Re_p = 1000`, then `0.44 Re_p / 24` (`C_D = 0.44`) | Rigid spheres up to $Re_p \approx 800$, within 5% of measured drag |
+| `"stokes"` | 1 | nothing |
+| `"schiller_naumann"` (default) | `1 + 0.15 Re_p^0.687` below `Re_p = 1000`, then `0.44 Re_p / 24` (`C_D = 0.44`) | `Re_p` |
+| `"singh"` | the correlation of [Singh et al. (2022)](../references.md#singh-2022), Appendix C ([theory](../theory/particles.md#drag-laws)) | `Re_p`, the slip Mach number `M = abs(u - v) / c`, the Knudsen number `Kn` and `T_p / T` |
 
-Stokes drag is 5% low at $Re_p = 0.2$ and 13% low at $Re_p = 1$: use it only
-where $Re_p$ stays well below 1, or to compare with analytic solutions.
-Schiller-Naumann is the safe default; its $Re_p$ uses the slip velocity of
-each stage, so $\tau$ changes as the particle speeds up or slows down.
+The gas's `mu` (at its temperature), `gamma` and `R` come from `[physics]`.
+For `"singh"` the Knudsen number is the gas's mean free path over the
+diameter, `Kn = mu / (rho c d) sqrt(gamma pi / 2) = sqrt(gamma pi / 2) M / Re_p`,
+and `T_p / T` is 1 without `specific_heat`. Each stage evaluates `f` from its
+own slip velocity, so `tau` changes as the particle speeds up or slows down.
 
-![Terminal velocity of water droplets and glass beads in air against their diameter: Stokes' law and the Schiller-Naumann correlation, with Mallard's settling velocities](../images/guide/particle_terminal_velocity-light.svg#gh-light-mode-only)
-![Terminal velocity of water droplets and glass beads in air against their diameter: Stokes' law and the Schiller-Naumann correlation, with Mallard's settling velocities](../images/guide/particle_terminal_velocity-dark.svg#gh-dark-mode-only)
+**Where each law is valid.** Outside its ranges a law still runs, but its drag
+is wrong by more than the error given.
 
-*Terminal velocities in air at 300 K: Stokes' law (dashed) and the
-Schiller-Naumann correlation (solid), with the settling velocities of Mallard
-runs of the [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling)
-box (dots). Above 50 µm the drag at the terminal velocity exceeds Stokes'.*
+| `drag` | Particle Reynolds number $Re_p$ | Slip Mach number $M$ | Knudsen number $Kn$ | Neglects | Sources |
+|---|---|---|---|---|---|
+| `"stokes"` | $\lesssim 0.1$: 3% low at 0.1, 5% at 0.2, 13% at 1 | $\ll 1$ | $\lesssim 0.01$ | the inertia of the gas around the sphere (its wake), compressibility, slip at the surface | [Stokes (1851)](../references.md#stokes-1851) |
+| `"schiller_naumann"` | $\lesssim 800$ within 5% of the standard drag curve; `C_D = 0.44` from 1000 to the drag crisis near $2 \times 10^5$ | $\lesssim 0.3$ | $\lesssim 0.01$ | compressibility and shocks, slip at the surface and rarefaction, the drag crisis | [Schiller & Naumann (1933)](../references.md#schiller-naumann-1933), [Clift, Grace & Weber (1978)](../references.md#clift-grace-weber-1978) |
+| `"singh"` | creeping flow to $\approx 10^4$ (laminar boundary layer) | 0 to 10 (fitted from 0.1); above 5 a calorically perfect gas | 0 (continuum) to free-molecular flow | real-gas effects behind strong shocks, boundary-layer turbulence and the drag crisis; least accurate in the transition regime, $0.1 \lesssim Kn \lesssim 10$ | [Singh et al. (2022)](../references.md#singh-2022): 7.6% relative L2 error against experiments and DSMC |
 
-### The stiff limit
+All three are the drag of an isolated, smooth, rigid, non-rotating sphere in
+steady, uniform flow: none accounts for neighbors, turbulence of the gas at
+the particle's scale, rotation or non-spherical shapes.
+
+**Choosing.**
+
+- `"schiller_naumann"`, the default, for particles in a gas at ordinary
+  densities whose slip is subsonic: droplets, dust and sand above a few
+  microns in air at 1 bar.
+- `"stokes"` where $Re_p$ stays well below 1, or to compare with analytic
+  solutions; it is never more accurate than Schiller-Naumann.
+- `"singh"` where the particle is not much larger than the mean free path
+  ($Kn > 0.01$: below about 7 µm in air at 1 bar, larger in a low-pressure
+  gas) or its slip is compressible ($M > 0.3$: shocks, nozzles, high-speed
+  dusty flow). In continuum, incompressible flow it is within about 6% of
+  Schiller-Naumann up to $Re_p = 1000$ and costs more.
+
+Check $Re_p$, and for `"singh"` $M$ and $Kn$, along the paths with a `max`
+quantity ([per-particle quantities](#per-particle-quantities)).
+
+![Terminal velocity of water droplets and glass beads in air against their diameter: Stokes' law and the Schiller-Naumann and Singh et al. correlations, with Mallard's settling velocities](../images/guide/particle_terminal_velocity-light.svg#gh-light-mode-only)
+![Terminal velocity of water droplets and glass beads in air against their diameter: Stokes' law and the Schiller-Naumann and Singh et al. correlations, with Mallard's settling velocities](../images/guide/particle_terminal_velocity-dark.svg#gh-dark-mode-only)
+
+*Terminal velocities in air at 300 K and 1 bar (left) and their ratio to
+the Schiller-Naumann value (right): Stokes' law (dashed), the
+Schiller-Naumann correlation (solid) and Singh et al.'s (dotted), with the
+settling velocities of Mallard runs of the
+[`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling)
+box (dots: Schiller-Naumann on the left, Singh et al. on the right). Above
+50 µm the drag at the terminal velocity exceeds Stokes'; below a few microns
+the particles slip through the gas ($Kn$ = 0.066 at 1 µm) and settle up to
+12% faster with Singh et al.'s drag; between, Singh et al.'s continuum drag
+is up to 6% above Schiller-Naumann's.*
+
+### Stiff particles
 
 The relaxation time `tau` can be far below the flow's time step (a 1 µm
-droplet in air relaxes in a few microseconds). A particle whose `tau` is below
-the step `dt` is in its stiff limit: it moves at its equilibrium velocity
-`u + tau g'` and its velocity relaxes to it within the step, so tiny particles
-follow the gas instead of making the run unstable, and the step never depends
-on the particles.
+droplet in air relaxes in a few microseconds), where an explicit integrator
+would be unstable. A particle whose `tau` is below the step `dt` relaxes
+exponentially within the step: its velocity is integrated exactly for a gas
+velocity and force that vary linearly over the step, so tiny particles follow
+the gas at their equilibrium velocity `u + tau g'` instead of making the run
+unstable, particles with `tau` near `dt` keep their inertia, and the step
+never depends on the particles. The same holds for the temperature's `tau_T`.
 
-- Settling in gas at rest or in uniform flow is exact in the stiff limit
-  (the `smoke.toml` input of
-  [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling)).
-- Where the gas accelerates, the equilibrium velocity misses the particle's
-  lag behind the gas, `tau Du/Dt`: an error first order in `tau`, small for
-  the particles the switch applies to.
-- Just below the switch (`dt` from `tau / 2` down) the integrator keeps its
-  order; particles with `tau` within a factor of a few of `dt` are the least
-  accurate. When their inertia matters, lower `dt` until `dt < tau / 2` for
-  them ([verification](../verification/index.md#lagrangian-particles)).
+- Settling in gas at rest or in uniform flow is exact (the `smoke.toml` input
+  of [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling)).
+- Where the gas accelerates, the trajectories still converge in the step, on
+  both sides of `dt = tau`
+  ([verification](../verification/index.md#lagrangian-particles)).
 
 ### Walls
 
@@ -263,7 +336,10 @@ Walls and symmetry planes rebound solid particles elastically;
 `[[particles.walls]]` sets other interactions per boundary zone. A rebound
 reverses the normal velocity times the restitution coefficient `e_n` and
 scales the tangential velocity by `e_t`; a sticking wall removes the particle
-and counts it as deposited.
+and counts it as deposited. The bounce is located within the step: the
+particle reaches the wall at the time its motion over the step puts it there,
+rebounds, and moves on for the rest of the step, so the timing of bounces
+does not depend on the step.
 
 ```toml
 [[particles.walls]]
@@ -301,14 +377,18 @@ example: Mallard's particles (dots) against their exact trajectories
 
 - Solid particles need a viscous single gas (`type = "navier_stokes"` in
   `[physics]`); mixtures are refused for now.
-- A bounce happens at the end of the step in which the particle crossed the
-  wall, so its timing is first order in the step: under gravity, the particle
-  leaves the wall with a velocity error of up to `(1 + e_n) g dt`.
-- The stiff limit is first order in `tau / dt` for particles near it: when
-  the inertia of particles with `tau` near `dt` matters, lower `dt`.
-- The drag has no slip correction for particles near the mean free path of
-  the gas (Cunningham's): in air at 1 bar, particles of 1 µm settle 17%
-  faster than Mallard's, of 0.1 µm three times as fast.
+- The bounce of a particle with `tau` below the step happens at the end of
+  the step: such a particle follows the gas within the step.
+- The located bounce takes the gas velocity and force at the start of the
+  step, so it is exact for drag in a gas that is uniform over the step's
+  travel and for constant acceleration; in a strongly varying gas it is still
+  first order in the step.
+- `temperature` without `specific_heat` is an error, as is an expression
+  reading `T_P` in a mixture.
+- Stokes and Schiller-Naumann drag have no slip correction for particles near
+  the mean free path of the gas: in air at 1 bar, particles of 1 µm settle
+  12% faster with `"singh"` than with them, of 0.1 µm several times as fast.
+  Use `"singh"` above `Kn = 0.01` ([drag laws](#drag-laws)).
 - Droplets above about 1 mm in air are not spheres (they flatten), and
   particles of a few cells' size are not point particles: the gas at their
   center is not the flow around them.
@@ -334,7 +414,8 @@ winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 ```
 
 *Used in:*
-[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex).
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
 
 Each `[[particles.quantities]]` follows one value along every particle's
 path, for residence times, exposure (the time integral of a temperature or a
@@ -363,6 +444,8 @@ particle:
   evaluated as the particle's velocity is, from the reconstruction polynomial
   of its cell;
 - the particle velocity `V_X`, `V_Y` (`V_Z`), for tracers the gas velocity;
+- the particle temperature `T_P`, for a single gas, the gas temperature for
+  particles without heat transfer;
 - the quantities listed before this one;
 - `in(name)`: 1 inside the region `name` of [regions](geometry.md#named-regions)
   and 0 outside, smooth across the region's `edge`.
@@ -403,7 +486,8 @@ interval = 100
 ```
 
 *Used in:*
-[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex).
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
 
 A particle probe writes, every `interval` steps, the number of particles in
 its region and the mean, standard deviation, minimum and maximum of each field
@@ -428,8 +512,8 @@ deposition history.
 
 **Pitfalls (quantities and probes).**
 
-- An expression reading `T` in a mixture is an error: particle expressions
-  have the gas temperature for a single gas only.
+- An expression reading `T` or `T_P` in a mixture is an error: particle
+  expressions have temperatures for a single gas only.
 - `in(name)` and probe regions are regions of primitives that do not move
   (boolean combinations included); at most 4 regions in all particle
   expressions, 4 probes with regions, and 16 quantities.
@@ -449,8 +533,8 @@ flow's orders:
 | Gas at the particle, `FO` and `MUSCL` | 2 | 1.96 to 3.07 (the linear least-squares fit) |
 | Pathlines in space | the flow's: 1 (`FO`), 2 (`MUSCL`), `k` (TENO) | 0.92 to 0.94 (`FO`), 2.28 to 3.19 (`MUSCL`), 2.94 to 5.09 (TENO3 to TENO5) |
 | Trajectories in time | the integrator's: 1 (`FE`), 3 (`SSPRK3`, `RDPK3Sp35`), 4 (`RK4`, `SSPRK54`, `CK45`) | 1.02 to 1.05, 2.97 to 3.14 and 3.96 to 4.22: tracers, drag relaxation, settling and Schiller-Naumann response, also at `dt = tau / 2` |
-| Stiff limit (`tau < dt`) | 1 in `tau` | 1.00 |
-| A bounce under gravity | 1 in `dt` | 1.00 |
+| Stiff particles (`tau < dt`), exponential | 3, exact for a gas velocity and force linear over the step | 2.90 (position) and 2.79 (velocity), RK4 at `dt / tau` = 12.5 to 3.1 |
+| A bounce | exact for drag in uniform gas and constant acceleration; else 1 in `dt` | round-off (`ABounceIsLocatedWithinTheStep`) |
 
 ![Errors of solid particles' trajectories against the number of steps, by integrator](../images/verification/particles-time-light.svg#gh-light-mode-only)
 ![Errors of solid particles' trajectories against the number of steps, by integrator](../images/verification/particles-time-dark.svg#gh-dark-mode-only)
@@ -461,7 +545,7 @@ In practice:
   In the vortex study, TENO5 on 32² cells is as accurate as MUSCL on 64²,
   and the gap grows with the accuracy asked for.
 - The time step of a stable flow (CFL below 1) moves particles less than a
-  cell per step and resolves their relaxation unless `tau < dt`. Check a
+  cell per step and resolves their relaxation, exponentially when `tau < dt`. Check a
   trajectory statistic at two values of `cfl` when it matters.
 - Particle counts at a wall (deposition) and in regions are discrete:
   converge them in the number of particles as well as the mesh.
@@ -490,9 +574,10 @@ In practice:
    tracers for $St \ll 1$ without settling, solid particles otherwise.
 2. Solid particles: `[physics] type = "navier_stokes"` with the right `mu`
    (its temperature dependence included), `diameter`, `density`, `gravity`.
-3. Check $Re_p$ (a `max` quantity, above): above 0.1 keep
-   `schiller_naumann`; above 800 the particles are outside the correlation's
-   range.
+3. Choose the [drag law](#drag-laws): check $Re_p$ (a `max` quantity,
+   above), and the Knudsen and slip Mach numbers: `singh` above
+   $Kn = 0.01$ or $M = 0.3$; above $Re_p = 800$ Schiller-Naumann is outside
+   its range.
 4. Walls: `restitution` from experiments on your materials, or `stick` for
    deposition.
 5. Converge the statistic you report in `cfl` (time), the mesh (space) and the

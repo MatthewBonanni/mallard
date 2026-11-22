@@ -11,7 +11,7 @@ script for droplets.csv, smoke.toml for smoke.csv), and computes the terminal
 velocity v_t = tau g (1 - rho / rho_p) / f(Re(v_t)) with the drag law's f
 (Stokes: f = 1; Schiller-Naumann: 1 + 0.15 Re^0.687) by fixed-point
 iteration, and the Stokes value for comparison. Particles whose relaxation time
-is below the run's step (the stiff limit) move at v_t exactly; the others
+is below the run's step relax to it exponentially within each step; all
 approach it as e^(-t / tau). A particle more than 1e-3 v_t off (plus the rest
 of its transient) fails. Exits 1 on any failure.
 """

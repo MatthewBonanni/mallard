@@ -13,7 +13,7 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
-Each but the archive also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
+Each but the archive also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `uv pip install` ([Python package](#python-package)).
 
 ## Supported platforms
 
@@ -37,12 +37,13 @@ The GPU builds are compiled in CI on every change to device code; only the NVIDI
 
 - **A cluster**: load a newer compiler module if there is one (`module avail gcc`, then e.g. `module load gcc/15`), or let [Spack](#spack) build one:
 
-  ```sh
-  spack install gcc@15
-  spack install mallard %gcc@15
-  ```
+    ```sh
+    spack install gcc@15
+    spack install mallard %gcc@15
+    ```
 
-  For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+    For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+
 - **Ubuntu 26.04**: `sudo apt-get install g++ cmake` installs GCC 15 and CMake 4.2; `sudo apt-get install clang-22` adds Clang 22 (configure with `-DCMAKE_CXX_COMPILER=clang++-22`).
 - **Debian 13**: its GCC 14 is too old; use Clang 22 and, with `trixie-backports` enabled, the backported CMake: `sudo apt-get install clang-22 libomp-22-dev && sudo apt-get install -t trixie-backports cmake`.
 - **Fedora 44**: `sudo dnf install gcc-c++ cmake` installs GCC 16 and CMake 4.3.
@@ -100,20 +101,20 @@ cd examples/sod && apptainer exec ../../mallard.sif mallard -i input.toml
 
 For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`.
 
-[`docker/mallard.def`](https://github.com/MatthewBonanni/mallard/blob/main/docker/mallard.def) builds the same image with a run script and a self-test (`apptainer test mallard.sif`), from any tag or digest: `apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.12.0 mallard.sif docker/mallard.def`, then `apptainer run mallard.sif -i input.toml`.
+[`docker/mallard.def`](https://github.com/MatthewBonanni/mallard/blob/main/docker/mallard.def) builds the same image with a run script and a self-test (`apptainer test mallard.sif`), from any tag or digest: `apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.11.0 mallard.sif docker/mallard.def`, then `apptainer run mallard.sif -i input.toml`.
 
 On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, and resumes from a restart file after preemption; an `MPIJob` ([Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator)) runs it across nodes, with the images' Open MPI in the launcher and the workers ([manifests and guide](guide/running.md#kubernetes)). On clusters with their own MPI and no Kubernetes, run across nodes with Spack or a source build.
 
 ## Relocatable archive
 
-From 0.12.0, each release attaches an archive of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer):
+From 0.11.0, each release attaches an archive of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer):
 
 ```sh
-v=0.12.0 a=mallard-$v-linux-$(uname -m)-cpu.tar.gz
+v=0.11.0 a=mallard-$v-linux-$(uname -m)-cpu.tar.gz
 curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a
 curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a.sha256
 sha256sum -c $a.sha256 && tar -xzf $a
-mallard-$v-linux-$(uname -m)-cpu/bin/mallard install verify
+export PATH=$PWD/mallard-$v-linux-$(uname -m)-cpu/bin:$PATH && mallard --version
 ```
 
 It carries MPICH's library, so it runs on one node as it is. Across nodes, load the site's MPI built on MPICH (Cray MPICH, Intel MPI, MVAPICH, MPICH: the MPICH ABI, `libmpi.so.12`) with `module load` first, and start it with the site's launcher (`srun`, `mpiexec`): its library on `LD_LIBRARY_PATH` replaces the archive's. Open MPI sites use Spack or a source build. `share/mallard/archive.toml` names the archive's variant and glibc floor, and `release-manifest.json`, beside the archives on the release, lists every archive and image with its SHA-256 or digest (what the [GUI](https://github.com/MatthewBonanni/mallard/blob/main/docs/design/gui.md) installs from). The archive has no Python package: use a container or Spack for it.

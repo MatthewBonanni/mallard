@@ -4,12 +4,13 @@ theory manual's (docs/images/theory/).
     python tools/docs/particles.py [--mallard build/src/mallard] [names...]
 
 Exact curves: the response of a particle to a step and to an oscillation of the
-gas (particle_response), the drag coefficient of the drag laws (particle_drag)
+gas (particle_response), the drag coefficient of the drag laws (particle_drag;
+Singh et al.'s from singh_drag_factor, the formula of src/particles/particle_forces.h)
 and a step of a particle across a face (particle_start_cell). From short Mallard
 runs (a 2D build, about a minute each on two CPU threads): particles of several
 Stokes numbers spiraling out of solid-body rotation against their exact spirals
 (particle_stokes_spirals), the terminal velocities of the settling box against
-Stokes' law and the Schiller-Naumann correlation (particle_terminal_velocity),
+Stokes' law and the Schiller-Naumann and Singh correlations (particle_terminal_velocity),
 and the particles of examples/particle_bounce against their exact trajectories
 (particle_bounce). The trajectories are read from restart files
 (tools/mallard/restart.py), which carry the particles.
@@ -68,6 +69,51 @@ def schiller_naumann(re):
     return np.where(re < 1000, 1.0 + 0.15 * re ** 0.687, 0.44 * re / 24.0)
 
 
+def singh_drag_factor(Re, M, Kn, Tp_T, gamma):
+    """C_D Re / 24 of Singh et al. (2022, Appendix C): particles::singh_drag_factor of
+    src/particles/particle_forces.h, term by term."""
+    omega, delta0, alpha0, A1, A2, A3, eta, alpha_hoc, Cd_hypersonic = 0.74, 9.4, 0.356, 2.514, 0.8, 0.55, 1.8, 1.27, 0.9
+    C0 = 24.0 / delta0 ** 2
+    gm1 = gamma - 1.0
+    exponent = gamma / gm1
+    Us_U, Ms2, Ts_T, alpha, pressure = 1.0, M * M, 1.0, 1.0, 0.0
+    if M > 1.0:
+        M2 = M * M
+        Us_U = (2.0 + gm1 * M2) / ((gamma + 1.0) * M2)
+        Ms2 = (gm1 * M2 + 2.0) / (2.0 * gamma * M2 - gm1)
+        Ts_T = (gm1 * M2 + 2.0) * (2.0 * gamma * M2 - gm1) / ((gamma + 1.0) ** 2 * M2)
+        alpha = 1.0 / (alpha0 * M + 1.0 - alpha0)
+        C1 = (Cd_hypersonic - C0 * (1.0 + gm1 ** 2 / (4.0 * gamma)) ** exponent) / (
+            1.0 - gm1 / ((gamma + 1.0) * alpha0 * M))
+        pressure = C1 * (1.0 - alpha * Us_U)
+    theta_s = (1.0 + 0.5 * gm1 * Ms2) ** exponent
+    p = (gamma + 1.0) / (2.0 * gamma) - gm1 * omega / gamma
+    Re_ratio = (alpha * alpha * Ts_T) ** omega * theta_s ** -p
+    root = math.sqrt(Re) + delta0 * math.sqrt(Re_ratio)
+    continuum = pressure * Re + C0 * theta_s * root * root
+    Mw = M ** (2.0 * omega - 1.0)
+    wall = (1.0 + Tp_T / Ts_T) ** omega
+    Wr_T = Kn * Mw * math.sqrt(2.0 / (math.pi * gamma)) * wall
+    Br = Kn * math.sqrt(2.0 / (math.pi * gamma)) * wall * (Mw + 1.0)
+    f_Kn = 1.0 / ((1.0 + Kn * (A1 + A2 * math.exp(-A3 / Kn))) * (1.0 + alpha_hoc * Wr_T))
+    s = M * math.sqrt(0.5 * gamma)
+    s2 = s * s
+    if s < 0.3:
+        g = (16.0 / 3.0 + s2 * (16.0 / 15.0 + s2 * (-8.0 / 105.0 + s2 * (8.0 / 945.0 - s2 * 2.0 / 2079.0)))) / math.sqrt(
+            math.pi)
+    else:
+        g = (1.0 + 2.0 * s2) * math.exp(-s2) / (s2 * math.sqrt(math.pi)) + \
+            (4.0 * s2 * s2 + 4.0 * s2 - 1.0) * math.erf(s) / (2.0 * s2 * s)
+    free_molecular = (g + 2.0 / 3.0 * math.sqrt(math.pi * Tp_T)) * math.sqrt(math.pi) / Kn
+    B = Br ** eta
+    return (continuum * f_Kn + free_molecular * B) / (24.0 * (1.0 + B))
+
+
+def knudsen(Re, M, gamma=1.4):
+    """The Knudsen number of a slip Reynolds and Mach number, Kn = sqrt(gamma pi / 2) M / Re."""
+    return math.sqrt(gamma * math.pi / 2.0) * M / Re
+
+
 # ------------------------------------------------------------ exact curves
 
 def particle_response(P):
@@ -106,12 +152,15 @@ def particle_drag(P):
     fig, ax = plt.subplots(figsize=(6.4, 4.0))
     ax.loglog(re, 24 / re, color=P["blue"], ls="--", label="Stokes, $24 / Re_p$")
     ax.loglog(re, 24 / re * schiller_naumann(re), color=P["teal"], label="Schiller-Naumann")
+    for M, color, ls in [(1e-4, P["flame"], "-"), (0.5, P["plum"], "-."), (2.0, P["gold"], ":")]:
+        cd = [24 / r * singh_drag_factor(r, M, knudsen(r, M), 1.0, 1.4) for r in re]
+        ax.loglog(re, cd, color=color, ls=ls, label=f"Singh et al., $M$ = {M:g}")
     ax.axvline(1000, color=P["muted"], lw=0.8, ls=":")
     label(ax, 1150, 30, "$C_D = 0.44$\nabove $Re_p$ = 1000", P, color=P["muted"], ha="left", size=11)
     ax.set_xlabel("particle Reynolds number $Re_p$")
     ax.set_ylabel("drag coefficient $C_D$")
     ax.set_ylim(0.1, 3000)
-    ax.legend(fontsize=11)
+    ax.legend(fontsize=10)
     return fig
 
 
@@ -206,16 +255,20 @@ def particle_stokes_spirals(P, args):
 SETTLING_DIAMETERS = [10e-6, 30e-6, 100e-6, 200e-6]
 
 
+SINGH_DIAMETERS = [1e-6, 3e-6, 10e-6, 100e-6]
+
+
 @functools.cache
-def settling_velocity(binary, d, rho_p):
-    """The settling velocity of the particle_settling box with particles of diameter d, after 6 tau."""
+def settling_velocity(binary, d, rho_p, drag="schiller_naumann", periods=6):
+    """The settling velocity of the particle_settling box with particles of diameter d, after periods tau."""
     work = Path(tempfile.mkdtemp())
     cfg = (ROOT / "examples" / "particle_settling" / "input.toml").read_text()
     phys = tomllib.loads(cfg)
     rho = 1.1614401858304297
     v_t, tau, _ = terminal_velocity(d, rho_p, rho, phys["physics"]["mu"], 9.81, "schiller_naumann")
     cfg = cfg.replace("diameter = 100e-6", f"diameter = {d!r}").replace("density = 1000.0", f"density = {rho_p}")
-    cfg = cfg.replace("t_stop = 0.25", f"t_stop = {6 * tau!r}").replace("Lx = 0.04", "Lx = 0.16").replace(
+    cfg = cfg.replace('drag = "schiller_naumann"', f'drag = "{drag}"')
+    cfg = cfg.replace("t_stop = 0.25", f"t_stop = {periods * tau!r}").replace("Lx = 0.04", "Lx = 0.16").replace(
         "Ly = 0.04", "Ly = 0.16")
     run(binary, cfg, work)
     with open(Path(work) / "droplets.csv") as f:
@@ -223,24 +276,51 @@ def settling_velocity(binary, d, rho_p):
     return -float(rows[1][rows[0].index("v_y")]), v_t
 
 
+def singh_terminal_velocity(d, rho_p, rho, mu, g, c, gamma=1.4):
+    """|v_t| = tau_St g (1 - rho / rho_p) / f with Singh et al.'s f at the slip v_t, by fixed-point iteration."""
+    tau_st, g_eff = rho_p * d * d / (18.0 * mu), g * (1.0 - rho / rho_p)
+    Kn = mu / (rho * c * d) * math.sqrt(0.5 * math.pi * gamma)
+    v = tau_st * g_eff
+    for _ in range(500):
+        v = tau_st * g_eff / singh_drag_factor(rho * v * d / mu, v / c, Kn, 1.0, gamma)
+    return v
+
+
 def particle_terminal_velocity(P, args):
     mu, rho, g = 1.8e-5, 1.1614401858304297, 9.81
+    c = math.sqrt(1.4 * 1e5 / rho)
     d = np.logspace(np.log10(1e-6), np.log10(1e-3), 200)
-    fig, ax = plt.subplots(figsize=(6.6, 4.4))
+    fig, (ax, rx) = plt.subplots(1, 2, figsize=(11.2, 4.4), gridspec_kw=dict(wspace=0.28))
     for rho_p, name, color in [(1000.0, "water", P["blue"]), (2500.0, "glass", P["flame"])]:
         stokes = rho_p * d ** 2 / (18 * mu) * g * (1 - rho / rho_p)
         sn = np.array([terminal_velocity(x, rho_p, rho, mu, g, "schiller_naumann")[0] for x in d])
+        singh = np.array([singh_terminal_velocity(x, rho_p, rho, mu, g, c) for x in d])
         ax.loglog(d * 1e6, stokes, color=color, ls="--", lw=1.2)
         ax.loglog(d * 1e6, sn, color=color, label=f"{name} ({rho_p:g} kg/m³)")
+        ax.loglog(d * 1e6, singh, color=color, ls=":", lw=1.6)
+        rx.semilogx(d * 1e6, stokes / sn, color=color, ls="--", lw=1.2)
+        rx.semilogx(d * 1e6, singh / sn, color=color, ls=":", lw=1.6, label=f"{name}, Singh et al.")
+        fill = "none" if rho_p > 1000 else color
         if args.mallard:
             for x in SETTLING_DIAMETERS:
                 v, _ = settling_velocity(args.mallard, x, rho_p)
-                ax.loglog([x * 1e6], [v], "o", color=color, ms=6, mfc="none" if rho_p > 1000 else color)
-    label(ax, 900, 2e-5, "dashed: Stokes' law", P, color=P["muted"], ha="right", size=11)
+                ax.loglog([x * 1e6], [v], "o", color=color, ms=6, mfc=fill)
+            if rho_p == 1000.0:
+                for x in SINGH_DIAMETERS:
+                    v, _ = settling_velocity(args.mallard, x, rho_p, "singh", 15)
+                    v_sn = terminal_velocity(x, rho_p, rho, mu, g, "schiller_naumann")[0]
+                    rx.semilogx([x * 1e6], [v / v_sn], "o", color=color, ms=6, mfc=fill)
+    label(ax, 900, 2e-5, "dashed: Stokes' law\ndotted: Singh et al.", P, color=P["muted"], ha="right", size=11)
     ax.set_xlabel("diameter (µm)")
     ax.set_ylabel("terminal velocity (m/s)")
     ax.set_ylim(1e-5, 20)
     ax.legend(fontsize=11, loc="upper left")
+    rx.axhline(1, color=P["muted"], lw=0.8)
+    label(rx, 1.1, 1.22, "dashed: Stokes' law", P, color=P["muted"], ha="left", size=11)
+    rx.set_xlabel("diameter (µm)")
+    rx.set_ylabel("ratio to the Schiller-Naumann value")
+    rx.set_ylim(0.8, 1.25)
+    rx.legend(fontsize=10.5, loc="lower right")
     return fig
 
 

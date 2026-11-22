@@ -9,7 +9,7 @@ described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-231 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
+230 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
 <!-- END GENERATED summary -->
 
 ## How the tables are made
@@ -391,8 +391,8 @@ error is the integrator's alone: tracers and solid particles of
 $\tau = 0.2$ (Stokes drag) in a uniform gas whose velocity turns at the rate
 $2\pi$ by a body force, after one turn, against the closed-form pathlines and
 the lagging inertial solution; the same with $\tau = 0.02$ and
-$\Delta t / \tau = 1/2$ to $1/8$, just below the switch to the stiff limit at
-$\Delta t = \tau$; Stokes settling from rest, against
+$\Delta t / \tau = 1/2$ to $1/8$, just below the switch to exponential
+integration at $\Delta t = \tau$; Stokes settling from rest, against
 $v_t (1 - e^{-t/\tau})$; and particles started at rest in a uniform stream
 at a slip Reynolds number of 20, Schiller-Naumann drag, against the same
 equation integrated in 20,000 steps. Each with three step sizes, observed on
@@ -412,19 +412,16 @@ the finest pair:
 ![Particle trajectories against the number of steps, by integrator](../images/verification/particles-time-light.svg#gh-light-mode-only)
 ![Particle trajectories against the number of steps, by integrator](../images/verification/particles-time-dark.svg#gh-dark-mode-only)
 
-Two studies check the model where it departs from the integrator's order.
-In the **stiff limit** ($\tau < \Delta t$) a particle moves at its
-equilibrium velocity $\mathbf{u} + \tau\mathbf{g}'$, which misses the lag
-$-\tau\,\mathrm{D}\mathbf{u}/\mathrm{D}t$ behind an accelerating gas: at a
-fixed step $\Delta t = 1/40$, particles of $\tau = \Delta t/4$ to
-$\Delta t/32$ in the turning flow converge to their inertial trajectories at
-first order in $\tau$. A **bounce** is applied at the end of the step in which
-the particle reached the wall: a particle dropped onto a floor ($e_n = 0.8$,
-$e_t = 0.6$) under gravity, with the impact in the middle of a step at every
-resolution, is first order in the step after it.
+Above the switch ($\tau < \Delta t$) a particle's relaxation is integrated
+**exponentially** within the step, exactly for a gas velocity and force
+linear in time over it: particles of $\tau = 0.002$ in the turning flow, at
+$\Delta t / \tau = 12.5$ to $3.1$ where RK4 alone is unstable, converge to
+their inertial trajectories, lag behind the gas included, at orders 2.90
+(position) and 2.79 (velocity) on the finest pair. A bounce is located within the step, and is exact to round-off
+for drag in gas at rest and constant acceleration (`test/particles_test.cpp`).
 
-![Particles near and in the stiff limit, and a bounce under gravity](../images/verification/particles-stiff-light.svg#gh-light-mode-only)
-![Particles near and in the stiff limit, and a bounce under gravity](../images/verification/particles-stiff-dark.svg#gh-dark-mode-only)
+![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-light.svg#gh-light-mode-only)
+![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-dark.svg#gh-dark-mode-only)
 
 In space: the gas velocity the particles read at their positions (9 x 9
 particles in 2D, 9 x 9 x 4 in 3D, at positions unrelated to the cells) in a
@@ -517,7 +514,6 @@ and the interpolation study above covers the particles there.
 | RK4 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 1.38e-06 → 9.08e-08 → 5.81e-09 | 4 | 3.96 | > 3.85 | pass |
 | SSPRK3 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 4.40e-05 → 5.79e-06 → 7.41e-07 | 3 | 2.97 | > 2.85 | pass |
 | SSPRK54 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 6.54e-07 → 4.25e-08 → 2.70e-09 | 4 | 3.97 | > 3.85 | pass |
-| RK4, stiff limit | – | max position error against the inertial trajectory | 4 → 8 → 16 → 32 | 3.70e-03 → 1.86e-03 → 9.34e-04 → 4.67e-04 | 1 | 1.00 | 0.9 to 1.1 | pass |
 | RK4 | – | max position error, Schiller-Naumann step response | 25 → 50 → 100 | 6.69e-06 → 3.09e-07 → 1.66e-08 | 4 | 4.22 | > 3.85 | pass |
 | SSPRK3 | – | max position error, Stokes settling from rest | 10 → 20 → 40 | 2.55e-06 → 2.65e-07 → 3.00e-08 | 3 | 3.14 | > 2.85 | pass |
 | CK45 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 1.36e-08 → 8.65e-10 → 5.45e-11 | 4 | 3.99 | > 3.7 | pass |
@@ -540,8 +536,8 @@ and the interpolation study above covers the particles there.
 | RK4 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 7.13e-06 → 4.46e-07 → 2.78e-08 | 4 | 4.00 | > 3.85 | pass |
 | SSPRK3 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 2.27e-04 → 2.85e-05 → 3.55e-06 | 3 | 3.00 | > 2.85 | pass |
 | SSPRK54 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 3.30e-06 → 2.06e-07 → 1.29e-08 | 4 | 4.00 | > 3.85 | pass |
-| RK4, wall rebound | – | position error after a bounce under gravity | 41 → 81 → 161 | 2.54e-02 → 1.29e-02 → 6.52e-03 | 1 | 1.00 | 0.85 to 1.15 | pass |
-| RK4, wall rebound | – | velocity error after a bounce under gravity | 41 → 81 → 161 | 2.98e-02 → 1.51e-02 → 7.58e-03 | 1 | 1.00 | 0.85 to 1.15 | pass |
+| RK4, exponential | – | max position error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 2.34e-06 → 3.52e-07 → 4.72e-08 | 3 | 2.90 | > 2.6 | pass |
+| RK4, exponential | – | max velocity error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 8.27e-04 → 1.53e-04 → 2.21e-05 | 3 | 2.79 | > 2.6 | pass |
 <!-- END GENERATED table-particles -->
 
 ## Not covered
@@ -554,8 +550,8 @@ and the interpolation study above covers the particles there.
 - Discontinuous solutions, whose errors converge at order 1 or below
   regardless of the scheme; see the validation cases.
 - The exact properties of the particles, which have no order: tracers in
-  uniform flow, Stokes and Schiller-Naumann terminal velocities, settling in
-  the stiff limit and the restitution of a bounce in gas at rest are exact to
-  round-off in the test suite (`test/particles_test.cpp`), and the
+  uniform flow, Stokes, Schiller-Naumann and Singh terminal velocities,
+  settling faster than the step, Ranz-Marshall heat transfer and a bounce
+  located within the step are exact to round-off in the test suite (`test/particles_test.cpp`), and the
   [particle examples](../../examples/README.md#particles) compare with exact
   trajectories.

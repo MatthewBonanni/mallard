@@ -10,9 +10,9 @@ x(s) = x0 + v_t s + (v0 - v_t) tau (1 - e^(-s/tau)), with v_t = tau g' along
 gravity and 0 across it. trajectory() steps from bounce to bounce, finding the
 next time a coordinate reaches a wall by bisection, and applies the wall's
 restitution coefficients there ([[particles.walls]]; 1 elsewhere). Mallard
-applies a bounce at the end of the step in which the particle reached the wall,
-first order in the step under gravity: a particle farther than 1e-2 from its
-exact position fails. Exits 1 on any failure.
+locates each bounce within its step, exactly for drag in gas at rest under
+gravity: a particle farther than 1e-6 from its exact position fails. Exits 1
+on any failure.
 """
 import argparse
 import csv
@@ -105,11 +105,11 @@ def main():
             continue
         r = rows[k]
         err = math.hypot(r["x"] - exact[0][0], r["y"] - exact[0][1])
-        ok = err < 1e-2
+        ok = err < 1e-6
         failed += not ok
         print(f"  particle {k}: ({r['x']:.5f}, {r['y']:.5f}), exact ({exact[0][0]:.5f}, {exact[0][1]:.5f}) after "
               f"{exact[2]} bounces: {err:.1e} off{'' if ok else '  FAIL'}")
-    print(f"{len(p['points']) - failed} of {len(p['points'])} particles within 1e-2 of the exact trajectories")
+    print(f"{len(p['points']) - failed} of {len(p['points'])} particles within 1e-6 of the exact trajectories")
     return 1 if failed else 0
 
 

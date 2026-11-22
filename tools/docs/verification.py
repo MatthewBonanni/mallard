@@ -360,10 +360,8 @@ def figures(data):
         "particles-stiff": panels([
             ("near the stiff limit (τ = 0.02)", "steps", lambda s: s["method"],
              by("particles", lambda s: "near the stiff limit" in s["error"])),
-            ("stiff limit, fixed step", "Δt / τ", lambda s: "position",
-             by("particles", lambda s: s["method"] == "RK4, stiff limit")),
-            ("bounce under gravity", "steps", lambda s: s["error"].split()[0],
-             by("particles", lambda s: s["method"] == "RK4, wall rebound")),
+            ("exponential integration (τ = 0.002)", "steps", lambda s: s["error"].split()[1],
+             by("particles", lambda s: s["method"] == "RK4, exponential")),
         ]),
         "particles-interpolation": convergence_grid(
             interp, [c for c in CELLS if any(s["cells"] == c for s in interp)]),

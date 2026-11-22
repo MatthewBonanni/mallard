@@ -84,9 +84,9 @@ obeyed `dw-/dt = -L`. Two problems:
 - **Steady offsets.** That cell's `w-` is frozen except for `L`. Any steady
   source in the cell is balanced by `K (p - p_t)`, and the outlet settles
   away from its target by `source / K`:
-  - viscous stress in a Poiseuille flow: 20% of the flow rate
-  - heat release of a flame at the outlet: the flame stayed anchored there,
-    or the domain kept pressurizing
+    - viscous stress in a Poiseuille flow: 20% of the flow rate
+    - heat release of a flame at the outlet: the flame stayed anchored there,
+      or the domain kept pressurizing
 - **Instability.** Taking the incoming wave from the face's own state
   instead differences the incoming wave downwind, and blows up.
 
@@ -302,16 +302,17 @@ The target is `u_t`, `T_t` and, for mixtures, the composition.
   (`lambda = u_n`), so the relaxation `dphi/dt = -K_phi (phi - phi_t)` is a
   blend of the transmissive state toward the target:
 
-  ```
-  phi_g = phi_e + min(1, h K_phi / |u_n|) (phi_t - phi_e),   K_phi = sigma_phi c / L
-  ```
+    ```
+    phi_g = phi_e + min(1, h K_phi / |u_n|) (phi_t - phi_e),   K_phi = sigma_phi c / L
+    ```
 
-  for `phi` = `T` or `u_t`, with `h` twice the distance from the boundary
-  cell's centroid to the face.
+    for `phi` = `T` or `u_t`, with `h` twice the distance from the boundary
+    cell's centroid to the face.
 
-  Without `sigma_T` or `sigma_t`, `T` and `u_t` are imposed exactly. This
-  does not reflect acoustic waves: in linear theory, the reflected acoustic
-  wave depends only on the incoming acoustic condition.
+    Without `sigma_T` or `sigma_t`, `T` and `u_t` are imposed exactly. This
+    does not reflect acoustic waves: in linear theory, the reflected acoustic
+    wave depends only on the incoming acoustic condition.
+
 - **Ghost density**: `p_g / (R_t T_g)`, with `R_t` the gas constant of the
   target composition.
 - **Composition**: imposed exactly, as for `inlet_state`. It is a convective wave
@@ -363,26 +364,26 @@ front of an `outlet_pressure` with `nscbc` or `farfield`.
 ## Validation (`test/nscbc_test.cpp`, `test/boundary3d_test.cpp`, MPI tests)
 
 - **Acoustic pulse at normal incidence**, default low-Mach correction:
-  - `sigma = 0` reflects under 0.25% with MUSCL (quadrilaterals, triangles
-    and jittered mixed meshes) and 1% with TENO5 (quadrilaterals), against
-    0.6 to 34% for `outlet_extrapolation`.
-  - `sigma = 20` reflects as `dw-/dt = -K p'` predicts, within 3%.
-  - `outlet_pressure` reflects 97 to 99%.
+    - `sigma = 0` reflects under 0.25% with MUSCL (quadrilaterals, triangles
+      and jittered mixed meshes) and 1% with TENO5 (quadrilaterals), against
+      0.6 to 34% for `outlet_extrapolation`.
+    - `sigma = 20` reflects as `dw-/dt = -K p'` predicts, within 3%.
+    - `outlet_pressure` reflects 97 to 99%.
 - **Vortex** (M = 0.25, swirl 0.05) leaving through an outlet between walls,
   against a domain three times longer. RMS pressure error at t = 3:
-  - default: 0.05 times the vortex's pressure deficit, on quadrilaterals,
-    triangles and jittered meshes
-  - `beta = 1` (Poinsot & Lele's original condition): 1.0 times (1.2 to 1.3
-    before the edges dropped their transverse terms)
+    - default: 0.05 times the vortex's pressure deficit, on quadrilaterals,
+      triangles and jittered meshes
+    - `beta = 1` (Poinsot & Lele's original condition): 1.0 times (1.2 to 1.3
+      before the edges dropped their transverse terms)
 - **Poiseuille flow** driven by a body force through an outlet: the profile
   stays within 1.2% and the pressure within 3.5% of the force balance, on
   quadrilaterals, triangles and jittered meshes.
 - **Gas mixtures**:
-  - an acoustic pulse in air leaves (under 2% reflected, against over 90%
-    for `outlet_pressure`)
-  - a hot H2/N2 front leaves without disturbing the pressure by more than 5%
-    of its dynamic pressure
-  - the flame example above
+    - an acoustic pulse in air leaves (under 2% reflected, against over 90%
+      for `outlet_pressure`)
+    - a hot H2/N2 front leaves without disturbing the pressure by more than 5%
+      of its dynamic pressure
+    - the flame example above
 - **3D**: a plane pulse leaves a box of hexahedra or tetrahedra (under 3%).
 - **Eddies reversing the flow at the outlet** (the box of "Stability",
   `24 x 12 x 12` cells, symmetry sides, `A = 0.8`): bounded to t = 12. Before

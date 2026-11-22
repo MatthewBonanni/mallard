@@ -200,8 +200,7 @@
 "ParticleTimeOrder.DragRelaxationNearTheStiffLimit" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
 "ParticleOrder.StokesSettlingFromRest" = ["particles", "ssprk3"]
 "ParticleOrder.SchillerNaumannResponseToAStepInGasVelocity" = ["particles", "rk4"]
-"ParticleOrder.StiffLimitConvergesToTheInertialTrajectoryAsTauVanishes" = ["particles", "rk4"]
-"ParticleOrder.ABounceUnderGravityIsFirstOrderInTheStep" = ["particles", "rk4"]
+"ParticleOrder.ExponentialIntegrationOfRelaxationsStifferThanTheStep" = ["particles", "rk4"]
 "ParticleSpaceOrder.GasVelocityAtTheParticles" = [["particles", "fo"], ["particles", "muscl"], ["particles", "teno3"], ["particles", "teno4"], ["particles", "teno5"]]
 "ParticleSpaceOrder.TracerPathlinesInACompactVortex" = [["particles", "euler", "fo"], ["particles", "euler", "muscl"], ["particles", "euler", "teno3"], ["particles", "euler", "teno4"], ["particles", "euler", "teno5"]]
 

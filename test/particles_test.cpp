@@ -233,6 +233,9 @@ void expect_same_particles(const Particles & a, const Particles & b) {
             EXPECT_EQ(ra[k].x[d], rb[k].x[d]) << "particle " << ra[k].id << ", direction " << d;
             EXPECT_EQ(ra[k].v[d], rb[k].v[d]) << "particle " << ra[k].id << ", direction " << d;
         }
+        if (!std::isnan(ra[k].T) || !std::isnan(rb[k].T)) {
+            EXPECT_EQ(ra[k].T, rb[k].T) << "particle " << ra[k].id;
+        }
     }
     EXPECT_EQ(a.removed(), b.removed());
 }
@@ -571,8 +574,8 @@ TEST(ParticleQuantitiesTest, ResidenceTimeInARegionIsItsLengthOverTheSpeed) {
 TEST(ParticleProbesTest, StatisticsOfTheParticlesInARegion) {
     // After 0.1 at U = 0.3 the lattice's columns are at x = 0.1, 0.3867, 0.6733, 0.96: the slab
     // 0.3 < x < 0.7 holds the middle two, 8 particles; every particle reads U_X = 0.3
-    const std::string file = (scratch_dir() / "mallard_particle_probe_slab.csv").string();
-    const std::string all = (scratch_dir() / "mallard_particle_probe_all.csv").string();
+    const std::string file = (rank_scratch_dir() / "mallard_particle_probe_slab.csv").string();
+    const std::string all = (rank_scratch_dir() / "mallard_particle_probe_all.csv").string();
     const std::string probes = "[[particles.probes]]\nname = \"slab\"\nregion = \"slab\"\nfields = [\"x\", \"y\", "
                                "\"U_X\"]\ninterval = 5\nfile = \"" + file + "\"\n"
                                "[[particles.probes]]\nname = \"all\"\nfields = [\"x\"]\nfile = \"" + all + "\"\n";
@@ -684,19 +687,22 @@ std::array<double, 2> inertial_turning_error(const std::string & integrator, uin
 
 /** @brief Solid particles starting at rest in gas at rest, under gravity (0, -g) in [particles], for n_steps of dt. */
 std::string settling(double tau, double g, const std::string & drag, uint32_t n_steps, double dt,
-                     const std::string & integrator = "RK4") {
+                     const std::string & integrator = "RK4", const std::string & keys = "") {
     std::ostringstream run;
     run.precision(17);
     run << "n_steps = " << n_steps << "\ndt = " << dt << "\n";
     const double density = 100.0;
     return solid(box(12, vec("0.0", "0.0", "0.0"), "xy", "", run.str(), lattice(0.1, 0.9), TENO4, integrator), density,
-                 diameter_for(tau, density), drag, "gravity = " + numbers(0.0, -g, 0.0) + "\n");
+                 diameter_for(tau, density), drag, "gravity = " + numbers(0.0, -g, 0.0) + "\n" + keys);
 }
 
-/** @brief Solid particles of relaxation time 0.05 in the vortex, which flings them out across the partitions. */
+/**
+ * @brief Solid particles of relaxation time 0.05 in the vortex, which flings them out across the partitions,
+ *        starting hotter than the gas, whose temperature they relax to in about a step.
+ */
 std::string solid_vortex(uint32_t n_steps, const std::string & init = "", const std::string & extra = "") {
     return solid(vortex(16, 0.01, n_steps, TENO4, "SSPRK3", init, extra), 1000.0, diameter_for(0.05, 1000.0),
-                 "schiller_naumann", "");
+                 "schiller_naumann", "specific_heat = 1.0\ntemperature = 1.5\n");
 }
 
 } // namespace
@@ -742,20 +748,22 @@ TEST(SolidParticlesTest, SchillerNaumannTerminalVelocity) {
 }
 
 TEST(SolidParticlesTest, TinyParticlesTrackTheGasAtAnyStep) {
-    // tau = 1e-5 is a thousandth of the step, where explicit integration diverges. The particles move at
-    // their equilibrium velocity u + tau g' exactly, and their velocity relaxes to it
+    // tau = 1e-5 is a thousandth of the step, where explicit integration diverges. Integrated exponentially,
+    // the particles move exactly as v(t) = v_t (1 - e^{-t/tau}) from rest
+    // Their temperature, which relaxes in about 3e-6, is the gas's
     const double tau = 1e-5, g = 1000.0, t = 0.5;
     const double v_t = -tau * g * (1.0 - 1.0 / 100.0);
     Solver solver;
     solver.set_distributed(false);
-    solver.init(parse_toml(settling(tau, g, "stokes", 50, t / 50)));
+    solver.init(parse_toml(settling(tau, g, "stokes", 50, t / 50, "RK4", "specific_heat = 1.0\ntemperature = 2.0\n")));
     solver.run();
     const auto seeds = lattice_points(0.1, 0.9);
     const std::vector<particles::Record> records = solver.get_particles()->gather();
     ASSERT_EQ(records.size(), seeds.size());
     for (const auto & r : records) {
-        EXPECT_NEAR(r.x[1], seeds[r.id][1] + v_t * t, roundoff(1e-14));
+        EXPECT_NEAR(r.x[1], seeds[r.id][1] + v_t * (t - tau * (1.0 - std::exp(-t / tau))), roundoff(1e-14));
         EXPECT_NEAR(r.v[1], v_t, roundoff(1e-12) * std::abs(v_t));
+        EXPECT_NEAR(r.T, 1.0, roundoff(1e-14));
     }
 }
 
@@ -837,7 +845,7 @@ TEST(SolidParticlesTest, TrajectoriesAreBitwiseIndependentOfTheRankCount) {
 }
 
 TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
-    // A restart's particles keep their velocities instead of starting at the gas's
+    // A restart's particles keep their velocities and temperatures instead of starting at the gas's
     const std::string dir = (scratch_dir() / "mallard_solid_particles_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 20\n";
     Solver straight;
@@ -861,6 +869,7 @@ TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
         EXPECT_EQ(records[k].id, expected[k].id);
         EXPECT_EQ(records[k].x, expected[k].x) << "particle " << k;
         EXPECT_EQ(records[k].v, expected[k].v) << "particle " << k;
+        EXPECT_EQ(records[k].T, expected[k].T) << "particle " << k;
     }
     EXPECT_EQ(second.get_particles()->removed(), removed);
 }
@@ -880,7 +889,7 @@ TEST(SolidParticlesTest, SolidParticlesNeedAViscousGas) {
 // ------------------------------------------------------------------ verification studies
 //
 // The particles' section of the verification manual (docs/verification/): observed orders in time against
-// exact trajectories, in space under mesh refinement, and of the stiff limit and wall bounces.
+// exact trajectories, also of relaxations stiffer than the step, and in space under mesh refinement.
 
 namespace {
 
@@ -929,7 +938,7 @@ TEST_P(ParticleTimeOrder, DragRelaxationInATurningFlow) {
 }
 
 TEST_P(ParticleTimeOrder, DragRelaxationNearTheStiffLimit) {
-    // tau = 0.02 with dt = tau/2, tau/4, tau/8: one halving from the switch to the equilibrium velocity at
+    // tau = 0.02 with dt = tau/2, tau/4, tau/8: one halving from the switch to exponential integration at
     // dt = tau, and within a factor 4 to 6 of the explicit stability limit, the integrator keeps its order
     SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
     const std::string integrator = GetParam();
@@ -1019,76 +1028,19 @@ TEST(ParticleOrder, SchillerNaumannResponseToAStepInGasVelocity) {
                                 {25, 50, 100}, {ev[0], ev[1], ev[2]}, 4.0, 3.85});
 }
 
-TEST(ParticleOrder, StiffLimitConvergesToTheInertialTrajectoryAsTauVanishes) {
-    // At a fixed step dt = 1/40, particles of tau = dt/4 to dt/32 take the equilibrium velocity (here the gas
-    // velocity), which misses the lag -tau du/dt of the exact solution: the position error after half a
-    // turn of the turning flow is first order in tau
+TEST(ParticleOrder, ExponentialIntegrationOfRelaxationsStifferThanTheStep) {
+    // tau = 0.002 at dt = 1/40 to 1/160 (dt / tau = 12.5 to 3.1), where RK4 alone is unstable: the velocity
+    // relaxes exponentially within each step toward u + tau a, and the trajectory converges in dt to the
+    // inertial one, lag tau du/dt included
     SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
-    const double dt = 1.0 / 40.0;
-    std::array<double, 4> e;
-    for (uint32_t k = 0; k < 4; k++) e[k] = inertial_turning_error("RK4", 20, dt / double(4u << k), 0.5)[0];
-    verification::expect_order({"particles", "RK4, stiff limit", "", "max position error against the inertial trajectory",
-                                {4, 8, 16, 32}, {e[0], e[1], e[2], e[3]}, 1.0, 0.9, 1.1});
-}
-
-namespace {
-
-/**
- * @brief The errors of position and velocity after a bounce: a solid particle (tau = 5, Stokes drag) dropped
- *        from y = 0.3 with velocity (0.2, 0) in gas at rest, under gravity 1, onto a floor of restitution 0.8
- *        normal and 0.6 tangential, at t = 2 t_c, twice the time of the impact t_c, in 2 N + 1 steps: the
- *        impact falls in the middle of step N for every N. The motion is linear in the velocity between
- *        bounces, y(t) = y0 + (v0 - v_t) tau (1 - e^{-t/tau}) + v_t t, with v_t = -tau g (1 - rho / rho_p).
- */
-std::array<double, 2> bounce_error(uint32_t N) {
-    const double tau = 5.0, g = 1.0, density = 1000.0, y0 = 0.3, vx0 = 0.2, e_n = 0.8, e_t = 0.6;
-    const double v_t = -tau * g * (1.0 - 1.0 / density);
-    const auto y_of = [&](double y_start, double vy, double s) {
-        return y_start + (vy - v_t) * tau * (1.0 - std::exp(-s / tau)) + v_t * s;
-    };
-    const auto vy_of = [&](double vy, double s) { return v_t + (vy - v_t) * std::exp(-s / tau); };
-    double t_c = std::sqrt(2.0 * y0 / g);
-    for (int i = 0; i < 50; i++) t_c -= y_of(y0, 0.0, t_c) / vy_of(0.0, t_c);
-    const double t = 2.0 * t_c, s = t - t_c;
-    const double vx_c = vx0 * std::exp(-t_c / tau), vy_up = -e_n * vy_of(0.0, t_c);
-    const double x = 0.5 + vx0 * tau * (1.0 - std::exp(-t_c / tau)) + e_t * vx_c * tau * (1.0 - std::exp(-s / tau));
-    const double y = y_of(0.0, vy_up, s), vx = e_t * vx_c * std::exp(-s / tau), vy = vy_of(vy_up, s);
-    EXPECT_GT(y, 0.0);  // no second bounce
-    const uint32_t n_steps = 2 * N + 1;
-    std::ostringstream run, keys;
-    run.precision(17);
-    keys.precision(17);
-    run << "n_steps = " << n_steps << "\ndt = " << t / n_steps << "\n";
-    keys << "velocity = " << numbers(vx0, 0.0, 0.0) << "\npoints = [" << numbers(0.5, y0, 0.25) << "]\ngravity = "
-         << numbers(0.0, -g, 0.0) << "\n[[particles.walls]]\nzones = [\"bottom\"]\nrestitution = " << e_n
-         << "\ntangential_restitution = " << e_t << "\n";
-    // Gas at rest, on cells coarse enough that the acoustic CFL stays below 1 in 3D
-    const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
-                              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
-    Solver solver;
-    solver.set_distributed(false);
-    solver.init(parse_toml(solid(box(6, vec("0.0", "0.0", "0.0"), "x", walls, run.str(), ""), density,
-                                 diameter_for(tau, density), "stokes", keys.str())));
-    solver.run();
-    const std::vector<particles::Record> records = solver.get_particles()->gather();
-    EXPECT_EQ(records.size(), 1u);
-    if (records.size() != 1) return {1.0, 1.0};
-    const auto & r = records[0];
-    return {std::max(std::abs(r.x[0] - x), std::abs(r.x[1] - y)), std::max(std::abs(r.v[0] - vx), std::abs(r.v[1] - vy))};
-}
-
-} // namespace
-
-TEST(ParticleOrder, ABounceUnderGravityIsFirstOrderInTheStep) {
-    // A bounce is applied at the end of the step in which the particle crossed the wall: its velocity then
-    // misses the gravity of the rest of the step, (1 + e_n) g' s for an impact s before the step's end
-    const uint32_t N[3] = {20, 40, 80};
+    const double tau = 0.002;
     std::array<std::array<double, 2>, 3> e;
-    for (size_t k = 0; k < 3; k++) e[k] = bounce_error(N[k]);
+    for (uint32_t k = 0; k < 3; k++) e[k] = inertial_turning_error("RK4", 20u << k, tau, 0.5);
     for (size_t j = 0; j < 2; j++) {
-        verification::expect_order({"particles", "RK4, wall rebound", "",
-                                    std::string(j == 0 ? "position" : "velocity") + " error after a bounce under gravity",
-                                    {41, 81, 161}, {e[0][j], e[1][j], e[2][j]}, 1.0, 0.85, 1.15});
+        verification::expect_order({"particles", "RK4, exponential", "",
+                                    std::string(j == 0 ? "max position" : "max velocity") +
+                                        " error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1",
+                                    {20, 40, 80}, {e[0][j], e[1][j], e[2][j]}, 3.0, 2.6});
     }
 }
 
@@ -1215,3 +1167,259 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ParticleSpaceOrder,
                       std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO3"},
                       std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO4"},
                       std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO5"}));
+
+TEST(SolidParticlesTest, RelaxationsStifferThanTheStepAreIntegratedExponentially) {
+    SKIP_IN_SINGLE_PRECISION("the errors at 40 steps are near single-precision round-off");
+    // tau = 0.01 at dt = 1/40 and 1/80 (dt / tau = 2.5, 1.25), where RK4 is unstable or barely stable: the
+    // exponential integration converges at third order in dt, where the stiff limit's equilibrium velocity
+    // u + tau g' does not converge at all (its error is the lag tau du/dt of the velocity)
+    const auto coarse = inertial_turning_error("RK4", 40, 0.01), fine = inertial_turning_error("RK4", 80, 0.01);
+    EXPECT_GT(std::log2(coarse[0] / fine[0]), 2.5) << "position";
+    EXPECT_GT(std::log2(coarse[1] / fine[1]), 2.5) << "velocity";
+    EXPECT_LT(fine[0], 1e-6);
+    EXPECT_LT(fine[1], 1e-4);
+}
+
+TEST(SolidParticlesTest, HeatTransferRelaxesAtTheRanzMarshallRate) {
+    // T_p(t) = T + (T_p0 - T) e^{-t/tau_T}, tau_T = rho_p c_p d^2 / (6 k Nu), with k = mu c_p,gas / Pr and
+    // Nu = 2 + 0.6 Re^{1/2} Pr^{1/3}: at rest in gas at rest (Nu = 2), and at a slip U that the drag keeps
+    // (tau = 5600)
+    const double Pr = 0.72, k = MU * 3.5 / Pr, c_p = 5e-4, density = 1e7, d = 0.01, t = 0.5, T0 = 2.0;
+    for (const auto & [U, tol] : {std::pair{0.0, 1e-9}, std::pair{2.0, 1e-5}}) {
+        std::ostringstream keys;
+        keys.precision(17);
+        keys << "specific_heat = " << c_p << "\ntemperature = " << T0 << "\nvelocity = " << numbers(U, 0.0, 0.0) << "\n";
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(solid(box(12, vec("0.0", "0.0", "0.0"), "xy", "", "n_steps = 50\ndt = 0.01\n",
+                                         lattice(0.1, 0.9)),
+                                     density, d, "stokes", keys.str())));
+        solver.run();
+        const double Nu = 2.0 + 0.6 * std::sqrt(U * d / MU) * std::cbrt(Pr);
+        const double tau_T = density * c_p * d * d / (6.0 * k * Nu);
+        const double T = 1.0 + (T0 - 1.0) * std::exp(-t / tau_T);
+        const std::vector<particles::Record> records = solver.get_particles()->gather();
+        ASSERT_EQ(records.size(), 16u);
+        for (const auto & r : records) EXPECT_NEAR(r.T, T, roundoff(tol)) << "U = " << U;
+    }
+}
+
+TEST(SolidParticlesTest, ProbesReadTheParticleVelocityAndTemperature) {
+    const std::string file = (rank_scratch_dir() / "mallard_solid_particle_probe.csv").string();
+    const std::string probe = "[[particles.probes]]\nname = \"all\"\nfields = [\"V_Y\", \"T_P\"]\ninterval = 20\nfile = \"" +
+                              file + "\"\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(settling(0.1, 1.0, "stokes", 20, 0.01, "RK4", "specific_heat = 10.0\ntemperature = 2.0\n" + probe)));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 16u);
+    const auto rows = csv_rows(file);
+    ASSERT_EQ(rows.size(), 1u);
+    ASSERT_EQ(rows[0].size(), 3u + 8u);
+    EXPECT_NEAR(rows[0][3], records[0].v[1], roundoff(1e-14));
+    EXPECT_LT(rows[0][3], -1e-3);  // not the gas's, which is at rest
+    EXPECT_NEAR(rows[0][7], records[0].T, roundoff(1e-14));
+    EXPECT_GT(rows[0][7], 1.01);  // not the gas's
+}
+
+namespace {
+
+/**
+ * @brief Gas at rest in hydrostatic balance with [source] gravity (0, -1) between walls, p = 2 - y, and a
+ *        particle at its middle of density 2 (the gas's is 1) and Stokes relaxation time 0.1 with the
+ *        [particles] keys.
+ */
+std::string hydrostatic(const std::string & keys) {
+    const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+                              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
+    std::string input = box(12, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 40\ndt = 0.005\n",
+                            "points = [" + numbers(0.5, 0.5, 0.25) + "]\n");
+    input.replace(input.find("p = \"1.0\""), 9, "p = \"2.0 - y\"");
+    input.insert(input.find("[numerics]"), "[source]\ngravity = " + numbers(0.0, -1.0, 0.0) + "\n");
+    return solid(input, 2.0, diameter_for(0.1, 2.0), "stokes", keys);
+}
+
+/** @brief The vertical velocity of the one particle of a hydrostatic() run. */
+double vertical_velocity(const std::string & keys) {
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(hydrostatic(keys)));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    EXPECT_EQ(records.size(), 1u);
+    return records.empty() ? 0.0 : records[0].v[1];
+}
+
+} // namespace
+
+TEST(ParticleForcesTest, PressureGradientAddedMassAndSaffmanLift) {
+    // a and tau of particles::Solid::response against the forces per volume: rho_p g, the buoyancy -rho g or
+    // the pressure gradient -grad p, the added mass's (rho g_gas - grad p) / 2 and Saffman's
+    // 1.615 (6 / (pi d)) sqrt(rho mu / |w|) (u - v) x w, over rho_p (+ rho / 2 with added mass)
+    particles::Solid solid;
+    solid.gas.viscosity_model = ViscosityModel::CONSTANT;
+    solid.gas.mu_ref = 0.01_r;
+    solid.gas.R = 1.0_r;
+    solid.diameter = 0.02_r;
+    solid.density = 3.0_r;
+    const double rho = 1.5, p = 2.0, mu = 0.01, d = 0.02, rho_p = 3.0, g[3] = {0.1, -1.0, 0.2}, g_gas[3] = {0.0, -0.5, 0.3};
+    const double u[3] = {0.4, -0.1, 0.2}, v[3] = {0.1, 0.3, -0.2}, dp[3] = {0.3, -0.7, 0.4};
+    FOR_I_DIM {
+        solid.gravity[i] = static_cast<rtype>(g[i]);
+        solid.gas_gravity[i] = static_cast<rtype>(g_gas[i]);
+    }
+    rtype W[N_CONSERVATIVE], G[N_CONSERVATIVE * N_DIM] = {}, vp[N_DIM];
+    W[0] = static_cast<rtype>(rho);
+    W[N_DIM + 1] = static_cast<rtype>(p);
+    FOR_I_DIM {
+        W[1 + i] = static_cast<rtype>(u[i]);
+        vp[i] = static_cast<rtype>(v[i]);
+        G[(N_DIM + 1) * N_DIM + i] = static_cast<rtype>(dp[i]);
+    }
+    // du_x/dy = 0.8, du_y/dx = -0.4 (and in 3D du_y/dz = 0.5, du_z/dx = 0.6)
+    G[1 * N_DIM + 1] = 0.8_r;
+    G[2 * N_DIM + 0] = -0.4_r;
+    double w[3] = {0.0, 0.0, -0.4 - 0.8};
+    if constexpr (N_DIM == 3) {
+        G[2 * N_DIM + 2] = 0.5_r;
+        G[3 * N_DIM + 0] = 0.6_r;
+        w[0] = -0.5;
+        w[1] = -0.6;
+    }
+    const double tau_stokes = rho_p * d * d / (18.0 * mu);
+    const auto check = [&](const char * what, double tau, const std::array<double, 3> & a) {
+        const particles::Solid::Response r = solid.response(W, G, vp, 1.0_r);
+        EXPECT_NEAR(r.tau, tau, roundoff(1e-14) * tau) << what;
+        FOR_I_DIM EXPECT_NEAR(r.a[i], a[i], roundoff(1e-13)) << what << ", direction " << int(i);
+    };
+    solid.pressure_gradient = true;
+    check("pressure gradient", tau_stokes,
+          {(rho_p * g[0] - dp[0]) / rho_p, (rho_p * g[1] - dp[1]) / rho_p, (rho_p * g[2] - dp[2]) / rho_p});
+    solid.pressure_gradient = false;
+    solid.added_mass = true;
+    const double m = rho_p + 0.5 * rho;
+    std::array<double, 3> a{};
+    for (size_t i = 0; i < 3; i++) a[i] = ((rho_p - rho) * g[i] + 0.5 * (rho * g_gas[i] - dp[i])) / m;
+    check("added mass", tau_stokes * m / rho_p, a);
+    solid.added_mass = false;
+    solid.lift = true;
+    const double s[3] = {u[0] - v[0], u[1] - v[1], N_DIM == 3 ? u[2] - v[2] : 0.0};
+    const double w_norm = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+    const double k = 1.615 * 6.0 / (std::numbers::pi * d) * std::sqrt(rho * mu / w_norm);
+    const double cross[3] = {s[1] * w[2] - s[2] * w[1], s[2] * w[0] - s[0] * w[2], s[0] * w[1] - s[1] * w[0]};
+    for (size_t i = 0; i < 3; i++) a[i] = ((rho_p - rho) * g[i] + k * cross[i]) / rho_p;
+    check("Saffman lift", tau_stokes, a);
+}
+
+TEST(SolidParticlesTest, PressureGradientAndAddedMassForcesInAHydrostaticGas) {
+    // To within 0.2%: the gas strays from rest by about 0.05%, as the scheme does not balance it exactly
+    const double tau = 0.1, t = 0.2, rho_p = 2.0;
+    // The pressure gradient alone, without the particle's weight: the buoyancy -grad p / rho_p = g / rho_p lifts it
+    const double lifted = tau / rho_p * (1.0 - std::exp(-t / tau));
+    EXPECT_NEAR(vertical_velocity("forces = [\"pressure_gradient\"]\ngravity = " + numbers(0.0, 0.0, 0.0) + "\n"), lifted,
+                2e-3 * lifted);
+    // Added mass: the same terminal velocity tau g (1 - rho / rho_p), reached in tau (rho_p + rho / 2) / rho_p
+    const double v_t = -tau * (1.0 - 1.0 / rho_p), tau_a = tau * (rho_p + 0.5) / rho_p;
+    const double sinking = v_t * (1.0 - std::exp(-t / tau_a));
+    EXPECT_NEAR(vertical_velocity("forces = [\"added_mass\"]\n"), sinking, 2e-3 * std::abs(sinking));
+}
+
+TEST(SolidParticlesTest, SaffmanLiftPushesALeadingParticleTowardTheSlowerGas) {
+    // In the shear u_x = S (y - 0.5), a particle at y = 0.5 moving at V along x feels the lift
+    // 1.615 (6 / (pi d)) sqrt(rho mu / S) (u - v) x w per volume, w = -S z: -1.615 (6 / (pi d)) sqrt(rho mu S) V
+    // along y. tau = 1e4 keeps the slip
+    const double S = 0.5, V = 0.5, t = 0.2, density = 1000.0, d = diameter_for(1e4, density);
+    const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+                              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
+    const std::string keys = "forces = [\"saffman_lift\"]\nvelocity = " + numbers(V, 0.0, 0.0) + "\npoints = [" +
+                             numbers(0.5, 0.5, 0.25) + "]\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(solid(box(12, vec("0.5 * (y - 0.5)", "0.0", "0.0"), "x", walls, "n_steps = 20\ndt = 0.01\n", ""),
+                                 density, d, "stokes", keys)));
+    solver.run();
+    const double a = -1.615 * 6.0 / (std::numbers::pi * d) * std::sqrt(MU * S) * V / density;
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_NEAR(records[0].v[1], a * t, 1e-3 * std::abs(a * t));
+}
+
+TEST(ParticleDragTest, SinghReducesToItsLimits) {
+    const double gamma = 1.4, C0 = 24.0 / (9.4 * 9.4);
+    const auto C_D = [&](double Re, double M, double Kn, double Tp_T = 1.0) {
+        return 24.0 / Re * static_cast<double>(particles::singh_drag_factor(static_cast<rtype>(Re), static_cast<rtype>(M),
+                                                                            static_cast<rtype>(Kn), static_cast<rtype>(Tp_T),
+                                                                            static_cast<rtype>(gamma)));
+    };
+    const auto Kn_of = [&](double Re, double M) { return std::sqrt(gamma * std::numbers::pi / 2.0) * M / Re; };
+    // Creeping continuum flow: Stokes
+    EXPECT_NEAR(C_D(1e-6, 1e-12, Kn_of(1e-6, 1e-12)) * 1e-6 / 24.0, 1.0, 1e-3);
+    // Incompressible continuum flow: Abraham's C0 (1 + delta0 / Re^{1/2})^2
+    for (const double Re : {10.0, 100.0, 1000.0}) {
+        const double M = 1e-6;
+        EXPECT_NEAR(C_D(Re, M, Kn_of(Re, M)), C0 * std::pow(1.0 + 9.4 / std::sqrt(Re), 2.0), roundoff(1e-4)) << Re;
+    }
+    // Hypersonic continuum flow: C_D -> 0.9
+    EXPECT_NEAR(C_D(1e8, 100.0, Kn_of(1e8, 100.0)), 0.9, 2e-3);
+    // Free-molecular flow: Patterson's C_D at s = M sqrt(gamma / 2)
+    for (const auto & [M, Tp_T] : {std::pair{0.1, 1.0}, std::pair{2.0, 1.0}, std::pair{2.0, 3.0}}) {
+        const double Kn = 1e4, Re = std::sqrt(gamma * std::numbers::pi / 2.0) * M / Kn, s = M * std::sqrt(gamma / 2.0);
+        const double fm = (1.0 + 2.0 * s * s) * std::exp(-s * s) / (s * s * s * std::sqrt(std::numbers::pi)) +
+                          (4.0 * std::pow(s, 4) + 4.0 * s * s - 1.0) * std::erf(s) / (2.0 * std::pow(s, 4)) +
+                          2.0 / (3.0 * s) * std::sqrt(std::numbers::pi * Tp_T);
+        EXPECT_NEAR(C_D(Re, M, Kn, Tp_T) / fm, 1.0, 2e-3) << M << " " << Tp_T;
+    }
+    // The free-molecular series and the closed form meet at s = 0.3
+    const double M3 = 0.3 / std::sqrt(gamma / 2.0), Kn3 = 10.0;
+    EXPECT_NEAR(C_D(Kn_of(1.0, M3) / Kn3, M3 * (1.0 - 1e-9), Kn3) / C_D(Kn_of(1.0, M3) / Kn3, M3 * (1.0 + 1e-9), Kn3), 1.0,
+                roundoff(1e-8));
+}
+
+TEST(SolidParticlesTest, SinghTerminalVelocityInARarefiedGas) {
+    // Kn = 0.93: slip at the surface lowers the drag, and the particles settle more than twice as fast as Stokes's
+    const double tau = 0.1, g = 1.0, density = 100.0, gamma = 1.4;
+    const double d = diameter_for(tau, density), g_eff = g * (1.0 - 1.0 / density), c = std::sqrt(gamma);
+    const double Kn = MU / (c * d) * std::sqrt(gamma * std::numbers::pi / 2.0);
+    double v_t = tau * g_eff;
+    for (int i = 0; i < 200; i++) {
+        v_t = tau * g_eff / static_cast<double>(particles::singh_drag_factor(static_cast<rtype>(v_t * d / MU),
+                                                                             static_cast<rtype>(v_t / c),
+                                                                             static_cast<rtype>(Kn), 1.0_r, 1.4_r));
+    }
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(settling(tau, g, "singh", 600, 0.02)));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 16u);
+    for (const auto & r : records) EXPECT_NEAR(r.v[1], -v_t, roundoff(1e-10) * v_t);
+    EXPECT_GT(v_t, 2.0 * tau * g_eff);
+}
+
+TEST(SolidParticlesTest, ABounceIsLocatedWithinTheStep) {
+    // Under gravity alone (tau = 1e10), from (0.5, y0) at (v_x, v_y) a particle reaches the floor at the root t_c
+    // of y0 + v_y t - g' t^2 / 2, g' = g (1 - rho / rho_p), leaves it at (e_t v_x, -e_n (v_y - g' t_c)) and moves
+    // on ballistically
+    const double e_n = 0.5, e_t = 0.8, y0 = 0.06, vx = 0.3, vy = -0.4, t = 0.5, g_p = 1.0, g = g_p * (1.0 - 1.0 / 1000.0);
+    const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+                              "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
+    std::ostringstream keys;
+    keys << "velocity = " << numbers(vx, vy, 0.0) << "\ngravity = " << numbers(0.0, -g_p, 0.0) << "\npoints = ["
+         << numbers(0.5, y0, 0.25) << "]\n[[particles.walls]]\nzones = [\"bottom\"]\nrestitution = " << e_n
+         << "\ntangential_restitution = " << e_t << "\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(solid(box(12, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 50\ndt = 0.01\n", "", TENO4, "RK4"),
+                                 1000.0, diameter_for(1e10, 1000.0), "stokes", keys.str())));
+    solver.run();
+    const double t_c = (vy + std::sqrt(vy * vy + 2.0 * g * y0)) / g, s = t - t_c;
+    ASSERT_GT(std::fmod(t_c, 0.01), 0.002);  // well within a step
+    const double up = -e_n * (vy - g * t_c);
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 1u);
+    EXPECT_NEAR(records[0].x[0], 0.5 + vx * t_c + e_t * vx * s, roundoff(1e-9));
+    EXPECT_NEAR(records[0].x[1], up * s - 0.5 * g * s * s, roundoff(1e-9));
+    EXPECT_NEAR(records[0].v[0], e_t * vx, roundoff(1e-9));
+    EXPECT_NEAR(records[0].v[1], up - g * s, roundoff(1e-9));
+}

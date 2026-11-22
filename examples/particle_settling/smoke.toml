@@ -1,20 +1,20 @@
-# Smoke settling in still air (2D build): particles in their stiff limit.
+# Smoke settling in still air (2D build): particles that relax faster than a step.
 #
 # Particles of 1 um (density 1000 kg/m^3) relax in tau = 3.1 us, less than a
 # third of the flow's time step (11.5 us at cfl = 0.8 on these 1 cm cells):
 # an explicit integrator would be unstable at that ratio. Each particle with
-# tau below the step moves at its equilibrium velocity u + tau g (1 - rho /
-# rho_p), here its terminal velocity, and its velocity relaxes to it within a
-# step, so the step stays the flow's own.
+# tau below the step relaxes exponentially within the step toward its
+# equilibrium velocity u + tau g (1 - rho / rho_p), here its terminal
+# velocity, so the step stays the flow's own.
 #
 # Run (seconds on one CPU thread):
 #   ../../build/src/mallard -i smoke.toml
 #   python check_particle_settling.py smoke.csv
 #
 # Result: every particle falls at tau g' = 30.24 um/s, exactly (to round-off),
-# and has moved down by that times t. Real smoke of this size settles 17%
-# faster: Mallard's drag has no slip correction for particles near the mean
-# free path of the gas (Cunningham's).
+# Real smoke of this size settles faster: Schiller-Naumann drag has no slip
+# correction for particles near the mean free path of the gas (Kn = 0.066
+# here); drag = "singh" has, and settles them 12% faster.
 
 [run]
 t_stop = 0.01

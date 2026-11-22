@@ -31,7 +31,8 @@ accuracy of every method, from the convergence tests; the sources are in
     the wall flux.
 6. [Lagrangian particles](particles.md): tracers and solid particles, drag
     laws, the gas at a particle from the reconstruction, integration in
-    time and its stiff limit, walls and other boundaries.
+    time (exponential for relaxations faster than the step), walls and
+    other boundaries.
 
 ### Part II: the discretization, in the order a step assembles it
 

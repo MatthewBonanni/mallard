@@ -4412,31 +4412,6 @@
   },
   {
    "section": "particles",
-   "method": "RK4, stiff limit",
-   "cells": "",
-   "error": "max position error against the inertial trajectory",
-   "dim": 3,
-   "test": "ParticleOrder.StiffLimitConvergesToTheInertialTrajectoryAsTauVanishes",
-   "n": [
-    4.0,
-    8.0,
-    16.0,
-    32.0
-   ],
-   "errors": [
-    0.003697413,
-    0.001861683,
-    0.0009336991,
-    0.0004672893
-   ],
-   "design": 1.0,
-   "min_order": 0.9,
-   "max_order": 1.1,
-   "order": 0.9986417,
-   "pass": true
-  },
-  {
-   "section": "particles",
    "method": "RK4",
    "cells": "",
    "error": "max position error, Schiller-Naumann step response",
@@ -4943,48 +4918,48 @@
   },
   {
    "section": "particles",
-   "method": "RK4, wall rebound",
+   "method": "RK4, exponential",
    "cells": "",
-   "error": "position error after a bounce under gravity",
-   "dim": 3,
-   "test": "ParticleOrder.ABounceUnderGravityIsFirstOrderInTheStep",
+   "error": "max position error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1",
+   "dim": 2,
+   "test": "ParticleOrder.ExponentialIntegrationOfRelaxationsStifferThanTheStep",
    "n": [
-    41.0,
-    81.0,
-    161.0
+    20.0,
+    40.0,
+    80.0
    ],
    "errors": [
-    0.02537219,
-    0.01291502,
-    0.006516129
+    2.342306e-06,
+    3.519519e-07,
+    4.716614e-08
    ],
-   "design": 1.0,
-   "min_order": 0.85,
-   "max_order": 1.15,
-   "order": 0.995859,
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.899555,
    "pass": true
   },
   {
    "section": "particles",
-   "method": "RK4, wall rebound",
+   "method": "RK4, exponential",
    "cells": "",
-   "error": "velocity error after a bounce under gravity",
-   "dim": 3,
-   "test": "ParticleOrder.ABounceUnderGravityIsFirstOrderInTheStep",
+   "error": "max velocity error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1",
+   "dim": 2,
+   "test": "ParticleOrder.ExponentialIntegrationOfRelaxationsStifferThanTheStep",
    "n": [
-    41.0,
-    81.0,
-    161.0
+    20.0,
+    40.0,
+    80.0
    ],
    "errors": [
-    0.02981644,
-    0.01507781,
-    0.007582029
+    0.000827102,
+    0.0001532837,
+    2.212997e-05
    ],
-   "design": 1.0,
-   "min_order": 0.85,
-   "max_order": 1.15,
-   "order": 1.000711,
+   "design": 3.0,
+   "min_order": 2.6,
+   "max_order": null,
+   "order": 2.792131,
    "pass": true
   }
  ]
