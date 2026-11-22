@@ -1297,7 +1297,9 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
                 }
             }
             mu = transport.extent(0) > 0 ? transport(c, 0) : physics.viscosity(T);
-            const rtype kappa = transport.extent(0) > 0 ? transport(c, 1) : physics.conductivity(mu);
+            rtype kappa = transport.extent(0) > 0 ? transport(c, 1) : physics.conductivity(mu);
+            // A flamelet gas's column is kappa / cp, the conductivity of enthalpy
+            if (boundaries.mixture_gas.tabulated()) kappa *= g / (g - 1.0_r) * R_c;
             viscous_traction(mu, gu, nv, tau_n,
                              axisymmetric ? hoop_divergence(face_coords(face(s), 1), Wf + 1, gu) : 0.0_r);
             q_n = kappa * dot<N_DIM>(gT, nv);
@@ -2311,23 +2313,25 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     probes.push_back(std::move(probe_ptr));
 }
 
-std::string Probes::set_interval(const std::string & name, uint64_t steps, bool snapshot) {
+std::string Probes::set_interval(const std::string & name, uint64_t steps, bool snapshot, const bool apply) {
     for (auto & p : probes) {
         if (p->name != name || p->snapshot != snapshot) continue;
         if (p->interval == 0) return "is written every time_interval; set that instead";
         if (steps == 0) return "interval must be positive";
+        if (!apply) return "";
         p->interval = steps;
         return "";
     }
     return snapshot ? "no [[write_data]] with prefix " + name : "no [[probes]] named " + name;
 }
 
-std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot) {
+std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot, const bool apply) {
     for (auto & p : probes) {
         if (p->name != name || p->snapshot != snapshot) continue;
         if (p->interval > 0) return "is written every interval steps; set that instead";
         if (!(value > 0.0_r)) return "time_interval must be positive";
         if (p->spectra) return "keeps its time_interval: its spectra need equally spaced samples";
+        if (!apply) return "";
         p->time_interval = value;
         p->n_written = static_cast<uint64_t>(std::floor(t / value + precision_tol(1e-9, 1e-5))) + 1;
         return "";
@@ -2344,6 +2348,14 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
         }
     }
     if (!output_files_enabled()) return;
+    // A file a rewind cuts back keeps a copy of what it held
+    [[maybe_unused]] const auto set_aside = [](const std::string & file) {
+        const std::string to = run_log::rewound_path(file, provenance::run_id());
+        std::error_code error;
+        std::filesystem::create_directories(std::filesystem::path(to).parent_path(), error);
+        if (!error) std::filesystem::copy_file(file, to, std::filesystem::copy_options::overwrite_existing, error);
+        if (error) throw std::runtime_error("Could not copy " + file + ", which the rewind cuts back, to " + to + ": " + error.message());
+    };
     on_root(distributed, [&] {
         for (auto & pp : probes) {
             Probe & p = *pp;
@@ -2365,7 +2377,12 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
                 }
             }
 #ifdef Mallard_HAS_HDF5
-            if (p.format == Format::VTKHDF && std::filesystem::exists(p.file)) {
+            if (p.format == Format::VTKHDF && p.snapshot) {
+                p.vtkhdf_mesh_checked = false;
+                const std::filesystem::path f(p.file);
+                p.index_steps = vtkhdf_series::resume(
+                    p.file, static_cast<double>(t), (f.parent_path() / (f.stem().string() + "_legacy.vtkhdf")).string());
+            } else if (p.format == Format::VTKHDF && std::filesystem::exists(p.file)) {
                 // Continue after the snapshots up to the restart time
                 const std::lock_guard<std::mutex> lock(h5::mutex());
                 h5::Handle file(H5Fopen(p.file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + p.file);
@@ -2375,6 +2392,7 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
                 while (p.vtkhdf_steps < times.size() && times[p.vtkhdf_steps] <= static_cast<double>(t) * (1.0 + 1e-12)) {
                     p.vtkhdf_steps++;
                 }
+                if (p.vtkhdf_steps < times.size()) set_aside(p.file);
             }
             if (p.format == Format::HDF5 && std::filesystem::exists(p.file)) {
                 // Drop the rows after the restart step
@@ -2389,6 +2407,7 @@ void Probes::resume([[maybe_unused]] uint64_t step, rtype t) {
                 const std::vector<uint64_t> steps = h5::read_rows<uint64_t>(file, "step", 0, n_rows, 1, H5P_DEFAULT);
                 uint64_t keep = 0;
                 while (keep < steps.size() && steps[keep] <= step) keep++;
+                if (keep < steps.size()) set_aside(p.file);
                 std::vector<std::string> names = {"step", "time"};
                 for (const auto & v : p.variables) names.push_back("fields/" + v);
                 for (const auto & name : names) {
@@ -2513,6 +2532,8 @@ bool Probes::reads_intervals(const size_t k) const {
 
 bool Probes::moves(const size_t k) const { return probes[k]->motion != nullptr || probes[k]->isosurface != nullptr; }
 
+bool Probes::reduces_staged(const size_t k) const { return probes[k]->isosurface == nullptr; }
+
 bool Probes::follows_solution(const size_t k) const { return probes[k]->solution; }
 
 void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & statistics, const double t,
@@ -2595,15 +2616,17 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     }
     if (!reduce) return;
     // The samples Probe::reduce sums: of point sets and boundaries, the nodes; of curves and regions, the quadrature
+    // (moving regions: the cells covered at each write, weighed by their f V, or the cells their averages hold)
     auto r = std::make_shared<Probe::DeviceReduction>();
     std::vector<ProbeTerm> terms;
     std::vector<ProbeOutput> outputs;
     p.reduction_plan(terms, outputs);
-    const bool points = p.quadrature.n_global == 0;
+    const bool moving = p.motion != nullptr;
+    const bool points = !moving && p.quadrature.n_global == 0;
     const Samples & S = points ? p.nodes : p.quadrature;
     const uint32_t n_local = static_cast<uint32_t>(S.cells.extent(0));
     const bool holds = !S.distributed || comm::is_root();  // the geometry
-    if (holds && (points ? p.geometry.nodes.size() : p.geometry.quad_weights.size()) != S.n_global) {
+    if (!moving && holds && (points ? p.geometry.nodes.size() : p.geometry.quad_weights.size()) != S.n_global) {
         throw std::logic_error("probe " + p.name + ": samples and geometry differ");
     }
     r->use_nccl = use_nccl;
@@ -2612,11 +2635,25 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     });
     const bool moments = std::any_of(terms.begin(), terms.end(), [](const ProbeTerm & term) { return term.kind == ProbeTerm::MOMENT; });
     int weighted = r->summed && holds && (!points || !p.geometry.node_weights.empty()) ? 1 : 0;
-    if (S.distributed) weighted = comm::allreduce(weighted, comm::Op::MAX);
-    if (weighted) {
+    if (S.distributed && !moving) weighted = comm::allreduce(weighted, comm::Op::MAX);
+    if (moving && p.average) {
+        const uint32_t n_cols = static_cast<uint32_t>(p.n_evaluated());
+        r->mean_weights = Kokkos::View<double *>("probe_mean_cell_weights", n_local);
+        r->held = Kokkos::View<uint32_t *>("probe_mean_held", n_local);
+        r->sample_of = Kokkos::View<int32_t *>("probe_mean_sample_of", n_local);
+        r->held_cells = Kokkos::View<uint32_t *>("probe_mean_held_cells", n_local);
+        r->held_count = Kokkos::View<uint32_t>("probe_mean_held_count");
+        r->held_values = Kokkos::View<double **, Kokkos::LayoutRight>("probe_mean_held_values", n_local, n_cols);
+        r->weights = Kokkos::View<double *>("probe_mean_held_weights", n_local);
+        r->count = r->held_count;
+    } else if (moving) {
+        r->weights = p.motion->weights;
+        r->count = p.motion->count;
+    } else if (weighted) {
         const std::vector<double> & global = points ? p.geometry.node_weights : p.geometry.quad_weights;
         r->weights = to_device(S.scatter(holds ? global : std::vector<double>{}, 1), "probe_reduction_weights");
     }
+    if (moving && moments) throw std::logic_error("probe " + p.name + ": moments of a moving region");
     if (r->summed && moments) {
         std::vector<double> global;
         for (size_t i = 0; holds && i < S.n_global; i++) {
@@ -2653,26 +2690,89 @@ void Probes::stage(const size_t k, const uint64_t n_records, const Statistics & 
     p.device_reduction = r;
 }
 
+namespace {
+
+/**
+ * @brief accumulate_cells on the device, of a moving region's sample (the first count() of covered, with their f V
+ *        weights and values q) into the means per owned cell of f V and of f V q, if *sampled: every cell held
+ *        or covered takes mean += a (x - mean), x zero where it is not covered, and is held from then on.
+ */
+void average_cells(const Kokkos::View<const uint32_t *> & covered, const Kokkos::View<const uint32_t> & count,
+                   const Kokkos::View<const double *> & weights, const Kokkos::View<const rtype **, Kokkos::LayoutRight> & q,
+                   const Kokkos::View<int32_t *> & sample_of, const Kokkos::View<uint32_t *> & held,
+                   const Kokkos::View<double *> & mean_weights, const Kokkos::View<double **, Kokkos::LayoutRight> & mean,
+                   const uint32_t * sampled, const double * a) {
+    const uint32_t n = static_cast<uint32_t>(held.extent(0)), n_cols = static_cast<uint32_t>(mean.extent(1));
+    Kokkos::parallel_for("probe_mean_cells_clear", n, KOKKOS_LAMBDA(const uint32_t c) { sample_of(c) = -1; });
+    Kokkos::parallel_for("probe_mean_cells_covered", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i < count()) sample_of(covered(i)) = static_cast<int32_t>(i);
+    });
+    Kokkos::parallel_for("probe_mean_cells", n, KOKKOS_LAMBDA(const uint32_t c) {
+        const int32_t s = sample_of(c);
+        if (*sampled == 0 || (s < 0 && held(c) == 0)) return;
+        const double w = s >= 0 ? weights(s) : 0.0;
+        mean_weights(c) += rounded_product(*a, w - mean_weights(c));
+        for (uint32_t v = 0; v < n_cols; v++) {
+            const double x = s >= 0 ? rounded_product(static_cast<double>(q(s, v)), w) : 0.0;
+            mean(c, v) += rounded_product(*a, x - mean(c, v));
+        }
+        held(c) = 1;
+    });
+}
+
+/**
+ * @brief Probe::mean_fields on the device: the cells held (into the first count() of cells), with their mean f V
+ *        and mean values mean (f V q) / mean f V (zero where the weight is not positive).
+ */
+void held_means(const Kokkos::View<const uint32_t *> & held, const Kokkos::View<const double *> & mean_weights,
+                const Kokkos::View<const double **, Kokkos::LayoutRight> & mean, const Kokkos::View<uint32_t *> & cells,
+                const Kokkos::View<uint32_t> & count, const Kokkos::View<double **, Kokkos::LayoutRight> & values,
+                const Kokkos::View<double *> & weights) {
+    const uint32_t n = static_cast<uint32_t>(held.extent(0)), n_cols = static_cast<uint32_t>(mean.extent(1));
+    Kokkos::parallel_scan("probe_mean_held", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & k, const bool final) {
+        if (final && held(c) != 0) cells(k) = c;
+        k += held(c) != 0 ? 1u : 0u;
+        if (final && c + 1 == n) count() = k;
+    });
+    Kokkos::parallel_for("probe_mean_held_values", n, KOKKOS_LAMBDA(const uint32_t i) {
+        if (i >= count()) return;
+        const uint32_t c = cells(i);
+        const double w = mean_weights(c);
+        weights(i) = w;
+        for (uint32_t v = 0; v < n_cols; v++) values(i, v) = w > 0.0 ? mean(c, v) / w : 0.0;
+    });
+}
+
+} // namespace
+
 void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) const {
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Probe & p = *probes[k];
     const Probe::DeviceReduction & r = *p.device_reduction;
-    const bool points = p.quadrature.n_global == 0;
+    const bool points = !p.motion && p.quadrature.n_global == 0;
     const Samples & S = points ? p.nodes : p.quadrature;
     const uint32_t n_local = static_cast<uint32_t>(S.cells.extent(0));
-    // The samples' values, or an averaging probe's means of them
+    // The samples' values, or an averaging probe's means of them (moving regions: of the cells they hold, as
+    // Probe::mean_fields gives them)
     const auto q = S.values;
-    const auto mq = points ? r.mean_nodes : r.mean_quadrature;
+    if (r.held.is_allocated()) {
+        held_means(r.held, r.mean_weights, r.mean_quadrature, r.held_cells, r.held_count, r.held_values, r.weights);
+    }
+    const auto mq = r.held.is_allocated() ? r.held_values : points ? r.mean_nodes : r.mean_quadrature;
     const auto mn = r.mean_nodes;
     const bool averaged = p.average;
+    // Moving regions reduce the first count() samples, those of positive weight (Probe::reduce's extrema)
+    const auto count = r.count;
+    const bool counted = count.is_allocated();
+    const auto weights = r.weights;
     if (r.summed) {
         const auto terms = r.terms;
-        const auto weights = r.weights;
         const auto positions = r.positions;
         const auto values = r.values;
         const bool weighted = weights.extent(0) > 0, moments = positions.extent(0) > 0;
         const uint32_t n_terms = static_cast<uint32_t>(terms.extent(0));
         Kokkos::parallel_for("probe_reduction_terms", n_local, KOKKOS_LAMBDA(const uint32_t i) {
+            if (counted && i >= count()) return;
             double x[3] = {0.0, 0.0, 0.0};
             if (moments) {
                 for (int d = 0; d < 3; d++) x[d] = positions(i, d);
@@ -2682,7 +2782,11 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
                 values(i, t) = averaged ? probe_term(terms(t), w, &mq(i, 0), x) : probe_term(terms(t), w, &q(i, 0), x);
             }
         });
-        r.sums.sum(values);
+        if (counted) {
+            r.sums.sum(values, count);
+        } else {
+            r.sums.sum(values);
+        }
     }
     const auto lo = r.lo, hi = r.hi;
     if (lo.extent(0) > 0) {
@@ -2691,11 +2795,13 @@ void Probes::reduce_staged(const size_t k, const uint32_t * due, double * out) c
         const uint32_t n_nodes = points || !p.samples_nodes() ? 0 : static_cast<uint32_t>(p.nodes.cells.extent(0));
         for (uint32_t v = 0; v < lo.extent(0); v++) {
             Kokkos::parallel_reduce("probe_reduction_min", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+                if (counted && i < n_local && (i >= count() || !(weights(i) > 0.0))) return;
                 const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
                                           : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x < m) m = x;
             }, Kokkos::Min<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(lo.data() + v)));
             Kokkos::parallel_reduce("probe_reduction_max", n_local + n_nodes, KOKKOS_LAMBDA(const uint32_t i, double & m) {
+                if (counted && i < n_local && (i >= count() || !(weights(i) > 0.0))) return;
                 const double x = averaged ? (i < n_local ? mq(i, v) : mn(i - n_local, v))
                                           : static_cast<double>(i < n_local ? q(i, v) : nodes(i - n_local, v));
                 if (x > m) m = x;
@@ -2735,6 +2841,11 @@ Probes::StagedClock Probes::staged_clock(const size_t k) const {
 void Probes::average_staged(const size_t k, const uint32_t * sampled, const double * a) {
     const Probe & p = *probes[k];
     const Probe::DeviceReduction & r = *p.device_reduction;
+    if (r.held.is_allocated()) {
+        average_cells(p.motion->covered, p.motion->count, p.motion->weights, p.quadrature.values, r.sample_of, r.held,
+                      r.mean_weights, r.mean_quadrature, sampled, a);
+        return;
+    }
     for (const auto & [S, mean] : {std::pair(&p.nodes, r.mean_nodes), std::pair(&p.quadrature, r.mean_quadrature)}) {
         const auto q = S->values;
         const auto m = mean;
@@ -2762,7 +2873,35 @@ void Probes::resume_staged(const size_t k) {
         Kokkos::deep_copy(mean, HostRows(local.data(), mean.extent(0), mean.extent(1)));
     };
     if (p.samples_nodes()) copy(p.nodes, p.mean_nodes, r.mean_nodes);
-    if (p.samples_quadrature()) copy(p.quadrature, p.mean_quadrature, r.mean_quadrature);
+    if (r.held.is_allocated()) {
+        // Rank 0's means per cell, by global cell, to the ranks owning the cells
+        const bool spread = p.motion->distributed;
+        const bool holds = !spread || comm::is_root();
+        const std::vector<uint64_t> cells = spread ? comm::allgatherv(holds ? p.mean_cells : std::vector<uint64_t>{})
+                                                        : p.mean_cells;
+        const std::vector<double> weights = spread ? comm::allgatherv(holds ? p.mean_weights : std::vector<double>{})
+                                                        : p.mean_weights;
+        const std::vector<double> means =
+            spread ? comm::allgatherv(holds ? p.mean_quadrature : std::vector<double>{}) : p.mean_quadrature;
+        const auto h_held = Kokkos::create_mirror_view(r.held);
+        const auto h_weights = Kokkos::create_mirror_view(r.mean_weights);
+        const auto h_means = Kokkos::create_mirror_view(r.mean_quadrature);
+        const size_t n_cols = h_means.extent(1);
+        for (uint32_t c = 0; c < h_held.extent(0); c++) {
+            const uint64_t g = p.motion->mesh->h_global_cell(c);
+            const auto at = std::lower_bound(cells.begin(), cells.end(), g);
+            const bool held = at != cells.end() && *at == g;
+            const size_t i = static_cast<size_t>(at - cells.begin());
+            h_held(c) = held ? 1 : 0;
+            h_weights(c) = held ? weights[i] : 0.0;
+            for (size_t v = 0; v < n_cols; v++) h_means(c, v) = held ? means[i * n_cols + v] : 0.0;
+        }
+        Kokkos::deep_copy(r.held, h_held);
+        Kokkos::deep_copy(r.mean_weights, h_weights);
+        Kokkos::deep_copy(r.mean_quadrature, h_means);
+    } else if (p.samples_quadrature()) {
+        copy(p.quadrature, p.mean_quadrature, r.mean_quadrature);
+    }
     r.means_current = true;
 }
 
@@ -2912,10 +3051,18 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
                                   average_interval);
                 if (p.format == Format::VTKHDF) {
                     p.write_vtkhdf(block, nodes);
+                    if (p.snapshot) {
+                        publish_file("the boundary snapshot", p.last_file);
+                        p.index_steps.push_back(vtkhdf_series::describe(p.last_file).at(0));
+                        vtkhdf_series::write_index(p.file, p.index_steps);
+                    }
                 } else {
                     p.write_vtp(block, nodes);
                 }
-                if (p.snapshot) {
+                if (p.snapshot && !p.vtkhdf_mesh_written.empty()) {
+                    logging::written(step, double(t), "vtkhdf", p.last_file, block.reason, p.file,
+                                     {written_file(p.vtkhdf_mesh_written), written_file(p.last_file)});
+                } else if (p.snapshot) {
                     logging::written(step, double(t), p.format == Format::VTKHDF ? "vtkhdf" : "vtp", p.last_file,
                                     block.reason, p.file);
                 }
@@ -3393,9 +3540,19 @@ snapshot_block::Block Probes::Probe::snapshot_of(uint64_t step, rtype t, const s
 void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & block,
                                  [[maybe_unused]] const std::vector<double> & values) {
 #ifdef Mallard_HAS_HDF5
-    last_file = file;
+    // A boundary snapshot: a file per snapshot, written once, and the series file an index of them
+    if (snapshot) {
+        const std::filesystem::path series_file(file);
+        std::ostringstream piece;
+        piece << series_file.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step << ".vtkhdf";
+        last_file = (series_file.parent_path() / piece.str()).string();
+    } else {
+        last_file = file;
+    }
+    // A snapshot's files are written under another name, given theirs once complete
+    const std::string target = snapshot ? partial_name(last_file) : last_file;
     const std::lock_guard<std::mutex> lock(h5::mutex());
-    const uint64_t k = vtkhdf_steps, n = geometry.nodes.size();
+    const uint64_t k = snapshot ? 0 : vtkhdf_steps, n = geometry.nodes.size();
     const size_t n_cols = n_evaluated();
     const PolyLayout layout = poly_layout(geometry);
     const std::string data = layout.cell_data ? "CellData" : "PointData";
@@ -3406,13 +3563,48 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     const std::string mine = layout.cells == std::string("Verts")   ? "Vertices"
                              : layout.cells == std::string("Lines") ? "Lines"
                                                                     : "Polygons";
-    if (k == 0) {
-        make_parent(file);
+    // The fixed geometry, or links to it in the mesh file of a boundary snapshot's series
+    const auto write_geometry = [&](hid_t top, const std::string & link) {
+        const auto array = [&](hid_t group, const std::string & path, uint64_t rows, int cols, const auto * array_values) {
+            const std::string leaf = path.substr(path.rfind('/') + 1);
+            if (link.empty()) {
+                h5::write_rows(group, leaf.c_str(), rows, cols, 0, rows, array_values, H5P_DEFAULT);
+            } else {
+                h5::check(H5Lcreate_external(link.c_str(), ("/VTKHDF/" + path).c_str(), group, leaf.c_str(), H5P_DEFAULT,
+                                             H5P_DEFAULT),
+                          "linking " + path);
+            }
+        };
+        const int64_t n_points = static_cast<int64_t>(layout.n_points());
+        h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points, H5P_DEFAULT);
+        array(top, "Points", layout.n_points(), 3, layout.xyz.data());
+        for (const char * kind : kinds) {
+            h5::Handle group(H5Gopen2(top, kind, H5P_DEFAULT), H5Gclose, kind);
+            const std::vector<int64_t> none, zero = {0};
+            const auto & o = kind == mine ? layout.offsets : zero;
+            const auto & c = kind == mine ? layout.connectivity : none;
+            const int64_t counts[2] = {static_cast<int64_t>(o.size() - 1), static_cast<int64_t>(c.size())};
+            h5::write_rows<int64_t>(group, "NumberOfCells", 1, 1, 0, 1, &counts[0], H5P_DEFAULT);
+            h5::write_rows<int64_t>(group, "NumberOfConnectivityIds", 1, 1, 0, 1, &counts[1], H5P_DEFAULT);
+            array(group, std::string(kind) + "/Offsets", o.size(), 1, o.data());
+            array(group, std::string(kind) + "/Connectivity", c.size(), 1, c.data());
+        }
+        h5::Handle samples(H5Gopen2(top, data.c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
+        for (const auto & a : fixed) {
+            array(samples, data + "/" + a.name, a.values.size() / static_cast<size_t>(a.components), a.components,
+                  a.values.data());
+            if (link.empty()) h5::annotate(samples, a.name, geometry_field(a.name, geometry));
+        }
+        if (link.empty()) h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
+    };
+    const auto create = [&](const std::string & created_file) {
+        make_parent(created_file);
         const std::string & provenance = provenance::json();
         const std::string located = sampling_json();
         h5::Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
         h5::Handle fcpl(h5::file_creation(fapl, std::max(provenance.size(), located.size())), H5Pclose, "H5Pcreate");
-        h5::Handle created(H5Fcreate(file.c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + file);
+        const hid_t created = H5Fcreate(created_file.c_str(), H5F_ACC_TRUNC, fcpl, fapl);
+        if (created < 0) throw std::runtime_error("HDF5: creating " + created_file + " failed.");
         {
             h5::Handle root(H5Gopen2(created, "/", H5P_DEFAULT), H5Gclose, "opening /");
             h5::write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
@@ -3422,41 +3614,57 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
         h5::write_array_attribute(top, "Version", std::vector<int64_t>{2, 0});
         h5::write_string_scalar_attribute(top, "Type", "PolyData");
-        const uint64_t n_points = layout.n_points();
-        const int64_t n_points_i = static_cast<int64_t>(n_points);
-        if (!changing) {
-            h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points_i, H5P_DEFAULT);
-            h5::write_rows(top, "Points", n_points, 3, 0, n_points, layout.xyz.data(), H5P_DEFAULT);
-        }
-        for (const char * kind : kinds) {
-            h5::Handle group(H5Gcreate2(top, kind, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, kind);
-            if (changing) continue;
-            const std::vector<int64_t> none, zero = {0};
-            const auto & o = kind == mine ? layout.offsets : zero;
-            const auto & c = kind == mine ? layout.connectivity : none;
-            const int64_t counts[2] = {static_cast<int64_t>(o.size() - 1), static_cast<int64_t>(c.size())};
-            h5::write_rows<int64_t>(group, "NumberOfCells", 1, 1, 0, 1, &counts[0], H5P_DEFAULT);
-            h5::write_rows<int64_t>(group, "NumberOfConnectivityIds", 1, 1, 0, 1, &counts[1], H5P_DEFAULT);
-            h5::write_rows(group, "Offsets", o.size(), 1, 0, o.size(), o.data(), H5P_DEFAULT);
-            h5::write_rows(group, "Connectivity", c.size(), 1, 0, c.size(), c.data(), H5P_DEFAULT);
-        }
-        for (const char * group_name : {"CellData", "PointData", "FieldData"}) {
+        for (const char * group_name : {"Vertices", "Lines", "Polygons", "Strips", "CellData", "PointData", "FieldData"}) {
             h5::Handle group(H5Gcreate2(top, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
         }
-        h5::Handle samples(H5Gopen2(top, data.c_str(), H5P_DEFAULT), H5Gclose, "opening " + data);
-        for (const auto & a : fixed) {
-            const uint64_t rows = a.values.size() / static_cast<size_t>(a.components);
-            if (changing) continue;
-            h5::write_rows(samples, a.name.c_str(), rows, a.components, 0, rows, a.values.data(), H5P_DEFAULT);
-            h5::annotate(samples, a.name, geometry_field(a.name, geometry));
+        return created;
+    };
+    const auto same_geometry = [&](const std::string & mesh) {
+        h5::Handle opened(H5Fopen(mesh.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + mesh);
+        h5::Handle top(H5Gopen2(opened, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        h5::Handle group(H5Gopen2(top, mine.c_str(), H5P_DEFAULT), H5Gclose, "opening " + mine);
+        return h5::n_rows(top, "Points") == layout.n_points() &&
+               h5::read_rows<double>(top, "Points", 0, layout.n_points(), 3, H5P_DEFAULT) == layout.xyz &&
+               h5::n_rows(group, "Offsets") == layout.offsets.size() &&
+               h5::read_rows<int64_t>(group, "Offsets", 0, layout.offsets.size(), 1, H5P_DEFAULT) == layout.offsets &&
+               h5::n_rows(group, "Connectivity") == layout.connectivity.size() &&
+               h5::read_rows<int64_t>(group, "Connectivity", 0, layout.connectivity.size(), 1, H5P_DEFAULT) ==
+                   layout.connectivity;
+    };
+    // A boundary snapshot's fixed geometry is in its series' mesh file, written once; one of another geometry is kept,
+    // and the snapshots that differ from it hold their own
+    vtkhdf_mesh_written.clear();
+    std::string link;
+    if (snapshot && !changing) {
+        const std::filesystem::path series_file(file);
+        const std::string mesh = (series_file.parent_path() / (series_file.stem().string() + "_mesh.vtkhdf")).string();
+        if (!vtkhdf_mesh_checked) {
+            vtkhdf_mesh_checked = true;
+            if (std::filesystem::exists(mesh)) {
+                vtkhdf_mesh_linked = same_geometry(mesh);
+            } else {
+                {
+                    h5::Handle created(create(partial_name(mesh)), H5Fclose, "creating " + mesh);
+                    h5::Handle top(H5Gopen2(created, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+                    write_geometry(top, "");
+                }
+                publish_file("the boundary snapshot's mesh file", mesh);
+                vtkhdf_mesh_written = mesh;
+                vtkhdf_mesh_linked = true;
+            }
         }
-        if (!changing) h5::annotate(top, "Points", FieldDescription{dim::length, "sample coordinates", "", ""});
+        if (vtkhdf_mesh_linked) link = std::filesystem::path(mesh).filename().string();
+    }
+    if (k == 0) {
+        h5::Handle created(create(target), H5Fclose, "creating " + target);
+        h5::Handle top(H5Gopen2(created, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        if (!changing) write_geometry(top, link);
         h5::Handle steps(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "Steps");
         for (const char * group_name : {"CellDataOffsets", "PointDataOffsets", "FieldDataOffsets"}) {
             h5::Handle group(H5Gcreate2(steps, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
         }
     }
-    h5::Handle h5file(H5Fopen(file.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + file);
+    h5::Handle h5file(H5Fopen(target.c_str(), H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening " + target);
     if (k > 0 && !vtkhdf_run_written) {
         // A file continued by another run carries that run's block; each step's snapshot block names its run
         h5::Handle root(H5Gopen2(h5file, "/", H5P_DEFAULT), H5Gclose, "opening /");

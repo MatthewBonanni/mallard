@@ -177,12 +177,15 @@ OTHER_GUARDS = [
     ("src/mesh/read_gmsh.cpp", "parametric nodes are not supported"),
     ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
+    ("src/solver/solver.cpp", "is not available yet with chemistry.coupling"),
     ("src/solver/solver.cpp", "is not available for gas mixtures yet"),
     ("src/solver/solver.cpp", "is not available for axisymmetric runs yet"),
     ("src/solver/solver.cpp", "is not available with LES yet"),
     ("src/solver/solver.cpp", "is not available with the hybrid convective flux yet"),
     ("src/solver/solver.cpp", "is not available on curved meshes yet"),
     ("src/solver/solver.cpp", "is not available with rotational periodicity yet"),
+    ("src/solver/solver_mixture.cpp", "with Z varying in time is not supported"),
+    ("src/particles/particles.cpp", "the drag of mixtures is not available yet"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")
 
