@@ -1,0 +1,78 @@
+# Tracer particles in a steady array of vortices (2D build).
+#
+# The low-Mach Taylor-Green cells u = U sin(2 pi x) cos(2 pi y),
+# v = -U cos(2 pi x) sin(2 pi y), with the pressure that balances them, are a
+# steady solution of the Euler equations up to O(M^2) acoustic waves. Each tracer
+# moves along a closed streamline sin(2 pi x) sin(2 pi y) = const, so the
+# streamfunction at its final position (tracers.csv) measures the pathline error.
+# Each tracer also counts its turns about its vortex's center, and a probe follows
+# the tracers near that center.
+[run]
+t_stop = 10.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Lx = 1.0
+Ly = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["0.1 * sin(2 * pi * x) * cos(2 * pi * y)", "-0.1 * cos(2 * pi * x) * sin(2 * pi * y)"]
+p = "1 / 1.4 + 0.01 / 4 * (cos(4 * pi * x) + cos(4 * pi * y))"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "tracer"
+file = "tracers.csv"
+# One more tracer at the center of another vortex, where the flow is at rest
+points = [[0.75, 0.75]]
+capacity = 82
+
+[particles.lattice]
+lo = [0.05, 0.05]
+hi = [0.45, 0.45]
+n = [9, 9]
+
+# Turns of each tracer about the center of its vortex, and its largest speed, in tracers.csv
+[[particles.quantities]]
+name = "turns"
+winding = {point = [0.25, 0.25]}
+
+[[particles.quantities]]
+name = "speed_max"
+max = "hypot(U_X, U_Y)"
+
+# Statistics of the tracers near the vortex's center, every 100 steps
+[[particles.probes]]
+name = "core"
+region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
+fields = ["turns", "hypot(U_X, U_Y)"]
+interval = 100
+
+[output]
+check_interval = 200
