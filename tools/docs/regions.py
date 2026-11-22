@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_rgb
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay
@@ -1279,6 +1280,92 @@ def region_solution(P, args):
     return fig
 
 
+# ------------------------------------------------------ regions from CAD surfaces
+
+def nozzle_profile(n_x=40):
+    """A thick-walled converging-diverging nozzle along x, in mm: x and the inner and outer radii."""
+    x = np.linspace(100.0, 900.0, n_x)
+    s = np.sin(np.pi * (x - 100.0) / 800.0) ** 2
+    return x, 200.0 - 110.0 * s, 290.0 - 50.0 * s
+
+
+def nozzle_surface(n_theta=48):
+    """The nozzle's closed surface about the axis y = 500 mm, z = 0: triangles (n, 3, 3) in mm."""
+    x, r_in, r_out = nozzle_profile()
+    theta = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+
+    def ring(xi, r):
+        return np.column_stack([np.full(n_theta, xi), 500.0 + r * np.cos(theta), r * np.sin(theta)])
+
+    outer = [ring(xi, r) for xi, r in zip(x, r_out)]
+    inner = [ring(xi, r) for xi, r in zip(x, r_in)]
+    tris = []
+    for j in range(n_theta):
+        k = (j + 1) % n_theta
+        for i in range(len(x) - 1):
+            a, b = outer[i], outer[i + 1]
+            tris += [(a[j], b[j], b[k]), (a[j], b[k], a[k])]
+            a, b = inner[i], inner[i + 1]
+            tris += [(a[j], a[k], b[k]), (a[j], b[k], b[j])]
+        for end, sign in ((0, -1), (len(x) - 1, 1)):
+            o, n = outer[end], inner[end]
+            quad = (o[j], o[k], n[k], n[j]) if sign < 0 else (o[j], n[j], n[k], o[k])
+            tris += [(quad[0], quad[1], quad[2]), (quad[0], quad[2], quad[3])]
+    return np.array(tris)
+
+
+def write_stl(path, tris):
+    lines = ["solid nozzle"]
+    for t in tris:
+        lines += ["facet normal 0 0 0", "outer loop"] + [f"vertex {p[0]:.17g} {p[1]:.17g} {p[2]:.17g}" for p in t]
+        lines += ["endloop", "endfacet"]
+    path.write_text("\n".join(lines + ["endsolid nozzle"]) + "\n")
+
+
+CAD_REGION = '{type = "stl", file = "nozzle.stl", units = "mm"}'
+
+
+@functools.cache
+def data_cad_surface(mallard):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=20)
+    tris = nozzle_surface()
+    write_stl(work / "nozzle.stl", tris)
+    return tris, fractions(mallard, mesh.name, CAD_REGION, work, "cad", 2)
+
+
+def cad_surface(P, args):
+    """The nozzle's STL surface cut open at z = 0, and the cell volume fractions of its section in a 2D run."""
+    tris, (pts, cells, f) = data_cad_surface(args.mallard)
+    fig = plt.figure(figsize=(11.0, 4.4))
+    ax = fig.add_axes([0.0, 0.02, 0.5, 0.86], projection="3d", computed_zorder=False)
+    back = tris[(tris[:, :, 2] <= 1e-9).all(axis=1)] / 1000.0
+    normals = np.cross(back[:, 1] - back[:, 0], back[:, 2] - back[:, 0])
+    normals /= np.linalg.norm(normals, axis=1)[:, None]
+    light = np.array([-0.4, 0.5, 0.75]) / np.linalg.norm([-0.4, 0.5, 0.75])
+    shade = 0.35 + 0.65 * np.abs(normals @ light)
+    colors = np.clip(shade[:, None] * np.array(to_rgb(P["teal"]))[None, :], 0, 1)
+    ax.add_collection3d(Poly3DCollection(back[:, :, [0, 2, 1]], facecolors=colors, edgecolors=P["mesh"],
+                                         linewidths=0.15, rasterized=True))
+    ax.set_xlim(0.05, 0.95)
+    ax.set_ylim(-0.35, 0.35)
+    ax.set_zlim(0.15, 0.85)
+    ax.set_box_aspect((0.9, 0.7, 0.7), zoom=1.2)
+    ax.view_init(elev=28, azim=-62)
+    ax.set_axis_off()
+    ax.set_title("nozzle.stl (mm), cut open at z = 0", fontsize=12)
+    ax2 = fig.add_axes([0.53, 0.08, 0.36, 0.8])
+    panel(ax2, P, pts, cells, f, None, "2D run: its section z = 0")
+    x, r_in, r_out = nozzle_profile()
+    for sign in (1, -1):
+        wall = np.vstack([np.column_stack([x, 500.0 + sign * r_out]), np.column_stack([x[::-1], 500.0 + sign * r_in[::-1]])])
+        wall = np.vstack([wall, wall[:1]]) / 1000.0
+        ax2.plot(wall[:, 0], wall[:, 1], color=P["fg"], lw=1.4)
+    colorbar(fig, [ax2], P)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -1289,7 +1376,7 @@ class Args(tuple):
     mallard3d = property(lambda self: self[1])
 
 
-FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
+FIGURES = {"region_cad_surface": cad_surface, "region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
            "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
            "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
            "region_control_surface": region_control_surface, "region_outside": region_outside,

@@ -10,6 +10,7 @@
  */
 
 #include "face_reconstruction.h"
+#include "gated.h"
 
 #include "input.h"
 #include "launch_bounds.h"
@@ -84,7 +85,7 @@ void FaceReconstruction::rotate_periodic_faces(Kokkos::View<rtype **[2][N_CONSER
     const auto face_shift = mesh->face_shift;
     const PeriodicMaps periodic = mesh->periodic_maps();
     const uint32_t n_quad = static_cast<uint32_t>(face_solution.extent(1));
-    Kokkos::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("rotate_periodic_faces", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t f = faces(k);
         for (uint32_t q = 0; q < n_quad; q++) {
             rtype u[N_DIM];
@@ -146,11 +147,11 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
     const auto faces = image_point_faces;
     const auto cells = image_point_cells;
     const auto W = image_point_W;
-    Kokkos::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+    gated::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE W(p, i) = solution(cells(p / n_quad), i);
     });
     point_values(solution, cells, image_point_offsets, W);
-    Kokkos::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
+    gated::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE face_solution(faces(p / n_quad), p % n_quad, 1, i) = W(p, i);
     });
 }
@@ -291,18 +292,20 @@ void FaceReconstruction::init_face_quadrature_3d(uint8_t degree) {
     Kokkos::deep_copy(face_rule, h_rule);
     const uint32_t n_state = mesh->n_state_faces();
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_state, n_max, N_DIM);
-    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_state, n_max);
     auto h_points = Kokkos::create_mirror_view(face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
     for (uint32_t f = 0; f < n_state; f++) {
         for (size_t q = 0; q < n_max; q++) {
             const size_t qq = offsets[f] + std::min(q, n_points(f) - 1);
             FOR_I_DIM h_points(f, q, i) = static_cast<rtype>(points[qq][i]);
-            h_weights(f, q) = static_cast<rtype>((q < n_points(f)) ? weights[offsets[f] + q] : 0.0);
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
-    Kokkos::deep_copy(face_quad_weights, h_weights);
+    face_quad_weights = share_face_weights(
+        "face_quad_weights", n_state, static_cast<uint32_t>(n_max),
+        [&](const uint32_t f, rtype * w_f) {
+            for (size_t q = 0; q < n_max; q++) w_f[q] = static_cast<rtype>((q < n_points(f)) ? weights[offsets[f] + q] : 0.0);
+        },
+        share_weights);
     if (geometry) {
         face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_state, n_max, N_DIM);
         auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
@@ -389,10 +392,9 @@ void FaceReconstruction::init_face_quadrature_2d_curved() {
         ref_w[q] = double(quadrature_face.h_weights(q));
     }
     face_quad_points = Kokkos::View<rtype ***>("face_quad_points", n_faces, n_q, N_DIM);
-    face_quad_weights = Kokkos::View<rtype **>("face_quad_weights", n_faces, n_q);
     face_quad_normals = Kokkos::View<rtype ***>("face_quad_normals", n_faces, n_q, N_DIM);
     auto h_points = Kokkos::create_mirror_view(face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view(face_quad_weights);
+    Kokkos::View<rtype **, Kokkos::HostSpace> h_weights("face_quad_weights_host", n_faces, n_q);
     auto h_normals = Kokkos::create_mirror_view(face_quad_normals);
     std::vector<curved::Vec3> x, n;
     std::vector<double> w;
@@ -420,7 +422,11 @@ void FaceReconstruction::init_face_quadrature_2d_curved() {
         }
     }
     Kokkos::deep_copy(face_quad_points, h_points);
-    Kokkos::deep_copy(face_quad_weights, h_weights);
+    face_quad_weights = share_face_weights(
+        "face_quad_weights", n_faces, n_q, [&](const uint32_t f, rtype * w_f) {
+            for (uint32_t q = 0; q < n_q; q++) w_f[q] = h_weights(f, q);
+        },
+        share_weights);
     Kokkos::deep_copy(face_quad_normals, h_normals);
 }
 
@@ -482,7 +488,7 @@ struct FirstOrderFunctor {
 void FirstOrder::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) {
     FirstOrderFunctor recon_functor(mesh->cells_of_face, face_solution, solution);
-    Kokkos::parallel_for(mesh->n_state_faces(), recon_functor);
+    gated::parallel_for(mesh->n_state_faces(), recon_functor);
 }
 
 MUSCL::MUSCL() {
@@ -889,8 +895,8 @@ void MUSCL::calc_cell_face_values(const Kokkos::DefaultExecutionSpace & exec,
                                               mesh->periodic_maps(), mesh->face_shift, solution, gradients, limiters,
                                               face_solution, tables},
                              cells};
-    Kokkos::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, cells.size()),
-                         functor);
+    gated::parallel_for("muscl_cells", Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, HeavyBounds>(exec, 0, cells.size()),
+                        functor);
 }
 
 void MUSCL::finish_cell_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]>, Kokkos::View<rtype **[2][N_CONSERVATIVE]>) {}
@@ -902,10 +908,10 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
         return;
     }
     gradient.faces = make_gradient(*mesh, boundaries, solution, gradients);
-    Kokkos::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient, tables});
+    gated::parallel_for("lsq_gradient", HeavyRange<>(0, mesh->n_cells), MUSCLGradientFunctor{gradient, tables});
 
     LimiterFunctor limiter_functor{gradient.faces, mesh->cell_volume, limiters, limiter, venkat_K, tables};
-    Kokkos::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
+    gated::parallel_for("limiter", HeavyRange<>(0, mesh->n_cells), limiter_functor);
 
     MUSCLFaceFunctor face_functor{mesh->cells_of_face,
                                   mesh->cell_coords,
@@ -917,7 +923,7 @@ void MUSCL::calc_face_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                   limiters,
                                   face_solution,
                                   tables};
-    Kokkos::parallel_for("muscl_faces", mesh->n_state_faces(), face_functor);
+    gated::parallel_for("muscl_faces", mesh->n_state_faces(), face_functor);
 }
 
 namespace {
@@ -947,7 +953,7 @@ void MUSCL::find_tables() {
     // layers, which no kernel reads, take no part, so a row's lowest global id is always a cell that some rank owns
     const uint32_t n_candidate_range = std::min(mesh->n_reconstructed(), mesh->n_complete());
     Kokkos::View<uint8_t *> d_has("muscl_table_has", mesh->n_cells);
-    Kokkos::parallel_for("muscl_table_candidates", n_candidate_range, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("muscl_table_candidates", n_candidate_range, KOKKOS_LAMBDA(const uint32_t c) {
         const uint32_t k0 = g.offsets_faces_of_cell(c), k1 = g.offsets_faces_of_cell(c + 1);
         bool has = !(N_DIM == 3 && k1 - k0 == 4);
         for (uint32_t k = k0; k < k1; k++) {
@@ -970,7 +976,7 @@ void MUSCL::find_tables() {
         Kokkos::View<uint32_t *> d_cells("muscl_table_cells", m);
         Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(cells.data(), m));
         const LimiterFunctor l{g, mesh->cell_volume, limiters, limiter, venkat_K, {}};
-        Kokkos::parallel_for("muscl_tables", m, KOKKOS_LAMBDA(const uint32_t t) {
+        gated::parallel_for("muscl_tables", m, KOKKOS_LAMBDA(const uint32_t t) {
             const uint32_t c = d_cells(t);
             g.weights(c, w);
             for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
@@ -994,8 +1000,8 @@ void MUSCL::find_tables() {
     constexpr int grid_bits = std::is_same_v<rtype, double> ? teno::SHARE_GRID_BITS : 18;
     std::vector<teno::CanonicalTable> cw(m), cr(m);
     std::vector<uint64_t> gid(m);
-    Kokkos::parallel_for("muscl_table_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, m),
-                         [&](const uint32_t i) {
+    gated::parallel_for("muscl_table_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, m),
+                        [&](const uint32_t i) {
         const uint32_t c = cells[i];
         const std::vector<uint16_t> segments(k_of(c + 1) - k_of(c), 1);
         cw[i] = teno::CanonicalTable(wv.data() + size_t(k_of(c)) * N_DIM, N_DIM, segments, grid_bits);

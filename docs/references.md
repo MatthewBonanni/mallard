@@ -68,6 +68,8 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 - <a id="diskin-2010"></a>B. Diskin, J. L. Thomas, E. J. Nielsen, H. Nishikawa and J. A. White, Comparison of node-centered and cell-centered unstructured finite-volume discretizations: viscous fluxes, *AIAA J.* 48, 1326–1338 (2010). [doi:10.2514/1.44940](https://doi.org/10.2514/1.44940)
   Used in: the viscous face gradients, the average of the two cell gradients corrected along the face normal so that their component along the line of centroids equals the direct difference (`src/numerics/viscous_flux.h`).
+- <a id="nishikawa-2010"></a>H. Nishikawa, Beyond interface gradient: a general principle for constructing diffusion schemes, AIAA Paper 2010-5093 (2010). [doi:10.2514/6.2010-5093](https://doi.org/10.2514/6.2010-5093)
+  Used in: the damping of the jump of the two polynomials' values in the face gradients of `[numerics] viscous_gradients = "reconstruction"` (`src/numerics/viscous_flux.h`).
 - <a id="sutherland-1893"></a>W. Sutherland, The viscosity of gases and molecular force, *Phil. Mag.* (5) 36, 507–531 (1893). [doi:10.1080/14786449308620508](https://doi.org/10.1080/14786449308620508)
   Used in: `viscosity_model = "sutherland"`.
 - <a id="wilke-1950"></a>C. R. Wilke, A viscosity equation for gas mixtures, *J. Chem. Phys.* 18, 517–519 (1950). [doi:10.1063/1.1747673](https://doi.org/10.1063/1.1747673)
@@ -137,6 +139,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the shock sensor of the hybrid flux.
 - <a id="bhagatwala-lele-2009"></a>A. Bhagatwala and S. K. Lele, A modified artificial viscosity approach for compressible turbulence simulations, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
   Used in: restricting the Ducros sensor to compressions, so expansions and flames keep the central flux.
+- <a id="hendrickson-2018"></a>T. R. Hendrickson, A. Kartha and G. V. Candler, An improved Ducros sensor for the simulation of compressible flows with shocks, AIAA Paper 2018-3710 (2018). [doi:10.2514/6.2018-3710](https://doi.org/10.2514/6.2018-3710)
+  Used in: `[numerics.hybrid] dilatation_scale`, the Ducros sensor's `eps`, which discounts small dilatations.
 - <a id="colin-2000"></a>O. Colin, F. Ducros, D. Veynante and T. Poinsot, A thickened flame model for large eddy simulations of turbulent premixed combustion, *Phys. Fluids* 12, 1843–1863 (2000). [doi:10.1063/1.870436](https://doi.org/10.1063/1.870436)
   Used in: `[les.combustion] model = "tfles"`, and its subgrid velocity `2 Delta^3 |lap(curl u)|`.
 - <a id="charlette-2002"></a>F. Charlette, C. Meneveau and D. Veynante, A power-law flame wrinkling model for LES of premixed turbulent combustion. Part I: non-dynamic formulation and initial tests, *Combust. Flame* 131, 159–180 (2002). [doi:10.1016/S0010-2180(02)00400-5](https://doi.org/10.1016/S0010-2180%2802%2900400-5)
@@ -267,6 +271,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: collapsed (conical product) Gauss rules on triangles and tetrahedra, for TENO-E moments and 3D analytical initial conditions (`src/numerics/teno.cpp`, `src/solver/solver_initialize.cpp`). Gauss–Legendre rules integrate the faces.
 - <a id="kuhn-1960"></a>H. W. Kuhn, Some combinatorial lemmas in topology, *IBM J. Res. Dev.* 4, 518–524 (1960). [doi:10.1147/rd.45.0518](https://doi.org/10.1147/rd.45.0518)
   Used in: `type = "cartesian_tet"`, six tetrahedra per block of a generated box.
+- <a id="baerentzen-aanaes-2005"></a>J. A. Bærentzen and H. Aanæs, Signed distance computation using the angle weighted pseudonormal, *IEEE Trans. Vis. Comput. Graph.* 11, 243–253 (2005). [doi:10.1109/TVCG.2005.49](https://doi.org/10.1109/TVCG.2005.49)
+  Used in: the sign of the distance to the closed surfaces of regions from STL and OBJ files (`src/common/geometry.h`).
+- <a id="ericson-2005"></a>C. Ericson, *Real-Time Collision Detection*, Morgan Kaufmann (2005).
+  Used in: the closest point on a triangle (§5.1.5) and the bounding volume hierarchy of regions from STL and OBJ files.
 
 ## Parallelism, meshes and software
 
@@ -317,6 +325,19 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in (these two): the optically thin radiation model of the TNF workshop, `[radiation]` (the Planck-mean absorption coefficients of H2O, CO2, CO and CH4 fitted to RADCAL; `src/chemistry/radiation.h`).
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
+
+## Lagrangian particles
+
+- <a id="schiller-naumann-1933"></a>L. Schiller and A. Naumann, Über die grundlegenden Berechnungen bei der Schwerkraftaufbereitung, *Z. Ver. Dtsch. Ing.* 77, 318–320 (1933).
+  Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`).
+- <a id="singh-2022"></a>N. Singh, M. Kroells, C. Li, E. Ching, M. Ihme, C. J. Hogan and T. E. Schwartzentruber, General drag coefficient for flow over spherical particles, *AIAA J.* 60, 587–597 (2022). [doi:10.2514/1.J060648](https://doi.org/10.2514/1.J060648), [arXiv:2012.04813](https://arxiv.org/abs/2012.04813)
+  Used in: `drag = "singh"` of solid particles (`src/particles/particle_forces.h`, Appendix C).
+- <a id="maxey-riley-1983"></a>M. R. Maxey and J. J. Riley, Equation of motion for a small rigid sphere in a nonuniform flow, *Phys. Fluids* 26, 883–889 (1983). [doi:10.1063/1.864230](https://doi.org/10.1063/1.864230)
+  Used in: the `"pressure_gradient"` and `"added_mass"` forces of solid particles.
+- <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
+  Used in: the `"saffman_lift"` force of solid particles.
+- <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
+  Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
 
 ## Derived output fields
 

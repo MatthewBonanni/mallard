@@ -24,6 +24,7 @@
 #include "common_typedef.h"
 #include "index_set.h"
 #include "mesh.h"
+#include "face_weights.h"
 #include "quadrature.h"
 #include "boundary.h"
 #include "gradient.h"
@@ -330,11 +331,12 @@ class FaceReconstruction {
         // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
         // (twice the area over face_area on curved faces) and are zero on padding points
         Kokkos::View<rtype ***> face_quad_points;
-        Kokkos::View<rtype **> face_quad_weights;
+        FaceWeights<> face_quad_weights;
         Kokkos::View<rtype ***> face_quad_normals;  // curved meshes: (face, q, dim) unit normals out of cell 0
         // 3D: reference coordinates of point q on planar faces, (s, t) on quadrilaterals and (a, b) on triangles,
         // from which planar_face_point places it
         Kokkos::View<rtype *[4]> face_rule;
+        bool share_weights = true;  // false keeps a row of face_quad_weights per face (tests)
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;
@@ -563,6 +565,9 @@ class TENO : public FaceReconstruction {
         // cells of a cell shape one row of basis_mean and si_matrix or moments
         // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // This rank's cells whose tables the last full setup fitted; with shared tables the
+        // others take those of their stencil shape's cell with the lowest global id
+        uint32_t n_cells_fitted = 0;
         // false: the central stencils alone, which cell_gradients and point_values read, and no
         // face values (output of states read from files); such tables are never written to the cache
         bool sector_stencils = true;
@@ -600,6 +605,11 @@ class TENO : public FaceReconstruction {
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
+        // When allocated (cell / 2, l, cell % 2, var), the reconstruction also writes there the central
+        // coefficients of the conservative variables of the cells it finds smooth, in the unscaled frame
+        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones and for those
+        // whose face values fall back to the cell mean (inadmissible at a face point)
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
 
         // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
@@ -625,7 +635,7 @@ class TENO : public FaceReconstruction {
         // Queued cells per round of the troubled passes, as a fraction of the
         // reconstructed cells (scratch slots); later rounds recompute the
         // central coefficients the smooth pass could not keep
-        rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
+        rtype troubled_capacity = N_DIM == 3 ? 0.25 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each table row's stencil search visited (host);
@@ -709,9 +719,11 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
-        // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        // Setup: on the host only (tests), the cells per device batch (0: from the device memory), and
+        // cells refitted after taking their stencil shape's tables (tests)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
+        std::vector<uint32_t> setup_refit_cells;
 
         // Gas mixtures: the flow block is reconstructed in primitive variables
         // W with characteristic projections on the primitive system, whose

@@ -79,7 +79,7 @@
 # D_TF and the mixture fraction come from N2 (inert, Lewis number near 1).
 #
 # 1D checks (planar flame at Z_st, tools/setup/flame_restart.py from the
-# converged flame and tools/post/flame_speed.py, 3 flame times): consumption
+# converged flame and mallard post flame, 3 flame times): consumption
 # speed against Cantera's -0.15%, -0.05% and -0.02% at 24, 32 and 48 cells
 # per delta_L, converging to it. At this input's 12 cells the speed settles
 # only after about 8 flame times, at -0.85% (after 3 flame times it is

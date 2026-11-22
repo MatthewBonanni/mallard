@@ -77,6 +77,14 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, TENOPlacesPlanarFacePointsAlikeWithAndWithoutStepGraphs) {
+    // The kernels place the quadrature points of planar faces from the faces'
+    // nodes, in the step graph too: smooth and troubled cells, triangles and
+    // quadrilaterals, the troubled cells over several rounds
+    expect_matches_serial_with_and_without_step_graphs(
+        blast_input("cartesian_mixed", "type = \"TENO\"\norder = 5\ntroubled_capacity = 0.05\n"));
+}
+
 TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
     // With owner-computes partition faces no halo cell is reconstructed, and every
     // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
@@ -326,6 +334,24 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
                  (d == 2 ? "1.0" : "0.0") + "]\n";
     }
     expect_matches_serial(input + "[parallel]\npartitioner = \"hilbert\"\n");
+    comm::barrier();
+}
+
+TEST(MPI3DTest, StencilShapeKeysAcrossRanksTakeTheTablesOfTheirLowestGlobalId) {
+    // Tetrahedra periodic along x, numbered along a Hilbert curve: keys whose tables are equal on the
+    // comparison grid share the table of the cell with the lowest global id, which is seldom the first
+    // cell of its key in a rank's batch
+    std::string input = blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n");
+    for (const std::string zone : {"left", "right"}) {
+        const std::string bc = "[[boundaries]]\nname = \"" + zone + "\"\n";
+        const size_t at = input.find(bc);
+        input.erase(at, input.find("[", at + bc.size()) - at);
+    }
+    const std::string box = "Lz = 1.0\n";
+    input.insert(input.find(box) + box.size(), "cell_order = \"hilbert\"\n");
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+             "[parallel]\npartitioner = \"hilbert\"\n";
+    expect_matches_serial(input);
     comm::barrier();
 }
 
