@@ -1,0 +1,98 @@
+# Solid particles in the Karman vortex street behind a cylinder at Re = 100
+# (2D build): the flow of flow.toml, from its developed shedding at t = 100,
+# with 134,000 particles seeded upstream of the cylinder in a band 7
+# diameters wide. Their Stokes number St = tau U / D (tau = rho_p d^2 /
+# (18 mu), D = 1, U = 0.2) sets what the street does to them: tracers wrap
+# into its vortices, particles of St near 1 are flung out of the vortex
+# cores and gather on the braids between them (preferential concentration),
+# and heavy particles cross the street almost unaffected, rebounding off the
+# cylinder and leaving a shadow behind it. This input has St = 1;
+# run_particle_wake.py runs it at St = 0 (tracers), 0.25, 1 and 4.
+
+[run]
+t_stop = 210.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+# The developed street of flow.toml at t = 100 (run_particle_wake.py passes
+# its restart file with --restart)
+type = "restart"
+file = "flow.restart"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[particles]
+type = "solid"
+file = "particles.csv"
+# St = 1: tau = 5, d = sqrt(18 mu tau / rho_p)
+density = 2000.0
+diameter = 9.486832980505138e-3
+
+[particles.lattice]
+lo = [-24.0, -3.5]
+hi = [-0.6, 3.5]
+n = [670, 200]
+
+# Particle Reynolds number and slip, along each path
+[[particles.quantities]]
+name = "Re_p_max"
+max = "hypot(U_X - V_X, U_Y - V_Y) * RHO * 9.486832980505138e-3 / 0.002"
+
+# Particles in the near wake, every 200 steps
+[[particles.probes]]
+name = "near_wake"
+region = {type = "rectangle", center = [5.0, 0.0], size = [9.0, 4.0]}
+fields = ["hypot(V_X - U_X, V_Y - U_Y)"]
+interval = 200
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "cylinder"
+interval = 20
+file = "./solut/forces_cylinder.csv"
+
+# The frames of the animation: restart files carry the particles
+[[write_data]]
+prefix = "./frames/frame"
+format = "restart"
+time_interval = 0.5
+
+[[write_data]]
+prefix = "./frames/wake"
+format = "vtu"
+region = {type = "rectangle", center = [6.0, 0.0], size = [18.0, 8.0]}
+time_interval = 0.5
+fields = ["VORTICITY"]
