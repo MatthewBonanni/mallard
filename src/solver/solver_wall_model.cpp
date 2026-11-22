@@ -9,6 +9,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 
@@ -33,5 +34,5 @@ void Solver::init_wall_model(const std::vector<int32_t> & face_bc, const std::ve
 void Solver::update_wall_model() {
     const WallModelFunctor functor{wall_model,      mesh->face_normals, mesh->face_area, W_cells,
                                    viscous_gradients, boundary_data,    wall_model::Gas{physics}};
-    Kokkos::parallel_for("wall_model", wall_model.faces.extent(0), functor);
+    gated::parallel_for("wall_model", wall_model.faces.extent(0), functor);
 }

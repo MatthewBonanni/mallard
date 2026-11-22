@@ -18,6 +18,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common_typedef.h"
+#include "gated.h"
 
 /** @brief Flow block [rho, rho u, rho E] per cell. */
 using StateView = Kokkos::View<rtype *[N_CONSERVATIVE]>;
@@ -80,12 +81,12 @@ inline void deep_copy(const State & dst, const State & src) {
     if (src.particles.span() > 0 && dst.particles.span() > 0) Kokkos::deep_copy(dst.particles, src.particles);
 }
 
-/** @brief deep_copy(dst, src), ordered on exec without a fence. */
+/** @brief Copy every block of src into dst, ordered on exec without a fence (gated.h kernels). */
 template <typename ExecSpace>
 inline void deep_copy(const ExecSpace & exec, const State & dst, const State & src) {
-    Kokkos::deep_copy(exec, dst.flow, src.flow);
-    if (src.species.span() > 0) Kokkos::deep_copy(exec, dst.species, src.species);
-    if (src.particles.span() > 0 && dst.particles.span() > 0) Kokkos::deep_copy(exec, dst.particles, src.particles);
+    gated::copy(exec, dst.flow, src.flow);
+    if (src.species.span() > 0) gated::copy(exec, dst.species, src.species);
+    if (src.particles.span() > 0 && dst.particles.span() > 0) gated::copy(exec, dst.particles, src.particles);
 }
 
 #endif // STATE_H

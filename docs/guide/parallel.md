@@ -83,8 +83,8 @@ What each GPU backend does with the steps (the run log's `CUDA graphs` and `Step
 
 | Build | Each step | Steps enqueued ahead of the host | Sort of the chemistry queue by cost |
 |---|---|---|---|
-| CUDA 12.4 or later, one rank or NCCL's halo exchange | One CUDA graph, its device decisions in conditional nodes | Up to `step_queue` | CUB's stable radix sort, into scratch sized beforehand, in the graph |
-| CUDA before 12.4, `cuda_graphs = false`, MPI's halo exchange, or NCCL failing under a conditional node | Kernel by kernel; the host reads each decision of the device | One | The same sort, kernel by kernel |
+| CUDA 12.4 or later, one rank or NCCL's halo exchange | One CUDA graph, its device decisions in conditional nodes (where NCCL communicates over a network, in bodies every launch runs, each gated by its decision) | Up to `step_queue` | CUB's stable radix sort, into scratch sized beforehand, in the graph |
+| CUDA before 12.4, `cuda_graphs = false`, or MPI's halo exchange | Kernel by kernel; the host reads each decision of the device | One | The same sort, kernel by kernel |
 | HIP | Kernel by kernel; the host reads each decision of the device. HIP's graphs (ROCm 10.1) capture streams but have no conditional nodes | One | hipCUB's stable radix sort, into scratch sized beforehand, as in CUDA |
 | SYCL | Kernel by kernel; the host reads each decision of the device. SYCL's graphs (`sycl_ext_oneapi_graph`, oneAPI 2026.2) record queues but have no conditional nodes | One | Kokkos' `sort_by_key` |
 
