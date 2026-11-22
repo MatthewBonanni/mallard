@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -74,12 +75,21 @@ RestartData last_restart(const std::string & dir) {
     return read_restart(newest);
 }
 
-/** @brief The run of `mallard -i file` (run_main.cpp): Solver::init of the file, then run(). */
+/**
+ * @brief The run of `mallard -i file` (run_main.cpp): Solver::init of the file, then run(). Its monitored values
+ *        as rank 0 has them, which alone has the probes' in a distributed run.
+ */
 std::vector<double> executable_run(const std::string & file) {
     ::Solver solver;
     solver.init(file);
     EXPECT_EQ(solver.run(), 0);
-    return solver.monitored_values();
+    const std::vector<double> values = solver.monitored_values();
+    std::string bytes(values.size() * sizeof(double), '\0');
+    std::memcpy(bytes.data(), values.data(), bytes.size());
+    bytes = comm::broadcast(bytes);
+    std::vector<double> root(bytes.size() / sizeof(double));
+    std::memcpy(root.data(), bytes.data(), bytes.size());
+    return root;
 }
 
 /** @brief The record of this type in dir's run log. */
