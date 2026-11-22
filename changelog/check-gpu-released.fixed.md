@@ -1,0 +1,1 @@
+- `mallard check --memory <GPU>` in a CPU build no longer counts the mesh's node coordinates and node lists in the steady state: GPU runs free them after setup, CPU builds keep them as the host copies. Its cells per GPU were up to about 2% low (120 B per hexahedron); the GPU sizing lists what it left out (#978).

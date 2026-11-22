@@ -368,6 +368,27 @@ TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
     EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
 }
 
+TEST(CheckSizing, AGpuSizedFromAHostBuildLeavesOutWhatGpusFreeAfterSetup) {
+    // The mesh's node lists: GPU runs free them after setup, a host build's device views are the host copies
+    CheckOptions options;
+    ASSERT_EQ(set_memory_target("a100-80", options), "");
+    CheckReport r = check(sized_box(64, 32, false), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    const uint64_t released = r.released_on_devices[size_t(memory::Category::MESH)];
+    if (r.device_memory) {
+        EXPECT_EQ(sum(r.released_on_devices), 0u);
+        return;
+    }
+    EXPECT_GT(released, 0u);
+    EXPECT_EQ(sum(r.released_on_devices), released);
+    EXPECT_LT(released, r.steady_bytes[size_t(memory::Category::MESH)]);
+    r.setup_phases.clear();
+    CheckReport kept = r;
+    kept.released_on_devices.fill(0);
+    const double n = 1e6;
+    EXPECT_NEAR(predicted_peak(kept, n) - predicted_peak(r, n), double(released) / double(r.local_cells) * n, 1.0);
+}
+
 TEST(CheckSizing, CellsPerRankStayWithinTheEntriesOfAView) {
     // With a terabyte per rank, a View of rank 2 or more runs out of entries before the memory does
     CheckOptions options;
@@ -1289,6 +1310,8 @@ CheckReport report_case() {
     r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
     r.setup_bytes[size_t(memory::Category::MESH)] = r.steady_bytes[size_t(memory::Category::MESH)] = 42'900;
     r.setup_bytes[size_t(memory::Category::SETUP)] = 58'100;
+    r.released_on_devices.fill(0);
+    r.released_on_devices[size_t(memory::Category::MESH)] = 4'200;
     r.bytes = r.target_bytes = 70'000;
     r.bytes_peak = r.target_bytes_peak = 128'100;
     return r;
