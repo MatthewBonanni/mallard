@@ -17,6 +17,7 @@
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "gated.h"
 #include "input.h"
 #include "log.h"
 #include "mixture_viscous_flux.h"
@@ -168,22 +169,22 @@ struct InitialVarianceFunctor {
 void Solver::update_flamelet_variance(const State & s) {
     if (!flamelet_variance.is_allocated()) return;
     if (mixture.flamelet.second_moment) {
-        Kokkos::parallel_for("flamelet_variance", mesh->n_cells,
+        gated::parallel_for("flamelet_variance", mesh->n_cells,
                              SecondMomentVarianceFunctor{s.flow, s.species, flamelet_variance});
         return;
     }
     // Owned cells have complete stencils; halo cells take their owners' variances
     const uint32_t n_owned = mesh->n_owned();
-    Kokkos::parallel_for("flamelet_variance", halo.active() ? n_owned : mesh->n_cells,
+    gated::parallel_for("flamelet_variance", halo.active() ? n_owned : mesh->n_cells,
                          AlgebraicVarianceFunctor{viscous_gradient, s.flow, s.species, bc_transport_values, les_width,
                                                   mixture_model->flamelet().variance_constant(), flamelet_variance});
     if (!halo.active()) return;
     const SpeciesView packed = flamelet_halo.species;
     const Kokkos::View<rtype *> variance = flamelet_variance;
-    Kokkos::parallel_for(
+    gated::parallel_for(
         "flamelet_variance_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) { packed(c, 0) = variance(c); });
     halo.exchange(flamelet_halo);
-    Kokkos::parallel_for("flamelet_variance_unpack", Kokkos::RangePolicy<>(n_owned, mesh->n_cells),
+    gated::parallel_for("flamelet_variance_unpack", Kokkos::RangePolicy<>(n_owned, mesh->n_cells),
                          KOKKOS_LAMBDA(const uint32_t c) { variance(c) = packed(c, 0); });
 }
 
@@ -193,7 +194,7 @@ void Solver::apply_initial_variance() {
         // Zero variance, as at inlets: the cell averages of Z^2 would hold the profile's variance within each cell
         const SpeciesView rhoY = species;
         const StateView U = conservatives;
-        Kokkos::parallel_for(
+        gated::parallel_for(
             "flamelet_initial_second_moment", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
                 using G = flamelet::Gas<>;
                 rhoY(c, G::Z2) = rhoY(c, G::Z) * rhoY(c, G::Z) / U(c, 0);
@@ -201,7 +202,7 @@ void Solver::apply_initial_variance() {
         return;
     }
     update_flamelet_variance(state());
-    Kokkos::parallel_for("flamelet_initial_variance", mesh->n_cells,
+    gated::parallel_for("flamelet_initial_variance", mesh->n_cells,
                          InitialVarianceFunctor{mixture, conservatives, species});
 }
 
@@ -232,10 +233,10 @@ void Solver::check_flamelet_input() const {
 }
 
 void Solver::add_progress_source(SpeciesView rhs) {
-    Kokkos::parallel_for("progress_source", mesh->n_owned(),
+    gated::parallel_for("progress_source", mesh->n_owned(),
                          ProgressSourceFunctor{mixture.flamelet, W_cells, cell_scalars, rhs});
     if (mixture.flamelet.second_moment) {
-        Kokkos::parallel_for("second_moment_sink", mesh->n_owned(),
+        gated::parallel_for("second_moment_sink", mesh->n_owned(),
                              SecondMomentSinkFunctor{mixture.flamelet, cell_transport, les_coefficients,
                                                      transport_gradients, les_width,
                                                      mixture_model->flamelet().dissipation_constant(), rhs});
@@ -246,7 +247,7 @@ void Solver::check_table_pressure() const {
     const double p_table = mixture_model->flamelet().table().pressure();
     const auto P = primitives;
     double lo = 0.0, hi = 0.0;
-    Kokkos::parallel_reduce(
+    gated::parallel_reduce(
         "table_pressure", mesh->n_owned(),
         KOKKOS_LAMBDA(const uint32_t c, double & l, double & h) {
             const double p = static_cast<double>(P(c, N_DIM));

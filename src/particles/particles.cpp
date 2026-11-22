@@ -23,6 +23,7 @@
 #include "comm.h"
 #include "distribution.h"
 #include "face_reconstruction.h"
+#include "gated.h"
 #include "log.h"
 #include "mesh.h"
 #include "provenance.h"
@@ -433,7 +434,7 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
     const auto xs = x_stage;
     const uint32_t w = width;
     const auto cell_coords = mesh->cell_coords;
-    Kokkos::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) {
             pc(s) = 0;
             FOR_I_DIM off(s, i) = 0.0_r;
@@ -445,14 +446,14 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
         Kokkos::atomic_store(&mark(c), 1u);
     });
     const LSQVertexGradientFunctor grad = gradient;
-    Kokkos::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         if (mark(c) == 0) return;
         mark(c) = 0;
         grad(c);
     });
     const LinearW linear{W, gradients};
     const auto Wp = W_point;
-    Kokkos::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype r[N_DIM], out[N_CONSERVATIVE];
         FOR_I_DIM r[i] = off(s, i);
         linear(pc(s), r, out);
@@ -483,7 +484,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const auto pc = point_cell;
     const auto start = step_start;
     const uint32_t n_start = is_solid ? solid.n_start() : 0;
-    Kokkos::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype * rate = dxdt.data() + size_t(w) * s;
         if (ids(s) == EMPTY) {
             for (uint32_t k = 0; k < w; k++) rate[k] = 0.0_r;
@@ -532,7 +533,7 @@ void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReco
     const auto Wp = W_point;
     const uint32_t w = width;
     const rtype gas_R = static_cast<rtype>(R);
-    Kokkos::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         if (velocity) FOR_I_DIM values(w * s + N_DIM + i) = Wp(s, 1 + i);
         if (temperature) values(w * s + 2 * N_DIM) = Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R);
@@ -632,7 +633,7 @@ void Particles::write_probes(const uint64_t step, const double t) {
         throw InputError("particles.probes: at most " + std::to_string(particles::MAX_REGIONS) + " probes have regions.");
     }
     for (uint32_t r = 0; r < n_regions; r++) regions[r] = probes.regions()[r];
-    Kokkos::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
         if (ids(s) == EMPTY) {
             for (uint32_t j = 0; j < n; j++) fields(s, j) = nan;
@@ -666,7 +667,7 @@ void Particles::relocate() {
     const bool inertia = is_solid;
     const auto e = restitution;
     const auto step = step_start;
-    Kokkos::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
         // The velocity, then the gas velocity and acceleration of the step's start, which turn with it
@@ -719,14 +720,14 @@ void Particles::migrate() {
     // Slots of the particles that left the owned cells, in slot order
     const auto slot = slots;
     uint32_t n_out = 0;
-    Kokkos::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool out = ids(s) != EMPTY && start(s) >= owned;
         if (last && out) slot(k) = s;
         k += out ? 1u : 0u;
     }, n_out);
     const size_t WIDTH = 2 + persistent();  // id, cell, bits of the block values and aux
     Kokkos::View<uint64_t **, Kokkos::LayoutRight> packed("particle_packed", n_out, WIDTH);
-    Kokkos::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         packed(k, 0) = ids(s);
         packed(k, 1) = start(s);
@@ -769,7 +770,7 @@ void Particles::migrate() {
 
     // Into the free slots, in slot order
     uint32_t n_free = 0;
-    Kokkos::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool free = ids(s) == EMPTY;
         if (last && free) slot(k) = s;
         k += free ? 1u : 0u;
@@ -787,7 +788,7 @@ void Particles::migrate() {
         }
         Kokkos::deep_copy(incoming, h_in);
     }
-    Kokkos::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         ids(s) = incoming(k, 0);
         start(s) = static_cast<uint32_t>(incoming(k, 1));
@@ -796,14 +797,14 @@ void Particles::migrate() {
     });
     if (lost > 0) {
         const auto removed = n_removed;
-        Kokkos::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
+        gated::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
     }
 }
 
 uint64_t Particles::count() const {
     const auto ids = id;
     uint64_t n = 0;
-    Kokkos::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
+    gated::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
         s += ids(i) != EMPTY ? 1u : 0u;
     }, n);
     return distributed ? comm::allreduce(n, comm::Op::SUM) : n;

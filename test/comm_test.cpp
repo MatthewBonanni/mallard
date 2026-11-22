@@ -15,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -227,3 +228,20 @@ TEST(CommTest, FileWritesGoInPieces) {
     }
 }
 #endif
+
+TEST(CommTest, SharedDirectoriesAreRemovedOrFailAlikeOnEveryRank) {
+    const std::filesystem::path dir = scratch_dir() / "shared";
+    if (comm::is_root()) {
+        std::filesystem::create_directories(dir / "sub");
+        std::ofstream(dir / "sub" / "file") << "x";
+    }
+    EXPECT_EQ(remove_shared_directory(dir), "");
+    if (comm::is_root()) {
+        EXPECT_FALSE(std::filesystem::exists(dir));
+    }
+    // A name no file system takes: rank 0's failure reaches every rank, and nothing throws
+    std::string failure;
+    EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(300, 'x')));
+    EXPECT_NE(failure, "");
+    EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
+}

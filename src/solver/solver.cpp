@@ -12,6 +12,7 @@
 #include "solver.h"
 #include "boundary_coordinates.h"
 #include "boundary_profiles.h"
+#include "gated.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -1447,7 +1448,7 @@ void Solver::init_sources(region::Regions & regions) {
 void Solver::init_mass_flow_volume() {
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
     const Kokkos::View<rtype *> vol = mesh->cell_volume;
-    Kokkos::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
         terms(i_cell, 0) = static_cast<double>(vol(i_cell));
         terms(i_cell, 1) = 0.0;
     });
@@ -1460,7 +1461,7 @@ void Solver::sum_mass_flow_terms() {
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     for (int k = 0; k < 2; k++) {
-        Kokkos::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+        gated::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
             m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k)));
         }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mass_flow_largest.data() + k)));
     }
@@ -1468,14 +1469,14 @@ void Solver::sum_mass_flow_terms() {
     const Kokkos::View<double *> largest = mass_flow_largest;
     const double unit = mass_flow_unit;
     for (int k = 0; k < 2; k++) {
-        Kokkos::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+        gated::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
             if (largest(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit / largest(k))));
         }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(mass_flow_sums.data() + k)));
     }
     if (is_distributed()) comm::allreduce_device(mass_flow_sums, comm::Op::SUM, halo.uses_nccl());
     const Kokkos::View<int64_t *> sums = mass_flow_sums;
     const Kokkos::View<double *> totals = mass_flow_totals;
-    Kokkos::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
         for (int k = 0; k < 2; k++) totals(k) = largest(k) > 0.0 ? static_cast<double>(sums(k)) / (unit / largest(k)) : 0.0;
     });
 }
@@ -1487,7 +1488,7 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     FOR_I_DIM e[i] = mass_flow_direction[i];
     // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
-    Kokkos::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype m = 0.0_r, r = 0.0_r;
         FOR_I_DIM {
             m += solution(i_cell, 1 + i) * e[i];
@@ -1502,13 +1503,13 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     const double target = mass_flow_target, volume = domain_volume;
     const rtype * dt_device = recording_step ? step_dt_device() : nullptr;
     const rtype dt_host = dt;
-    Kokkos::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
         const rtype dt_ = dt_device ? *dt_device : dt_host;
         double force = -totals(1) / volume;
         if (dt_ > 0.0_r) force += (target - totals(0) / volume) / static_cast<double>(dt_);
         totals(2) = force;
     });
-    Kokkos::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         Kokkos::Array<rtype, N_DIM> f;
         FOR_I_DIM f[i] = static_cast<rtype>(totals(2)) * e[i];
         const rtype V = vol(i_cell);
@@ -1537,7 +1538,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
     for (const auto & outlet : average_pressure_outlets) {
         const Kokkos::View<uint32_t *> faces = outlet.faces;
         const Kokkos::View<double *[2]> pA_A = outlet.pA_A;
-        Kokkos::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        gated::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t f = faces(k);
             const int32_t c = cells_of_face(f, 0);
             rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
@@ -1549,7 +1550,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
         outlet.sums.sum(pA_A);
         const Kokkos::View<double *> sums = outlet.sums.sums();
         const int32_t i_bc = outlet.i_bc;
-        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
             bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - static_cast<rtype>(sums(0) / sums(1));
         });
     }
@@ -1822,17 +1823,14 @@ void Solver::init_axisymmetric_weights() {
     const auto & points = face_reconstruction->quadrature_face.h_points;
     const auto & weights = face_reconstruction->quadrature_face.h_weights;
     const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
-    flux_weights = Kokkos::View<rtype **>("flux_weights", mesh->n_state_faces(), n_q);
-    auto h_weights = Kokkos::create_mirror_view(flux_weights);
-    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
+    flux_weights = share_face_weights("flux_weights", mesh->n_state_faces(), n_q, [&](const uint32_t f, rtype * w_f) {
         const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
         const rtype dy = mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1);
         for (uint32_t q = 0; q < n_q; q++) {
             const rtype r_q = mesh->h_face_coords(f, 1) + 0.5_r * points(q, 0) * dy;
-            h_weights(f, q) = weights(q) * std::max(r_q, 0.0_r);
+            w_f[q] = weights(q) * std::max(r_q, 0.0_r);
         }
-    }
-    Kokkos::deep_copy(flux_weights, h_weights);
+    });
     geometric_source = Kokkos::View<rtype *>("geometric_source", mesh->n_cells);
     if (!is_mixture() && physics.is_viscous()) cell_mu = Kokkos::View<rtype *>("cell_mu", mesh->n_cells);
 }
@@ -3010,7 +3008,7 @@ void Solver::progress_reductions() {
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     DiagnosticsFunctor functor{conservatives, teno ? teno->troubled : Kokkos::View<rtype *>(),
                                teno ? teno->sigma_threshold : rtype(0), physics};
-    Kokkos::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
+    gated::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
                             Kokkos::View<step_queue::Diagnostics, Memory>(&out->diagnostics));
     if (is_mixture()) mixture_reductions(&out->mixture);
     if (reacting) chemistry_reductions(&out->chemistry);
@@ -3516,7 +3514,7 @@ RestartArrays Solver::restart_arrays() const {
 
 void Solver::update_probe_gradients() {
     // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
-    Kokkos::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
+    gated::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
     if (wall_model_on) update_wall_model();
 }
 
@@ -3616,7 +3614,7 @@ void Solver::update_primitives() {
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
-    Kokkos::parallel_for("update_primitives", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("update_primitives", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE];
         rtype prim[N_PRIMITIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
@@ -3637,7 +3635,7 @@ void Solver::update_p_max() {
     update_primitives();
     Kokkos::View<rtype *> peak = p_max;
     Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
-    Kokkos::parallel_for("update_p_max", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("update_p_max", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         peak(i_cell) = Kokkos::max(peak(i_cell), P(i_cell, N_DIM));
     });
 }
@@ -3680,7 +3678,7 @@ void Solver::calc_dt() {
     // cfl_local holds dt_cfl1 per cell; convert to local CFL number
     Kokkos::View<rtype *> c = cfl_local;
     const rtype dt_ = dt;
-    Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = dt_ / c(i);
     });
 }
@@ -3815,12 +3813,12 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
     comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
     const Kokkos::RangePolicy<> cells(comm_space, 0, mesh->n_owned());
     if (on_device.data()) {
-        Kokkos::parallel_reduce("time_step", cells, functor,
+        gated::parallel_reduce("time_step", cells, functor,
                                 Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         return 0.0;
     }
-    Kokkos::parallel_reduce("time_step", cells, functor,
+    gated::parallel_reduce("time_step", cells, functor,
                             Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
     comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
     return reduce_dt();
@@ -3835,7 +3833,7 @@ rtype Solver::reduce_dt() {
     control_contributed = run_control::pending();
     const Kokkos::View<rtype *> values = step_reduce;
     const int contributed = control_contributed;
-    Kokkos::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
+    gated::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
         values(k + 1) = (contributed >> k) & 1 ? rtype(-1) : rtype(0);
     });
     if (is_distributed()) comm::allreduce_device(values, comm::Op::MIN, halo.uses_nccl());
@@ -3931,7 +3929,7 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
     // The gradients and the wall model read the halo, stale after the last stage
     update_cell_W();
     if (is_viscous()) {
-        Kokkos::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
+        gated::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
         if (is_mixture()) update_transport();
         if (wall_model_on) update_wall_model();
     }
@@ -3941,11 +3939,11 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     constexpr size_t n = 2 * N_DIM + 1;
     const Kokkos::View<rtype *> sum = monitor_sums;
-    Kokkos::parallel_reduce("force", faces.extent(0), functor,
+    gated::parallel_reduce("force", faces.extent(0), functor,
                             Kokkos::View<ForceFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
                                 reinterpret_cast<ForceFunctor::value_type *>(sum.data())));
     if (is_distributed()) comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), n), comm::Op::SUM, halo.uses_nccl());
-    Kokkos::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
         for (size_t i = 0; i < n; i++) out[i] = static_cast<double>(sum(i));
     });
 }
@@ -3989,7 +3987,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
     Kokkos::View<rtype *> vol = mesh->cell_measure;
     for (uint8_t i_var = 0; i_var < N_CONSERVATIVE; i_var++) {
         rtype sum = 0.0;
-        Kokkos::parallel_reduce("integrate", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
+        gated::parallel_reduce("integrate", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
             s += U(i, i_var) * vol(i);
         }, sum);
         total[i_var] = sum;
@@ -4059,7 +4057,7 @@ struct FlowStatisticsFunctor {
 void Solver::update_velocity_gradients() {
     update_cell_W();
     if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
-        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+        gated::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
     }
 }
 
@@ -4073,7 +4071,7 @@ void Solver::update_cell_W() {
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);
@@ -4089,13 +4087,13 @@ void Solver::reduce_flow_statistics(double * out) {
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Kokkos::View<rtype *> sum = monitor_sums;
-    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor,
+    gated::parallel_reduce("statistics", mesh->n_owned(), functor,
                             Kokkos::View<FlowStatisticsFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
                                 reinterpret_cast<FlowStatisticsFunctor::value_type *>(sum.data())));
     if (is_distributed()) {
         comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), N_FLOW_STATISTICS), comm::Op::SUM, halo.uses_nccl());
     }
-    Kokkos::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
         for (size_t i = 0; i < N_FLOW_STATISTICS; i++) out[i] = static_cast<double>(sum(i));
     });
 }
@@ -4113,7 +4111,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
 void Solver::update_vortex_fields() {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
-    Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
 #if N_DIM == 2
         out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
 #else

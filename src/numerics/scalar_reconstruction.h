@@ -182,7 +182,7 @@ class ScalarReconstruction {
          * @param face_weights 3D: (face, q) weights of the face points.
          */
         void species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                           Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                           FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
 
         /** @brief Device evaluator of first-order and MUSCL face values, valid after calc(). */
         ScalarFaceValues face_values(ScalarView scalars) const;
@@ -206,7 +206,7 @@ class ScalarReconstruction {
         // Public because nvcc rejects device lambdas in non-public member functions
         template <typename Eval>
         void launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                          Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                          FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
         template <uint8_t DEG>
         void calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo);
 
