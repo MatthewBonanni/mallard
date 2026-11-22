@@ -36,6 +36,7 @@ std::vector<std::string> base_variables() {
     for (const char * u : {"V_X", "V_Y", "V_Z"}) {
         if (v.size() < VAR_V + N_DIM) v.push_back(u);
     }
+    v.push_back("T_P");
     return v;
 }
 
@@ -105,9 +106,9 @@ std::vector<std::string> Quantities::variables(const uint32_t visible) const {
 kexpr::Program Quantities::compile(const std::string & where, const std::string & text) {
     const std::string substituted = substitute(where, text);
     kexpr::Program p(where, substituted, variables(m_count));
-    if (!m_temperature && p.uses(VAR_TEMPERATURE)) {
+    if (!m_temperature && (p.uses(VAR_TEMPERATURE) || p.uses(VAR_TP))) {
         throw InputError(Diagnostic{.key = where,
-                                    .message = "reads T, which particle expressions have for a single gas only",
+                                    .message = "reads T or T_P, which particle expressions have for a single gas only",
                                     .docs = DOCS});
     }
     m_time = m_time || p.uses(VAR_T);
@@ -164,10 +165,10 @@ void Quantities::init(const Input & table, region::Regions & regions, const uint
         const auto compile_visible = [&](const std::string & key, const std::string & text) {
             const std::string substituted = substitute(where + "." + key, text);
             kexpr::Program p(where + "." + key, substituted, variables(visible));
-            if (!m_temperature && p.uses(VAR_TEMPERATURE)) {
+            if (!m_temperature && (p.uses(VAR_TEMPERATURE) || p.uses(VAR_TP))) {
                 throw InputError(Diagnostic{.key = where + "." + key,
                                             .line = line_of(e, key),
-                                            .message = "reads T, which particle expressions have for a single gas only",
+                                            .message = "reads T or T_P, which particle expressions have for a single gas only",
                                             .docs = DOCS});
             }
             m_time = m_time || p.uses(VAR_T);

@@ -6,6 +6,7 @@
  */
 
 #include "stencils.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -275,13 +276,13 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     Kokkos::deep_copy(unit_states, 1.0_r);
     LSQVertexGradientFunctor g = muscl.gradient;
     g.faces = make_gradient(mesh, boundaries, unit_states, muscl.gradients);
-    Kokkos::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
+    gated::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
         if (g.faces.cells_of_face(f, 1) >= 0) return;
         flags(f) = static_cast<uint8_t>((g.faces.one_sided(f) ? 2 : 0) |
                                         (g.faces.boundaries.image_stencil(f) ? 4 : 0));
     });
     Kokkos::View<rtype *[N_DIM]> face_fit("stencil_face_fit_weights", mesh.faces_of_cell.extent(0));
-    Kokkos::parallel_for("stencil_face_fit_weights", mesh.n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("stencil_face_fit_weights", mesh.n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
         g.faces.weights(c, face_fit);
     });
     auto h_flags = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), flags);
