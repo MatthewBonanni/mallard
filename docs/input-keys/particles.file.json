@@ -3,6 +3,7 @@
   2
  ],
  "set_in": [
+  "examples/particle_vortex/input.toml",
   "examples/tracer_vortex/input.toml"
  ],
  "type": "string",

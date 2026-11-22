@@ -23,6 +23,7 @@
 #include "comm.h"
 #include "distribution.h"
 #include "face_reconstruction.h"
+#include "gated.h"
 #include "log.h"
 #include "mesh.h"
 #include "provenance.h"
@@ -146,18 +147,31 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
     solid.gas = *gas;
     solid.diameter = positive(table, "diameter", dim::length);
     solid.density = positive(table, "density", dim::density);
-    record_options("particles.drag", {"schiller_naumann", "stokes"});
+    const std::vector<std::string> drags = {"schiller_naumann", "singh", "stokes"};
+    record_options("particles.drag", drags);
     const std::string drag = find_value_or<std::string>(table, "drag", "schiller_naumann");
-    if (drag != "stokes" && drag != "schiller_naumann") throw not_accepted(table, "particles.drag", drag, {"schiller_naumann", "stokes"});
-    solid.drag = drag == "stokes" ? particles::Drag::STOKES : particles::Drag::SCHILLER_NAUMANN;
+    if (std::find(drags.begin(), drags.end(), drag) == drags.end()) throw not_accepted(table, "particles.drag", drag, drags);
+    solid.drag = drag == "stokes" ? particles::Drag::STOKES
+                 : drag == "singh" ? particles::Drag::SINGH
+                                   : particles::Drag::SCHILLER_NAUMANN;
+    if (input.contains("source") && contains_optional(input.at("source"), "gravity")) {
+        // [source] reports a gravity of the wrong size
+        const std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
+        if (g.size() == N_DIM) FOR_I_DIM solid.gas_gravity[i] = solid.gravity[i] = g[i];
+    }
     if (contains_optional(table, "gravity")) {
         const std::vector<rtype> g = read_vector(table, "gravity", dim::acceleration);
         FOR_I_DIM solid.gravity[i] = g[i];
-    } else if (input.contains("source") && contains_optional(input.at("source"), "gravity")) {
-        // [source] reports a gravity of the wrong size
-        const std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
-        if (g.size() == N_DIM) FOR_I_DIM solid.gravity[i] = g[i];
     }
+    const std::vector<std::string> forces = {"added_mass", "pressure_gradient", "saffman_lift"};
+    record_options("particles.forces", forces);
+    for (const std::string & force : find_value_or<std::vector<std::string>>(table, "forces", {})) {
+        if (std::find(forces.begin(), forces.end(), force) == forces.end()) throw not_accepted(table, "particles.forces", force, forces);
+        solid.added_mass = solid.added_mass || force == "added_mass";
+        solid.pressure_gradient = solid.pressure_gradient || force == "pressure_gradient";
+        solid.lift = solid.lift || force == "saffman_lift";
+    }
+    if (contains_optional(table, "specific_heat")) solid.specific_heat = positive(table, "specific_heat", dim::specific_heat);
     return solid;
 }
 
@@ -176,16 +190,29 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
     std::array<rtype, N_DIM> v_seed{};
-    bool v_given = false;
+    rtype T_seed = 0.0_r;
+    bool v_given = false, T_given = false;
     if (is_solid) {
         solid = read_solid(input, table, gas);
+        heated = solid.heated();
         if (contains_optional(table, "velocity")) {
             const std::vector<rtype> v = read_vector(table, "velocity", dim::velocity);
             FOR_I_DIM v_seed[i] = v[i];
             v_given = true;
         }
+        if (contains_optional(table, "temperature")) {
+            if (!heated) {
+                throw InputError(Diagnostic{.key = "particles.temperature",
+                                            .line = line_of(table, "temperature"),
+                                            .message = "is the temperature of particles with heat transfer",
+                                            .fix = "Give specific_heat, or remove temperature",
+                                            .docs = SOLID_DOCS});
+            }
+            T_seed = positive(table, "temperature", dim::temperature);
+            T_given = true;
+        }
     }
-    const uint32_t first_quantity = is_solid ? 2 * N_DIM : N_DIM;
+    const uint32_t first_quantity = is_solid ? 2 * N_DIM + (heated ? 1 : 0) : N_DIM;
     quantities.init(table, regions, first_quantity, R > 0.0);
     probes.init(table, regions, quantities);
     width = first_quantity + quantities.n_integrated();
@@ -246,6 +273,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     const auto fresh = [&](const Point & p) {
         for (size_t d = 0; d < N_DIM; d++) new_values.push_back(static_cast<rtype>(p[d]));
         if (is_solid) FOR_I_DIM new_values.push_back(v_seed[i]);
+        if (heated) new_values.push_back(T_seed);
         for (uint32_t k = first_quantity; k < width; k++) new_values.push_back(0.0_r);
         for (uint32_t j = 0; j < n_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
     };
@@ -273,7 +301,13 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         if (restored_v && restored_v->size() != N_DIM * n_restored) {
             throw std::runtime_error("particles: the restart file's particle velocities are inconsistent.");
         }
-        start_at_gas = is_solid && !restored_v && !v_given;
+        start_v_at_gas = is_solid && !restored_v && !v_given;
+        // Likewise particles that start transferring heat take the gas temperature
+        const std::vector<double> * restored_T = heated ? find_array("PARTICLE_T") : nullptr;
+        if (restored_T && restored_T->size() != n_restored) {
+            throw std::runtime_error("particles: the restart file's particle temperatures are inconsistent.");
+        }
+        start_T_at_gas = heated && !restored_T && !T_given;
         // Quantities the file has continue; others start afresh
         std::vector<const std::vector<double> *> restored_q(quantities.size(), nullptr);
         for (uint32_t q = 0; q < quantities.size(); q++) {
@@ -295,6 +329,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             if (restored_v) {
                 for (size_t d = 0; d < N_DIM; d++) new_values[at + N_DIM + d] = static_cast<rtype>((*restored_v)[N_DIM * k + d]);
             }
+            if (restored_T) new_values[at + 2 * N_DIM] = static_cast<rtype>((*restored_T)[k]);
             for (uint32_t q = 0; q < quantities.size(); q++) {
                 if (!restored_q[q]) continue;
                 const particles::QuantitySpec & spec = quantities.spec(q);
@@ -309,7 +344,8 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         n_global = n_restored;
     } else {
         // Seeds: each point goes to the rank owning the cell that holds it
-        start_at_gas = is_solid && !v_given;
+        start_v_at_gas = is_solid && !v_given;
+        start_T_at_gas = heated && !T_given;
         std::vector<uint8_t> contained;
         const std::vector<int32_t> located = locate_points(*mesh, points, &contained);
         for (size_t p = 0; p < points.size(); p++) {
@@ -366,6 +402,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     marked = Kokkos::View<uint32_t *>("particle_marked_cells", mesh->n_cells);
     aux = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_aux", capacity, n_aux);
     if (distributed) slots = Kokkos::View<uint32_t *>("particle_slots", capacity);
+    if (is_solid) step_start = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_step_start", capacity, solid.n_start());
     h_id = mirrors(id);
     h_cell = mirrors(cell);
     h_x = mirrors(x);
@@ -405,7 +442,7 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
     const auto xs = x_stage;
     const uint32_t w = width;
     const auto cell_coords = mesh->cell_coords;
-    Kokkos::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_offsets", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) {
             pc(s) = 0;
             FOR_I_DIM off(s, i) = 0.0_r;
@@ -417,14 +454,14 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
         Kokkos::atomic_store(&mark(c), 1u);
     });
     const LSQVertexGradientFunctor grad = gradient;
-    Kokkos::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         if (mark(c) == 0) return;
         mark(c) = 0;
         grad(c);
     });
     const LinearW linear{W, gradients};
     const auto Wp = W_point;
-    Kokkos::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype r[N_DIM], out[N_CONSERVATIVE];
         FOR_I_DIM r[i] = off(s, i);
         linear(pc(s), r, out);
@@ -449,9 +486,13 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const particles::QuantityFunctor q = quantities.functor();
     const bool observe = first_stage && q.size() > 0;
     const uint32_t n_aux = quantities.n_aux();
-    const bool inertia = is_solid;
+    const bool inertia = is_solid, heat = heated;
     const particles::Solid sphere = solid;
-    Kokkos::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    const bool read_gradients = solid.reads_gradients();
+    const auto pc = point_cell;
+    const auto start = step_start;
+    const uint32_t n_start = is_solid ? solid.n_start() : 0;
+    gated::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype * rate = dxdt.data() + size_t(w) * s;
         if (ids(s) == EMPTY) {
             for (uint32_t k = 0; k < w; k++) rate[k] = 0.0_r;
@@ -461,8 +502,13 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         rtype Ws[N_CONSERVATIVE], v[N_DIM];
         FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
         if (inertia) {
+            rtype G[N_CONSERVATIVE * N_DIM] = {};
+            if (read_gradients) {
+                FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = gradients(pc(s), i, d);
+            }
+            sphere.rates(Ws, G, values + N_DIM, dt_device ? *dt_device : dt, first_stage,
+                         start.data() + size_t(n_start) * s, rate);
             FOR_I_DIM v[i] = values[N_DIM + i];
-            sphere.rates(Ws, v, dt_device ? *dt_device : dt, rate, rate + N_DIM);
         } else {
             FOR_I_DIM v[i] = Ws[1 + i];
             FOR_I_DIM rate[i] = v[i];
@@ -471,7 +517,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         rtype * row = a.data() + size_t(n_aux) * s;
         const double t = timed ? static_cast<double>(time()) : 0.0;
         double vars[particles::MAX_VARIABLES];
-        particles::fill_base(vars, values, t, Ws, v, gas_R);
+        particles::fill_base(vars, values, t, Ws, v, heat ? values + 2 * N_DIM : nullptr, gas_R);
         q.fill(vars, values, row, rate);
         if (observe) q.observe(vars, t, row);
     });
@@ -483,19 +529,22 @@ void Particles::sample(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstructi
     evaluate_gas(x, W, reconstruction, gradient, gradients);
 }
 
-void Particles::start_velocity(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
                                const LSQVertexGradientFunctor & gradient,
                                Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
-    start_at_gas = false;
+    const bool velocity = start_v_at_gas, temperature = start_T_at_gas;
+    start_v_at_gas = start_T_at_gas = false;
     if (capacity == 0) return;
     sample(W, reconstruction, gradient, gradients);
     const auto ids = id;
     const auto values = x;
     const auto Wp = W_point;
     const uint32_t w = width;
-    Kokkos::parallel_for("particle_start_velocity", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    const rtype gas_R = static_cast<rtype>(R);
+    gated::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
-        FOR_I_DIM values(w * s + N_DIM + i) = Wp(s, 1 + i);
+        if (velocity) FOR_I_DIM values(w * s + N_DIM + i) = Wp(s, 1 + i);
+        if (temperature) values(w * s + 2 * N_DIM) = Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R);
     });
 }
 
@@ -580,6 +629,7 @@ void Particles::write_probes(const uint64_t step, const double t) {
     const auto Wp = W_point;
     const uint32_t w = width;
     const double gas_R = R;
+    const bool inertia = is_solid, heat = heated;
     const particles::QuantityFunctor q = quantities.functor();
     const uint32_t n_aux = quantities.n_aux();
     const kexpr::ProgramTable<> table = probes.table();
@@ -591,18 +641,18 @@ void Particles::write_probes(const uint64_t step, const double t) {
         throw InputError("particles.probes: at most " + std::to_string(particles::MAX_REGIONS) + " probes have regions.");
     }
     for (uint32_t r = 0; r < n_regions; r++) regions[r] = probes.regions()[r];
-    Kokkos::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_probe_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
         if (ids(s) == EMPTY) {
             for (uint32_t j = 0; j < n; j++) fields(s, j) = nan;
             return;
         }
-        rtype Ws[N_CONSERVATIVE], u[N_DIM];
+        rtype Ws[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
-        FOR_I_DIM u[i] = Ws[1 + i];
         const rtype * values = xs.data() + size_t(w) * s;
         double vars[particles::MAX_VARIABLES];
-        particles::fill_base(vars, values, t, Ws, u, gas_R);
+        particles::fill_base(vars, values, t, Ws, inertia ? values + N_DIM : Ws + 1, heat ? values + 2 * N_DIM : nullptr,
+                             gas_R);
         q.fill(vars, values, a.data() + size_t(n_aux) * s, nullptr);
         const double p[3] = {vars[0], vars[1], N_DIM == 3 ? vars[N_DIM - 1] : 0.0};
         for (uint32_t j = 0; j < n; j++) {
@@ -624,15 +674,21 @@ void Particles::relocate() {
     const uint32_t wd = width;
     const bool inertia = is_solid;
     const auto e = restitution;
-    Kokkos::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    const auto step = step_start;
+    gated::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
-        rtype p[N_DIM], v[N_DIM];
+        // The velocity, then the gas velocity and acceleration of the step's start, which turn with it
+        rtype p[N_DIM], v[3 * N_DIM];
         FOR_I_DIM p[i] = pos(wd * s + i);
-        FOR_I_DIM v[i] = inertia ? pos(wd * s + N_DIM + i) : 0.0_r;
+        FOR_I_DIM {
+            v[i] = inertia ? pos(wd * s + N_DIM + i) : 0.0_r;
+            v[N_DIM + i] = inertia ? step(s, particles::Solid::U + i) : 0.0_r;
+            v[2 * N_DIM + i] = inertia ? step(s, particles::Solid::A + i) : 0.0_r;
+        }
         for (int bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
             int32_t face = -1;
-            const Walker::Outcome outcome = w.walk(c, p, face, inertia ? v : nullptr);
+            const Walker::Outcome outcome = w.walk(c, p, face, inertia ? v : nullptr, 3);
             if (outcome == Walker::INSIDE) break;
             if (outcome == Walker::STUCK || bounce == MAX_BOUNCES) {
                 Kokkos::atomic_inc(&removed(1));
@@ -643,16 +699,12 @@ void Particles::relocate() {
             if (action == particles::REFLECT) {
                 rtype n[N_DIM];
                 const rtype d = w.distance(c, static_cast<uint32_t>(face), p, n);
-                rtype v_n = 0.0_r;
-                FOR_I_DIM v_n += v[i] * n[i];
-                // A solid particle bounced at the step's end: the normal velocity reverses times e_n, the
-                // tangential velocity scales by e_t, and the depth past the wall comes back times e_n
-                const rtype e_n = inertia && v_n > 0.0_r ? e(static_cast<uint32_t>(face), 0) : 1.0_r;
-                if (inertia && v_n > 0.0_r) {
-                    const rtype e_t = e(static_cast<uint32_t>(face), 1);
-                    FOR_I_DIM v[i] = e_t * (v[i] - v_n * n[i]) - e_n * v_n * n[i];
+                if (inertia) {
+                    particles::rebound(v + N_DIM, v + 2 * N_DIM, step(s, particles::Solid::TAU), step(s, particles::Solid::DT),
+                                       n, d, e(static_cast<uint32_t>(face), 0), e(static_cast<uint32_t>(face), 1), p, v);
+                } else {
+                    FOR_I_DIM p[i] -= 2.0_r * d * n[i];
                 }
-                FOR_I_DIM p[i] -= (1.0_r + e_n) * d * n[i];
                 continue;
             }
             Kokkos::atomic_inc(&removed(action == particles::EXIT ? 0 : action == particles::STICK ? 2 : 1));
@@ -676,14 +728,14 @@ void Particles::migrate() {
     // Slots of the particles that left the owned cells, in slot order
     const auto slot = slots;
     uint32_t n_out = 0;
-    Kokkos::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_emigrants", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool out = ids(s) != EMPTY && start(s) >= owned;
         if (last && out) slot(k) = s;
         k += out ? 1u : 0u;
     }, n_out);
     const size_t WIDTH = 2 + persistent();  // id, cell, bits of the block values and aux
     Kokkos::View<uint64_t **, Kokkos::LayoutRight> packed("particle_packed", n_out, WIDTH);
-    Kokkos::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_pack", n_out, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         packed(k, 0) = ids(s);
         packed(k, 1) = start(s);
@@ -726,7 +778,7 @@ void Particles::migrate() {
 
     // Into the free slots, in slot order
     uint32_t n_free = 0;
-    Kokkos::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
+    gated::parallel_scan("particle_free_slots", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & k, const bool last) {
         const bool free = ids(s) == EMPTY;
         if (last && free) slot(k) = s;
         k += free ? 1u : 0u;
@@ -744,7 +796,7 @@ void Particles::migrate() {
         }
         Kokkos::deep_copy(incoming, h_in);
     }
-    Kokkos::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_unpack", n_in, KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t s = slot(k);
         ids(s) = incoming(k, 0);
         start(s) = static_cast<uint32_t>(incoming(k, 1));
@@ -753,14 +805,14 @@ void Particles::migrate() {
     });
     if (lost > 0) {
         const auto removed = n_removed;
-        Kokkos::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
+        gated::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
     }
 }
 
 uint64_t Particles::count() const {
     const auto ids = id;
     uint64_t n = 0;
-    Kokkos::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
+    gated::parallel_reduce("particle_count", capacity, KOKKOS_LAMBDA(const uint32_t i, uint64_t & s) {
         s += ids(i) != EMPTY ? 1u : 0u;
     }, n);
     return distributed ? comm::allreduce(n, comm::Op::SUM) : n;
@@ -776,14 +828,15 @@ std::vector<particles::Record> Particles::gather() const {
     auto g_id = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), id);
     auto g_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), x);
     auto g_aux = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), aux);
-    const size_t n_q = quantities.size(), stride = 2 * N_DIM + n_q;
+    const size_t n_q = quantities.size(), stride = 2 * N_DIM + 1 + n_q;
     std::vector<uint64_t> ids;
-    std::vector<double> xs;  // position, velocity, quantities
+    std::vector<double> xs;  // position, velocity, temperature, quantities
     for (uint32_t i = 0; i < capacity; i++) {
         if (g_id(i) == EMPTY) continue;
         ids.push_back(g_id(i));
         for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(width * i + d)));
         for (size_t d = 0; d < N_DIM; d++) xs.push_back(is_solid ? static_cast<double>(g_x(width * i + N_DIM + d)) : 0.0);
+        xs.push_back(heated ? static_cast<double>(g_x(width * i + 2 * N_DIM)) : std::numeric_limits<double>::quiet_NaN());
         for (uint32_t q = 0; q < n_q; q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -802,7 +855,8 @@ std::vector<particles::Record> Particles::gather() const {
             records[k].x[d] = xs[stride * k + d];
             records[k].v[d] = xs[stride * k + N_DIM + d];
         }
-        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + 2 * N_DIM),
+        records[k].T = xs[stride * k + 2 * N_DIM];
+        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + 2 * N_DIM + 1),
                             xs.begin() + static_cast<std::ptrdiff_t>(stride * (k + 1)));
     }
     std::sort(records.begin(), records.end(), [](const auto & a, const auto & b) { return a.id < b.id; });
@@ -823,6 +877,7 @@ void Particles::write(const uint64_t step, const double t) const {
     if (is_solid) {
         for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
     }
+    if (heated) out << ",T_p";
     for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {
@@ -831,6 +886,7 @@ void Particles::write(const uint64_t step, const double t) const {
         if (is_solid) {
             for (size_t d = 0; d < N_DIM; d++) out << "," << r.v[d];
         }
+        if (heated) out << "," << r.T;
         for (const double q : r.q) out << "," << q;
         out << "\n";
     }
@@ -866,7 +922,7 @@ RestartArrays Particles::restart_arrays() const {
     std::vector<size_t> order(n);
     for (size_t k = 0; k < n; k++) order[k] = k;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[WIDTH * a] < all[WIDTH * b]; });
-    std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0);
+    std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0), Ts(heated ? n : 0);
     std::vector<std::vector<double>> qs(quantities.size(), std::vector<double>(n));
     for (size_t k = 0; k < n; k++) {
         const double * p = all.data() + WIDTH * order[k];
@@ -876,6 +932,7 @@ RestartArrays Particles::restart_arrays() const {
         if (is_solid) {
             for (size_t d = 0; d < N_DIM; d++) vs[N_DIM * k + d] = p[2 + N_DIM + d];
         }
+        if (heated) Ts[k] = p[2 + 2 * N_DIM];
         for (uint32_t q = 0; q < quantities.size(); q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -890,6 +947,7 @@ RestartArrays Particles::restart_arrays() const {
                              {static_cast<double>(removed[0]), static_cast<double>(removed[1]),
                               static_cast<double>(removed[2])}}};
     if (is_solid) arrays.emplace_back("PARTICLE_V", std::move(vs));
+    if (heated) arrays.emplace_back("PARTICLE_T", std::move(Ts));
     for (uint32_t q = 0; q < quantities.size(); q++) {
         arrays.emplace_back("PARTICLE_Q_" + quantities.names()[q], std::move(qs[q]));
     }
@@ -906,10 +964,16 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
     if (is_solid) {
         std::string g;
         FOR_I_DIM g += (i ? ", " : "") + logging::real(static_cast<double>(solid.gravity[i]));
-        lines.emplace_back("Solid particles", "diameter " + logging::real(static_cast<double>(solid.diameter)) +
-                                                  ", density " + logging::real(static_cast<double>(solid.density)) +
-                                                  ", " + (solid.drag == particles::Drag::STOKES ? "Stokes" : "Schiller-Naumann") +
-                                                  " drag, gravity (" + g + ")");
+        const char * drag = solid.drag == particles::Drag::STOKES ? "Stokes"
+                            : solid.drag == particles::Drag::SINGH ? "Singh et al."
+                                                                   : "Schiller-Naumann";
+        std::string solid_text = "diameter " + logging::real(static_cast<double>(solid.diameter)) + ", density " +
+                           logging::real(static_cast<double>(solid.density)) + ", " + drag + " drag, gravity (" + g + ")";
+        if (solid.pressure_gradient) solid_text += ", pressure gradient";
+        if (solid.added_mass) solid_text += ", added mass";
+        if (solid.lift) solid_text += ", Saffman lift";
+        if (heated) solid_text += ", Ranz-Marshall heat transfer (specific heat " + logging::real(static_cast<double>(solid.specific_heat)) + ")";
+        lines.emplace_back("Solid particles", solid_text);
     }
     for (const auto & q : quantities.summary()) lines.emplace_back("Particle quantity", q);
     for (const auto & p : probes.summary()) lines.emplace_back("Particle probe", p);

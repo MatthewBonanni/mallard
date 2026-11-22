@@ -12,6 +12,7 @@
 #include "solver.h"
 #include "boundary_coordinates.h"
 #include "boundary_profiles.h"
+#include "gated.h"
 
 #include "diagnostic_code.h"
 #include "input.h"
@@ -821,13 +822,13 @@ void Solver::init_physics() {
                                  "and the gas properties, e.g. gamma = 1.4"});
     }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
-    record_options("physics.gas", {"perfect", "mixture"});
+    record_options("physics.gas", {"perfect", "mixture", "flamelet"});
     const std::string unit_system = find_value_or<std::string>(input, "physics", "units", "SI");
     record_options("physics.units", {"SI", "nondimensional"});
     if (unit_system != "SI" && unit_system != "nondimensional") {
         throw not_accepted(input.at("physics"), "physics.units", unit_system, {"SI", "nondimensional"});
     }
-    if (unit_system == "nondimensional" && gas == "mixture") {
+    if (unit_system == "nondimensional" && (gas == "mixture" || gas == "flamelet")) {
         throw InputError({.key = "physics.units",
                           .line = line_of(input.at("physics"), "units"),
                           .message = "a gas mixture reads real thermochemistry, so its numbers are always in SI units",
@@ -846,10 +847,12 @@ void Solver::init_physics() {
         physics = Euler::from_input(input);
         return;
     }
-    if (gas != "mixture") {
-        throw not_accepted(input.at("physics"), "physics.gas", gas, {"mixture", "perfect"});
+    if (gas != "mixture" && gas != "flamelet") {
+        throw not_accepted(input.at("physics"), "physics.gas", gas, {"flamelet", "mixture", "perfect"});
     }
-    mixture_model = std::make_shared<MixtureModel>(MixtureModel::from_input(input));
+    if (gas == "flamelet") check_flamelet_input();
+    mixture_model = std::make_shared<MixtureModel>(gas == "flamelet" ? MixtureModel::flamelet_from_input(input)
+                                                                      : MixtureModel::from_input(input));
     mixture = mixture_model->device();
     species_names = mixture_model->species_names();
     physics = Euler();
@@ -1300,7 +1303,7 @@ void Solver::init_boundaries() {
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
-        boundary_data.thermo = mixture.thermo;
+        boundary_data.mixture_gas = mixture;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
         if (is_viscous()) {
@@ -1445,7 +1448,7 @@ void Solver::init_sources(region::Regions & regions) {
 void Solver::init_mass_flow_volume() {
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
     const Kokkos::View<rtype *> vol = mesh->cell_volume;
-    Kokkos::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("mass_flow_volume", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i_cell) {
         terms(i_cell, 0) = static_cast<double>(vol(i_cell));
         terms(i_cell, 1) = 0.0;
     });
@@ -1458,7 +1461,7 @@ void Solver::sum_mass_flow_terms() {
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     for (int k = 0; k < 2; k++) {
-        Kokkos::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+        gated::parallel_reduce("mass_flow_largest", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
             m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k)));
         }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(mass_flow_largest.data() + k)));
     }
@@ -1466,14 +1469,14 @@ void Solver::sum_mass_flow_terms() {
     const Kokkos::View<double *> largest = mass_flow_largest;
     const double unit = mass_flow_unit;
     for (int k = 0; k < 2; k++) {
-        Kokkos::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+        gated::parallel_reduce("mass_flow_sum", n_owned, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
             if (largest(k) > 0.0) sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * (unit / largest(k))));
         }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(mass_flow_sums.data() + k)));
     }
     if (is_distributed()) comm::allreduce_device(mass_flow_sums, comm::Op::SUM, halo.uses_nccl());
     const Kokkos::View<int64_t *> sums = mass_flow_sums;
     const Kokkos::View<double *> totals = mass_flow_totals;
-    Kokkos::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("mass_flow_totals", 1, KOKKOS_LAMBDA(const int) {
         for (int k = 0; k < 2; k++) totals(k) = largest(k) > 0.0 ? static_cast<double>(sums(k)) / (unit / largest(k)) : 0.0;
     });
 }
@@ -1485,7 +1488,7 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     FOR_I_DIM e[i] = mass_flow_direction[i];
     // Along e: the volume integral of rho u and the rate of change of that integral from all other terms
     const Kokkos::View<double *[2]> terms = mass_flow_terms;
-    Kokkos::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("mass_flow_terms", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype m = 0.0_r, r = 0.0_r;
         FOR_I_DIM {
             m += solution(i_cell, 1 + i) * e[i];
@@ -1500,13 +1503,13 @@ void Solver::add_mass_flow_force(StateView solution, StateView rhs) {
     const double target = mass_flow_target, volume = domain_volume;
     const rtype * dt_device = recording_step ? step_dt_device() : nullptr;
     const rtype dt_host = dt;
-    Kokkos::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("mass_flow_force", 1, KOKKOS_LAMBDA(const int) {
         const rtype dt_ = dt_device ? *dt_device : dt_host;
         double force = -totals(1) / volume;
         if (dt_ > 0.0_r) force += (target - totals(0) / volume) / static_cast<double>(dt_);
         totals(2) = force;
     });
-    Kokkos::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("rhs_mass_flow_force", n_owned, KOKKOS_LAMBDA(const uint32_t i_cell) {
         Kokkos::Array<rtype, N_DIM> f;
         FOR_I_DIM f[i] = static_cast<rtype>(totals(2)) * e[i];
         const rtype V = vol(i_cell);
@@ -1535,7 +1538,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
     for (const auto & outlet : average_pressure_outlets) {
         const Kokkos::View<uint32_t *> faces = outlet.faces;
         const Kokkos::View<double *[2]> pA_A = outlet.pA_A;
-        Kokkos::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        gated::parallel_for("outlet_average_pressure", faces.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const uint32_t f = faces(k);
             const int32_t c = cells_of_face(f, 0);
             rtype U[N_CONSERVATIVE], W[N_CONSERVATIVE];
@@ -1547,7 +1550,7 @@ void Solver::update_average_pressure_outlets(StateView solution) {
         outlet.sums.sum(pA_A);
         const Kokkos::View<double *> sums = outlet.sums.sums();
         const int32_t i_bc = outlet.i_bc;
-        Kokkos::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("outlet_average_offset", 1, KOKKOS_LAMBDA(const int) {
             bcs(i_bc).data[0] = bcs(i_bc).data[N_DIM + 1] - static_cast<rtype>(sums(0) / sums(1));
         });
     }
@@ -1571,7 +1574,12 @@ void Solver::copy_boundary_gas() {
     for (size_t i_bc = 0; i_bc < h_values.extent(0); i_bc++) {
         if (bc_mass_fractions[i_bc].empty()) continue;
         const std::vector<double> X = mixture_model->mole_fractions(bc_mass_fractions[i_bc]);
-        h_values(i_bc, 0) = static_cast<rtype>(bc_temperatures[i_bc]);
+        // A flamelet gas conducts enthalpy (unity Lewis number), so its gradient variable is h
+        const double T = bc_temperatures[i_bc];
+        h_values(i_bc, 0) = static_cast<rtype>(
+            mixture.tabulated() ? mixture_model->energy(T, bc_mass_fractions[i_bc]) +
+                                      mixture_model->gas_constant(bc_mass_fractions[i_bc]) * T
+                                : T);
         for (uint32_t k = 0; k < n_species; k++) h_values(i_bc, 1 + k) = static_cast<rtype>(X[k]);
     }
     Kokkos::deep_copy(bc_transport_values, h_values);
@@ -1590,7 +1598,7 @@ void Solver::apply_boundary_fields() {
     gas.R = double(physics.R);
     if (is_mixture()) {
         gas.mixture = true;
-        gas.thermo = boundary_data.thermo;
+        gas.gas = boundary_data.mixture_gas;
         gas.bc_Y = boundary_data.bc_Y;
         gas.bc_thermo = boundary_data.bc_thermo;
         gas.transport = bc_transport_values;
@@ -1671,7 +1679,7 @@ void Solver::init_numerics() {
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
     if (is_mixture() && !state_reader) {
         scalar_reconstruction.own_scratch = false;
-        scalar_reconstruction.init(mesh, boundary_data, mixture.thermo, *face_reconstruction);
+        scalar_reconstruction.init(mesh, boundary_data, mixture, *face_reconstruction);
     }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
@@ -1815,17 +1823,14 @@ void Solver::init_axisymmetric_weights() {
     const auto & points = face_reconstruction->quadrature_face.h_points;
     const auto & weights = face_reconstruction->quadrature_face.h_weights;
     const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
-    flux_weights = Kokkos::View<rtype **>("flux_weights", mesh->n_state_faces(), n_q);
-    auto h_weights = Kokkos::create_mirror_view(flux_weights);
-    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
+    flux_weights = share_face_weights("flux_weights", mesh->n_state_faces(), n_q, [&](const uint32_t f, rtype * w_f) {
         const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
         const rtype dy = mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1);
         for (uint32_t q = 0; q < n_q; q++) {
             const rtype r_q = mesh->h_face_coords(f, 1) + 0.5_r * points(q, 0) * dy;
-            h_weights(f, q) = weights(q) * std::max(r_q, 0.0_r);
+            w_f[q] = weights(q) * std::max(r_q, 0.0_r);
         }
-    }
-    Kokkos::deep_copy(flux_weights, h_weights);
+    });
     geometric_source = Kokkos::View<rtype *>("geometric_source", mesh->n_cells);
     if (!is_mixture() && physics.is_viscous()) cell_mu = Kokkos::View<rtype *>("cell_mu", mesh->n_cells);
 }
@@ -2292,6 +2297,10 @@ void Solver::allocate_memory() {
         }
         h_Y = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("Y", mesh->n_cells, n_species);
         h_X = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("X", mesh->n_cells, n_species);
+        if (mixture.tabulated()) {
+            h_table_fields = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>(
+                "table_fields", mesh->n_cells, mixture_model->flamelet().output_names().size());
+        }
         if (reacting) allocate_chemistry();
         if (radiating) h_qrad = Kokkos::View<rtype *, Kokkos::HostSpace>("QRAD", mesh->n_cells);
     }
@@ -2427,6 +2436,7 @@ void Solver::output_arrays_to_host() {
             // Coefficients of the current state; W and the scalars are work arrays the next RHS refills
             update_cell_states(state(), false);
             update_transport();
+            if (flamelet_variance.is_allocated()) copy(h_flamelet_variance, flamelet_variance);
             copy(h_cell_transport, cell_transport);
             copy(h_cell_diffusion, cell_diffusion);
         }
@@ -2487,7 +2497,14 @@ void Solver::allocate_restart_mirrors() {
 
 void Solver::finish_output_arrays() {
     if (is_mixture()) {
-        if (is_viscous()) {
+        if (is_viscous() && mixture.tabulated()) {
+            // rho D = kappa / cp for every scalar
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                for (size_t k = 0; k < h_D.extent(1); k++) {
+                    h_D(c, k) = static_cast<rtype>(h_cell_diffusion(c, k) / static_cast<double>(h_conservatives(c, 0)));
+                }
+            }
+        } else if (is_viscous()) {
             const auto & mech = mixture_model->mechanism();
             for (uint32_t c = 0; c < mesh->n_cells; c++) {
                 const double rho = static_cast<double>(h_conservatives(c, 0));
@@ -2513,6 +2530,16 @@ void Solver::finish_output_arrays() {
                 h_X(c, k) = static_cast<rtype>(X[k]);
             }
         }
+        if (mixture.tabulated()) {
+            std::vector<double> out(h_table_fields.extent(1));
+            for (uint32_t c = 0; c < mesh->n_cells; c++) {
+                const double rho = static_cast<double>(h_conservatives(c, 0));
+                const double Zvar = h_flamelet_variance.extent(0) > 0 ? static_cast<double>(h_flamelet_variance(c)) : 0.0;
+                mixture_model->flamelet().outputs(rho, static_cast<double>(h_Y(c, 0)), static_cast<double>(h_Y(c, 1)),
+                                                  Zvar, out.data());
+                for (size_t i = 0; i < out.size(); i++) h_table_fields(c, i) = static_cast<rtype>(out[i]);
+            }
+        }
     }
     if (radiating) {
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
@@ -2533,15 +2560,23 @@ void Solver::register_data() {
         data.push_back(Data("RHOY_" + species_names[k], Kokkos::subview(h_species, Kokkos::ALL(), k)));
     }
     if (is_mixture()) {
-        data.reserve(data.size() + 4 * species_names.size() + 6 + PRIMITIVE_NAMES.size() + 2);
+        data.reserve(data.size() + 4 * species_names.size() + h_table_fields.extent(1) + 6 + PRIMITIVE_NAMES.size() +
+                     2);
         for (size_t k = 0; k < species_names.size(); k++) {
             data.push_back(Data("Y_" + species_names[k], Kokkos::subview(h_Y, Kokkos::ALL(), k)));
-            data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
+            if (!mixture.tabulated()) data.push_back(Data("X_" + species_names[k], Kokkos::subview(h_X, Kokkos::ALL(), k)));
         }
         data.push_back(Data("T_SEED", h_T_seed));
+        if (mixture.tabulated()) {
+            const std::vector<std::string> & names = mixture_model->flamelet().output_names();
+            for (size_t i = 0; i < names.size(); i++) {
+                data.push_back(Data(names[i], Kokkos::subview(h_table_fields, Kokkos::ALL(), i)));
+            }
+        }
         if (is_viscous()) {
             data.push_back(Data("MU", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 0)));
-            data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
+            // A flamelet gas's column holds kappa / cp, the conductivity of enthalpy, which D_ shows
+            if (!mixture.tabulated()) data.push_back(Data("LAMBDA", Kokkos::subview(h_cell_transport, Kokkos::ALL(), 1)));
             for (size_t k = 0; k < species_names.size(); k++) {
                 data.push_back(Data("D_" + species_names[k], Kokkos::subview(h_D, Kokkos::ALL(), k)));
             }
@@ -2579,6 +2614,7 @@ void Solver::register_data() {
         }
     }
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
+    if (flamelet_variance.is_allocated()) data.push_back(Data("MIXTURE_FRACTION_VARIANCE", h_flamelet_variance));
     if (tfles_on) {
         data.push_back(Data("TF_F", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 0)));
         data.push_back(Data("TF_E", Kokkos::subview(h_tfles_fields, Kokkos::ALL(), 1)));
@@ -2653,14 +2689,18 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
     for (const auto & s : species_names) names.push_back("RHOY_" + s);
     if (is_mixture()) {
+        const bool tabulated = mixture_model->tabulated();
         for (const auto & s : species_names) {
             names.push_back("Y_" + s);
-            names.push_back("X_" + s);
+            if (!tabulated) names.push_back("X_" + s);
         }
         names.emplace_back("T_SEED");
+        if (tabulated) {
+            for (const auto & name : mixture_model->flamelet().output_names()) names.push_back(name);
+        }
         if (is_viscous()) {
             names.emplace_back("MU");
-            names.emplace_back("LAMBDA");
+            if (!tabulated) names.emplace_back("LAMBDA");
             for (const auto & s : species_names) names.push_back("D_" + s);
             if (mixture.transport.thermal_diffusion) {
                 for (const auto & s : species_names) names.push_back("DT_" + s);
@@ -2680,6 +2720,7 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
     }
     if (LES::in_input(input)) {
         names.emplace_back("MU_T");
+        if (mixture_model && mixture_model->tabulated()) names.emplace_back("MIXTURE_FRACTION_VARIANCE");
         if (input.at("les").contains("combustion")) {
             if (find_value<std::string>(input.at("les").at("combustion"), "model") == "pasr") {
                 names.emplace_back("PASR_KAPPA");
@@ -2793,9 +2834,9 @@ int Solver::run_loop() {
         // A restart's pending half step, where this run does not fuse it into its first step
         if (chemistry_pending > 0.0 && simpler) advance_chemistry(chemistry_pending);
         if (!reacting || simpler) chemistry_pending = 0.0;
-        if (particles && particles->starts_at_gas_velocity()) {
+        if (particles && particles->starts_at_gas()) {
             update_cell_W();
-            particles->start_velocity(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+            particles->start_from_gas(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
         }
         calc_dt();
         // Output before the progress row, which reports the monitors' values and counts the files
@@ -2985,7 +3026,7 @@ void Solver::progress_reductions() {
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     DiagnosticsFunctor functor{conservatives, teno ? teno->troubled : Kokkos::View<rtype *>(),
                                teno ? teno->sigma_threshold : rtype(0), physics};
-    Kokkos::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
+    gated::parallel_reduce("diagnostics", Kokkos::RangePolicy<>(0, mesh->n_owned()), functor,
                             Kokkos::View<step_queue::Diagnostics, Memory>(&out->diagnostics));
     if (is_mixture()) mixture_reductions(&out->mixture);
     if (reacting) chemistry_reductions(&out->chemistry);
@@ -3485,7 +3526,7 @@ RestartArrays Solver::restart_arrays() const {
 
 void Solver::update_probe_gradients() {
     // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
-    Kokkos::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
+    gated::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
     if (wall_model_on) update_wall_model();
 }
 
@@ -3585,7 +3626,7 @@ void Solver::update_primitives() {
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
-    Kokkos::parallel_for("update_primitives", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("update_primitives", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE];
         rtype prim[N_PRIMITIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
@@ -3606,7 +3647,7 @@ void Solver::update_p_max() {
     update_primitives();
     Kokkos::View<rtype *> peak = p_max;
     Kokkos::View<rtype *[N_PRIMITIVE]> P = primitives;
-    Kokkos::parallel_for("update_p_max", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("update_p_max", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         peak(i_cell) = Kokkos::max(peak(i_cell), P(i_cell, N_DIM));
     });
 }
@@ -3649,7 +3690,7 @@ void Solver::calc_dt() {
     // cfl_local holds dt_cfl1 per cell; convert to local CFL number
     Kokkos::View<rtype *> c = cfl_local;
     const rtype dt_ = dt;
-    Kokkos::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("local_cfl", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i) {
         c(i) = dt_ / c(i);
     });
 }
@@ -3784,12 +3825,12 @@ rtype Solver::calc_dt_cfl1(Kokkos::View<rtype> on_device) {
     comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
     const Kokkos::RangePolicy<> cells(comm_space, 0, mesh->n_owned());
     if (on_device.data()) {
-        Kokkos::parallel_reduce("time_step", cells, functor,
+        gated::parallel_reduce("time_step", cells, functor,
                                 Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(on_device));
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         return 0.0;
     }
-    Kokkos::parallel_reduce("time_step", cells, functor,
+    gated::parallel_reduce("time_step", cells, functor,
                             Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(dt_reduce_slot()));
     comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
     return reduce_dt();
@@ -3804,7 +3845,7 @@ rtype Solver::reduce_dt() {
     control_contributed = run_control::pending();
     const Kokkos::View<rtype *> values = step_reduce;
     const int contributed = control_contributed;
-    Kokkos::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
+    gated::parallel_for("time_step_requests", run_control::N_REQUESTS, KOKKOS_LAMBDA(const int k) {
         values(k + 1) = (contributed >> k) & 1 ? rtype(-1) : rtype(0);
     });
     if (is_distributed()) comm::allreduce_device(values, comm::Op::MIN, halo.uses_nccl());
@@ -3900,7 +3941,7 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
     // The gradients and the wall model read the halo, stale after the last stage
     update_cell_W();
     if (is_viscous()) {
-        Kokkos::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
+        gated::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
         if (is_mixture()) update_transport();
         if (wall_model_on) update_wall_model();
     }
@@ -3910,11 +3951,11 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     constexpr size_t n = 2 * N_DIM + 1;
     const Kokkos::View<rtype *> sum = monitor_sums;
-    Kokkos::parallel_reduce("force", faces.extent(0), functor,
+    gated::parallel_reduce("force", faces.extent(0), functor,
                             Kokkos::View<ForceFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
                                 reinterpret_cast<ForceFunctor::value_type *>(sum.data())));
     if (is_distributed()) comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), n), comm::Op::SUM, halo.uses_nccl());
-    Kokkos::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("force_out", 1, KOKKOS_LAMBDA(const int) {
         for (size_t i = 0; i < n; i++) out[i] = static_cast<double>(sum(i));
     });
 }
@@ -3958,7 +3999,7 @@ std::array<rtype, N_CONSERVATIVE> Solver::integrate_conservatives() {
     Kokkos::View<rtype *> vol = mesh->cell_measure;
     for (uint8_t i_var = 0; i_var < N_CONSERVATIVE; i_var++) {
         rtype sum = 0.0;
-        Kokkos::parallel_reduce("integrate", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
+        gated::parallel_reduce("integrate", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t i, rtype & s) {
             s += U(i, i_var) * vol(i);
         }, sum);
         total[i_var] = sum;
@@ -4028,7 +4069,7 @@ struct FlowStatisticsFunctor {
 void Solver::update_velocity_gradients() {
     update_cell_W();
     if (!face_reconstruction->cell_gradients(W_cells, viscous_gradients, mesh->n_owned())) {
-        Kokkos::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
+        gated::parallel_for("statistics_gradients", mesh->n_owned(), viscous_gradient);
     }
 }
 
@@ -4042,7 +4083,7 @@ void Solver::update_cell_W() {
     const Euler phys = physics;
     StateView U = conservatives;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    Kokkos::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
+    gated::parallel_for("statistics_W", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t i_cell) {
         rtype cons[N_CONSERVATIVE], W_c[N_CONSERVATIVE];
         FOR_I_CONSERVATIVE cons[i] = U(i_cell, i);
         phys.compute_W_from_conservatives(W_c, cons);
@@ -4058,13 +4099,13 @@ void Solver::reduce_flow_statistics(double * out) {
                                   axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>()};
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     const Kokkos::View<rtype *> sum = monitor_sums;
-    Kokkos::parallel_reduce("statistics", mesh->n_owned(), functor,
+    gated::parallel_reduce("statistics", mesh->n_owned(), functor,
                             Kokkos::View<FlowStatisticsFunctor::value_type, DeviceMemory, Kokkos::MemoryUnmanaged>(
                                 reinterpret_cast<FlowStatisticsFunctor::value_type *>(sum.data())));
     if (is_distributed()) {
         comm::allreduce_device(Kokkos::View<rtype *>(sum.data(), N_FLOW_STATISTICS), comm::Op::SUM, halo.uses_nccl());
     }
-    Kokkos::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("statistics_out", 1, KOKKOS_LAMBDA(const int) {
         for (size_t i = 0; i < N_FLOW_STATISTICS; i++) out[i] = static_cast<double>(sum(i));
     });
 }
@@ -4082,7 +4123,7 @@ std::array<rtype, N_FLOW_STATISTICS> Solver::integrate_flow_statistics() {
 void Solver::update_vortex_fields() {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> g = viscous_gradients;
     Kokkos::View<rtype **> out = vortex_fields;
-    Kokkos::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("vortex_fields", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
 #if N_DIM == 2
         out(c, 0) = g(c, 2, 0) - g(c, 1, 1);
 #else
@@ -4104,6 +4145,7 @@ void Solver::update_derived_fields() {
         inputs.cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
         inputs.Y = cell_scalars;
         inputs.thermo = mixture.thermo;
+        inputs.flamelet = mixture.flamelet;
         if (derived_selection.need(derived::need::VISCOUS)) {
             update_transport();
             inputs.transport = cell_transport;

@@ -10,6 +10,7 @@
  */
 
 #include "statistics.h"
+#include "gated.h"
 
 #include "batch_means.h"
 #include "statistical_convergence.h"
@@ -324,7 +325,7 @@ void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint
     const bool batches_on = batches_enabled();
     const Kokkos::View<BatchClock> b = batch_clock;
     const rtype duration = batch;
-    Kokkos::parallel_for("statistics_clock", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("statistics_clock", 1, KOKKOS_LAMBDA(const int) {
         Clock & c = k();
         const rtype w = *t - c.t_last;
         c.weight += w;
@@ -351,7 +352,7 @@ void Statistics::sample_means(const rtype * t, const CellSampler & sampler, uint
     const auto code = codes;
     const auto pair = pairs;
     const uint32_t n_fields = static_cast<uint32_t>(fields.size()), n_products = static_cast<uint32_t>(products.size());
-    Kokkos::parallel_for("statistics_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("statistics_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const rtype a = k().a;
         if (batches_on) {
             const BatchClock & bc = b();
@@ -770,7 +771,7 @@ void PhaseAverage::sample(const rtype * const t, const CellSampler & sampler, co
     if (triggered_) {
         const int32_t c = trigger_cell, code = trigger_code;
         // Every other rank adds an exact zero
-        Kokkos::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("phase_signal", 1, KOKKOS_LAMBDA(const int) {
             value(0) = c >= 0 ? static_cast<double>(sampler(static_cast<uint32_t>(c), code)) : 0.0;
         });
         if (distributed) comm::allreduce_device(value, comm::Op::SUM, use_nccl);
@@ -779,7 +780,7 @@ void PhaseAverage::sample(const rtype * const t, const CellSampler & sampler, co
     const Kokkos::View<double *> w_bin = d_weight;
     const double level_ = level, period_ = period, t_reference_ = t_reference;
     const uint32_t bins_ = bins;
-    Kokkos::parallel_for("phase_clock", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("phase_clock", 1, KOKKOS_LAMBDA(const int) {
         Clock & ck = k();
         const rtype tr = *t;
         bool use = tr > ck.t_start;
@@ -822,7 +823,7 @@ void PhaseAverage::sample(const rtype * const t, const CellSampler & sampler, co
     const auto m = mean;
     const auto code = codes;
     const uint32_t n_fields = static_cast<uint32_t>(fields.size());
-    Kokkos::parallel_for("phase_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("phase_sample", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const Clock & ck = k();
         if (!ck.use) return;
         const uint32_t offset = ck.bin * n_fields;

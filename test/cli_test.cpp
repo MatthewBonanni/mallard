@@ -640,8 +640,8 @@ void write_pack_case() {
     }
     input << "[[forces]]\nzone = \"cylinder\"\ninterval = 1\nfile = \"solut/forces.csv\"\n"
           << "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"points.txt\"\ninterval = 1\n"
-          << "variables = [\"RHO\"]\n"
-          << "[[write_data]]\nprefix = \"solut/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\"]\n"
+          << "fields = [\"RHO\"]\n"
+          << "[[write_data]]\nprefix = \"solut/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\"]\n"
           << "[[write_data]]\nprefix = \"solut/restart\"\nformat = \"restart\"\ninterval = 2\n";
 }
 

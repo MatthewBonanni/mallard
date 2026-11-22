@@ -11,6 +11,7 @@
  */
 
 #include "statistical_convergence.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <bit>
@@ -554,7 +555,7 @@ void Convergence::add_staged(const uint32_t * due, double * result) {
     const double t_q = t_quantile, tol = tolerance, variance_tol = variance_tolerance;
     // add and update in the host's order of operations; mser's batch means and the autocorrelation of each lag are
     // each summed by one thread
-    Kokkos::parallel_for("convergence_add", Kokkos::TeamPolicy<>(1, Kokkos::AUTO), KOKKOS_LAMBDA(const Team & team) {
+    gated::parallel_for("convergence_add", Kokkos::TeamPolicy<>(1, Kokkos::AUTO), KOKKOS_LAMBDA(const Team & team) {
         if (*due == 0) return;
         constexpr uint32_t m = time_series::MSER_BATCH;
         const double nan = Kokkos::Experimental::quiet_NaN_v<double>;

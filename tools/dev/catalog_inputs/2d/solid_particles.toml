@@ -48,9 +48,12 @@ rho_ref = 1.0
 type = "solid"
 diameter = 0.01
 density = 1000.0
-drag = "stokes"
+drag = "singh"
 gravity = [0.0, -1.0]
+forces = ["pressure_gradient", "added_mass", "saffman_lift"]
+specific_heat = 1.0
 velocity = [0.1, 0.0]
+temperature = 1.2
 points = [[0.5, 0.5]]
 
 [[particles.walls]]

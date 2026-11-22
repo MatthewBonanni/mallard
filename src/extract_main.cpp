@@ -32,6 +32,7 @@
 #include "diagnostic_code.h"
 #include "favre_average.h"
 #include "field_units.h"
+#include "gated.h"
 #include "homogeneous_average.h"
 #include "input.h"
 #include "input_upgrade.h"
@@ -407,6 +408,9 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         if (!output.contains(table)) return false;
         return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
     };
+    const bool flamelet = top.contains("physics") && top.at("physics").is_table() &&
+                          top.at("physics").contains("gas") && top.at("physics").at("gas").is_string() &&
+                          top.at("physics").at("gas").as_string() == "flamelet";
     for (const std::string & name : fields) {
         if (!field_units::post_derive(name)) {
             std::vector<std::string> names;
@@ -420,6 +424,8 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         }
         const derived::Field f = derived::find(name.c_str());
         if (f == derived::N_FIELDS) continue;
+        // A flamelet gas has Z and C of its own
+        if (flamelet && (f == derived::MIXTURE_FRACTION || f == derived::C_NORM)) continue;
         const uint16_t needs = derived::FIELDS[f].needs;
         uint16_t missing = 0;
         if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
@@ -1422,7 +1428,7 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
     }
     if (columns.empty()) {
         throw std::runtime_error(c.path + " holds no [statistics] fields (MEAN_, COV_): average its states "
-                                 "without --statistics, or write them with variables = [\"MEAN_*\", \"COV_*\"]");
+                                 "without --statistics, or write them with fields = [\"MEAN_*\", \"COV_*\"]");
     }
     // COV_<a>_<b> pairs with MEAN_<a> and MEAN_<b> where the file holds both
     for (homogeneous::Column & col : columns) {
@@ -2174,7 +2180,7 @@ int flame(const cli::Args & args) {
                 for (uint32_t j = 0; j < n_columns; j++) columns[j].values = owned_values(files[e.file], e, names[j], cells);
             } else {
                 const CellSampler sampler = solver->sample_statistics_of_state(current > 0);
-                Kokkos::parallel_for("flame_values", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+                gated::parallel_for("flame_values", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
                     for (uint32_t j = 0; j < n_columns; j++) values(c, j) = double(sampler(c, codes(j)));
                 });
                 Kokkos::deep_copy(h_values, values);
