@@ -225,22 +225,22 @@ void Solver::ledger_boundary_flux(const ViscousFluxFunctor * viscous) {
     }
 }
 
-void Solver::launch_convective_flux(const IndexSet & faces) {
+void Solver::launch_convective_flux(const IndexSet & faces, const Kokkos::DefaultExecutionSpace & exec) {
     switch (riemann_solver_type) {
         case RiemannSolverType::RUSANOV:
-            launch_flux_functor<riemann::Rusanov>(faces);
+            launch_flux_functor<riemann::Rusanov>(exec, faces);
             break;
         case RiemannSolverType::HLL:
-            launch_flux_functor<riemann::HLL>(faces);
+            launch_flux_functor<riemann::HLL>(exec, faces);
             break;
         case RiemannSolverType::HLLC:
-            launch_flux_functor<riemann::HLLC>(faces);
+            launch_flux_functor<riemann::HLLC>(exec, faces);
             break;
         case RiemannSolverType::ROE:
-            launch_flux_functor<riemann::Roe>(faces);
+            launch_flux_functor<riemann::Roe>(exec, faces);
             break;
         case RiemannSolverType::RHLL:
-            launch_flux_functor<riemann::RHLL>(faces);
+            launch_flux_functor<riemann::RHLL>(exec, faces);
             break;
     }
 }
@@ -298,8 +298,8 @@ ConvectiveFluxFunctor<T_riemann_solver> Solver::flux_functor() const {
 }
 
 template <typename T_riemann_solver>
-void Solver::launch_flux_functor(const IndexSet & faces) {
-    parallel_for_set<HeavyBounds>("convective_flux", faces, flux_functor<T_riemann_solver>());
+void Solver::launch_flux_functor(const Kokkos::DefaultExecutionSpace & exec, const IndexSet & faces) {
+    parallel_for_set<HeavyBounds>(exec, "convective_flux", faces, flux_functor<T_riemann_solver>());
 }
 
 template <typename T_riemann_solver>

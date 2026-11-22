@@ -1241,9 +1241,10 @@ class Solver {
         ConvectiveFluxFunctor<T_riemann_solver> flux_functor() const;
         CentralStates central_states() const;  // the hybrid flux's cell values, empty unless central = "cell_averages"
         template <typename T_riemann_solver>
-        void launch_flux_functor(const IndexSet & faces);
-        /** @brief The single gas's convective fluxes of faces into face_flux, by the chosen Riemann solver. */
-        void launch_convective_flux(const IndexSet & faces);
+        void launch_flux_functor(const Kokkos::DefaultExecutionSpace & exec, const IndexSet & faces);
+        /** @brief The single gas's convective fluxes of faces into face_flux on exec, by the chosen Riemann solver. */
+        void launch_convective_flux(const IndexSet & faces,
+                                    const Kokkos::DefaultExecutionSpace & exec = Kokkos::DefaultExecutionSpace());
         /** @brief The mixture's convective fluxes (double flux or not) of rhs_faces, by the chosen Riemann solver. */
         void launch_mixture_convective_flux();
         /** @brief Distributed reconstructions that receive partition faces from their owners (FaceExchange). */
