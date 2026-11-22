@@ -1,0 +1,12 @@
+{
+ "dimension": "density (kg m^-3)",
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/particle_vortex/input.toml",
+  "tools/dev/catalog_inputs/2d/solid_particles.toml"
+ ],
+ "type": "number"
+}

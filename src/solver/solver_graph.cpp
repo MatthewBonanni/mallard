@@ -141,6 +141,7 @@ void set_condition(const cudaGraphConditionalHandle handle, const uint32_t * fla
 
 std::string Solver::device_steps_unsupported() const {
     if (step_queue_depth == 0) return "off ([run] step_queue = 0)";
+    if (particles && particles->migrates()) return "particles migrate between ranks through the host";
     return "";
 }
 
@@ -286,6 +287,8 @@ void Solver::record_step() {
         }
         step_controller.update(dt, step_scalars.data() + STEP_DT, state(), solution_vec.back());
     }
+    // After a rejected step the positions are those of its start, where they stay
+    if (particles) particles->relocate();
     if (double_flux) {
         cells_frozen = false;
         reset_energy();
@@ -1186,7 +1189,7 @@ void Solver::begin_device_steps() {
     bool moving = false, solution = false, current = false;
     for (size_t k = 0; k < probes.size() && staged_probes.size() < 64; k++) {
         const bool reduced = triggers_read_probe(k) || convergence_reads_probe(k);
-        if (!probes.can_stage(k, statistics) || (reduced && probes.moves(k))) continue;
+        if (!probes.can_stage(k, statistics) || (reduced && !probes.reduces_staged(k))) continue;
         if (probes.follows_solution(k) && !current) {
             // Its staging is sized by the cells it covers now
             update_cell_W();
@@ -1289,6 +1292,7 @@ step_queue::Horizon Solver::step_horizon() const {
         for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
     }
     probes.due_limits(step, h.step_limit, h.t_limit);
+    if (particles) particles->probe_limits(step, h.step_limit);
     if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
     // The chemistry balancing's window ends after a step the host takes
     const uint64_t window = reacting ? cell_chemistry.steps_to_balance_window() : 0;
