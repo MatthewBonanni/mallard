@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ComputeSanitizerOutput>
-  <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back -->
+  <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back (from initOnceFunc,
+       under pthread_once, on its first communicator) -->
   <record>
     <kind>Api</kind>
     <what>
@@ -12,7 +13,7 @@
         <module>.*lib(cuda|nccl)\.so.*</module>
       </frame>
       <frame>
-        <module>.*libnccl\.so.*</module>
+        <module>.*lib(nccl|c)\.so.*</module>
       </frame>
     </hostStack>
   </record>
