@@ -639,9 +639,11 @@ class TENO : public FaceReconstruction {
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
-        // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        // Setup: on the host only (tests), the cells per device batch (0: from the device memory), and
+        // cells refitted after taking their stencil shape's tables (tests)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
+        std::vector<uint32_t> setup_refit_cells;
 
         // Gas mixtures: the flow block is reconstructed in primitive variables
         // W with characteristic projections on the primitive system, whose
