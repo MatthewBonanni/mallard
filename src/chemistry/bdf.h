@@ -254,11 +254,21 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult integrate_bdf(const Lanes & lanes, const
             failures++;
             // An accurate step to negative mass fractions (the RMS norm lets a few species past -atol): a
             // smaller step of order 1, whose damping of decaying species keeps them from overshooting zero
-            const double factor =
-                accurate ? 0.5
-                         : (Kokkos::isfinite(err)
-                                ? Kokkos::fmax(B::MIN_FACTOR, Kokkos::fmin(0.9, B::factor(B::BIAS_SAME, err, order)))
-                                : 0.25);
+            double factor = accurate ? 0.5 : 0.25;
+            if (!accurate && Kokkos::isfinite(err)) {
+                // The order below as well (LSODE's): past ignition order 5, not stable for the oscillatory
+                // modes there, otherwise fails at every step size and shrinks h by orders of magnitude
+                factor = B::factor(B::BIAS_SAME, err, order);
+                if (order > 1) {
+                    const double down = B::factor(B::BIAS_DOWN, B::error_constant(order - 1) * norm(Dk(order), Dk(0), Dk(0)),
+                                                  order - 1);
+                    if (down > factor) {
+                        factor = down;
+                        order--;
+                    }
+                }
+                factor = Kokkos::fmax(B::MIN_FACTOR, Kokkos::fmin(0.9, factor));
+            }
             bdf_rescale(lanes, n, order, factor, D);
             h_step *= factor;
             h_free = h_step;
