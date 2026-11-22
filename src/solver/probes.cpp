@@ -530,19 +530,37 @@ struct DiffusiveColumns {
     }
 };
 
-/** @brief Device views of samples in cells (inside: index into cells of those with an offset). */
+/**
+ * @brief Device views of samples in cells (inside: index into cells of those with an offset), the inside ones
+ *        ordered by cell, so that the reconstruction fits each cell once for all its points.
+ */
 void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells, const std::vector<uint32_t> & h_inside,
                       const std::vector<rtype> & h_offsets, uint32_t n_variables) {
-    std::vector<uint32_t> h_inside_cells;
-    for (uint32_t i : h_inside) h_inside_cells.push_back(h_cells[i]);
+    std::vector<uint32_t> order(h_inside.size());
+    std::iota(order.begin(), order.end(), 0u);
+    std::stable_sort(order.begin(), order.end(),
+                     [&](uint32_t a, uint32_t b) { return h_cells[h_inside[a]] < h_cells[h_inside[b]]; });
+    std::vector<uint32_t> h_sorted, h_inside_cells, h_groups, h_first;
+    for (uint32_t j : order) {
+        const uint32_t c = h_cells[h_inside[j]];
+        if (h_groups.empty() || h_groups.back() != c) {
+            h_groups.push_back(c);
+            h_first.push_back(static_cast<uint32_t>(h_sorted.size()));
+        }
+        h_sorted.push_back(h_inside[j]);
+        h_inside_cells.push_back(c);
+    }
+    h_first.push_back(static_cast<uint32_t>(h_sorted.size()));
     s.cells = to_device(h_cells, "probe_cells");
     s.host_cells = h_cells;
-    s.inside = to_device(h_inside, "probe_inside");
+    s.inside = to_device(h_sorted, "probe_inside");
     s.inside_cells = to_device(h_inside_cells, "probe_inside_cells");
+    s.inside_groups = to_device(h_groups, "probe_inside_groups");
+    s.inside_first = to_device(h_first, "probe_inside_first");
     s.inside_offsets = Kokkos::View<rtype *[N_DIM]>("probe_offsets", h_inside.size());
     auto h_off = Kokkos::create_mirror_view(s.inside_offsets);
-    for (size_t i = 0; i < h_inside.size(); i++) {
-        for (size_t d = 0; d < N_DIM; d++) h_off(i, d) = h_offsets[i * N_DIM + d];
+    for (size_t i = 0; i < order.size(); i++) {
+        for (size_t d = 0; d < N_DIM; d++) h_off(i, d) = h_offsets[order[i] * N_DIM + d];
     }
     Kokkos::deep_copy(s.inside_offsets, h_off);
     std::vector<uint32_t> unique = h_cells;
@@ -1183,7 +1201,10 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             const bool admissible = Wq[0] > 0.0_r && Wq[E] > 0.0_r;
             FOR_I_CONSERVATIVE in_W(j, i) = admissible ? Wq[i] : Wc(c, i);
         });
-        if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
+        if (fields.reconstruction) {
+            const bool grouped = inside_first.extent(0) > 0;
+            fields.reconstruction->point_values(Wc, grouped ? inside_groups : in_cells, in_offsets, in_W, inside_first);
+        }
         const auto in = inside;
         gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             if (counted && j >= *counted) return;

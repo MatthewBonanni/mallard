@@ -724,6 +724,60 @@ TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
     }
 }
 
+TEST(TENO3D, PointValuesGroupedByCellAreThoseOfOnePointEachBitForBit) {
+    // Probes hand point_values each cell once with all its points (first): the values of one fit per point
+    auto mesh = make_mesh_3d("cartesian", 6, 6, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    // Gentle enough that every cell is smooth and takes its polynomial
+    auto avg = cell_averages_3d(*mesh, [](double x, double y, double z, double * U) {
+        quadratic_conservatives(x, y, z, U);
+        U[0] = 1.0 + 0.01 * x * x + 0.02 * y * z - 0.01 * z;
+    });
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        for (int v = 0; v < N_CONSERVATIVE; v++) U[v] = avg(c, v);
+        euler.compute_W_from_conservatives(Wc, U);
+        for (int v = 0; v < N_CONSERVATIVE; v++) h_W(c, v) = Wc[v];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto teno = make_teno(mesh, bd, 5);
+    const std::vector<uint32_t> groups = {7, 43, 100, 214};
+    const std::vector<uint32_t> counts = {3, 1, 5, 2};
+    std::vector<uint32_t> first = {0}, per_point;
+    for (size_t k = 0; k < groups.size(); k++) {
+        per_point.insert(per_point.end(), counts[k], groups[k]);
+        first.push_back(first.back() + counts[k]);
+    }
+    const size_t n = per_point.size();
+    Kokkos::View<rtype *[N_DIM]> offsets("offsets", n);
+    auto h_offsets = Kokkos::create_mirror_view(offsets);
+    for (size_t p = 0; p < n; p++) {
+        for (int d = 0; d < N_DIM; d++) h_offsets(p, d) = 0.01_r * rtype((int(p) * (d + 2)) % 7 - 3);
+    }
+    Kokkos::deep_copy(offsets, h_offsets);
+    auto values = [&](const std::vector<uint32_t> & cells, const std::vector<uint32_t> & starts) {
+        Kokkos::View<rtype *[N_CONSERVATIVE]> out("out", n);
+        Kokkos::deep_copy(out, -1.0_r);
+        Kokkos::View<uint32_t *> d_cells("cells", cells.size()), d_first;
+        Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(cells.data(), cells.size()));
+        if (!starts.empty()) {
+            d_first = Kokkos::View<uint32_t *>("first", starts.size());
+            Kokkos::deep_copy(d_first, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(starts.data(), starts.size()));
+        }
+        EXPECT_TRUE(teno->point_values(W, d_cells, offsets, out, d_first));
+        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+    };
+    const auto grouped = values(groups, first);
+    const auto single = values(per_point, {});
+    for (size_t p = 0; p < n; p++) {
+        EXPECT_GT(single(p, 0), 0.0_r) << "point " << p << " not written";
+        for (int v = 0; v < N_CONSERVATIVE; v++) EXPECT_EQ(grouped(p, v), single(p, v)) << "point " << p << ", variable " << v;
+    }
+}
+
 TEST(TENO3DSetup, CentralStencilsAloneAreTheFullSetupsBitForBit) {
     // Output of states read from files sets up only what cell_gradients and point_values read, from moments
     // of the central stencils' degree alone. With share_tables, cells share basis means on the means alone,

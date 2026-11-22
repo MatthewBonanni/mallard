@@ -2287,6 +2287,7 @@ struct TENOFunctor {
     uint32_t n_direct_rows = 0;            // TENO::n_direct_rows
     Kokkos::View<uint32_t *> extra_cells{};  // TENO::extra_cells
     Kokkos::View<rtype *[N_DIM]> point_offsets{};  // from the cell centroid, point_cells.extent(0) groups
+    Kokkos::View<uint32_t *> point_first{};        // group k's points first(k) to first(k + 1), else equal groups
     Kokkos::View<rtype *[N_CONSERVATIVE]> point_W{};
 
     /**
@@ -2337,7 +2338,9 @@ struct TENOFunctor {
         const rtype h = scale(i_row);
         const uint32_t row = cell_shape(i_row);
         const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
-        for (uint32_t p = k * m; p < (k + 1) * m; p++) {
+        const bool grouped = point_first.extent(0) > 0;
+        const uint32_t p_begin = grouped ? point_first(k) : k * m, p_end = grouped ? point_first(k + 1) : (k + 1) * m;
+        for (uint32_t p = p_begin; p < p_end; p++) {
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = point_offsets(p, i) / h;
             rtype psi[NK];
@@ -3438,7 +3441,8 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 
 template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                         Kokkos::View<uint32_t *> first) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -3454,6 +3458,7 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     functor.extra_cells = extra_cells_device;
     functor.point_offsets = offsets;
     functor.point_W = out;
+    functor.point_first = first;
     gated::parallel_for("teno_point_values", Kokkos::RangePolicy<typename Functor::PointPass>(0, cells.extent(0)),
                          functor);
 }
@@ -3534,29 +3539,30 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 }
 
 bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                        Kokkos::View<uint32_t *> first) {
     if (cells.extent(0) == 0) return true;
 #if N_DIM == 3
     if (single_tables) {
         switch (degree) {
-            case 2: launch_points<2, false, float>(solution, cells, offsets, out); break;
-            case 3: launch_points<3, false, float>(solution, cells, offsets, out); break;
-            case 4: launch_points<4, false, float>(solution, cells, offsets, out); break;
-            case 5: launch_points<5, false, float>(solution, cells, offsets, out); break;
+            case 2: launch_points<2, false, float>(solution, cells, offsets, out, first); break;
+            case 3: launch_points<3, false, float>(solution, cells, offsets, out, first); break;
+            case 4: launch_points<4, false, float>(solution, cells, offsets, out, first); break;
+            case 5: launch_points<5, false, float>(solution, cells, offsets, out, first); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
         return true;
     }
 #endif
     switch (degree * 2 + primitive) {
-        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out); break;
-        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out); break;
-        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out); break;
-        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out); break;
-        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out); break;
-        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out); break;
-        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out); break;
-        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out); break;
+        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, first); break;
+        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, first); break;
+        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, first); break;
+        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, first); break;
+        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, first); break;
+        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, first); break;
+        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, first); break;
+        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, first); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
     return true;

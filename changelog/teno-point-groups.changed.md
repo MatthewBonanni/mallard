@@ -1,0 +1,1 @@
+- Point-sampled probes fit each cell's TENO polynomial once for all of the cell's sample points instead of once per point: the exact cut plane of the `probes_3d` performance case has about 108 quadrature points per cell, and on CPUs its point values cost 37x less (about 200 to 5 ms per evaluation at 48^3) with bitwise-identical results (#1402).

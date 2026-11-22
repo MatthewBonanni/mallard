@@ -210,17 +210,20 @@ class FaceReconstruction {
         
         /**
          * @brief Values of W = [rho, u, p] at points inside cells from the
-         *        reconstruction polynomials: out(i) = W of cells(i / m) at
-         *        offset offsets(i) from its centroid, with m =
-         *        offsets.extent(0) / cells.extent(0) points per cell, for cells
-         *        the scheme deems smooth and where the value is admissible;
-         *        out(i) of other points is left as it is.
+         *        reconstruction polynomials: out(i) = W of cells(k) at offset
+         *        offsets(i) from its centroid, for the points i of cells(k):
+         *        first(k) to first(k + 1) - 1 if first is allocated
+         *        (cells.extent(0) + 1 entries), else k m to (k + 1) m - 1 with
+         *        m = offsets.extent(0) / cells.extent(0). Each cell is fitted
+         *        once for all its points. Only for cells the scheme deems smooth
+         *        and where the value is admissible; out(i) of other points is
+         *        left as it is.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
         virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                   Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, Kokkos::View<uint32_t *> /*first*/) {
             return false;
         }
 
@@ -462,7 +465,8 @@ class TENO : public FaceReconstruction {
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                          Kokkos::View<uint32_t *> first) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -668,7 +672,8 @@ class TENO : public FaceReconstruction {
                            Kokkos::View<rtype *> source, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out);
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                           Kokkos::View<uint32_t *> first);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);

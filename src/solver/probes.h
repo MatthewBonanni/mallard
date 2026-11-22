@@ -424,6 +424,9 @@ class Probes {
             Kokkos::View<uint32_t *> inside_cells;
             Kokkos::View<rtype *[N_DIM]> inside_offsets;  // from the cell centroid
             Kokkos::View<rtype *[N_CONSERVATIVE]> inside_W;
+            // The inside samples' cells, once each, and the first of each one's samples (by cell; empty: one each)
+            Kokkos::View<uint32_t *> inside_groups;
+            Kokkos::View<uint32_t *> inside_first;
             Kokkos::View<uint32_t *> unique_cells;  // cells of the inside samples, once each
             Kokkos::View<const uint32_t> unique_count;  // isosurfaces cut on the device: the first count() of them
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
