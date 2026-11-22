@@ -650,7 +650,13 @@ derived fields the due probes read are updated (the cell states, transport and g
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
 from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
-takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
+takes the record. A probe whose writes need its reductions alone (no samples written, no time averages, spectra,
+motion or isosurface) is reduced in the graph instead, as the probes triggers read are, and only its measure and
+reduced values go to the record slot: copying a cut plane's 1.5M samples into pinned memory at each write made
+the perf set's `probes_3d` two to five times slower than `teno5_3d` on an A100 (#1402). Point values come from
+`FaceReconstruction::point_values` with `by_cell`: the probes' points come by cell, and TENO fits each run of
+one cell once, a team of threads sharing out its coefficients, each summed in the per-point fit's order, so the
+values are those of a fit per point bit for bit. The intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
 A moving region's fractions, and a `where` region's (from the levels of its conditions on the cell states, which
