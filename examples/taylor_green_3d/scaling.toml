@@ -17,9 +17,9 @@
 # efficiencies.
 #
 # Expected result on NVIDIA A100-SXM4-80GB GPUs: 245 ms per step for 128^3
-# on one GPU and 61 ms on 4 (100% strong-scaling efficiency); 30.6 ms per step
-# for 64^3 on one GPU and 98.5% weak-scaling efficiency on 8 GPUs, and on
-# 7 + 7 GPUs over two nodes.
+# on one GPU, 61 ms on 4 and 32 ms on 8 (96% strong-scaling efficiency);
+# 30.6 ms per step for 64^3 on one GPU, and 98.5% weak-scaling efficiency on
+# 8 GPUs and on 7 + 7 GPUs over two nodes.
 
 [run]
 n_steps = 160

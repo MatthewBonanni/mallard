@@ -37,6 +37,17 @@
    ]
   },
   {
+   "series": "strong",
+   "gpus": 8,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 31.992,
+   "runs": [
+    29.286,
+    32.017
+   ]
+  },
+  {
    "series": "weak",
    "gpus": 1,
    "nodes": 1,

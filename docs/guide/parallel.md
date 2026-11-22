@@ -205,7 +205,7 @@ The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashbo
 
 ### 3D Taylor–Green vortex, Mallard 0.11.0 {#scaling-3d-taylor-green}
 
-The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and SSPRK3, on hexahedra, from `examples/taylor_green_3d/scaling.toml`. The hardware is NVIDIA A100-SXM4-80GB GPUs, 8 per node, with NVLink within a node and HDR InfiniBand with GPUDirect RDMA between nodes. There is one rank per GPU (12 OpenMP host threads each), NCCL halo exchanges, multi-jagged partitions and the step's CUDA graph, all defaults. Each point is the median time per step from step 60 to 160 over two runs, setup excluded; the 8-GPU run of the strong series did not fit in the GPU time available. Efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong scaling and T<sub>1</sub>/T<sub>n</sub> for weak scaling.
+The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and SSPRK3, on hexahedra, from `examples/taylor_green_3d/scaling.toml`. The hardware is NVIDIA A100-SXM4-80GB GPUs, 8 per node, with NVLink within a node and HDR InfiniBand with GPUDirect RDMA between nodes. There is one rank per GPU (12 OpenMP host threads each), NCCL halo exchanges, multi-jagged partitions and the step's CUDA graph, all defaults. Each point is the median time per step from step 60 to 160 over two runs, setup excluded. Efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong scaling and T<sub>1</sub>/T<sub>n</sub> for weak scaling.
 
 ![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-light.svg#gh-light-mode-only)
 ![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-dark.svg#gh-dark-mode-only)
@@ -217,6 +217,7 @@ The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and
 | 1 | 2,097,152 | 244.9 ms | |
 | 2 | 1,048,576 | 119.6 ms | 102% |
 | 4 | 524,288 | 60.9 ms | 100.5% |
+| 8 | 262,144 | 32.0 ms | 95.7% |
 
 **Weak scaling**, 64³ hexahedra per GPU (Nx = 64 n), main 9da4ab1e7 (the solver's step is unchanged between the two commits):
 
@@ -228,7 +229,7 @@ The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and
 | 8 | 512 × 64 × 64 | 31.03 ms | 98.6% | 31.05 ms (4 + 4) | 98.5% |
 | 14 | 896 × 64 × 64 | | | 31.05 ms (7 + 7) | 98.5% |
 
-- **Strong scaling at or above 100%:** an A100 advances 8.77M cells per second with 1M cells, against 8.56M with 2.1M or 262,144, and 8.60M with 524,288 cells per GPU on 4 GPUs, halo work included.
+- **Strong scaling:** at or above 100% up to 4 GPUs. An A100 advances 8.77M cells per second with 1M cells, against 8.56M with 2.1M or 262,144 cells. At 8 GPUs each rank holds a 64³ cube with neighbors on all six sides, whereas the weak-scaling boxes are cut along x only. The larger partition surface is the likely cause of the extra 1 ms per step over the weak-scaling run with the same cells per GPU (32.0 against 31.0 ms).
 - **Crossing nodes costs nothing measurable:** 4 + 4 GPUs on two nodes run as fast as 8 on one, and the step stays a single CUDA graph across nodes.
 - **What weak scaling loses** is 0.2 ms per step at 2 GPUs and about 0.5 ms (1.5–1.7%) from 4 on: the halo-dependent cells' and NCCL's kernels share the device with the interior cells' reconstruction.
 
