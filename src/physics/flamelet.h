@@ -78,19 +78,26 @@ struct Transport {
  *        fpv / saghafian2015 contract, the indices of the fields the solver
  *        reads and, in LES, each cell's subgrid variance of Z. Plain aggregate,
  *        captured by value in kernels; empty (inactive) unless gas = "flamelet".
- *        The transported scalars are Z and C, in this order.
+ *        The transported scalars are Z and C, in this order, then the second
+ *        moment Z2 (the filtered Z^2) with the transported variance.
  */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct Gas {
-    static constexpr uint32_t Z = 0, C = 1;  // scalars of the species block
+    static constexpr uint32_t Z = 0, C = 1, Z2 = 2;  // scalars of the species block
 
     FPV<double, MemorySpace> fpv;
     uint32_t thermo_fields[5] = {};     // T0, e0, R, gamma0, a_gamma
     uint32_t transport_fields[3] = {};  // mu, kappa, cp
     uint32_t source_fields[2] = {};     // omega_C, rho0
     Kokkos::View<rtype *, MemorySpace> variance;  // LES: Zvar of each cell (Solver::update_flamelet_variance), else empty
+    bool second_moment = false;                   // Z2 is transported
 
     KOKKOS_INLINE_FUNCTION bool active() const { return fpv.table.values.extent(0) > 0; }
+
+    /** @brief Scalars given as Z and C (host), completed with Z2 = Z^2 of zero variance if transported. */
+    void complete(std::vector<double> & y) const {
+        if (second_moment) y[Z2] = y[Z] * y[Z];
+    }
 
     /** @brief The subgrid variance of Z in cell c: 0 without LES. */
     KOKKOS_INLINE_FUNCTION double cell_variance(const uint32_t c) const {
@@ -152,13 +159,16 @@ struct Gas {
  */
 class FlameletModel {
     public:
-        /** @brief The closure of the subgrid variance of Z: none (laminar), or algebraic in LES. */
-        enum class Variance : uint8_t { NONE, ALGEBRAIC };
+        /**
+         * @brief The closure of the subgrid variance of Z: none (laminar), or in LES algebraic or from the
+         *        transported second moment Z2.
+         */
+        enum class Variance : uint8_t { NONE, ALGEBRAIC, TRANSPORTED };
 
         /**
          * @brief From the [physics] table: table (the file, relative to the
          *        working directory); type = "euler" or "navier_stokes"; with
-         *        [les], variance = "algebraic" and its constant C_Z.
+         *        [les], variance = "algebraic" (constant C_Z) or "transported" (constant C_chi).
          */
         static FlameletModel from_input(const Input & input);
 
@@ -170,8 +180,13 @@ class FlameletModel {
         const Gas<Kokkos::HostSpace> & host() const { return host_gas; }
         bool viscous() const { return m_viscous; }
 
-        /** @brief The transported scalars' names, in the order of the species block. */
+        /** @brief The names of the scalars given as composition, Z and C. */
         static std::vector<std::string> scalar_names() { return {"Z", "C"}; }
+        /** @brief The transported scalars' names, in the order of the species block: Z, C, and Z2 if transported. */
+        std::vector<std::string> species_block() const {
+            if (m_variance == Variance::TRANSPORTED) return {"Z", "C", "Z2"};
+            return scalar_names();
+        }
 
         /** @brief The table's C at mixture fraction Z for fully burnt (Lambda = 1) laminar (Sz = 0) states. */
         double burnt_progress(double Z) const;
@@ -180,6 +195,8 @@ class FlameletModel {
         Variance variance() const { return m_variance; }
         /** @brief The constant of the algebraic variance, Zvar = C_Z Delta^2 |grad Z|^2. */
         double variance_constant() const { return m_C_Z; }
+        /** @brief The constant of the subgrid dissipation rate, chi_sgs = C_chi (D + D_t) Zvar / Delta^2. */
+        double dissipation_constant() const { return m_C_chi; }
 
         /** @brief Thermodynamics of the table point of (Z, Zvar, C); Zvar = 0 is the laminar flamelet. */
         Thermo thermo(double Z, double C, double Zvar = 0.0) const;
@@ -221,6 +238,7 @@ class FlameletModel {
         bool m_heat_release = false;            // the first of m_output_fields is HRR
         Variance m_variance = Variance::NONE;
         double m_C_Z = 0.1;
+        double m_C_chi = 2.0;
 };
 
 } // namespace flamelet

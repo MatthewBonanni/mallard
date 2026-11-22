@@ -72,8 +72,9 @@ mass fractions that sum to one).
 |---|---|---|
 | `gas = "flamelet"`, `table` | `[physics]` | The table file, an FPV table with `saghafian2015` thermodynamics |
 | `Z`, `C` | `[initialize]`, `[[initialize.regions]]`, `inlet_state` | Mixture fraction in [0, 1] (default 0) and progress variable in the table's range at `Z` (default 0); numbers, expressions, or `C = "burnt"` |
-| `variance` | `[physics]`, with `[les]` | Closure of the subgrid variance of `Z`: `algebraic` (default, the only one so far) |
-| `C_Z` | `[physics]`, with `[les]` | Constant of the algebraic variance, default 0.1, non-negative |
+| `variance` | `[physics]`, with `[les]` | Closure of the subgrid variance of `Z`: `algebraic` (default) or `transported` |
+| `C_Z` | `[physics]`, `variance = "algebraic"` | Constant of the algebraic variance, default 0.1, non-negative |
+| `C_chi` | `[physics]`, `variance = "transported"` | Constant of the subgrid dissipation rate, default 2, positive |
 
 `C` must lie between the table's `C_min` and `C_max` at its `Z`; values
 outside are clamped in lookups.
@@ -167,15 +168,45 @@ C_Z = 0.1                   # variance = "algebraic" is the default
 model = "sigma"
 ```
 
-Inlets and the boundary states are laminar (zero variance). The initial state
+With `variance = "transported"` the second moment `Z2`, the filtered `Z^2`, is
+a third transported scalar (written as `Y_Z2`), and the variance is
+`Zvar = Z2 - Z^2`, within `[0, Z (1 - Z)]`. `rho Z2` is conserved and diffuses
+with `rho (D + D_t)`, as `Z`; its sink is the filtered dissipation rate
+
+$$
+\bar\rho \tilde\chi = 2 \bar\rho D |\nabla \tilde Z|^2 + \bar\rho \chi_{sgs}, \qquad
+\chi_{sgs} = C_\chi (D + D_t) \frac{\widetilde{Z''^2}}{\Delta^2}
+$$
+
+The eddy diffusion of `Z2 = Z^2 + Zvar` produces the variance at
+`2 rho D_t |grad Z|^2`, so it relaxes in `Delta^2 / (C_chi (D + D_t))` toward
+`2 D_t / (C_chi (D + D_t)) Delta^2 |grad Z|^2`: with `D_t >> D` the algebraic
+model with `C_Z = 2 / C_chi`. The default `C_chi = 2` relaxes within a few
+explicit time steps; much larger values make the sink stiff at the viscous time
+step, as `C_chi (D + D_t) dt / Delta^2` reaches `C_chi cfl / 8` on regular cells.
+Transporting `Z2` rather than `Zvar` keeps the production out of the scheme's
+discretization (Kaul et al. 2013).
+
+```toml
+[physics]
+type = "navier_stokes"
+gas = "flamelet"
+table = "h2_fpv.h5"
+variance = "transported"
+C_chi = 2.0
+```
+
+Inlets and the boundary states are laminar (zero variance; with the transported
+variance, inlets carry `Z2 = Z^2`). The initial state
 is converted at its variance: `p`, `T`, `u`, `Z` and `C` are those given, the
-density and energy those of the table at the cell's variance. `[les.combustion]`
+density and energy those of the table at the cell's variance. A transported
+`Z2` starts at zero variance. `[les.combustion]`
 (thickened flames) is an input error with the flamelet gas: the table already
 represents the subgrid flame.
 
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:
-`variance = "transported"`, `[les.combustion]`, `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
+`[les.combustion]`, `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
 mixture's other derived fields, and nondimensional units. Probes and statistics
 do not sample the table fields (`T_TABLE`, `HRR`, the table's `Y_<species>`).

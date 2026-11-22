@@ -186,7 +186,7 @@ class MixtureModel {
         bool viscous() const { return gas.viscous; }
         uint32_t n_species() const { return gas.n_species; }
         std::vector<std::string> species_names() const {
-            return tabulated() ? flamelet::FlameletModel::scalar_names() : mech.species_names();
+            return tabulated() ? tabulated_gas->species_block() : mech.species_names();
         }
 
         /** @brief The error of a species name, key (in table) of the input, that the mechanism lacks. */

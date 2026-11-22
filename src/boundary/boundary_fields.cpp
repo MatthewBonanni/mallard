@@ -743,6 +743,9 @@ struct TimedFieldsFunctor : FirstError {
                         }
                     }
                     for (uint32_t i = 0; i < n_species; i++) Y(i) = static_cast<rtype>(double(Y(i)) / norm);
+                } else if (gas.gas.flamelet.second_moment) {
+                    using G = flamelet::Gas<>;
+                    Y(G::Z2) = Y(G::Z) * Y(G::Z);
                 }
             }
             R = gas.gas.gas_constant(BoundaryComposition{gas.bc_Y, static_cast<int32_t>(i_bc)});

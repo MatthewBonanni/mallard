@@ -110,7 +110,7 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     }
     // The variance keys before the table, which a build without HDF5 cannot read
     const bool les = input.contains("les");
-    for (const char * key : {"variance", "C_Z"}) {
+    for (const char * key : {"variance", "C_Z", "C_chi"}) {
         if (!les && physics.contains(key)) {
             throw InputError({.key = std::string("physics.") + key,
                               .line = line_of(physics, key),
@@ -120,16 +120,30 @@ FlameletModel FlameletModel::from_input(const Input & input) {
         }
     }
     Variance variance = Variance::NONE;
-    double C_Z = 0.1;
+    double C_Z = 0.1, C_chi = 2.0;
     if (les) {
         const std::string name = find_value_or<std::string>(physics, "variance", "algebraic");
-        if (name != "algebraic") throw not_accepted(physics, "physics.variance", name, {"algebraic"});
-        variance = Variance::ALGEBRAIC;
-        C_Z = static_cast<double>(find_real_or(physics, "C_Z", dim::none, static_cast<rtype>(C_Z)));
-        if (!(C_Z >= 0.0)) {
-            throw InputError({.key = "physics.C_Z",
-                              .line = line_of(physics, "C_Z"),
-                              .message = "must not be negative",
+        if (name != "algebraic" && name != "transported") {
+            throw not_accepted(physics, "physics.variance", name, {"algebraic", "transported"});
+        }
+        const bool transported = name == "transported";
+        const char * other = transported ? "C_Z" : "C_chi";
+        if (physics.contains(other)) {
+            throw InputError({.key = std::string("physics.") + other,
+                              .line = line_of(physics, other),
+                              .message = std::string("is a constant of variance = \"") +
+                                         (transported ? "algebraic" : "transported") + "\", not of \"" + name + "\"",
+                              .fix = std::string("Remove ") + other,
+                              .docs = "docs/guide/flamelet.md"});
+        }
+        variance = transported ? Variance::TRANSPORTED : Variance::ALGEBRAIC;
+        const char * key = transported ? "C_chi" : "C_Z";
+        double & constant = transported ? C_chi : C_Z;
+        constant = static_cast<double>(find_real_or(physics, key, dim::none, static_cast<rtype>(constant)));
+        if (!(transported ? constant > 0.0 : constant >= 0.0)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(physics, key),
+                              .message = transported ? "must be positive" : "must not be negative",
                               .docs = "docs/guide/flamelet.md"});
         }
     }
@@ -149,6 +163,8 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     model.m_file = file;
     model.m_variance = variance;
     model.m_C_Z = C_Z;
+    model.m_C_chi = C_chi;
+    model.gas.second_moment = model.host_gas.second_moment = variance == Variance::TRANSPORTED;
     return model;
 }
 
@@ -171,6 +187,7 @@ void FlameletModel::conservatives(const double p, const double T, const double *
     U[N_DIM + 1] = rho * (th.energy(T) + 0.5 * u2);
     rhoY[Gas<>::Z] = rho * Z;
     rhoY[Gas<>::C] = rho * C;
+    if (gas.second_moment) rhoY[Gas<>::Z2] = rho * Z * Z;
 }
 
 void FlameletModel::surrogates(const double T, const double Z, const double C, double & gamma, double & e0) const {
@@ -200,6 +217,9 @@ report::Summary FlameletModel::summary() const {
     if (m_viscous) s.setting("Transport", "from the table, unity Lewis number");
     if (m_variance == Variance::ALGEBRAIC) {
         s.setting("Subgrid variance", "algebraic, C_Z Delta^2 |grad Z|^2 with C_Z = " + logging::real(m_C_Z));
+    } else if (m_variance == Variance::TRANSPORTED) {
+        s.setting("Subgrid variance", "transported second moment Z2, chi_sgs = C_chi (D + D_t) Zvar / Delta^2 with "
+                                      "C_chi = " + logging::real(m_C_chi));
     }
     return s;
 }
