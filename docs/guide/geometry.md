@@ -800,12 +800,16 @@ itself. A region with more than 4096 images that meet the domain is an error.
 ### Regions on a mesh
 
 Each cell gets its **volume fraction**: the average of the region's indicator
-over the cell. Mallard splits each cell into triangles (2D) or tetrahedra (3D)
-and subdivides them where the surface may cross them (where `|φ|` is less than
-their size), up to 8 levels in 2D and 5 in 3D. Cells entirely inside get
-exactly 1, cells outside 0. A region much smaller than a cell can fall
-between the samples of the deepest level; a region that then covers no part of
-any cell is an error.
+over the cell. Mallard splits each cell into triangles (2D) or tetrahedra (3D).
+Where only flat faces cross them (of rectangles, boxes, half-spaces and
+polygons, and booleans of them, without a smooth `edge`), it cuts them along
+those faces, so those fractions are exact to rounding, unless faces smaller
+than a cell need more cuts than a cell allows; it then samples that triangle or
+tetrahedron as below. Elsewhere it subdivides them where the surface may cross
+them (where `|φ|` is less than their size), up to 8 levels in 2D and 5 in 3D,
+and samples the deepest level. Cells entirely inside get exactly 1, cells
+outside 0. A region much smaller than a cell can fall between the samples of
+the deepest level; a region that then covers no part of any cell is an error.
 
 ![Three triangles cut by a circle, with no subdivision, two levels and six levels, and their fractions](../images/guide/geometry-subdivision-light.svg#gh-light-mode-only)
 ![Three triangles cut by a circle, with no subdivision, two levels and six levels, and their fractions](../images/guide/geometry-subdivision-dark.svg#gh-dark-mode-only)

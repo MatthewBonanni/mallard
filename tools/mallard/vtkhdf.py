@@ -1,8 +1,9 @@
 """Reader for Mallard's VTKHDF output (format = "vtkhdf", the default; needs h5py).
 
-A snapshot is one step of the series file PREFIX.vtkhdf, which holds them all
-(series = true, the default), or with series = false PREFIX_NNNNNN.vtkhdf
-(indexed by PREFIX.vtkhdf.series). Volume output is an UnstructuredGrid,
+A snapshot is one step of the series file PREFIX.vtkhdf (series = true, the
+default), an index of HDF5 virtual datasets over the snapshots' own files
+PREFIX_NNNNNN.vtkhdf, which h5py reads through as one temporal file; or with
+series = false PREFIX_NNNNNN.vtkhdf, indexed by PREFIX.vtkhdf.series. Volume output is an UnstructuredGrid,
 boundary zones and probes a PolyData. The snapshots of a series file are
 SeriesSnapshot paths, which every reader of mallard.vtu and mallard.vtkhdf
 reads as that snapshot.
