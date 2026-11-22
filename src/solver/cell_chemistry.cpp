@@ -10,6 +10,7 @@
  */
 
 #include "cell_chemistry.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <limits>
@@ -18,8 +19,12 @@
 #include <type_traits>
 
 #include <Kokkos_Sort.hpp>
-#ifdef KOKKOS_ENABLE_CUDA
+#if defined(KOKKOS_ENABLE_CUDA)
 #include <cub/device/device_radix_sort.cuh>
+#define MALLARD_RADIX_SORT 1
+#elif defined(KOKKOS_ENABLE_HIP)
+#include <hipcub/device/device_radix_sort.hpp>
+#define MALLARD_RADIX_SORT 1
 #endif
 
 #include "chemistry_balance.h"
@@ -84,6 +89,8 @@ double cell_composition(const Mixture & gas, const StateView & U, const SpeciesV
 
 struct ActivityTeamTag {};
 using ActivityPolicy = Kokkos::TeamPolicy<ActivityTeamTag>;
+struct ExplicitTag {};
+using ExplicitPolicy = Kokkos::TeamPolicy<ExplicitTag>;
 
 /** @brief Flags the cells of a chunk that need chemistry (see CellChemistry), by threads or by teams. */
 struct ActivityFunctor {
@@ -232,6 +239,7 @@ struct AdvanceFunctor {
     Kokkos::View<rtype *> volume{};
     Kokkos::View<uint8_t *> repaired{};
     Kokkos::View<uint64_t[2]> counters{};
+    Kokkos::View<uint32_t *> active{};  // explicit steps: the flags of the cells that need chemistry
     // The queue positions [*begin, *end) of the cells to integrate, on the device
     const uint32_t * begin = nullptr;
     const uint32_t * end = nullptr;
@@ -321,7 +329,8 @@ struct AdvanceFunctor {
         double T;
         const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
         const double rho = static_cast<double>(U(c, 0));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         chemistry::RosenbrockResult r;
         if (forcing_offset > 0) {
             double * g = Y + forcing_offset;
@@ -347,11 +356,107 @@ struct AdvanceFunctor {
                                                            nullptr, nullptr, clipped);
             for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
         }
-        chem_h(c) = static_cast<rtype>(h);
+        chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
         chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
         previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         if (r.status != chemistry::RosenbrockStatus::SUCCESS) failures++;
         account(c, r);
+    }
+
+    /**
+     * @brief Whether cell c's chemistry may take an explicit step over the
+     *        call: its last sub-step covered a call of this length, or there
+     *        was none, and no explicit step failed since its sub-steps last
+     *        fell short of a call (chem_h < 0).
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool explicit_candidate(const uint32_t c) const {
+        const double h = static_cast<double>(chem_h(c));
+        return h == 0.0 || !(h < cell_dt(c));
+    }
+
+    /** @brief What cell c keeps of RODAS's proposal h: negated while its failed explicit step (h_last < 0) stands. */
+    KOKKOS_INLINE_FUNCTION
+    double proposal(const uint32_t c, const double h_last, const double h) const {
+        return h_last < 0.0 && h >= cell_dt(c) ? -h : h;
+    }
+
+    /** @brief After cell c's failed explicit step: no other until its sub-steps fall short of a call. */
+    KOKKOS_INLINE_FUNCTION
+    void explicit_failed(const uint32_t c) const { chem_h(c) = -chem_h(c); }
+
+    /** @brief After cell c's accepted explicit step: one sub-step, and the cell leaves the queue. */
+    KOKKOS_INLINE_FUNCTION
+    void explicit_done(const uint32_t c) const {
+        chem_cost(c) += rtype(1);
+        previous_cost(c) = 1.0f;
+        active(c) = 0;
+        if (repair.active()) Kokkos::atomic_add(&counters(0), uint64_t(1));
+    }
+
+    /** @brief The explicit step of a queued cell by one thread (see CellChemistry::advance). */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(ExplicitTag, const uint32_t i) const {
+        if (skipped(i)) return;
+        const uint32_t c = queue(i), ns = gas.n_species;
+        if (!explicit_candidate(c)) return;
+        double * Y = &work(i, 0);
+        double T;
+        const double e = cell_composition(gas, U, rhoY, T_seed, c, Y, T);
+        const double rho = static_cast<double>(U(c, 0));
+        double * g = nullptr;
+        if (forcing_offset > 0) {
+            g = Y + forcing_offset;
+            for (uint32_t k = 0; k <= ns; k++) g[k] = cell_forcing(c, k, rho, e);
+        }
+        if (!chemistry::explicit_reactor_step(chemistry::SerialLanes(), gas.thermo, kinetics, rho, cell_dt(c), Y, T,
+                                              options, Y + ns, g)) {
+            explicit_failed(c);
+            return;
+        }
+        if (forcing_offset > 0) {
+            const double rho_end = static_cast<double>(U_end(c, 0));
+            for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]);
+        } else {
+            for (uint32_t k = 0; k < ns; k++) rhoY(c, k) = static_cast<rtype>(rho * Y[k]);
+        }
+        explicit_done(c);
+    }
+
+    /** @brief The same by the lanes of a team. */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(ExplicitTag, const ExplicitPolicy::member_type & member) const {
+        const uint32_t slot = static_cast<uint32_t>(member.league_rank());
+        if (skipped(slot)) return;
+        const uint32_t c = queue(slot), ns = gas.n_species;
+        if (!explicit_candidate(c)) return;
+        const chemistry::TeamLanes<ExplicitPolicy::member_type> team(member,
+                                                                    lanes * static_cast<uint32_t>(member.team_size()));
+        double * Y = &work(slot, 0);
+        const double rho = static_cast<double>(U(c, 0));
+        team.for_each(ns, [&](const uint32_t k) { Y[k] = static_cast<double>(rhoY(c, k)) / rho; });
+        team.sync();
+        double u2 = 0.0;
+        FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
+        const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
+        double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
+        double * g = nullptr;
+        if (forcing_offset > 0) {
+            g = &work(slot, forcing_offset);
+            team.for_each(ns + 1, [&](const uint32_t k) { g[k] = cell_forcing(c, k, rho, e); });
+            team.sync();
+        }
+        if (!chemistry::explicit_reactor_step(team, gas.thermo, kinetics, rho, cell_dt(c), Y, T, options, Y + ns, g)) {
+            team.single([&]() { explicit_failed(c); });
+            return;
+        }
+        if (forcing_offset > 0) {
+            const double rho_end = static_cast<double>(U_end(c, 0));
+            team.for_each(ns, [&](const uint32_t k) { rhoY_end(c, k) = static_cast<rtype>(rho_end * Y[k]); });
+        } else {
+            team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
+        }
+        team.single([&]() { explicit_done(c); });
     }
 
     /** @brief All threads and lanes of a team per cell. */
@@ -371,7 +476,8 @@ struct AdvanceFunctor {
         FOR_I_DIM u2 += static_cast<double>(U(c, 1 + i)) * static_cast<double>(U(c, 1 + i));
         const double e = static_cast<double>(U(c, N_DIM + 1)) / rho - 0.5 * u2 / (rho * rho);
         double T = gas.thermo.T_from_e(e, chemistry::MassFractions{Y}, static_cast<double>(T_seed(c)));
-        double h = static_cast<double>(chem_h(c));
+        const double h_last = static_cast<double>(chem_h(c));
+        double h = Kokkos::fabs(h_last);
         double * g = nullptr;
         if (forcing_offset > 0) {
             g = &work(slot, forcing_offset);
@@ -389,7 +495,7 @@ struct AdvanceFunctor {
             team.for_each(ns, [&](const uint32_t k) { rhoY(c, k) = static_cast<rtype>(rho * Y[k]); });
         }
         team.single([&]() {
-            chem_h(c) = static_cast<rtype>(h);
+            chem_h(c) = static_cast<rtype>(proposal(c, h_last, h));
             chem_cost(c) += static_cast<rtype>(r.steps + r.rejected);
             previous_cost(c) = static_cast<float>(r.steps + r.rejected);
         });
@@ -442,7 +548,7 @@ inline void launch_teams(const Space & space, const AdvanceFunctor & functor, co
     const size_t scratch = chemistry::TeamLanes<Member>::scratch_bytes(lanes * threads) + fast_bytes + 64;
     auto launch = [&](auto policy) {
         policy.set_scratch_size(0, Kokkos::PerTeam(scratch));
-        Kokkos::parallel_reduce("chemistry_advance_teams", policy, functor, failures);
+        gated::parallel_reduce("chemistry_advance_teams", policy, functor, failures);
     };
     const int L = static_cast<int>(league), T = static_cast<int>(threads), V = static_cast<int>(lanes);
     if (lanes * threads > WARP) {
@@ -548,21 +654,23 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
     // this lowers the cells per SM more than it speeds each cell, so it is off unless asked for
     fast_bytes = 0;
     if (n_lanes > 1 && !wide && options.shared == 1) {
-        const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr);
+        const size_t bytes = sizeof(double) * chemistry::reactor_fast_size(kinetics, sparse ? &pattern : nullptr, options.reactor.method);
         const size_t room = static_cast<size_t>(TeamPolicy<false, true>::scratch_size_max(0));
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
     }
-    // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels)
-    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr);
+    // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels).
+    // Every view of a row per cell of the chunk is labeled "chem_work*" and counted here, the audit's
+    // clipped masses included
+    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr, options.reactor.method);
     forcing_offset = options.forced ? reactor_size : 0;
     const uint32_t work_size = reactor_size + (options.forced ? ns + 1 : 0);
-    const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0;
+    const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0 + 8.0 * ns;
     const size_t concurrency = static_cast<size_t>(Kokkos::DefaultExecutionSpace().concurrency());
     size_t chunk = std::max<size_t>(4096, 4 * concurrency);
     chunk = std::min<size_t>(chunk, static_cast<size_t>(double(memory::MAX_WORK_BYTES) / per_cell));
     chunk = std::max<size_t>(1, std::min<size_t>(chunk, n_cells));
     work = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work", chunk, work_size);
-    pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_pivot", chunk, ns + 1);
+    pivot = Kokkos::View<uint32_t **, Kokkos::LayoutRight>("chem_work_pivot", chunk, ns + 1);
     active = Kokkos::View<uint32_t *>("chem_active", n_cells);
     queue = Kokkos::View<uint32_t *>("chem_queue", n_cells);
     cost = Kokkos::View<float *>("chem_queue_cost", n_cells);
@@ -588,7 +696,7 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
         const SpeciesView F_Y = forcing->rate.species;
         const uint32_t ns = gas.n_species;
         const Kokkos::View<double> h_dt = dt;
-        Kokkos::parallel_for("chemistry_forced_end", n, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("chemistry_forced_end", n, KOKKOS_LAMBDA(const uint32_t c) {
             const rtype h = static_cast<rtype>(h_dt());
             FOR_I_CONSERVATIVE U_end(c, i) = U(c, i) + h * F(c, i);
             for (uint32_t k = 0; k < ns; k++) rhoY_end(c, k) = rhoY(c, k) + h * F_Y(c, k);
@@ -602,12 +710,12 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
                                  dt,    options.T_frozen, 1e-2 * options.reactor.atol_Y, time_scale, n_lanes};
         auto flag = [&]() {
             if (n_lanes == 1) {
-                Kokkos::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
+                gated::parallel_for("chemistry_activity", HeavyRange<>(0, m), activity);
             } else {
                 const auto policy =
                     ActivityPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
                         .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
-                Kokkos::parallel_for("chemistry_activity_teams", policy, activity);
+                gated::parallel_for("chemistry_activity_teams", policy, activity);
             }
         };
         flag();
@@ -620,20 +728,25 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
     }
     const Kokkos::View<uint32_t *> range = local_range;
     const Kokkos::View<uint64_t *> t = tally;
-    Kokkos::parallel_for("chemistry_queue_start", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_queue_start", 1, KOKKOS_LAMBDA(const int) {
         range(0) = 0;
         range(1) = 0;
         range(2) = 0;
     });
-    if (n > 0) Kokkos::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, range, n});
-    Kokkos::parallel_for("chemistry_tally", 1, KOKKOS_LAMBDA(const int) {
+    if (n > 0) gated::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, range, n});
+    gated::parallel_for("chemistry_tally", 1, KOKKOS_LAMBDA(const int) {
         t(LAST_ACTIVE) = range(2);
         t(ACTIVE) += range(2);
     });
-    if (bin_by_cost) sort_queue(queue, cost, n, range);
     const ChemistryCells cells{U,      rhoY,     T_seed,      chem_h,        chem_cost,
                                previous_cost, time_scale, forcing ? forcing->rate.species : SpeciesView(),
                                U_end,  rhoY_end, cell_volume, cell_repaired};
+    if (options.explicit_step && n > 0) {
+        // The cells whose explicit step is accepted leave the queue before it is ordered and balanced
+        integrate(cells, queue, n, range, dt, true);
+        gated::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, range, n});
+    }
+    if (bin_by_cost) sort_queue(queue, cost, n, range);
     if (balance) balance->send(cells, queue, range, tally, SENT);
     integrate(cells, queue, n, range, dt);
     if (balance) {
@@ -648,24 +761,43 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
         const uint32_t ns = gas.n_species;
         StateView U_out = U;
         SpeciesView rhoY_out = rhoY;
-        Kokkos::parallel_for("chemistry_forced_copy", n, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("chemistry_forced_copy", n, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE U_out(c, i) = U_end(c, i);
             for (uint32_t k = 0; k < ns; k++) rhoY_out(c, k) = rhoY_end(c, k);
         });
     }
 }
 
+#ifdef MALLARD_RADIX_SORT
+namespace {
+
+/** @brief CUB's (hipCUB's) stable radix sort of n (key, value) pairs; with no scratch, the scratch bytes it needs. */
+void radix_sort_pairs(void * scratch, size_t & bytes, const float * keys_in, float * keys_out, const uint32_t * values_in,
+                      uint32_t * values_out, const uint32_t n) {
+    const Kokkos::DefaultExecutionSpace exec;
+#if defined(KOKKOS_ENABLE_CUDA)
+    const cudaError_t err = cub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                            static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                            exec.cuda_stream());
+    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+#else
+    const hipError_t err = hipcub::DeviceRadixSort::SortPairs(scratch, bytes, keys_in, keys_out, values_in, values_out,
+                                                              static_cast<int>(n), 0, static_cast<int>(8 * sizeof(float)),
+                                                              exec.hip_stream());
+    if (err != hipSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + hipGetErrorString(err));
+#endif
+}
+
+} // namespace
+#endif
+
 void CellChemistry::size_sort_scratch(const size_t n) {
-#ifdef KOKKOS_ENABLE_CUDA
+#ifdef MALLARD_RADIX_SORT
     if (sorted_queue.extent(0) >= n) return;
     sorted_queue = Kokkos::View<uint32_t *>("chem_sorted_queue", n);
     sorted_cost = Kokkos::View<float *>("chem_sorted_cost", n);
     size_t bytes = 0;
-    const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-        nullptr, bytes, static_cast<const float *>(nullptr), static_cast<float *>(nullptr),
-        static_cast<const uint32_t *>(nullptr), static_cast<uint32_t *>(nullptr), static_cast<int>(n), 0,
-        static_cast<int>(8 * sizeof(float)));
-    if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
+    radix_sort_pairs(nullptr, bytes, nullptr, nullptr, nullptr, nullptr, static_cast<uint32_t>(n));
     sort_scratch = Kokkos::View<uint8_t *>("chem_sort_scratch", bytes);
 #else
     (void)n;
@@ -679,23 +811,20 @@ void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Ko
     const Kokkos::View<uint32_t *> r = range, q = queued;
     const Kokkos::View<float *> key = queued_cost;
     const uint32_t wide_max = n_wide_threads > 0 ? WIDE_CELLS : 0u;
-    Kokkos::parallel_for("chemistry_sort_keys", n, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("chemistry_sort_keys", n, KOKKOS_LAMBDA(const uint32_t i) {
         if (i >= r(2)) key(i) = Kokkos::Experimental::finite_max_v<float>;
     });
     if (n > 0) {
-#ifdef KOKKOS_ENABLE_CUDA
-        // Into scratch sized beforehand: captured in a step's graph
+#ifdef MALLARD_RADIX_SORT
+        // Into scratch sized beforehand: no allocation or fence, so a step's graph captures it
         if (sorted_queue.extent(0) < n) {
             throw std::logic_error("CellChemistry::sort_queue: more cells than its scratch holds.");
         }
         const Kokkos::View<uint32_t *> q_out = sorted_queue;
         const Kokkos::View<float *> key_out = sorted_cost;
         size_t bytes = sort_scratch.extent(0);
-        const cudaError_t err = cub::DeviceRadixSort::SortPairs(
-            sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), static_cast<int>(n), 0,
-            static_cast<int>(8 * sizeof(float)), Kokkos::DefaultExecutionSpace().cuda_stream());
-        if (err != cudaSuccess) throw std::runtime_error(std::string("chemistry queue sort: ") + cudaGetErrorString(err));
-        Kokkos::parallel_for("chemistry_sort_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
+        radix_sort_pairs(sort_scratch.data(), bytes, key.data(), key_out.data(), q.data(), q_out.data(), n);
+        gated::parallel_for("chemistry_sort_copy", n, KOKKOS_LAMBDA(const uint32_t i) {
             if (i >= r(2)) return;
             q(i) = q_out(i);
             key(i) = key_out(i);
@@ -706,7 +835,7 @@ void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Ko
                                           Kokkos::subview(q, slots));
 #endif
     }
-    Kokkos::parallel_for("chemistry_sort_wide", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_sort_wide", 1, KOKKOS_LAMBDA(const int) {
         // The keys rise: the queued cells of the wide teams' costs come first
         uint32_t lo = 0, hi = r(2);
         while (lo < hi) {
@@ -723,7 +852,7 @@ void CellChemistry::sort_queue(const Kokkos::View<uint32_t *> & queued, const Ko
 
 void CellChemistry::add_failures(const Kokkos::View<uint32_t> & failures) const {
     const Kokkos::View<uint64_t *> t = tally;
-    Kokkos::parallel_for("chemistry_failures", 1, KOKKOS_LAMBDA(const int) { t(FAILURES) += failures(); });
+    gated::parallel_for("chemistry_failures", 1, KOKKOS_LAMBDA(const int) { t(FAILURES) += failures(); });
 }
 
 CellChemistry::Statistics CellChemistry::statistics() const {
@@ -734,7 +863,7 @@ CellChemistry::Statistics CellChemistry::statistics() const {
 void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,
                           const Kokkos::View<uint8_t *> & repaired) {
     clip_recorder = recorder;
-    clipped_mass = Kokkos::View<double **, Kokkos::LayoutRight>("chem_clipped_mass", work.extent(0), gas.n_species);
+    clipped_mass = Kokkos::View<double **, Kokkos::LayoutRight>("chem_work_clipped_mass", work.extent(0), gas.n_species);
     clip_sum = Kokkos::View<double *>("chem_clip_sum", gas.n_species);
     cell_volume = volume;
     cell_repaired = repaired;
@@ -764,16 +893,16 @@ void CellChemistry::allocate_kept() {
 
 void CellChemistry::keep() {
     const Kokkos::DefaultExecutionSpace exec;
-    Kokkos::deep_copy(exec, kept_tally, tally);
-    if (counters.is_allocated()) Kokkos::deep_copy(exec, kept_counters, counters);
-    Kokkos::deep_copy(exec, kept_cost, previous_cost);
+    gated::copy(exec, kept_tally, tally);
+    if (counters.is_allocated()) gated::copy(exec, kept_counters, counters);
+    gated::copy(exec, kept_cost, previous_cost);
 }
 
 void CellChemistry::restore() {
     const Kokkos::DefaultExecutionSpace exec;
-    Kokkos::deep_copy(exec, tally, kept_tally);
-    if (counters.is_allocated()) Kokkos::deep_copy(exec, counters, kept_counters);
-    Kokkos::deep_copy(exec, previous_cost, kept_cost);
+    gated::copy(exec, tally, kept_tally);
+    if (counters.is_allocated()) gated::copy(exec, counters, kept_counters);
+    gated::copy(exec, previous_cost, kept_cost);
 }
 
 bool CellChemistry::adapt_balance(const bool after_last_call) {
@@ -784,7 +913,8 @@ bool CellChemistry::adapt_balance(const bool after_last_call) {
 }
 
 void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<uint32_t *> & queued, const uint32_t n,
-                              const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt) {
+                              const Kokkos::View<uint32_t *> & range, const Kokkos::View<double> & dt,
+                              const bool explicit_steps) {
     // Launches over every slot [0, n): the cells to integrate, range [0, range(2)), are known on the device only
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     const uint32_t * all = range.data(), * wide_end = range.data() + 1, * end = range.data() + 2;
@@ -813,16 +943,28 @@ void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<u
         }
         functor.begin = all;
         functor.end = end;
+        if (explicit_steps) {
+            functor.active = active;
+            if (n_lanes == 1) {
+                gated::parallel_for("chemistry_explicit", HeavyRange<ExplicitTag>(0, m), functor);
+            } else {
+                const auto policy =
+                    ExplicitPolicy(static_cast<int>(m), 1, static_cast<int>(n_lanes))
+                        .set_scratch_size(0, Kokkos::PerTeam(chemistry::TeamLanes<Member>::scratch_bytes(n_lanes)));
+                gated::parallel_for("chemistry_explicit_teams", policy, functor);
+            }
+            continue;
+        }
         using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
         if (n_lanes == 1) {
             const Kokkos::Sum<uint32_t, DeviceMemory> f(team_failures[0]);
             const size_t size = work.extent(1);
             if (ON_GPU && size <= LOCAL_SMALL) {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_SMALL>>(0, m), functor, f);
+                gated::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_SMALL>>(0, m), functor, f);
             } else if (ON_GPU && size <= LOCAL_LARGE) {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_LARGE>>(0, m), functor, f);
+                gated::parallel_reduce("chemistry_advance", HeavyRange<LocalWork<LOCAL_LARGE>>(0, m), functor, f);
             } else {
-                Kokkos::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, f);
+                gated::parallel_reduce("chemistry_advance", HeavyRange<>(0, m), functor, f);
             }
             add_failures(team_failures[0]);
         } else if (n_wide_threads == 0 || first >= WIDE_CELLS) {
@@ -848,7 +990,7 @@ void CellChemistry::integrate(const ChemistryCells & cells, const Kokkos::View<u
             add_failures(team_failures[0]);
         }
         if (audited) {
-            Kokkos::parallel_reduce("chemistry_clip_sum", Kokkos::RangePolicy<>(0, m),
+            gated::parallel_reduce("chemistry_clip_sum", Kokkos::RangePolicy<>(0, m),
                                     ClipSumFunctor{gas.n_species, clipped_mass, clip_recorder.change}, clip_sum);
         }
     }
@@ -860,7 +1002,7 @@ void CellChemistry::heat_release(const StateView & U, const SpeciesView & rhoY, 
     const uint32_t chunk = static_cast<uint32_t>(work.extent(0));
     for (uint32_t first = 0; first < n; first += chunk) {
         const uint32_t m = std::min(chunk, n - first);
-        Kokkos::parallel_for("heat_release_rate", HeavyRange<>(0, m),
+        gated::parallel_for("heat_release_rate", HeavyRange<>(0, m),
                              HeatReleaseFunctor{gas, kinetics, U, rhoY, T_seed, work, hrr, production, first});
     }
 }

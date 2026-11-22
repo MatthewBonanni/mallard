@@ -1,8 +1,9 @@
 /**
  * @file extract_main.cpp
  * @brief `mallard post extract`: the probes, regions and snapshots of existing output,
- *        `mallard post derive`: snapshots of derived fields of it, and `mallard post average`: its
- *        statistics over snapshots, all by the run's own code on a case set up from the output's input.
+ *        `mallard post derive`: snapshots of derived fields of it, `mallard post average`: its
+ *        statistics over snapshots, and `mallard post flame`: the position, thickness and speeds of a
+ *        premixed flame in it, all by the run's own code on a case set up from the output's input.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -24,12 +25,14 @@
 
 #include <Kokkos_Core.hpp>
 
+#include "chemistry/mechanism.h"
 #include "cli.h"
 #include "commands.h"
 #include "derived_catalog.h"
 #include "diagnostic_code.h"
 #include "favre_average.h"
 #include "field_units.h"
+#include "gated.h"
 #include "homogeneous_average.h"
 #include "input.h"
 #include "input_upgrade.h"
@@ -268,6 +271,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);  // Its ledger and repair audit follow time steps
+    output.erase("write_stencils");    // The run's stencils, not output of its states
 
     const bool chosen = args.has("--probe");
     const bool others = args.has("--region") || args.has("--snapshot");
@@ -393,6 +397,7 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);
+    output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
     if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
 
@@ -403,6 +408,9 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         if (!output.contains(table)) return false;
         return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
     };
+    const bool flamelet = top.contains("physics") && top.at("physics").is_table() &&
+                          top.at("physics").contains("gas") && top.at("physics").at("gas").is_string() &&
+                          top.at("physics").at("gas").as_string() == "flamelet";
     for (const std::string & name : fields) {
         if (!field_units::post_derive(name)) {
             std::vector<std::string> names;
@@ -416,6 +424,8 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         }
         const derived::Field f = derived::find(name.c_str());
         if (f == derived::N_FIELDS) continue;
+        // A flamelet gas has Z and C of its own
+        if (flamelet && (f == derived::MIXTURE_FRACTION || f == derived::C_NORM)) continue;
         const uint16_t needs = derived::FIELDS[f].needs;
         uint16_t missing = 0;
         if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
@@ -964,6 +974,7 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
     output["health"] = Input(false);
+    output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
     if (args.has("--mixture")) output["mixture"] = inline_table(args.value_or("--mixture", ""), "--mixture");
     std::vector<std::string> products;
@@ -1312,6 +1323,50 @@ void print_profile(const homogeneous::Profile & p, const std::string & path, con
     item("Written", path);
 }
 
+/** @brief The owned cells of a case's mesh, read without setting the case up. */
+struct OwnedCells {
+    std::vector<uint64_t> global;  // global ids
+    std::vector<std::array<double, N_DIM>> centers;
+    std::vector<double> weights;  // cell_weights
+    uint64_t n_global = 0;
+};
+
+/** @brief The owned cells of the case's mesh, with the weights of cell_weights; faces only for --region and curved cells. */
+OwnedCells owned_cells(const cli::Args & args, const Input & input) {
+    Input setup(Input::table_type{});
+    for (const char * key : {"mesh", "periodic", "regions"}) {
+        if (input.contains(key)) setup.as_table()[key] = input.at(key);
+    }
+    const bool axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
+    OwnedCells out;
+    std::ostringstream quiet;
+    std::streambuf * const stdout_buffer = std::cout.rdbuf(quiet.rdbuf());
+    struct Restore {
+        std::streambuf * out;
+        ~Restore() { std::cout.rdbuf(out); }
+    } restore{stdout_buffer};
+    const MeshBlock block = read_mesh_block(setup);
+    const bool curved = comm::allreduce(uint32_t(!block.face_high_order_offsets.empty()), comm::Op::MAX) > 0;
+    if (args.has("--region") || curved) {
+        const std::shared_ptr<Mesh> mesh = remap::source_mesh(setup, 1);
+        if (axisymmetric) mesh->make_axisymmetric();
+        out.n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+        for (uint32_t i = 0; i < mesh->n_owned(); i++) out.global.push_back(mesh->h_global_cell(i));
+        out.centers = cell_centers(*mesh);
+        out.weights = cell_weights(args, input, *mesh);
+        return out;
+    }
+    out.n_global = comm::allreduce(block.n_cells(), comm::Op::SUM);
+    for (const CellGeometry & g : block_cell_geometry(block, axisymmetric)) {
+        out.global.push_back(block.first_cell + out.global.size());
+        std::array<double, N_DIM> x;
+        FOR_I_DIM x[i] = double(g.centroid[i]);
+        out.centers.push_back(x);
+        out.weights.push_back(double(g.measure));
+    }
+    return out;
+}
+
 /**
  * @brief mallard post average --statistics: the [statistics] fields one snapshot holds (MEAN_,
  *        COV_, FAVRE_MEAN_, FAVRE_COV_), averaged over homogeneous directions, on the case's mesh.
@@ -1337,43 +1392,11 @@ int average_statistics(const cli::Args & args, const std::string & dir, const st
     const output::Contents & c = files[e.file];
     std::string case_from;
     const Input input = case_input(args, files[0], case_from);
-    Input setup(Input::table_type{});
-    for (const char * key : {"mesh", "periodic", "regions"}) {
-        if (input.contains(key)) setup.as_table()[key] = input.at(key);
-    }
-    const bool axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
-    // Centers and weights of the owned cells, and their global ids; faces only for --region and curved cells
-    std::vector<uint64_t> global;
-    std::vector<std::array<double, N_DIM>> centers;
-    std::vector<double> weights;
-    uint64_t n_global = 0;
-    {
-        std::ostringstream quiet;
-        std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
-        struct Restore {
-            std::streambuf * out;
-            ~Restore() { std::cout.rdbuf(out); }
-        } restore{out};
-        const MeshBlock block = read_mesh_block(setup);
-        const bool curved = comm::allreduce(uint32_t(!block.face_high_order_offsets.empty()), comm::Op::MAX) > 0;
-        if (args.has("--region") || curved) {
-            const std::shared_ptr<Mesh> mesh = remap::source_mesh(setup, 1);
-            if (axisymmetric) mesh->make_axisymmetric();
-            n_global = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
-            for (uint32_t i = 0; i < mesh->n_owned(); i++) global.push_back(mesh->h_global_cell(i));
-            centers = cell_centers(*mesh);
-            weights = cell_weights(args, input, *mesh);
-        } else {
-            n_global = comm::allreduce(block.n_cells(), comm::Op::SUM);
-            for (const CellGeometry & g : block_cell_geometry(block, axisymmetric)) {
-                global.push_back(block.first_cell + global.size());
-                std::array<double, N_DIM> x;
-                FOR_I_DIM x[i] = double(g.centroid[i]);
-                centers.push_back(x);
-                weights.push_back(double(g.measure));
-            }
-        }
-    }
+    const OwnedCells cells = owned_cells(args, input);
+    const std::vector<uint64_t> & global = cells.global;
+    const std::vector<std::array<double, N_DIM>> & centers = cells.centers;
+    const std::vector<double> & weights = cells.weights;
+    const uint64_t n_global = cells.n_global;
     const uint32_t n_owned = static_cast<uint32_t>(global.size());
     std::vector<homogeneous::Column> columns;
     const auto index = [&](const std::string & name) {
@@ -1752,15 +1775,563 @@ int average(const cli::Args & args) {
     return 0;
 }
 
+/** @brief The premixed flame of one snapshot, from its profile along the direction of propagation. */
+struct FlameRow {
+    int64_t step = 0;
+    double t = 0.0;
+    double x_f = 0.0;    // where T is midway between the fresh and burnt temperatures
+    double delta = 0.0;     // thermal thickness (T_b - T_u) / max |dT/dx|
+    double gradient = 0.0;  // max |dT/dx|
+    double S_c = 0.0;    // consumption speed
+    double S_d = std::numeric_limits<double>::quiet_NaN();  // displacement speed, from the motion of x_f
+    double u_u = 0.0, T_u = 0.0, T_b = 0.0, rho_u = 0.0, Y_u = 0.0, Y_b = 0.0;
+};
+
+/** @brief A profile of the flame along the direction of propagation: per row, its position and the plane means. */
+struct FlameProfile {
+    std::vector<double> x, T, u, rho;
+    std::vector<std::vector<double>> Y, omega;  // per species
+};
+
+/** @brief The rows of the profile: from the fresh end (the colder one) to the burnt end. */
+std::vector<size_t> fresh_to_burnt(const FlameProfile & p) {
+    std::vector<size_t> order(p.x.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = p.T.front() <= p.T.back() ? i : order.size() - 1 - i;
+    return order;
+}
+
+/** @brief Per species, per unit mass [kmol/kg]: the O2 its C and H take to burn, and the O2 its O gives. */
+struct Oxygen {
+    std::vector<double> takes, gives;
+};
+
+Oxygen oxygen_of(const chemistry::Mechanism & mech, const std::vector<std::string> & species) {
+    Oxygen o;
+    for (const std::string & name : species) {
+        const int32_t k = mech.species_index(name);
+        if (k < 0) throw std::runtime_error("the case's mechanism has no species " + name + ": give the species with --species");
+        const chemistry::Species & sp = mech.species[static_cast<size_t>(k)];
+        double C = 0.0, H = 0.0, O = 0.0;
+        for (const auto & [element, n] : sp.composition) {
+            if (element == "C") C = n;
+            if (element == "H") H = n;
+            if (element == "O") O = n;
+        }
+        o.takes.push_back((C + 0.25 * H) / sp.molecular_weight);
+        o.gives.push_back(0.5 * O / sp.molecular_weight);
+    }
+    return o;
+}
+
+/** @brief Fresh mixtures within this of stoichiometric burn their fuel. */
+const double STOICHIOMETRIC_TOLERANCE = 0.01;
+
+struct Deficient {
+    uint32_t k = 0;
+    double phi = 0.0;  // the fresh gas's equivalence ratio
+};
+
+/**
+ * @brief The reactant the fresh gas runs out of: the fuel when its equivalence ratio is at most 1, else the
+ *        oxidizer; of several, the one the flame depletes most relative to its fresh mass fraction.
+ */
+Deficient deficient_species(const FlameProfile & p, const Oxygen & o) {
+    const std::vector<size_t> order = fresh_to_burnt(p);
+    const size_t u = order.front(), b = order.back();
+    double takes = 0.0, gives = 0.0;
+    for (size_t k = 0; k < o.takes.size(); k++) {
+        takes += p.Y[k][u] * o.takes[k];
+        gives += p.Y[k][u] * o.gives[k];
+    }
+    if (!(takes > 0.0) || !(gives > 0.0)) {
+        throw std::runtime_error("the fresh gas holds no " + std::string(takes > 0.0 ? "oxygen" : "fuel (C or H)") +
+                                 ": give the species the flame consumes with --species");
+    }
+    Deficient d;
+    d.phi = takes / gives;
+    const bool fuel = d.phi <= 1.0 + STOICHIOMETRIC_TOLERANCE;
+    double depletion = -1.0;
+    for (uint32_t k = 0; k < o.takes.size(); k++) {
+        const double Y_u = p.Y[k][u];
+        if (!(Y_u > 1e-12) || (fuel ? !(o.takes[k] > o.gives[k]) : !(o.gives[k] > o.takes[k]))) continue;
+        const double depleted = (Y_u - p.Y[k][b]) / Y_u;
+        if (depleted > depletion) {
+            depletion = depleted;
+            d.k = k;
+        }
+    }
+    if (!(depletion > 0.0)) {
+        throw std::runtime_error(std::string("no ") + (fuel ? "fuel" : "oxidizer") + " of the fresh gas (equivalence "
+                                 "ratio " + format("%.3g", d.phi) + ") is consumed between the fresh and the burnt end: "
+                                 "is there a premixed flame along the direction given?");
+    }
+    return d;
+}
+
+/**
+ * @brief Position, thermal thickness and consumption speed of the flame of a profile, burning species k;
+ *        T_b the burnt temperature given, else (0) the profile's peak.
+ */
+FlameRow flame_of(const FlameProfile & p, uint32_t k, double T_b) {
+    const size_t n = p.x.size();
+    if (n < 3) throw std::runtime_error("the profile has " + count(n, "row") + ": a flame needs more along it");
+    const std::vector<size_t> order = fresh_to_burnt(p);
+    const size_t u = order.front(), b = order.back();
+    FlameRow r;
+    r.T_u = p.T[u];
+    // The burnt gas cools behind the flame where heat is lost or pressure waves pass: its peak is the flame's
+    r.T_b = T_b > 0.0 ? T_b : *std::max_element(p.T.begin(), p.T.end());
+    r.u_u = p.u[u];
+    r.rho_u = p.rho[u];
+    r.Y_u = p.Y[k][u];
+    r.Y_b = p.Y[k][b];
+    if (!(r.T_b > r.T_u)) {
+        throw std::runtime_error(T_b > 0.0 ? "--burnt-temperature is not above the fresh gas's, " + format("%.6g", r.T_u) + " K"
+                                           : "the temperature is the same at both ends: no flame");
+    }
+    if (!(r.Y_u > r.Y_b)) throw std::runtime_error("the burnt gas has as much of the species as the fresh gas");
+    // Rows end midway between centers, the outer ones as far out as in
+    double consumed = 0.0, gradient = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        const double lo = i > 0 ? 0.5 * (p.x[i - 1] + p.x[i]) : p.x[0] - 0.5 * (p.x[1] - p.x[0]);
+        const double hi = i + 1 < n ? 0.5 * (p.x[i] + p.x[i + 1]) : p.x[n - 1] + 0.5 * (p.x[n - 1] - p.x[n - 2]);
+        consumed -= p.omega[k][i] * (hi - lo);
+        if (i + 1 < n) gradient = std::max(gradient, std::abs((p.T[i + 1] - p.T[i]) / (p.x[i + 1] - p.x[i])));
+    }
+    r.S_c = consumed / (r.rho_u * (r.Y_u - r.Y_b));
+    r.gradient = gradient;
+    r.delta = (r.T_b - r.T_u) / gradient;
+    const double T_mid = 0.5 * (r.T_u + r.T_b);
+    for (size_t j = 1; j < n; j++) {
+        const size_t i0 = order[j - 1], i1 = order[j];
+        if (p.T[i1] < T_mid) continue;
+        r.x_f = p.x[i0] + (T_mid - p.T[i0]) / (p.T[i1] - p.T[i0]) * (p.x[i1] - p.x[i0]);
+        return r;
+    }
+    throw std::runtime_error("the temperature does not cross midway between its ends");
+}
+
+/** @brief Least-squares slope of y over x. */
+double slope(const std::vector<double> & x, const std::vector<double> & y) {
+    const double n = double(x.size());
+    double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+    for (size_t i = 0; i < x.size(); i++) {
+        sx += x[i];
+        sy += y[i];
+        sxx += x[i] * x[i];
+        sxy += x[i] * y[i];
+    }
+    return (n * sxy - sx * sy) / (n * sxx - sx * sx);
+}
+
+/**
+ * @brief The speeds over the end of the series: S_c, and the thickness, over its last third, S_d from x_f
+ *        fitted over its last half.
+ */
+struct FlameSummary {
+    double S_c = 0.0, S_c_spread = 0.0, S_c_from = 0.0, delta = 0.0, gradient = 0.0;
+    size_t S_c_samples = 0;
+    double S_d = std::numeric_limits<double>::quiet_NaN(), drift = 0.0, S_d_from = 0.0;
+    size_t S_d_samples = 0;
+};
+
+FlameSummary summarize(const std::vector<FlameRow> & rows, double sense) {
+    FlameSummary s;
+    const double t0 = rows.front().t, t1 = rows.back().t;
+    s.S_c_from = t0 + 2.0 / 3.0 * (t1 - t0);
+    double lo = std::numeric_limits<double>::max(), hi = -lo, sum = 0.0;
+    for (const FlameRow & r : rows) {
+        if (r.t < s.S_c_from) continue;
+        sum += r.S_c;
+        s.delta += r.delta;
+        s.gradient += r.gradient;
+        lo = std::min(lo, r.S_c);
+        hi = std::max(hi, r.S_c);
+        s.S_c_samples++;
+    }
+    s.S_c = sum / double(s.S_c_samples);
+    s.delta /= double(s.S_c_samples);
+    s.gradient /= double(s.S_c_samples);
+    s.S_c_spread = hi - lo;
+    s.S_d_from = t0 + 0.5 * (t1 - t0);
+    std::vector<double> t, x;
+    double u = 0.0;
+    for (const FlameRow & r : rows) {
+        if (r.t < s.S_d_from) continue;
+        t.push_back(r.t);
+        x.push_back(r.x_f);
+        u += r.u_u;
+    }
+    s.S_d_samples = t.size();
+    if (t.size() < 2) return s;
+    s.drift = slope(t, x);
+    s.S_d = sense * (s.drift - u / double(t.size()));
+    return s;
+}
+
+/** @brief The table of the flame per snapshot, as probes write theirs: names, units, provenance, then a row each. */
+void write_flame_table(const std::vector<FlameRow> & rows, const std::string & species, const std::string & path) {
+    fs::create_directories(fs::path(path).parent_path());
+    std::ofstream out(path);
+    out << "step,t,x_f,delta_T,dTdx_max,S_c,S_d,u_u,T_u,T_b,rho_u,Y_" << species << "_u,Y_" << species << "_b\n"
+        << field_units::csv_line({dim::none, dim::time, dim::length, dim::length, dim::of(0, -1, 0, 1), dim::velocity,
+                                  dim::velocity,
+                                  dim::velocity, dim::temperature, dim::temperature, dim::density, dim::none, dim::none})
+        << "\n" << provenance::csv_comment() << "\n" << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const FlameRow & r : rows) {
+        out << r.step << "," << r.t << "," << r.x_f << "," << r.delta << "," << r.gradient << "," << r.S_c << ",";
+        if (std::isfinite(r.S_d)) out << r.S_d;
+        out << "," << r.u_u << "," << r.T_u << "," << r.T_b << "," << r.rho_u << "," << r.Y_u << "," << r.Y_b << "\n";
+    }
+    if (!out) throw std::runtime_error("cannot write " + path);
+}
+
+/**
+ * @brief The species of the snapshots post flame reads as they are: those of which every file selected holds
+ *        Y_ and OMEGA_, with T, RHO and the velocity along axis; none if a file lacks them.
+ */
+std::vector<std::string> stored_species(const std::vector<output::Contents> & files, const std::vector<Selected> & selected,
+                                        uint32_t axis) {
+    std::vector<std::string> out;
+    bool first = true;
+    for (size_t f = 0; f < files.size(); f++) {
+        if (std::none_of(selected.begin(), selected.end(), [&](const Selected & e) { return e.file == f; })) continue;
+        const output::Contents & c = files[f];
+        if (c.kind != output::Kind::snapshot || !c.field("T") || !c.field("RHO") ||
+            !(c.field(std::string("U_") + "XYZ"[axis]) || c.field("U"))) {
+            return {};
+        }
+        std::vector<std::string> species;
+        for (const output::Field & field : c.fields) {
+            if (field.name.starts_with("Y_") && c.field("OMEGA_" + field.name.substr(2))) {
+                species.push_back(field.name.substr(2));
+            }
+        }
+        if (species.empty() || (!first && species != out)) return {};
+        out = species;
+        first = false;
+    }
+    return out;
+}
+
+/** @brief A field of a snapshot on the owned cells (U_X, U_Y, U_Z also from a vector U). */
+std::vector<double> owned_values(const output::Contents & c, const Selected & e, const std::string & name,
+                                 const OwnedCells & cells) {
+    const bool component = !c.field(name) && name.starts_with("U_");
+    const std::string field = component ? "U" : name;
+    const uint32_t components = c.field(field)->components;
+    const uint32_t d = component ? static_cast<uint32_t>(name[2] - 'X') : 0;
+    const std::vector<double> values = output::read(c, field, e.index);
+    if (values.size() != cells.n_global * components) {
+        throw std::runtime_error("has " + count(values.size() / components, "cell") + ", but the case's mesh has " +
+                                 count(cells.n_global) + ": give the input of the run that wrote it (-i)");
+    }
+    std::vector<double> out(cells.global.size());
+    for (size_t i = 0; i < out.size(); i++) out[i] = values[cells.global[i] * components + d];
+    return out;
+}
+
+int flame(const cli::Args & args) {
+    const std::string dir = args.value_or("--output", "flame");
+    const std::string report = args.value_or("--format", "text");
+    if (report != "text" && report != "json") throw UsageError("--format takes text or json, not " + report);
+    const std::string direction = args.value_or("--direction", "x");
+    if (direction.size() != 1 || direction[0] < 'x' || direction[0] >= 'x' + N_DIM) {
+        throw UsageError("--direction takes " + std::string(N_DIM == 3 ? "x, y or z" : "x or y") + ", not " + direction);
+    }
+    const uint32_t axis = static_cast<uint32_t>(direction[0] - 'x');
+    std::string averaged;
+    for (uint32_t d = 0; d < N_DIM; d++) {
+        if (d != axis) averaged += static_cast<char>('x' + d);
+    }
+    const double rtol = args.has("--rtol") ? parse_number(args.value_or("--rtol", ""), "--rtol") : 1e-6;
+    if (!(rtol > 0.0)) throw UsageError("--rtol takes a positive number");
+    const bool reference = args.has("--reference-speed");
+    const double S_ref = reference ? parse_number(args.value_or("--reference-speed", ""), "--reference-speed") : 0.0;
+    if (reference && !(S_ref > 0.0)) throw UsageError("--reference-speed takes a positive speed in m/s");
+    const bool burnt_given = args.has("--burnt-temperature");
+    const double T_b =
+        burnt_given ? parse_number(args.value_or("--burnt-temperature", ""), "--burnt-temperature") : 0.0;
+    if (burnt_given && !(T_b > 0.0)) throw UsageError("--burnt-temperature takes a temperature in K");
+
+    const std::vector<output::Contents> files = open_files(args, "flame");
+    size_t n_available = 0;
+    for (const auto & c : files) n_available += c.snapshots.size();
+    const std::vector<Selected> selected = select(files, args);
+    for (size_t k = 1; k < selected.size(); k++) {
+        if (selected[k].snapshot.t <= selected[k - 1].snapshot.t) {
+            throw std::runtime_error(selected[k].snapshot.file + " (t = " + seconds(selected[k].snapshot.t) +
+                                     " s) follows " + selected[k - 1].snapshot.file + " (t = " +
+                                     seconds(selected[k - 1].snapshot.t) + " s): give the snapshots in increasing "
+                                     "time, each once");
+        }
+    }
+
+    std::string case_from;
+    Input input = case_input(args, files[0], case_from);
+    std::vector<std::string> species = stored_species(files, selected, axis);
+    const bool stored = !species.empty();
+
+    std::ostringstream quiet;
+    std::streambuf * const out = std::cout.rdbuf(quiet.rdbuf());
+    struct Restore {
+        std::streambuf * out;
+        ~Restore() { std::cout.rdbuf(out); }
+    } restore{out};
+    // Snapshots of the run's production rates are read as they are, on the mesh alone; the states of other
+    // files go to the case, whose chemistry computes them
+    std::unique_ptr<Solver> solver;
+    size_t current = 0;
+    OwnedCells cells;
+    if (stored) {
+        cells = owned_cells(args, input);
+    } else {
+        const bool chemistry = input.contains("chemistry") && find_value_or<bool>(input, "chemistry", "enabled", true);
+        if (!chemistry) {
+            throw std::runtime_error("the case has no [chemistry], which the production rates of the consumption "
+                                     "speed need: give the input of a reacting run (-i), or snapshots of T, RHO, U, "
+                                     "Y_* and OMEGA_*");
+        }
+        // The heat release, sampled as a [statistics] field, makes the solver compute every production rate
+        auto & top = input.as_table().entries();
+        for (const char * key : {"write_data", "forces", "integrals", "statistics", "initialize", "probes"}) top.erase(key);
+        if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
+        auto & output = top.at("output").as_table().entries();
+        output["run_log"] = Input("");
+        output["health"] = Input(false);
+        Input::table_type statistics;
+        statistics["fields"] = string_array({"HRR"});
+        statistics["products"] = string_array({});
+        statistics["t_start"] = Input(selected.front().snapshot.t - 1.0);
+        statistics["interval"] = Input(1);
+        top["statistics"] = Input(statistics);
+        solver = std::make_unique<Solver>();
+        solver->set_state_reader([&](const Mesh & mesh) {
+            try {
+                return read_state(files[selected[current].file], selected[current], mesh);
+            } catch (const std::exception & e) {
+                throw std::runtime_error(selected[current].snapshot.file + ": " + e.what());
+            }
+        });
+        solver->init(input);
+        const auto hash = [](const std::string & block) { return provenance::find_string(block, "mesh", "sha256"); };
+        const std::string then = hash(files[0].run), now = hash(provenance::json());
+        if (comm::is_root() && !then.empty() && !now.empty() && then != now) {
+            logging::warning(diagnostic_code::MESH_DIFFERS,
+                             files[0].path + " was written on a mesh file of other contents (the sha256 in its run "
+                                             "block differs) with as many cells: check that the case's mesh is the run's.");
+        }
+        species = solver->get_species_names();
+        if (species.empty()) throw std::runtime_error("the case is of a single gas: a premixed flame needs a mixture");
+        const Mesh & mesh = *solver->get_mesh();
+        cells.centers = cell_centers(mesh);
+        for (uint32_t c = 0; c < mesh.n_owned(); c++) cells.weights.push_back(double(mesh.h_cell_measure(c)));
+    }
+    int32_t chosen = -1;
+    if (args.has("--species")) {
+        const std::string name = args.value_or("--species", "");
+        const auto it = std::find(species.begin(), species.end(), name);
+        if (it == species.end()) {
+            const std::string like = suggest_value(name, species);
+            throw UsageError("--species: " +
+                             std::string(stored ? "the snapshots hold no Y_ and OMEGA_ of " : "the case has no species ") +
+                             name + (like.empty() ? "" : " (did you mean " + like + "?)") + "; its species: " +
+                             list_text(species));
+        }
+        chosen = static_cast<int32_t>(it - species.begin());
+    }
+    Oxygen oxygen;
+    if (chosen < 0) {
+        const std::string mechanism = find_value<std::string>(input, "physics", "mechanism");
+        const std::string phase = find_value_or<std::string>(input, "physics", "phase", "");
+        oxygen = oxygen_of(chemistry::read_mechanism(mechanism, phase), species);
+    }
+    double phi = std::numeric_limits<double>::quiet_NaN();
+
+    // Per owned cell: T, the velocity along the direction, RHO, then Y and OMEGA of every species
+    const uint32_t n_owned = static_cast<uint32_t>(cells.centers.size());
+    const uint32_t n_species = static_cast<uint32_t>(species.size());
+    std::vector<std::string> names = {"T", std::string("U_") + "XYZ"[axis], "RHO"};
+    for (const std::string & s : species) names.push_back("Y_" + s);
+    for (const std::string & s : species) names.push_back("OMEGA_" + s);
+    const uint32_t n_columns = static_cast<uint32_t>(names.size());
+    Kokkos::View<int32_t *> codes;
+    Kokkos::View<double **, Kokkos::LayoutLeft> values;
+    Kokkos::View<double **, Kokkos::LayoutLeft>::host_mirror_type h_values;
+    if (solver) {
+        codes = Kokkos::View<int32_t *>("flame_codes", n_columns);
+        const auto h_codes = Kokkos::create_mirror_view(codes);
+        for (uint32_t j = 0; j < n_columns; j++) h_codes(j) = CellSampler::code(names[j], species, "--species", nullptr, true);
+        Kokkos::deep_copy(codes, h_codes);
+        values = Kokkos::View<double **, Kokkos::LayoutLeft>("flame_values", n_owned, n_columns);
+        h_values = Kokkos::create_mirror_view(values);
+    }
+    std::vector<homogeneous::Column> columns(n_columns);
+    for (uint32_t j = 0; j < n_columns; j++) columns[j].name = names[j];
+
+    std::vector<FlameRow> rows;
+    size_t n_rows = 0;
+    double sense = 0.0;
+    for (current = 0; current < selected.size(); current++) {
+        const Selected & e = selected[current];
+        try {
+            double t = e.snapshot.t;
+            if (stored) {
+                for (uint32_t j = 0; j < n_columns; j++) columns[j].values = owned_values(files[e.file], e, names[j], cells);
+            } else {
+                const CellSampler sampler = solver->sample_statistics_of_state(current > 0);
+                gated::parallel_for("flame_values", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+                    for (uint32_t j = 0; j < n_columns; j++) values(c, j) = double(sampler(c, codes(j)));
+                });
+                Kokkos::deep_copy(h_values, values);
+                for (uint32_t j = 0; j < n_columns; j++) {
+                    columns[j].values.resize(n_owned);
+                    for (uint32_t c = 0; c < n_owned; c++) columns[j].values[c] = h_values(c, j);
+                }
+                t = double(solver->get_time());
+            }
+            const homogeneous::Profile profile =
+                homogeneous::average(cells.centers, cells.weights, {}, columns, averaged, rtol);
+            if (!comm::is_root()) continue;
+            const size_t n = profile.rows();
+            FlameProfile p;
+            p.x = profile.coords;
+            const auto column = [&](uint32_t j) {
+                std::vector<double> v(n);
+                for (size_t i = 0; i < n; i++) v[i] = profile.values[i * n_columns + j];
+                return v;
+            };
+            p.T = column(0);
+            p.u = column(1);
+            p.rho = column(2);
+            for (uint32_t k = 0; k < n_species; k++) {
+                p.Y.push_back(column(3 + k));
+                p.omega.push_back(column(3 + n_species + k));
+            }
+            if (chosen < 0) {
+                const Deficient d = deficient_species(p, oxygen);
+                chosen = static_cast<int32_t>(d.k);
+                phi = d.phi;
+            }
+            FlameRow r = flame_of(p, static_cast<uint32_t>(chosen), T_b);
+            r.step = e.step;
+            r.t = t;
+            rows.push_back(r);
+            n_rows = n;
+            sense = p.T.front() <= p.T.back() ? -1.0 : 1.0;
+        } catch (const std::exception & error) {
+            const std::string what = error.what();
+            if (what.starts_with(e.snapshot.file)) throw;
+            throw std::runtime_error(e.snapshot.file + ": " + what);
+        }
+    }
+    comm::barrier();
+    std::cout.rdbuf(out);
+    if (!comm::is_root()) return 0;
+    // S_d of each snapshot from the motion of x_f: centered differences, one-sided at the ends
+    for (size_t i = 0; rows.size() > 1 && i < rows.size(); i++) {
+        const size_t a = i > 0 ? i - 1 : 0, b = i + 1 < rows.size() ? i + 1 : i;
+        rows[i].S_d = sense * ((rows[b].x_f - rows[a].x_f) / (rows[b].t - rows[a].t) - rows[i].u_u);
+    }
+    const FlameSummary s = summarize(rows, sense);
+    const std::string & burnt = species[static_cast<size_t>(chosen)];
+    const std::string path = under(dir, args.value_or("--name", "flame") + ".csv");
+    write_flame_table(rows, burnt, path);
+    const auto error = [&](double v) { return 100.0 * (v / S_ref - 1.0); };
+    const std::string fresh_end = std::string(sense < 0.0 ? "low" : "high") + " " + direction;
+    if (report == "json") {
+        json::Object o;
+        std::vector<std::string> paths;
+        for (const auto & c : files) paths.push_back(c.path);
+        o.raw("files", json_strings(paths)).add("input", case_from).add("direction", direction);
+        o.add("fresh_end", std::string(sense < 0.0 ? "low" : "high")).add("species", burnt).add("rows", n_rows);
+        if (std::isfinite(phi)) o.add("equivalence_ratio", phi);
+        o.add("burnt_temperature", std::string(burnt_given ? "given" : "peak"));
+        o.add("rates", std::string(stored ? "stored" : "computed"));
+        std::string list = "[";
+        for (size_t k = 0; k < rows.size(); k++) {
+            const FlameRow & r = rows[k];
+            json::Object row;
+            row.raw("snapshot", snapshot_json(files[selected[k].file], selected[k]));
+            row.add("x_f", r.x_f).add("delta_T", r.delta).add("dTdx_max", r.gradient).add("S_c", r.S_c);
+            if (std::isfinite(r.S_d)) row.add("S_d", r.S_d);
+            row.add("u_u", r.u_u).add("T_u", r.T_u).add("T_b", r.T_b).add("rho_u", r.rho_u).add("Y_u", r.Y_u).add("Y_b", r.Y_b);
+            list += (list.size() > 1 ? "," : "") + row.str();
+        }
+        o.raw("snapshots", list + "]");
+        json::Object summary;
+        summary.add("S_c", s.S_c).add("S_c_spread", s.S_c_spread).add("S_c_from", s.S_c_from).add("S_c_samples", s.S_c_samples);
+        summary.add("delta_T", s.delta).add("dTdx_max", s.gradient);
+        if (std::isfinite(s.S_d)) summary.add("S_d", s.S_d).add("drift", s.drift);
+        summary.add("S_d_from", s.S_d_from).add("S_d_samples", s.S_d_samples);
+        if (reference) {
+            summary.add("reference", S_ref).add("S_c_error_percent", error(s.S_c));
+            if (std::isfinite(s.S_d)) summary.add("S_d_error_percent", error(s.S_d));
+        }
+        o.raw("summary", summary.str()).raw("written", json_strings({path}));
+        std::cout << o.str() << "\n";
+        return 0;
+    }
+    logging::section("Flame");
+    std::vector<std::string> file_names;
+    for (const auto & c : files) file_names.push_back(c.path + " (" + c.format + ")");
+    item(files.size() == 1 ? "File" : "Files", list_text(file_names));
+    item("Case", case_from);
+    item("Snapshots", count(selected.size()) + " of " + count(n_available) + ", t = " +
+                          seconds(selected.front().snapshot.t) +
+                          (selected.size() > 1 ? " to " + seconds(selected.back().snapshot.t) : "") + " s");
+    item("Profile", count(n_rows, "row") + " along " + direction +
+                        (averaged.empty() ? "" : ", each the mean over " + directions_text(averaged) + " weighted by "
+                                                 "cell volume") + "; fresh gas at the " + fresh_end + " end");
+    const std::string role = phi <= 1.0 + STOICHIOMETRIC_TOLERANCE ? "fuel" : "oxidizer";
+    item("Consumed", burnt + (args.has("--species")
+                                  ? " (--species)"
+                                  : ", the " + role + ": the fresh gas's equivalence ratio is " + format("%.4g", phi)));
+    item("Burnt gas", burnt_given ? format("%.6g K (--burnt-temperature)", T_b) : "the peak temperature of each snapshot");
+    item("Rates", stored ? "OMEGA_" + burnt + " as the snapshots hold it"
+                         : "computed from each state by the case's chemistry");
+    logging::section("Snapshots", count(rows.size()));
+    std::vector<std::vector<std::string>> table;
+    for (size_t k = 0; k < rows.size(); k++) {
+        const FlameRow & r = rows[k];
+        table.push_back({seconds(r.t), std::to_string(r.step) + (selected[k].step_recorded ? "" : " *"),
+                         format("%.6g", r.x_f), format("%.6g", r.delta), format("%.6g", r.gradient), format("%.6g", r.S_c),
+                         std::isfinite(r.S_d) ? format("%.6g", r.S_d) : "-", format("%.6g", r.u_u)});
+    }
+    logging::table({"t [s]", "step", "x_f [m]", "delta_T [m]", "max dT/dx [K/m]", "S_c [m/s]", "S_d [m/s]", "u_u [m/s]"},
+                   table);
+    if (!selected.front().step_recorded) logging::line("  *: position in the files, which record no step.");
+    logging::section("Speeds");
+    item("Consumption", format("%.6g", s.S_c) + " m/s, the mean of " + count(s.S_c_samples, "snapshot") +
+                            " from t = " + seconds(s.S_c_from) + " s (spread " + format("%.3g", s.S_c_spread) + " m/s)" +
+                            (reference ? format(", %+.3f%% from --reference-speed", error(s.S_c)) : ""));
+    if (std::isfinite(s.S_d)) {
+        item("Displacement", format("%.6g", s.S_d) + " m/s, from x_f fitted over " + count(s.S_d_samples, "snapshot") +
+                                 " from t = " + seconds(s.S_d_from) + " s (the front moves at " +
+                                 format("%.4g", s.drift) + " m/s)" +
+                                 (reference ? format(", %+.3f%% from --reference-speed", error(s.S_d)) : ""));
+    } else {
+        item("Displacement", "needs two snapshots in the last half of the series");
+    }
+    item("Thermal thickness", format("%.6g", s.delta) + " m, from max |dT/dx| = " + format("%.6g", s.gradient) +
+                                  " K/m: the means over the snapshots of S_c");
+    item("Written", path);
+    return 0;
+}
+
 } // namespace
 
 namespace {
 
-enum class Post { extract, derive, average };
+enum class Post { extract, derive, average, flame };
 
 int post_command(const cli::Args & args, const Post post) {
-    const std::string command = post == Post::extract ? "post extract" : post == Post::derive ? "post derive" : "post average";
+    const std::string command = post == Post::extract  ? "post extract"
+                                : post == Post::derive ? "post derive"
+                                : post == Post::flame  ? "post flame"
+                                                       : "post average";
     try {
+        if (post == Post::flame) return flame(args);
         return post == Post::average ? average(args) : extract(args, post == Post::derive);
     } catch (const UsageError & e) {
         return comm::is_root() ? cli::usage_error(*cli::command(command), e.what()) : 2;
@@ -1793,8 +2364,12 @@ int post_derive(const cli::Args & args) { return post_command(args, Post::derive
 
 int post_average(const cli::Args & args) { return post_command(args, Post::average); }
 
+int post_flame(const cli::Args & args) { return post_command(args, Post::flame); }
+
 int extract_main(const cli::Args & args) { return post_main(args, Post::extract); }
 
 int derive_main(const cli::Args & args) { return post_main(args, Post::derive); }
 
 int average_main(const cli::Args & args) { return post_main(args, Post::average); }
+
+int flame_main(const cli::Args & args) { return post_main(args, Post::flame); }

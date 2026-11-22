@@ -38,7 +38,7 @@ Mallard; their class says only whether we found them published.
 | Double flux with TENO on unstructured meshes | Original extension (narrow) | Double flux (Abgrall & Karni 2001; Billet & Abgrall 2003); with WENO on structured grids (Houim & Kuo 2011); in DG on unstructured meshes (Lv & Ihme 2014; Johnson & Kercher 2020) | The combination with high-order TENO finite volumes on mixed meshes, and wave speeds from each side's own frozen pair so both fluxes carry the same mass flux | [Double flux](#double-flux) |
 | SIMPLER splitting with an explicit integrator: stability polynomial, and the instability of non-dissipative fluxes | Original (analysis) | SIMPLER (Wu, Ma & Ihme 2019) and balanced splitting (Speth et al. 2013), analyzed with exact substeps | The composite polynomial with SSPRK3, which exceeds 1 everywhere on the imaginary axis, so a central flux is unstable at any step | [SIMPLER stability](#simpler-stability) |
 | RHLL blended toward HLL by a pressure-jump weight | Original extension (minor) | Rotated hybrid (Nishikawa & Kitamura 2008); the weight of AUSMPW+ (Kim, Kim & Rho 2001); pressure-based shock sensing in RoeM (Kim, Kim & Rho 2003); Rotated-RoeM with a Mach-number weight (Choi et al. 2024) | The blend of the rotated flux with face-normal HLL by `min(p_L/p_R, p_R/p_L)^3`, which removes the stagnation-line carbuncle on tetrahedra | [RHLL blend](#rhll-blend) |
-| Unstructured solver with an automatic structured fast path | Original extension | Zonal structured/unstructured solvers on zones the user or mesh generator designates (Cambier, Heib & Plot 2013); structure from refining a coarse unstructured mesh (Bergen & Hülsemann 2004) | Structured blocks found in any mesh from its nodes alone, numbered along their axes, one TENO table per stencil shape and stencils read by index, with results bitwise independent of the numbering and partition | [Structured fast path](#structured-fast-path) |
+| Unstructured solver with an automatic structured fast path | Original extension | Zonal structured/unstructured solvers on zones the user or mesh generator designates (Cambier, Heib & Plot 2013); structure from refining a coarse unstructured mesh (Bergen & Hülsemann 2004) | Structured blocks found in any mesh from its nodes alone, numbered along their axes, one TENO table per stencil shape and TENO and MUSCL stencils read by index, with results bitwise independent of the numbering and partition | [Structured fast path](#structured-fast-path) |
 | Mirror-image stencil entries at straight boundaries | Adapted | Mirrored ghost cells in high-order unstructured stencils (Yang, Pan & Xu 2023) | Coplanar faces as one plane with several conditions, moments reflected degree by degree, images not counted toward the candidate search's limit | [Mirror images](#mirror-images) |
 | Curved boundaries for k-exact reconstruction | Adapted | Ollivier-Gooch & Van Altena 2002; Krivodonova & Berger 2006 | Quadrature area vectors shifted to sum exactly to the face's; degree cap 3 next to curved walls | [Curved boundaries](#curved-boundaries) |
 | Hybrid KEEP / Riemann flux with a Ducros sensor | Standard | Kuya, Totani & Kawai 2018; Ducros et al. 1999; Bhagatwala & Lele 2009; Ma, Lv & Ihme 2017; central flux on cell values (Subbareddy & Candler 2009) | Upwind floor, the rule for wall faces, and the central flux on the cells' values under TENO's upwind part | [Hybrid flux](#hybrid-flux) |
@@ -220,7 +220,8 @@ zones that the user or the mesh generator designates (as in elsA; Cambier,
 Heib & Plot 2013), and hierarchical hybrid grids get their structure by
 refining a coarse unstructured mesh (Bergen & Hülsemann 2004). Mallard finds
 the structure in any mesh itself, with no input: every rank labels the
-quadrilaterals or hexahedra that meet face to face with (i, j, k) indices
+quadrilaterals or hexahedra that meet face to face (across periodic
+boundaries too) with (i, j, k) indices
 from their nodes alone, carrying each cell's frame across shared faces,
 cuts the labeled region into boxes and numbers their cells first, along
 their axes. The TENO tables of a lattice differ from cell to cell only in
@@ -230,7 +231,8 @@ the shape's cell with the lowest global id, agreed over the ranks, so
 results do not depend on the numbering, partition or rank count. TENO's
 smooth pass reads the central stencil of a block cell as the cell plus its
 block shape's offsets; only the source of the indices changes, so the result
-is bitwise that of the unstructured path
+is bitwise that of the unstructured path; MUSCL reads the face neighbors of
+block cells the same way
 ([TENO-E](teno_e.md), [structured blocks](../design/structured_blocks.md)).
 
 **Evidence.** On the meshes measured, 83-100% of the cells have their whole
@@ -279,8 +281,8 @@ the cell. What Mallard adds is engineering
 order: 2.99, 3.96, 4.98 and 5.96 for TENO3 to TENO6 on quadrilaterals, 2.98
 to 5.97 on triangles ([verification](../verification/index.md#boundary-conditions)).
 The 2D exclusions remove an odd-even mode in the wall pressure of the NACA
-0012 tutorial mesh, together with the [ranking metric](#ranking-metric); at
-order 4 it remains at the trailing edge
+0012 tutorial mesh, together with the [ranking metric](#ranking-metric), at
+order 4 too once images past the far side of the trailing edge are left out
 ([TENO4 robustness](../design/teno4_robustness.md)).
 
 ### Curved boundaries

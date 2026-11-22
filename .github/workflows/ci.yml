@@ -33,6 +33,7 @@ on:
       - 'docs/guide/input_files.md'
       - 'docs/guide/output.md'
       - 'docs/guide/running.md'
+      - 'docs/input.md'
       - 'docs/input-keys/**'
   workflow_dispatch:
     inputs:
@@ -170,12 +171,13 @@ jobs:
           echo "changed=$(tools/dev/device_changes.sh "$base")" >> "$GITHUB_OUTPUT"
           # Documentation alone needs none of the build jobs, except the pages the tests read:
           # boundary_types_test and cli_test read guide pages, check_test those of
-          # diagnostic_code::ALL, cli_test the key catalog docs/input-keys/
+          # diagnostic_code::ALL, error_messages_test docs/input.md, cli_test the key catalog
+          # docs/input-keys/
           if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$(git rev-parse "$base")" = "$(git rev-parse HEAD)" ]; then
             echo code=false >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$base" HEAD | grep -qvE '^docs/|\.md$|^CITATION\.cff$|^LICENSE$' \
               || git diff --name-only "$base" HEAD \
-              | grep -qE '^docs/(guide/(boundary_conditions|cli|input_files|output|running)\.md$|input-keys/)'; then
+              | grep -qE '^docs/(guide/(boundary_conditions|cli|input_files|output|running)\.md$|input\.md$|input-keys/)'; then
             echo code=true >> "$GITHUB_OUTPUT"
           else
             echo code=false >> "$GITHUB_OUTPUT"
@@ -226,7 +228,9 @@ jobs:
   # and serial builds on x86-64, and each backend variant also runs once on
   # arm64 with one of the compilers. macOS runs the 2D and 3D suites with Apple Clang and
   # the 2D suite with Homebrew's GCC. The GCC 16 jobs build with CMake 4.2.3, the oldest
-  # supported; the others with the runners' CMake. Branches run the jobs marked gate.
+  # supported; the others with the runners' CMake. The x86-64 MPI builds check the bounds of
+  # every Kokkos View access, which finds out-of-range indices that only multiple ranks reach.
+  # Branches run the jobs marked gate.
   matrix:
     needs: [changelog, device]
     if: needs.device.outputs.code == 'true'
@@ -248,8 +252,8 @@ jobs:
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON", "cgns": true, "full": true, "gate": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON", "mpi": true, "shards": 2, "gate": true},
-            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "mpi": true, "full": true, "shards": 4, "gate": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "shards": 3, "gate": true},
+            {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "full": true, "shards": 6, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true},
             {"name": "float", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_USE_DOUBLE=OFF -DMallard_ENABLE_ZLIB=ON", "full": true, "concurrent": true, "gate": true},
@@ -331,13 +335,37 @@ jobs:
           echo "MALLARD_TEST_XML=$RUNNER_TEMP/junit" >> "$GITHUB_ENV"
           printf '%s\n' "$FILTER" > "$RUNNER_TEMP/junit/filter.txt"
           if [ -n "$FILTER" ]; then echo "GTEST_FILTER=$FILTER" >> "$GITHUB_ENV"; fi
+      # A mirror can trickle a download past apt_install.sh's time limits, so the MPI
+      # packages come from a cache: main saves them once per runner image, branches restore it
+      - &key-apt
+        name: Name the MPI package cache
+        if: matrix.backend.mpi
+        run: echo "APT_KEY=apt/mpi/$ImageOS-$(uname -m)/$ImageVersion" >> "$GITHUB_ENV"
+      - &restore-apt
+        name: Restore the MPI packages
+        id: restore-apt
+        if: matrix.backend.mpi
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: ${{ env.APT_KEY }}
       - &install-mpi
         name: Install MPI
         timeout-minutes: 25
         if: matrix.backend.mpi
+        env:
+          APT_ARCHIVES: ${{ runner.temp }}/apt-archives
         run: >
           sh tools/dev/apt_install.sh
           libopenmpi-dev openmpi-bin libtbb-dev libhdf5-openmpi-dev
+      - &save-apt
+        name: Save the MPI packages
+        if: matrix.backend.mpi && github.ref == 'refs/heads/main' && steps.restore-apt.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: ${{ env.APT_KEY }}
       - &install-hdf5
         name: Install HDF5
         timeout-minutes: 25
@@ -486,8 +514,9 @@ jobs:
         timeout-minutes: 90
         env:
           FULL: ${{ matrix.backend.full }}
-          # A test that hangs (a collective some ranks never reach) aborts and names itself
-          MALLARD_TEST_TIMEOUT: 600
+          # A test that hangs (a collective some ranks never reach) aborts and names itself;
+          # bounds checking makes the longest 3D test take about 16 minutes on 3 ranks
+          MALLARD_TEST_TIMEOUT: ${{ contains(matrix.backend.flags, 'BOUNDS_CHECK=ON') && 1800 || 600 }}
         run: |
           mpi_tests='CommTest.*:MeshBlockTest.*:DistributedMeshTest.*:MPITest.*:MPI3DTest.*:Check*.*:ProbesTest.*'
           # A filter of this step, restricted to GTEST_FILTER (the dispatch's selection, or the
@@ -562,7 +591,10 @@ jobs:
     steps:
       - *checkout
       - *report-running
+      - *key-apt
+      - *restore-apt
       - *install-mpi
+      - *save-apt
       - *install-hdf5
       - *install-cgns
       - *install-ccache
@@ -609,7 +641,10 @@ jobs:
       - uses: actions/checkout@v4
       - *report-running
       - *select-tests
+      - *key-apt
+      - *restore-apt
       - *install-mpi
+      - *save-apt
       - *install-hdf5
       - *install-cgns
       - name: Download the executables

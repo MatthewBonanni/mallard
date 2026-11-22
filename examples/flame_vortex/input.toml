@@ -1,6 +1,6 @@
-# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 1.7599 mm, u' = 45.8137 m/s), pair at x = 2.1999 mm.
-# Planar flame: h2_phi4.0_T300_mix_full.csv, 12 cells per
-# thermal thickness (0.4400 mm), Cantera S_L = 1.527125 m/s
+# Flame-vortex interaction: r / delta = 4, u' / S_L = 30 (r = 1.7521 mm, u' = 45.6315 m/s), pair at x = 2.1901 mm.
+# Planar flame: h2_phi4_T300_mix_full.csv, 12 cells per
+# thermal thickness (0.4380 mm), Cantera S_L = 1.521049 m/s
 #
 # Premixed flame-vortex interactions on the spectral diagram of Poinsot,
 # Veynante & Candel (1991), J. Fluid Mech. 228:561, doi 10.1017/S0022112091002823
@@ -19,11 +19,11 @@
 # is pushed into burnt gas that the losses have cooled. This case has none (see
 # examples/flame_vortex_quenching for a radiating flame that quenches) and uses
 # a mixture whose flame stretch alone weakens: rich H2/air, phi = 4, 300 K, 1 atm, mixture-averaged
-# transport (S_L = 1.527 m/s, thermal thickness delta_L = 0.440 mm, burnt gas
+# transport (S_L = 1.520 m/s, thermal thickness delta_L = 0.438 mm, burnt gas
 # 1556 K, rho_u / rho_b = 4.78), where the deficient reactant is O2, with a
 # Lewis number of 2.2 (H2: 0.42). Lengths are in delta_L, the thermal
 # thickness (T_b - T_u) / max dT/dx; Poinsot et al.'s l_F is 3.7 nu_u / S_L of
-# their flame, whereas here delta_L = 19.3 nu_u / S_L, so placing these runs
+# their flame, whereas here delta_L = 19.1 nu_u / S_L, so placing these runs
 # by nu_u / S_L instead would move them 5 times further right.
 #
 # Setup (examples/flame_vortex/flame_vortex.py): the planar Cantera flame in its frame (fresh
@@ -44,7 +44,7 @@
 # Poinsot et al.'s quenching example), from this directory, and run it:
 #
 #   python ../../tools/setup/flame_reference.py --single h2 4.0 300 .
-#   python flame_vortex.py h2_phi4.0_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
+#   python flame_vortex.py h2_phi4_T300_mix_full.csv ../../mechanisms/h2o2.yaml ohmech . \
 #       --r 4 --u 30 --cfl 0.8
 #
 # For the sweep, the same with --r R --u U into run directories (and --cells 24
@@ -87,13 +87,19 @@
 # after the interaction); only about the first flame time is the interaction
 # itself.
 #
+# The sweep ran from Cantera's flame on its grid of slope = curve = 0.02, whose
+# S_L and delta_L are 0.5% larger than the converged ones above; this file's
+# run (r = 4, u' = 30) from the converged flame gives the same row (Q / Q_0
+# 0.99-1.80, longest front 2.66, q_min 0.39).
+#
 # Resolution: the r = 4, u' = 30 run at 24 cells per delta_L (552 x 192) gives
 # the same outcome, the largest Q / Q_0 1.785 against 1.797, the longest front
 # 2.68 against 2.66 channel heights and q_min 0.378 against 0.389.
 #
-# 1D checks (planar flame, tools/setup/flame_restart.py and tools/post/flame_speed.py):
-# consumption speed against Cantera's -1.44%, -1.46%, -0.93% and -0.70% at
-# 10, 12, 16 and 24 cells per delta_L (CFL 0.4), and at 12 cells the same to
+# 1D checks (planar flame, tools/setup/flame_restart.py and mallard post flame):
+# consumption speed over the last of four flame times against Cantera's
+# -1.19%, -0.91%, -0.42% and -0.31% at 10, 12, 16 and 24 cells per delta_L
+# (CFL 0.4), and at 12 cells the same to
 # 5 digits at CFL 0.4, 0.6 and 0.8 (half the steps at 0.8).
 #
 # Cost on one A100: r = 4 (276 x 96 cells) 21 min for 145,000 steps at
@@ -102,15 +108,15 @@
 # 24 cells (300 x 192) about 1.5 hours for 210,000-265,000 steps.
 
 [run]
-t_stop = 0.00097957056200000006
+t_stop = 0.00097910957789999991
 cfl = 0.8
 
 [mesh]
 type = "cartesian"
 Nx = 276
 Ny = 96
-Lx = 0.010119500858045426
-Ly = 0.0035198263854071049
+Lx = 0.010074500672883952
+Ly = 0.0035041741470900698
 
 [initialize]
 type = "restart"
@@ -119,10 +125,10 @@ file = "flame.restart"
 [[boundaries]]
 name = "left"
 type = "inlet_state"
-u = [1.5271245092529449, 0.0]
+u = [1.5210493759855019, 0.0]
 p = 101325.0
 T = 300
-X = { "H2" = 0.626959247648878, "O2" = 0.078369905956099162, "N2" = 0.29467084639502295 }
+X = { "H2" = 0.62695924764890276, "O2" = 0.078369905956112859, "N2" = 0.29467084639498431 }
 
 [[boundaries]]
 name = "right"
@@ -161,5 +167,5 @@ check_interval = 2000
 
 [[write_data]]
 prefix = "./solut/flame"
-time_interval = 9.7957056200000014e-06
+time_interval = 9.7910957789999994e-06
 fields = ["RHO", "U", "P", "T", "HRR", "Y_H2", "Y_O2"]

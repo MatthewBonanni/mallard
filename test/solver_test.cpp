@@ -20,9 +20,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "data_paths.h"
@@ -57,7 +59,7 @@ std::string make_input(const CaseConfig & c) {
       << "[[boundaries]]\nname = \"top\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[[boundaries]]\nname = \"bottom\"\ntype = \"" << c.bc_tb << "\"\n"
       << "[numerics]\nriemann_solver = \"" << c.riemann << "\"\ntime_integrator = \"SSPRK3\"\ncheck_nan = true\n"
-      << "[numerics.face_reconstruction]\ntype = \"" << c.recon << "\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"" << (c.recon == "TENO4" ? "TENO\"\norder = 4" : c.recon + "\"") << "\n"
       << (c.recon == "MUSCL" ? "limiter = \"" + c.limiter + "\"\n" : "")
       << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n";
@@ -135,7 +137,7 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
     CaseConfig c;
     std::tie(c.mesh, c.recon) = GetParam();
     if (c.mesh == "wedge") GTEST_SKIP() << "wedge is not symmetric";
-    if (c.recon == "TENO") SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuities");
+    if (c.recon == "TENO" || c.recon == "TENO4") SKIP_IN_SINGLE_PRECISION("round-off flips TENO stencil selections at the discontinuities");
     c.nx = 20;
     c.ny = 20;
     c.run = "t_stop = 0.2\ncfl = 0.25\n";
@@ -165,9 +167,10 @@ TEST_P(MeshRecon, RiemannProblemIsSymmetricAboutDiagonal) {
     EXPECT_LT(max_diff, precision_tol(1e-10, 2e-4));
 }
 
+// TENO4: order 4 compares the indicators of mirror-image sectors, which tie to round-off (#977)
 INSTANTIATE_TEST_SUITE_P(Solver, MeshRecon,
     ::testing::Combine(::testing::Values("cartesian", "cartesian_tri", "wedge"),
-                       ::testing::Values("FO", "MUSCL", "TENO")));
+                       ::testing::Values("FO", "MUSCL", "TENO", "TENO4")));
 
 namespace {
 
@@ -285,6 +288,62 @@ TEST(SolverRegression, TENOSodOnAFineStripBetweenSymmetryPlanesStaysOneDimension
     EXPECT_LT(max_v, 1e-12);
 }
 
+namespace {
+
+/**
+ * @brief Lowest cell density and pressure over every step of an order-4 TENO run along a strip of
+ *        nx x 4 square cells between symmetry planes.
+ */
+std::pair<double, double> teno4_lowest_over_every_step(const std::string & mesh, const std::string & init,
+                                                       const std::string & left, const std::string & riemann,
+                                                       double t_stop) {
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(
+        "[run]\ncfl = 1.0\nt_stop = " + std::to_string(t_stop) + "\n[mesh]\ntype = \"cartesian\"\n" + mesh +
+        "[initialize]\ntype = \"analytical\"\n" + init +
+        "[[boundaries]]\nname = \"left\"\ntype = \"" + left + "\"\n"
+        "[[boundaries]]\nname = \"right\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"top\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+        "[numerics]\nriemann_solver = \"" + riemann + "\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+        "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n"));
+    double rho = std::numeric_limits<double>::infinity(), p = rho;
+    while (double(solver.get_time()) < t_stop * (1 - 1e-9)) {
+        solver.calc_dt();
+        solver.take_step();
+        solver.update_primitives();
+        solver.copy_device_to_host();
+        for (uint32_t i = 0; i < solver.get_mesh()->n_cells; i++) {
+            rho = std::min(rho, double(solver.h_conservatives(i, 0)));
+            p = std::min(p, double(solver.h_primitives(i, N_DIM)));
+        }
+    }
+    return {rho, p};
+}
+
+} // namespace
+
+TEST(SolverRegression, TENO4DoesNotUndershootTheStateAheadOfAShock) {
+    // The cell a shock is crossing took its central cubic for the u + a wave at its downstream face,
+    // where the cubic undershoots the state ahead, and the Riemann problem there drained the cell ahead:
+    // 1.2% of the density in Sod's first steps, 2.9% of the pressure ahead of a Mach 3 shock (#977)
+    const auto sod = teno4_lowest_over_every_step(
+        "Nx = 200\nNy = 4\nLx = 1.0\nLy = 0.02\n",
+        "rho = \"x < 0.5 ? 1.0 : 0.125\"\nu = [\"0.0\", \"0.0\"]\np = \"x < 0.5 ? 1.0 : 0.1\"\n", "symmetry", "HLLC", 0.2);
+    EXPECT_GT(sod.first, 0.125 * (1 - 2e-3));
+    EXPECT_GT(sod.second, 0.1 * (1 - 2e-3));
+    // RHLL: HLLC has a grid-aligned shock instability on this strip
+    const auto mach3 = teno4_lowest_over_every_step(
+        "Nx = 100\nNy = 4\nLx = 5.0\nLy = 0.2\n",
+        "rho = \"x < 1 ? 3.857143 : 1\"\nu = [\"x < 1 ? 2.629369 : 0\", \"0\"]\np = \"x < 1 ? 10.33333 : 1\"\n",
+        "outlet_extrapolation", "RHLL", 0.9);
+    EXPECT_GT(mach3.first, 1 - 5e-3);
+    EXPECT_GT(mach3.second, 1 - 5e-3);
+}
+
 TEST(SolverRegression, BoundPreservingTENOKeepsAMach14NearVacuumPositive) {
     // 183 cells of the cubic examples/mallard mesh around the lee of the tail,
     // with the Mach 8 run's state at step 6840 (t = 0.0462): Mach 14 near
@@ -295,6 +354,8 @@ TEST(SolverRegression, BoundPreservingTENOKeepsAMach14NearVacuumPositive) {
     SKIP_IN_SINGLE_PRECISION("the near-vacuum pressures are below single precision's resolution of the energy");
     const std::string dir = source_dir() + "/test/data/positivity/";
     auto solver = std::make_unique<Solver>();
+    // Each rank holds the whole mesh, whose every cell the state below sets
+    solver->set_distributed(false);
     solver->init(parse_toml(
         "[run]\nn_steps = 1\ndt = 6.977e-6\n"
         "[mesh]\ntype = \"file\"\nfilename = \"" + dir + "mallard_lee.msh\"\n"

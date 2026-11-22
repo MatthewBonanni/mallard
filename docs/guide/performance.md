@@ -16,7 +16,7 @@ Fifth-order TENO-E costs 4.7 times as much per step as third order on the CPU an
 
 ## Structured fast path {#structured-fast-path}
 
-Mallard is an unstructured solver with an automatic structured fast path. Where a mesh is structured, it finds the blocks, numbers their cells along the blocks' axes, lets the cells of each stencil shape share one set of TENO tables, and has TENO read the stencils of block cells by index arithmetic; walls, transitions and irregular cells keep the unstructured path. There is no input key, and results stay bitwise independent of the cell numbering, partition and rank count.
+Mallard is an unstructured solver with an automatic structured fast path. Where a mesh is structured, it finds the blocks, numbers their cells along the blocks' axes, lets the cells of each stencil shape share one set of TENO tables, and has TENO and MUSCL read the stencils of block cells by index arithmetic; walls, transitions and irregular cells keep the unstructured path. There is no input key, and results stay bitwise independent of the cell numbering, partition and rank count.
 
 **When it engages.** With the default `[mesh] cell_order = "auto"`, each rank finds the structured blocks among its owned cells from their nodes alone: boxes of quadrilaterals or hexahedra that meet face to face, at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers (two for TENO5). That covers generated `cartesian` boxes and the hexahedral bulk of mesh files, whatever their numbering or the cells' node order. TENO shares its tables wherever cells have the same stencil shape: lattices, and uniformly stretched or extruded directions, where a stretched channel has one shape per plane of cells.
 
@@ -33,7 +33,41 @@ The smooth pass also reads fewer distinct rows: on one A100, the 96³ Taylor-Gre
 
 **Checking it.** The log's Mesh section reports the blocks in its cell order, e.g. `structured blocks first (1 block, 100.0% of the cells)`, and its Numerics section the share of cells on TENO's block path, e.g. `Structured blocks  88.0% of the cells on the block path, 1 block shape`. `mallard check --memory` gives the tables per cell.
 
-**Limits.** Triangles, tetrahedra, prisms, pyramids and hexahedra that do not form a box stay on the unstructured path, as do blocks shorter than 2n + 1 cells and, with several ranks, cells near the partition. Block cells whose TENO stencil holds a mirror image (next to straight walls and symmetry planes) stay off the block path. A block does not continue across a periodic seam or an O-grid's seam, but a periodic box that is one block on its rank keeps the cells along its seams on the block path, their offsets wrapping. `cell_order = "hilbert"` or `"input"` numbers no blocks. MUSCL keeps a table per cell and the unstructured kernel. Detection adds about 1 s per million cells to the mesh setup.
+**Limits.** Triangles, tetrahedra, prisms, pyramids and hexahedra that do not form a box stay on the unstructured path, as do blocks shorter than 2n + 1 cells and, with several ranks, cells near the partition. Block cells whose TENO stencil holds a mirror image (next to straight walls and symmetry planes) stay off the block path. A block continues across a periodic boundary where a rank owns the cells on both sides, but not across an O-grid's seam; a periodic box that is one block on its rank keeps the cells along its seams on the block path, their offsets wrapping. `cell_order = "hilbert"` or `"input"` numbers no blocks. MUSCL shares its table rows only on lattices (8 or more cells per row), and takes the block path only for cells with a neighbor across every face. Detection adds about 1 s per million cells to the mesh setup.
+
+## Choosing a scheme for an accuracy target {#accuracy-target}
+
+What a given error costs with each scheme, measured on the isentropic vortex
+(2D squares and irregular triangles, 3D hexahedra and tetrahedra) and on the
+Shu-Osher problem, on 2 CPU threads and on one A100 (v0.10.0-48):
+
+![Error of the isentropic vortex on 2D squares against cells and wall time on 2 CPU threads and on an A100](../images/guide/work_precision_vortex_2d_quad-light.svg#gh-light-mode-only)
+![Error of the isentropic vortex on 2D squares against cells and wall time on 2 CPU threads and on an A100](../images/guide/work_precision_vortex_2d_quad-dark.svg#gh-dark-mode-only)
+
+| Target ($L_2$ error of $\rho$, smooth flow) | Cheapest on CPUs (2D and 3D) | Cheapest on a GPU (2D) |
+|---|---|---|
+| 10<sup>-3</sup> (coarse) | TENO-E 4; MUSCL takes 1.3 to 3× as long | MUSCL; every scheme within 2× |
+| 10<sup>-4</sup> to 10<sup>-5</sup> | TENO-E 4 (at 10<sup>-5</sup> TENO-E 6 is 10 to 20% faster on triangles and hexahedra); MUSCL takes 6 to 45× as long or never gets there | TENO-E 4; MUSCL takes 1.1 to 70× as long |
+| 10<sup>-6</sup> and below | TENO-E 6 (TENO-E 4: 1.2× on squares, 2.2× on triangles) | TENO-E 4 (TENO-E 6 within 1.1×) |
+| Flow with shocks | TENO-E 4 down to an $L_1$ error of 10<sup>-2</sup> (half MUSCL's time); below it every scheme within 2.2× | not measured yet ([#1171](https://github.com/MatthewBonanni/mallard/issues/1171)) |
+
+- **TENO-E 4** is the cheapest scheme over most of the range, on every cell
+  type. **TENO-E 5**, the order of the `high_order` preset, costs 1.0 to 2.3
+  times as much on CPUs (4 to 5 times on tetrahedra) and 1.15 to 1.3 times
+  on a GPU; it is the preset for robustness
+  ([why high order](numerics.md#why-high-order)). For smooth flow on meshes
+  without pyramids, `order = 4` under `[numerics.face_reconstruction]` is the
+  cheaper choice.
+- **On a GPU** a small 2D run takes 0.15 to 0.35 s whatever the scheme, so at
+  coarse targets the scheme hardly matters; TENO-E 4 reaches 10<sup>-6</sup>
+  on squares in 0.85 s, 16 times faster than 2 CPU threads. 45 to 73% of a
+  2D TENO-E run's time there is its setup, which runs on the host. In 3D the
+  setup dominates too: 91% of a TENO-E 3 run on 221,184 hexahedra.
+- **Below about 10<sup>-6</sup>** SSPRK3 at `cfl = 1.0` limits TENO-E 5 and 6
+  to third order: lower `cfl` for smaller errors.
+
+Design notes: [work-precision study](../design/work_precision.md) (every case,
+platform and order, and the method).
 
 ## 3D TENO-E: setup and memory {#teno-3d}
 
@@ -55,11 +89,19 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 | TENO6, hexahedra | 129.6 / 99.6 KB | 77.9 KB | 46.5 KB |
 
 - **Capacity:** one A100-80GB now holds about 2.1M hexahedra or 1.65M tetrahedra at TENO5 (before: about 1.8M / 1.45M), and 3.4M / 2.75M with `single_precision_tables`. A 125³ Taylor–Green vortex that ran out of memory now runs.
+- **Since 0.11.0** ([#978](https://github.com/MatthewBonanni/mallard/issues/978)): the troubled-cell passes take a quarter of the cells per round (`troubled_capacity`, was half); results are bitwise unchanged. At TENO5 that is 880 bytes less per cell (7.6 → 6.7 KB per hexahedron for a perfect gas, everything included: 13% more cells per A100-80GB) at a cost under 0.3 ms per step ([measurements](../design/performance.md#19-troubled-scratch-for-a-quarter-of-the-cells-978)).
 - **`single_precision_tables`** (opt-in, 3D, single gas) stores the pseudo-inverses in single precision and is another 3–8% faster. It changes results at single-precision round-off: below 10<sup>−7</sup> of each field's range on the Taylor–Green vortex, but up to 6.9 × 10<sup>−3</sup> in shock cells of a blast wave.
+
+**Shared face quadrature weights** ([#965](https://github.com/MatthewBonanni/mallard/issues/965)). The 3D quadrature weights of the faces (and in 2D those of curved faces and of axisymmetric runs) are stored once per distinct row, bitwise, with a row index per face: the faces of a box have a few rows per direction (1,826 for the 798,720 faces of a 64³ box) and triangles one. Results are bitwise unchanged. `mallard check`, 64³ hexahedra, Navier–Stokes:
+
+| mesh and geometry per cell | before | after |
+|---|---:|---:|
+| TENO5 | 2.01 kB | 1.80 kB |
+| TENO3 | 1.52 kB | 1.44 kB |
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first, along its axes ([structured fast path](#structured-fast-path); a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
+Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first, along its axes, blocks meeting across periodic boundaries too ([structured fast path](#structured-fast-path); a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
 
 The performance set on one A100, cells per second, best of six runs over two interleaved rounds, before 0.10.0 and with `auto`:
 
@@ -112,6 +154,8 @@ The performance case `flame_3d` is a propane–air flame with the two-step mecha
 | cost per cell and step over the same flow of air | 15.5× | 7.8× | 5.9× |
 
 The opt-in `C_reg = 1e-10` cheapens trace fuel burning out in hot gas. After 100 steps the temperature is within 0.54 K and the integrated heat release within 0.08% of the default.
+
+Device memory: the reconstruction's work memory and the transport properties of a mixture share one allocation, since a step never needs both at once ([#552](https://github.com/MatthewBonanni/mallard/issues/552)). An A100-80GB holds 4% more cells of the two-step flame at TENO5, 9% with MUSCL and 18% with GRI-Mech 3.0; `mallard check --memory` counts it under faces and gradients.
 
 ### Chemistry load balancing {#chemistry-load-balancing}
 

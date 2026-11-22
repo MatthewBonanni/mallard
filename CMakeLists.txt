@@ -27,16 +27,12 @@ function(mallard_target_warnings target)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
-    # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
-    if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set(nvcc TRUE)
-    endif()
     set(warnings
         -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wcast-align -Wunused
         -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough
         -Wconversion -Wsign-conversion)
     # nvcc rewrites functional casts such as T(x) into C-style casts before the host compiler sees them
-    if(NOT nvcc)
+    if(NOT mallard_nvcc)
         list(APPEND warnings -Wold-style-cast)
     endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -47,7 +43,7 @@ function(mallard_target_warnings target)
     endif()
     if(${PROJECT_NAME}_WARNINGS_AS_ERRORS)
         list(APPEND warnings -Werror)
-        if(nvcc)
+        if(mallard_nvcc)
             list(APPEND warnings "SHELL:-Werror all-warnings")
         endif()
     endif()
@@ -233,6 +229,85 @@ if(USE_SYSTEM_KOKKOS)
 else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos SYSTEM)
 endif()
+# Kokkos compiles device code with nvcc either through nvcc_wrapper as the compiler or
+# through its launcher around the host compiler (-DCMAKE_CXX_COMPILER=g++), which CMake
+# identifies as the host compiler either way; Kokkos' own compiler id tells nvcc apart
+if(USE_SYSTEM_KOKKOS)
+    set(mallard_kokkos_compiler_id "${Kokkos_CXX_COMPILER_ID}")
+else()
+    get_directory_property(mallard_kokkos_compiler_id DIRECTORY src/external/kokkos
+                           DEFINITION KOKKOS_CXX_COMPILER_ID)
+endif()
+if(Kokkos_ENABLE_CUDA AND mallard_kokkos_compiler_id STREQUAL "NVIDIA")
+    set(mallard_nvcc TRUE)
+else()
+    set(mallard_nvcc FALSE)
+endif()
+
+# Sources whose floating-point operations must round alike on every backend, host and
+# device: no multiply-add contraction (--fmad=false for nvcc; -ffp-contract=off reaches
+# nvcc's host compiler, and Clang's CUDA, HIP and SYCL device compilations alike)
+function(mallard_no_contraction)
+    if(mallard_nvcc)
+        set(options --fmad=false -ffp-contract=off)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+        # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
+        set(options -ffp-contract=off -Wno-overriding-option)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        set(options -ffp-contract=off)
+    endif()
+    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "${options}")
+    list(TRANSFORM ARGN PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+    set_property(DIRECTORY APPEND PROPERTY mallard_no_contraction ${ARGN})
+    set_property(GLOBAL APPEND PROPERTY mallard_no_contraction_dirs "${CMAKE_CURRENT_SOURCE_DIR}")
+endfunction()
+
+# Checks every mallard_no_contraction source against how its compile command actually
+# runs, independently of mallard_nvcc: through nvcc when the compiler is nvcc_wrapper or
+# Kokkos' launcher redirects to it
+function(mallard_check_no_contraction)
+    set(required)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
+        list(APPEND required -ffp-contract=off)
+    endif()
+    if(Kokkos_ENABLE_CUDA)
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE version ERROR_QUIET)
+        get_property(launcher GLOBAL PROPERTY RULE_LAUNCH_COMPILE)
+        if(version MATCHES "nvcc" OR launcher MATCHES "nvcc_wrapper")
+            list(APPEND required --fmad=false)
+        endif()
+    endif()
+    get_property(dirs GLOBAL PROPERTY mallard_no_contraction_dirs)
+    list(REMOVE_DUPLICATES dirs)
+    set(all_sources)
+    foreach(dir IN LISTS dirs)
+        get_property(sources DIRECTORY ${dir} PROPERTY mallard_no_contraction)
+        list(APPEND all_sources ${sources})
+        foreach(source IN LISTS sources)
+            get_source_file_property(options ${source} DIRECTORY ${dir} COMPILE_OPTIONS)
+            foreach(option IN LISTS required)
+                if(NOT option IN_LIST options)
+                    message(FATAL_ERROR "${source} must not contract multiplies and adds, but compiles "
+                                        "without ${option} (its options: ${options})")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
+    # The Riemann solvers round alike in every kernel only if every source naming them is listed
+    set(globs ${PROJECT_SOURCE_DIR}/src/*.cpp)
+    if(${PROJECT_NAME}_ENABLE_TESTS)
+        list(APPEND globs ${PROJECT_SOURCE_DIR}/test/*.cpp)
+    endif()
+    file(GLOB_RECURSE candidates ${globs})
+    list(FILTER candidates EXCLUDE REGEX "/src/external/")
+    foreach(source IN LISTS candidates)
+        file(STRINGS ${source} uses REGEX "riemann::")
+        if(uses AND NOT source IN_LIST all_sources)
+            message(FATAL_ERROR "${source} inlines the Riemann solvers: list it in mallard_no_contraction "
+                                "with the others (src/CMakeLists.txt)")
+        endif()
+    endforeach()
+endfunction()
 
 # Cantera YAML mechanism files
 option(USE_SYSTEM_YAML_CPP "Use system-installed yaml-cpp" OFF)
@@ -275,6 +350,7 @@ endif()
 if(${PROJECT_NAME}_ENABLE_FUZZING)
     add_subdirectory(test/fuzz)
 endif()
+mallard_check_no_contraction()
 
 # Documentation setup
 option(BUILD_DOCS "Build documentation" OFF)

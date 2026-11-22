@@ -236,6 +236,12 @@ template <typename T>
 Received<T> exchange(std::vector<std::vector<T>> && send) {
     const size_t p = static_cast<size_t>(size());
     if (send.size() != p) throw std::invalid_argument("comm::exchange: one list per rank");
+    Received<T> received;
+    if (p == 1) {
+        received.data = std::move(send[0]);
+        received.offsets = {0, received.data.size()};
+        return received;
+    }
     std::vector<uint64_t> send_counts(p), recv_counts(p);
     for (size_t r = 0; r < p; r++) send_counts[r] = send[r].size();
     check(MPI_Alltoall(send_counts.data(), 1, MPI_UINT64_T, recv_counts.data(), 1, MPI_UINT64_T, communicator()),
@@ -247,7 +253,6 @@ Received<T> exchange(std::vector<std::vector<T>> && send) {
         send_flat.insert(send_flat.end(), send[r].begin(), send[r].end());
         std::vector<T>().swap(send[r]);
     }
-    Received<T> received;
     received.offsets = prefix_sum(recv_counts);
     received.data.resize(received.offsets[p]);
     detail::alltoallv<T>(send_flat.data(), send_counts, send_offsets, received.data.data(), recv_counts,
@@ -357,6 +362,7 @@ template std::vector<double> gatherv(const std::vector<double> &);
 template std::vector<float> gatherv(const std::vector<float> &);
 template std::vector<std::vector<double>> alltoallv(const std::vector<std::vector<double>> &);
 template std::vector<std::vector<float>> alltoallv(const std::vector<std::vector<float>> &);
+template Received<uint32_t> exchange(std::vector<std::vector<uint32_t>> &&);
 template Received<uint64_t> exchange(std::vector<std::vector<uint64_t>> &&);
 template Received<double> exchange(std::vector<std::vector<double>> &&);
 template Received<float> exchange(std::vector<std::vector<float>> &&);

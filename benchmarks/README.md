@@ -29,7 +29,8 @@ cells whose last call took 16 or more sub-steps), `shared` (-1 automatic, 0: wor
 and `bin_by_cost` (GPUs: order the queue by the cells' last cost, most
 expensive first; default true, ignored on CPUs).
 `[chemistry] sparse = true/false` chooses the LU (by default sparse from 30 species
-when it pays: GRI-3.0 and larger). V3 with the large mechanism: `python tools/dev/v3_check.py
+when it pays: GRI-3.0 and larger); `[chemistry] integrator = "bdf"` benchmarks the BDF integrator
+(rows `... bdf` in `baselines.csv`; [design notes](../docs/design/chemistry.md#bdf-integrator-issue-143)). V3 with the large mechanism: `python tools/dev/v3_check.py
 <build>/src/mallard reactor` against `chemistry/nhexane_ignition.csv`.
 
 ## `perf/`: performance set
@@ -78,9 +79,10 @@ chemistry's share.
 
 `dmr_2d.toml` (2D) and `tgv_3d.toml` (3D) write 11 VTKHDF snapshots of `RHO`,
 `U`, `P` and `T`, the same steps' `MACH`, `Q_CRITERION`, `LAMBDA2`,
-`SCHLIEREN` and `VORTICITY` from the run, and restart files. `pv_derive.py` is
+`SCHLIEREN` and `VORTICITY` from the run, restart files and the TENO
+`cache_file`. `pv_derive.py` is
 the `pvbatch` pipeline that derives those fields; `run.sh` times both on the
-last snapshot and on the series, with and without a TENO `cache_file`, and
+last snapshot and on the series, with and without the run's `cache_file`, and
 `compare.py` (`pvpython`) gives the relative differences of two snapshots of
 the fields, optionally only more than a margin from the domain's faces:
 
@@ -93,6 +95,26 @@ mallard -i ../benchmarks/post_derive/tgv_3d.toml --kokkos-num-threads=2
 
 `mallard diff` compares `post derive`'s snapshots with the run's (`inrun/`).
 Results: [Reading output](../docs/design/output_reader.md#cost-against-paraview).
+
+## `python_read/`: the Python package's reads against ParaView
+
+`make_cases.py OUT` writes four cases (2D, 115k triangles and 1M
+quadrilaterals; 3D, 1M and 8M hexahedra), each a `serial.toml` writing 5
+snapshots as VTKHDF and XDMF and an `mpi.toml` writing them as VTU, run on 4
+ranks for PVTU. `read_mallard.py` and `read_pvbatch.py` read the last snapshot
+(geometry, `RHO`, `U`) or `RHO` at every snapshot; `run.sh` (Linux, GNU
+`time`) runs both in fresh processes and prints the time in the script, the
+whole script's wall time and peak memory as CSV, and saves the values read
+to `npy/` for comparison. ParaView is not a dependency of Mallard: install it
+for the benchmark only.
+
+```bash
+python benchmarks/python_read/make_cases.py cases
+cd cases/big3d && mallard -i serial.toml && mpirun -n 4 mallard -i mpi.toml && cd ../..
+PYTHONPATH=tools benchmarks/python_read/run.sh /opt/ParaView-6.2.0/bin/pvbatch cases/big3d > read.csv
+```
+
+Results: [The Python package](../docs/design/python_package.md#performance).
 
 ## AMD MI355X against the A100
 

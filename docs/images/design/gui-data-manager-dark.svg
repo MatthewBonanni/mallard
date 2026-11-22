@@ -1,0 +1,461 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<rect x="0.0" y="0.0" width="1440.0" height="900.0" rx="0" fill="#131417"/>
+<rect x="0.0" y="0.0" width="1440.0" height="36.0" rx="0" fill="#191a1e"/>
+<line x1="0.0" y1="36.0" x2="1440.0" y2="36.0" stroke="#2b2c31" stroke-width="1"/>
+<circle cx="20.0" cy="18.0" r="7.0" fill="#2dd4bf"/>
+<path d="M16.5 18.5c1.5-3 5.5-3 7 0" stroke="#0b1f1c" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="34.0" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="600" fill="#ececee" text-anchor="start">cylinder-re100</text>
+<path transform="translate(140.3 11.0) scale(0.5833)" d="M9 6l6 6-6 6" fill="none" stroke="#45464d" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="156.3" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">Data</text>
+<path transform="translate(188.2 11.0) scale(0.5833)" d="M9 6l6 6-6 6" fill="none" stroke="#45464d" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="204.2" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#ececee" text-anchor="start">re100-fine</text>
+<rect x="275.0" y="8.0" width="93.3" height="20.0" rx="10" fill="#123430"/>
+<path transform="translate(281.0 12.0) scale(0.5000)" d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01" fill="none" stroke="#2dd4bf" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="297.0" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#2dd4bf" text-anchor="start">hpc · Slurm</text>
+<rect x="1020.0" y="6.0" width="260.0" height="24.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(1028.0 10.0) scale(0.6667)" d="M11 4a7 7 0 1 0 0.01 0z M16 16l4 4" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1048.0" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">Keys, runs, files, actions</text>
+<rect x="1234.0" y="10.0" width="40.0" height="16.0" rx="3" fill="#202126"/>
+<text x="1254.0" y="22.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="middle" font-feature-settings="'tnum'">⌘ K</text>
+<path transform="translate(1290.0 10.0) scale(0.6667)" d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1305.0" cy="25.0" r="3.0" fill="#9ad56a"/>
+<text x="1312.0" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">hpc</text>
+<path transform="translate(1343.8 10.0) scale(0.6667)" d="M12 2l8.7 5v10L12 22l-8.7-5V7z M12 8v8 M8.5 10l7 4 M15.5 10l-7 4" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="1358.8" cy="25.0" r="3.0" fill="#9ad56a"/>
+<text x="1365.8" y="22.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">k8s-lab</text>
+<rect x="0.0" y="36.0" width="44.0" height="840.0" rx="0" fill="#191a1e"/>
+<line x1="44.0" y1="36.0" x2="44.0" y2="876.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(14.0 50.0) scale(0.6667)" d="M6 3h8l4 4v14H6z M14 3v4h4 M9 12h6 M9 16h6" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(14.0 86.0) scale(0.6667)" d="M12 3a9 9 0 1 0 0.01 0z M10 8.5v7l6-3.5z" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="8.0" y="116.0" width="28.0" height="28.0" rx="4" fill="#123430"/>
+<rect x="0.0" y="120.0" width="2.0" height="20.0" rx="0" fill="#2dd4bf"/>
+<path transform="translate(14.0 122.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#2dd4bf" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(14.0 158.0) scale(0.6667)" d="M12 3l8 4.5v9L12 21l-8-4.5v-9z M12 12l8-4.5 M12 12v9 M12 12L4 7.5" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(14.0 194.0) scale(0.6667)" d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(14.0 842.0) scale(0.6667)" d="M4 7h10 M18 7h2 M4 17h4 M12 17h8 M14 4v6 M8 14v6" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="0.0" y="876.0" width="1440.0" height="24.0" rx="0" fill="#191a1e"/>
+<line x1="0.0" y1="876.0" x2="1440.0" y2="876.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(10.0 881.0) scale(0.5833)" d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01" fill="none" stroke="#9ad56a" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="28.0" y="892.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#9ad56a" text-anchor="start" font-feature-settings="'tnum'">hpc</text>
+<line x1="57.8" y1="882.0" x2="57.8" y2="894.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(67.8 881.0) scale(0.5833)" d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="#8e8e96" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="85.8" y="892.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">direct route hpc → k8s-lab: yes (agent forwarding)</text>
+<line x1="425.8" y1="882.0" x2="425.8" y2="894.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="435.8" y="892.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">cache index: 3 locations · rebuilt 2 min ago</text>
+<line x1="736.2" y1="882.0" x2="736.2" y2="894.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(746.2 881.0) scale(0.5833)" d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" fill="none" stroke="#2dd4bf" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="764.2" y="892.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#2dd4bf" text-anchor="start" font-feature-settings="'tnum'">1 transfer running</text>
+<line x1="893.0" y1="882.0" x2="893.0" y2="894.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(903.0 881.0) scale(0.5833)" d="M8 5v14 M16 5v14" fill="none" stroke="#f5b544" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="921.0" y="892.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#f5b544" text-anchor="start" font-feature-settings="'tnum'">1 paused</text>
+<line x1="983.8" y1="882.0" x2="983.8" y2="894.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="44.0" y="36.0" width="248.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="52.0" y="52.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">LOCATIONS</text>
+<path transform="translate(268.0 40.0) scale(0.6667)" d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="44.0" y1="60.0" x2="292.0" y2="60.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(50.0 66.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(64.0 64.0) scale(0.6667)" d="M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="84.0" y="76.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#ececee" text-anchor="start">hpc</text>
+<text x="284.0" y="76.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">home</text>
+<rect x="44.0" y="84.0" width="248.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="44.0" y="84.0" width="2.0" height="24.0" rx="0" fill="#2dd4bf"/>
+<path transform="translate(78.0 88.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#2dd4bf" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="100.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="600" fill="#2dd4bf" text-anchor="start" font-feature-settings="'tnum'">re100-fine</text>
+<text x="284.0" y="100.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">1.13 GB</text>
+<rect x="44.0" y="108.0" width="248.0" height="24.0" rx="0" fill="#202126"/>
+<path transform="translate(78.0 112.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="124.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">re100-coarse</text>
+<text x="284.0" y="124.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">212 MB</text>
+<path transform="translate(50.0 138.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(64.0 136.0) scale(0.6667)" d="M5 5h14v10H5z M2 19h20" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="84.0" y="148.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#ececee" text-anchor="start">Local</text>
+<path transform="translate(78.0 160.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="172.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">re100-fine </text>
+<rect x="256.0" y="161.0" width="28.0" height="14.0" rx="7" fill="#123430"/>
+<text x="270.0" y="171.5" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="10" font-weight="600" fill="#2dd4bf" text-anchor="middle" font-feature-settings="'tnum'">41%</text>
+<text x="252.0" y="172.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">318 MB</text>
+<path transform="translate(78.0 184.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="196.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">re100-quick</text>
+<text x="284.0" y="196.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">9 MB</text>
+<path transform="translate(50.0 210.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<path transform="translate(64.0 208.0) scale(0.6667)" d="M12 2l8.7 5v10L12 22l-8.7-5V7z M12 8v8 M8.5 10l7 4 M15.5 10l-7 4" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="84.0" y="220.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#ececee" text-anchor="start">k8s-lab</text>
+<text x="284.0" y="220.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">pvc mallard-data</text>
+<path transform="translate(78.0 232.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="244.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">re100-fine  </text>
+<text x="284.0" y="244.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">96 MB</text>
+<path transform="translate(78.0 256.0) scale(0.6667)" d="M5 6c0-1.7 3.1-3 7-3s7 1.3 7 3-3.1 3-7 3-7-1.3-7-3z M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6 M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="98.0" y="268.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">re200-les</text>
+<text x="284.0" y="268.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">home</text>
+<line x1="292.0" y1="36.0" x2="292.0" y2="876.0" stroke="#2b2c31" stroke-width="1"/>
+<line x1="44.0" y1="284.0" x2="292.0" y2="284.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="44.0" y="284.0" width="248.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="52.0" y="300.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">RUN</text>
+<text x="282.0" y="300.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">re100-fine</text>
+<line x1="44.0" y1="308.0" x2="292.0" y2="308.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="324.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">run_id</text>
+<line x1="128.0" y1="308.0" x2="128.0" y2="332.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="324.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">3a256c99</text>
+<line x1="44.0" y1="332.0" x2="292.0" y2="332.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="348.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">home</text>
+<line x1="128.0" y1="332.0" x2="128.0" y2="356.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="348.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">hpc</text>
+<line x1="44.0" y1="356.0" x2="292.0" y2="356.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="372.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">objects</text>
+<line x1="128.0" y1="356.0" x2="128.0" y2="380.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="372.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">226</text>
+<line x1="44.0" y1="380.0" x2="292.0" y2="380.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="396.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">streams</text>
+<line x1="128.0" y1="380.0" x2="128.0" y2="404.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="396.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">7</text>
+<line x1="44.0" y1="404.0" x2="292.0" y2="404.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="420.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">total</text>
+<line x1="128.0" y1="404.0" x2="128.0" y2="428.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="420.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">1.13</text>
+<text x="284.0" y="420.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">GB</text>
+<line x1="44.0" y1="428.0" x2="292.0" y2="428.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="444.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">snapshot</text>
+<line x1="128.0" y1="428.0" x2="128.0" y2="452.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="444.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">4.4</text>
+<text x="284.0" y="444.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">MB</text>
+<line x1="44.0" y1="452.0" x2="292.0" y2="452.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="52.0" y="468.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">restart</text>
+<line x1="128.0" y1="452.0" x2="128.0" y2="476.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="136.0" y="468.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">2.1</text>
+<text x="284.0" y="468.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">MB</text>
+<line x1="44.0" y1="476.0" x2="292.0" y2="476.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="36.0" width="788.0" height="28.0" rx="0" fill="#131417"/>
+<rect x="292.0" y="62.0" width="52.4" height="2.0" rx="0" fill="#2dd4bf"/>
+<text x="302.0" y="54.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="600" fill="#ececee" text-anchor="start">Files</text>
+<text x="354.4" y="54.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">Transfers</text>
+<text x="432.7" y="54.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">History</text>
+<line x1="292.0" y1="64.0" x2="1080.0" y2="64.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="298.0" y="68.0" width="53.6" height="22.0" rx="4" fill="#123430"/>
+<text x="304.0" y="83.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#2dd4bf" text-anchor="start">All 233</text>
+<rect x="355.6" y="68.0" width="89.2" height="22.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<text x="361.6" y="83.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#a3a3ab" text-anchor="start">Snapshots 212</text>
+<rect x="448.8" y="68.0" width="71.4" height="22.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<text x="454.8" y="83.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#a3a3ab" text-anchor="start">Restarts 9</text>
+<rect x="524.2" y="68.0" width="65.5" height="22.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<text x="530.2" y="83.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#a3a3ab" text-anchor="start">Streams 7</text>
+<rect x="593.7" y="68.0" width="59.5" height="22.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<text x="599.7" y="83.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="500" fill="#a3a3ab" text-anchor="start">Inputs 5</text>
+<rect x="872.0" y="68.0" width="200.0" height="22.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(878.0 72.0) scale(0.5833)" d="M4 5h16l-6 8v6l-4-2v-4z" fill="none" stroke="#8e8e96" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="896.0" y="83.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">t ≥ 200 and t ≤ 212</text>
+<line x1="292.0" y1="94.0" x2="1080.0" y2="94.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="94.0" width="788.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="300.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start"></text>
+<text x="324.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">path</text>
+<text x="592.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">kind</text>
+<text x="664.0" y="110.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">t (nd)</text>
+<text x="742.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">size</text>
+<text x="804.0" y="110.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">sha256</text>
+<text x="904.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">hpc</text>
+<text x="956.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">local</text>
+<text x="1010.0" y="110.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">k8s-lab</text>
+<line x1="292.0" y1="118.0" x2="1080.0" y2="118.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="124.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="134.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000200.vtkhdf</text>
+<text x="592.0" y="134.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="134.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">200.0</text>
+<text x="792.0" y="134.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="134.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">9b571248</text>
+<circle cx="910.0" cy="130.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="130.0" r="4.0" fill="#9ad56a"/>
+<circle cx="1016.0" cy="130.0" r="4.0" fill="#9ad56a"/>
+<line x1="292.0" y1="142.0" x2="1080.0" y2="142.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="148.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="158.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000201.vtkhdf</text>
+<text x="592.0" y="158.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="158.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">201.0</text>
+<text x="792.0" y="158.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="158.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">398e8bf9</text>
+<circle cx="910.0" cy="154.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="154.0" r="4.0" fill="#9ad56a"/>
+<circle cx="1016.0" cy="154.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="166.0" x2="1080.0" y2="166.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="166.0" width="788.0" height="24.0" rx="0" fill="#202126"/>
+<rect x="300.0" y="172.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="182.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000202.vtkhdf</text>
+<text x="592.0" y="182.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="182.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">202.0</text>
+<text x="792.0" y="182.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="182.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">d7c605aa</text>
+<circle cx="910.0" cy="178.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="178.0" r="4.0" fill="#9ad56a"/>
+<circle cx="1016.0" cy="178.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="190.0" x2="1080.0" y2="190.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="196.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="206.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000203.vtkhdf</text>
+<text x="592.0" y="206.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="206.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">203.0</text>
+<text x="792.0" y="206.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="206.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">75fd7f5b</text>
+<circle cx="910.0" cy="202.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="202.0" r="4.0" fill="#9ad56a"/>
+<circle cx="1016.0" cy="202.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="214.0" x2="1080.0" y2="214.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="220.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="230.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000204.vtkhdf</text>
+<text x="592.0" y="230.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="230.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">204.0</text>
+<text x="792.0" y="230.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="230.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">1434f90c</text>
+<circle cx="910.0" cy="226.0" r="4.0" fill="#9ad56a"/>
+<path d="M962 222 a4 4 0 0 1 0 8 z" fill="#2dd4bf"/>
+<circle cx="962.0" cy="226.0" r="4.0" fill="none" stroke="#2dd4bf" stroke-width="1.2"/>
+<text x="970.0" y="230.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="10" font-weight="400" fill="#2dd4bf" text-anchor="start" font-feature-settings="'tnum'">41%</text>
+<circle cx="1016.0" cy="226.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="238.0" x2="1080.0" y2="238.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="238.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="244.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 250 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="254.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000205.vtkhdf</text>
+<text x="592.0" y="254.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="254.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">205.0</text>
+<text x="792.0" y="254.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="254.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">b26c72bd</text>
+<circle cx="910.0" cy="250.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="250.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="250.0" r="4.0" fill="#9ad56a"/>
+<line x1="292.0" y1="262.0" x2="1080.0" y2="262.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="262.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="268.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 274 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="278.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000206.vtkhdf</text>
+<text x="592.0" y="278.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="278.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">206.0</text>
+<text x="792.0" y="278.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="278.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">50a3ec6e</text>
+<circle cx="910.0" cy="274.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="274.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="274.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="286.0" x2="1080.0" y2="286.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="286.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="292.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 298 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="302.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000207.vtkhdf</text>
+<text x="592.0" y="302.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="302.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">207.0</text>
+<text x="792.0" y="302.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="302.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">eedb661f</text>
+<circle cx="910.0" cy="298.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="298.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="298.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="310.0" x2="1080.0" y2="310.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="310.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="316.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 322 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="326.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000208.vtkhdf</text>
+<text x="592.0" y="326.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="326.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">208.0</text>
+<text x="792.0" y="326.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="326.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">8d12dfd0</text>
+<circle cx="910.0" cy="322.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="322.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="322.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="334.0" x2="1080.0" y2="334.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="334.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="340.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 346 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="350.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000209.vtkhdf</text>
+<text x="592.0" y="350.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="350.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">209.0</text>
+<text x="792.0" y="350.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="350.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">2b4a5981</text>
+<circle cx="910.0" cy="346.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="346.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="346.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="358.0" x2="1080.0" y2="358.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="358.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="364.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 370 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="374.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000210.vtkhdf</text>
+<text x="592.0" y="374.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="374.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">210.0</text>
+<text x="792.0" y="374.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="374.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">c981d332</text>
+<circle cx="910.0" cy="370.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="370.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="370.0" r="4.0" fill="#9ad56a"/>
+<line x1="292.0" y1="382.0" x2="1080.0" y2="382.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="382.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="388.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 394 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="398.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000211.vtkhdf</text>
+<text x="592.0" y="398.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="398.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">211.0</text>
+<text x="792.0" y="398.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="398.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">67b94ce3</text>
+<circle cx="910.0" cy="394.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="394.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="394.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="406.0" x2="1080.0" y2="406.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="292.0" y="406.0" width="788.0" height="24.0" rx="0" fill="#123430"/>
+<rect x="300.0" y="412.0" width="12.0" height="12.0" rx="2" fill="#2dd4bf" stroke="#2dd4bf" stroke-width="1"/>
+<path d="M302.5 418 l2.5 2.5 l5 -5" stroke="#0b1f1c" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="324.0" y="422.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/cylinder_000212.vtkhdf</text>
+<text x="592.0" y="422.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">snapshot</text>
+<text x="664.0" y="422.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">212.0</text>
+<text x="792.0" y="422.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">4.4 MB</text>
+<text x="804.0" y="422.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">05f0c694</text>
+<circle cx="910.0" cy="418.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="418.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="418.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="430.0" x2="1080.0" y2="430.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="436.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/restart_000101000.restart</text>
+<text x="592.0" y="446.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">restart</text>
+<text x="664.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">197.3</text>
+<text x="792.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">2.1 MB</text>
+<text x="804.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">a19e77f0</text>
+<circle cx="910.0" cy="442.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="442.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="442.0" r="4.0" fill="#9ad56a"/>
+<line x1="292.0" y1="454.0" x2="1080.0" y2="454.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="460.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="470.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">solut/restart_000108000.restart</text>
+<text x="592.0" y="470.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">restart</text>
+<text x="664.0" y="470.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">211.6</text>
+<text x="792.0" y="470.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">2.1 MB</text>
+<text x="804.0" y="470.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">4f6d2a90</text>
+<circle cx="910.0" cy="466.0" r="4.0" fill="#9ad56a"/>
+<circle cx="962.0" cy="466.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<circle cx="1016.0" cy="466.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<line x1="292.0" y1="478.0" x2="1080.0" y2="478.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="300.0" y="484.0" width="12.0" height="12.0" rx="2" fill="#131417" stroke="#8e8e96" stroke-width="1"/>
+<text x="324.0" y="494.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">mallard.jsonl</text>
+<text x="592.0" y="494.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start">stream</text>
+<text x="664.0" y="494.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">0 … 212.6</text>
+<text x="792.0" y="494.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">1.9 MB</text>
+<text x="804.0" y="494.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">prefix</text>
+<circle cx="910.0" cy="490.0" r="4.0" fill="#9ad56a"/>
+<path d="M962 486 a4 4 0 0 1 0 8 z" fill="#9ad56a"/>
+<circle cx="962.0" cy="490.0" r="4.0" fill="none" stroke="#9ad56a" stroke-width="1.2"/>
+<path d="M1016 486 a4 4 0 0 1 0 8 z" fill="#9ad56a"/>
+<circle cx="1016.0" cy="490.0" r="4.0" fill="none" stroke="#9ad56a" stroke-width="1.2"/>
+<line x1="292.0" y1="502.0" x2="1080.0" y2="502.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="784.0" y="192.0" width="288.0" height="40.0" rx="4" fill="#ececee"/>
+<text x="792.0" y="207.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#131417" text-anchor="start" font-feature-settings="'tnum'">sha256 d7c605aa3e91c0…  4 417 280 B</text>
+<text x="792.0" y="223.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#131417" text-anchor="start" font-feature-settings="'tnum'">on hpc and local · from the run log</text>
+<rect x="292.0" y="850.0" width="788.0" height="26.0" rx="0" fill="#191a1e"/>
+<line x1="292.0" y1="850.0" x2="1080.0" y2="850.0" stroke="#2b2c31" stroke-width="1"/>
+<circle cx="306.0" cy="863.0" r="4.0" fill="#9ad56a"/>
+<text x="314.0" y="867.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">object (SHA-256 matches)</text>
+<path d="M476 859 a4 4 0 0 1 0 8 z" fill="#9ad56a"/>
+<circle cx="476.0" cy="863.0" r="4.0" fill="none" stroke="#9ad56a" stroke-width="1.2"/>
+<text x="484.0" y="867.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">stream prefix (shorter)</text>
+<path d="M636 859 a4 4 0 0 1 0 8 z" fill="#2dd4bf"/>
+<circle cx="636.0" cy="863.0" r="4.0" fill="none" stroke="#2dd4bf" stroke-width="1.2"/>
+<text x="644.0" y="867.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">partial (resumes from any holder)</text>
+<circle cx="844.0" cy="863.0" r="4.0" fill="none" stroke="#45464d" stroke-width="1"/>
+<text x="852.0" y="867.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start">absent</text>
+<text x="1072.0" y="867.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#ececee" text-anchor="end" font-feature-settings="'tnum'">8 selected · 35.3 MB</text>
+<line x1="1080.0" y1="36.0" x2="1080.0" y2="876.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1080.0" y="36.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="1088.0" y="52.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">TRANSFER</text>
+<path transform="translate(1416.0 40.0) scale(0.6667)" d="M5 12h.01 M12 12h.01 M19 12h.01" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1410.0" y="52.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">8 objects</text>
+<line x1="1080.0" y1="60.0" x2="1440.0" y2="60.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1080.0" y="60.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<path transform="translate(1086.0 66.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1102.0" y="76.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">SELECTION</text>
+<line x1="1080.0" y1="84.0" x2="1440.0" y2="84.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="100.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">objects</text>
+<line x1="1196.0" y1="84.0" x2="1196.0" y2="108.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="100.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">8 snapshots</text>
+<line x1="1080.0" y1="108.0" x2="1440.0" y2="108.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="124.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">size</text>
+<line x1="1196.0" y1="108.0" x2="1196.0" y2="132.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="124.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">35.3</text>
+<text x="1432.0" y="124.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">MB</text>
+<line x1="1080.0" y1="132.0" x2="1440.0" y2="132.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="148.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">at destination</text>
+<line x1="1196.0" y1="132.0" x2="1196.0" y2="156.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="148.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">0</text>
+<line x1="1080.0" y1="156.0" x2="1440.0" y2="156.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1080.0" y="156.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<path transform="translate(1086.0 162.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1102.0" y="172.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">ROUTE</text>
+<line x1="1080.0" y1="180.0" x2="1440.0" y2="180.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="196.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">from</text>
+<line x1="1196.0" y1="180.0" x2="1196.0" y2="204.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="196.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#ececee" text-anchor="start">hpc</text>
+<path transform="translate(1420.0 186.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="1080.0" y1="204.0" x2="1440.0" y2="204.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="220.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">to</text>
+<line x1="1196.0" y1="204.0" x2="1196.0" y2="228.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="220.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#ececee" text-anchor="start">local</text>
+<path transform="translate(1420.0 210.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="1080.0" y1="228.0" x2="1440.0" y2="228.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="244.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">method</text>
+<line x1="1196.0" y1="228.0" x2="1196.0" y2="252.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="244.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#ececee" text-anchor="start">rsync over SSH</text>
+<path transform="translate(1420.0 234.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="1080.0" y1="252.0" x2="1440.0" y2="252.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="268.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">estimate</text>
+<line x1="1196.0" y1="252.0" x2="1196.0" y2="276.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="268.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">1.6 s at 22.4 MB/s</text>
+<line x1="1080.0" y1="276.0" x2="1440.0" y2="276.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1080.0" y="276.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<path transform="translate(1086.0 282.0) scale(0.5000)" d="M6 9l6 6 6-6" fill="none" stroke="#8e8e96" stroke-width="3.20" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1102.0" y="292.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">OTHER ROUTES</text>
+<text x="1432.0" y="292.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">estimates</text>
+<line x1="1080.0" y1="300.0" x2="1440.0" y2="300.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="316.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">k8s-lab → local</text>
+<line x1="1196.0" y1="300.0" x2="1196.0" y2="324.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="316.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">4.1 s at 8.6 MB/s</text>
+<line x1="1080.0" y1="324.0" x2="1440.0" y2="324.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="340.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">view remotely</text>
+<line x1="1196.0" y1="324.0" x2="1196.0" y2="348.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1204.0" y="340.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="12" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">no copy · viewer</text>
+<line x1="1080.0" y1="348.0" x2="1440.0" y2="348.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1088.0" y="356.0" width="131.2" height="24.0" rx="4" fill="#131417" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(1096.0 360.0) scale(0.6667)" d="M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7" fill="none" stroke="#8e8e96" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1116.0" y="372.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#ececee" text-anchor="start">Estimate routes</text>
+<rect x="1300.0" y="356.0" width="132.0" height="24.0" rx="4" fill="#2dd4bf"/>
+<path transform="translate(1308.0 360.0) scale(0.6667)" d="M12 4v11 M7 10l5 5 5-5 M4 19h16" fill="none" stroke="#0b1f1c" stroke-width="2.40" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1328.0" y="372.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="500" fill="#0b1f1c" text-anchor="start">Copy 35.3 MB</text>
+<rect x="1080.0" y="388.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="1088.0" y="404.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">RUNNING</text>
+<text x="1430.0" y="404.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">this machine</text>
+<line x1="1080.0" y1="412.0" x2="1440.0" y2="412.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="428.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">hpc → local</text>
+<text x="1432.0" y="428.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">21.9 MB/s</text>
+<text x="1088.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">snapshot 204</text>
+<text x="1432.0" y="446.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">1.8 / 4.4 MB</text>
+<rect x="1088.0" y="454.0" width="344.0" height="4.0" rx="2" fill="#2b2c31"/>
+<rect x="1088.0" y="454.0" width="141.0" height="4.0" rx="2" fill="#2dd4bf"/>
+<line x1="1080.0" y1="466.0" x2="1440.0" y2="466.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="482.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">hpc → k8s-lab</text>
+<text x="1432.0" y="482.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">direct · 9.2 MB/s</text>
+<text x="1088.0" y="500.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">restart_000108000</text>
+<text x="1432.0" y="500.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">1.6 / 2.1 MB</text>
+<rect x="1088.0" y="508.0" width="344.0" height="4.0" rx="2" fill="#2b2c31"/>
+<rect x="1088.0" y="508.0" width="268.3" height="4.0" rx="2" fill="#2dd4bf"/>
+<line x1="1080.0" y1="520.0" x2="1440.0" y2="520.0" stroke="#2b2c31" stroke-width="1"/>
+<text x="1088.0" y="536.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="600" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">k8s-lab → local</text>
+<text x="1432.0" y="536.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#f5b544" text-anchor="end" font-feature-settings="'tnum'">paused</text>
+<text x="1088.0" y="554.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">mallard.jsonl tail</text>
+<text x="1432.0" y="554.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">0 / 0.6 MB</text>
+<rect x="1088.0" y="562.0" width="344.0" height="4.0" rx="2" fill="#2b2c31"/>
+<rect x="1088.0" y="562.0" width="0.0" height="4.0" rx="2" fill="#f5b544"/>
+<line x1="1080.0" y1="574.0" x2="1440.0" y2="574.0" stroke="#2b2c31" stroke-width="1"/>
+<rect x="1080.0" y="574.0" width="360.0" height="24.0" rx="0" fill="#191a1e"/>
+<text x="1088.0" y="590.0" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="11" font-weight="600" fill="#a3a3ab" text-anchor="start">HISTORY</text>
+<text x="1430.0" y="590.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="end" font-feature-settings="'tnum'">verified</text>
+<line x1="1080.0" y1="598.0" x2="1440.0" y2="598.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(1088.0 603.0) scale(0.5833)" d="M5 12l5 5 9-10" fill="none" stroke="#9ad56a" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1108.0" y="614.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">11-20 14:06</text>
+<text x="1192.0" y="614.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">4 objects hpc → local  17.6 MB</text>
+<line x1="1080.0" y1="622.0" x2="1440.0" y2="622.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(1088.0 627.0) scale(0.5833)" d="M5 12l5 5 9-10" fill="none" stroke="#9ad56a" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1108.0" y="638.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">11-20 13:48</text>
+<text x="1192.0" y="638.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">3 objects hpc → k8s-lab  12.9 MB</text>
+<line x1="1080.0" y1="646.0" x2="1440.0" y2="646.0" stroke="#2b2c31" stroke-width="1"/>
+<path transform="translate(1088.0 651.0) scale(0.5833)" d="M5 12l5 5 9-10" fill="none" stroke="#9ad56a" stroke-width="2.74" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="1108.0" y="662.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#a3a3ab" text-anchor="start" font-feature-settings="'tnum'">11-20 13:40</text>
+<text x="1192.0" y="662.0" font-family="'JetBrains Mono', 'SF Mono', Menlo, monospace" font-size="11" font-weight="400" fill="#ececee" text-anchor="start" font-feature-settings="'tnum'">inputs local → hpc  1.21 MB</text>
+<line x1="1080.0" y1="670.0" x2="1440.0" y2="670.0" stroke="#2b2c31" stroke-width="1"/>
+</svg>

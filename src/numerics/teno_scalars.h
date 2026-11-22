@@ -19,6 +19,7 @@
 #include "common.h"
 #include "face_reconstruction.h"
 #include "mesh.h"
+#include "scalar_reconstruction.h"
 #include "teno.h"
 
 /**
@@ -50,7 +51,7 @@ struct TENOScalarValues {
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;
-    Kokkos::View<rtype **> face_quad_weights;
+    FaceWeights<> face_quad_weights;
     Kokkos::View<rtype *> scale;
     Kokkos::View<uint32_t *> cell_shape;
     Kokkos::View<rtype **> basis_mean;
@@ -133,9 +134,14 @@ struct TENOScalarValues {
         const rtype S_c = scalars(c, j);
         for (uint8_t l = 0; l < NK; l++) a[l] = 0.0_r;
         const teno::PackedStencils::Row stencil = stencil_large.row(c);
+        rtype spread = 0.0_r;
         for (uint16_t s = 0; s < stencil_large_size(c); s++) {
             const rtype d = entry_value(stencil.cell(s), stencil.face(s), j) - S_c;
+            spread = Kokkos::fmax(spread, Kokkos::fabs(d));
             for (uint8_t l = 0; l < NK; l++) a[l] += stencil.pinv<NK>(s, l) * d;
+        }
+        if (j < n_species && spread <= SPECIES_NOISE) {
+            for (uint8_t l = 0; l < NK; l++) a[l] = 0.0_r;
         }
     }
 
@@ -147,9 +153,14 @@ struct TENOScalarValues {
         uint16_t start = 0;
         for (uint8_t t = 0; t < s; t++) start += stencil_small_size(c, t);
         const teno::PackedStencils::Row stencil = stencil_small.row(c);
+        rtype spread = 0.0_r;
         for (uint16_t e = 0; e < stencil_small_size(c, s); e++) {
             const rtype d = entry_value(stencil.cell(start + e), stencil.face(start + e), j) - S_c;
+            spread = Kokkos::fmax(spread, Kokkos::fabs(d));
             for (uint8_t l = 0; l < teno::NK_SMALL; l++) a[l] += stencil.pinv<teno::NK_SMALL>(start + e, l) * d;
+        }
+        if (j < n_species && spread <= SPECIES_NOISE) {
+            for (uint8_t l = 0; l < teno::NK_SMALL; l++) a[l] = 0.0_r;
         }
     }
 

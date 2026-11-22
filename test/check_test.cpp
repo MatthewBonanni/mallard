@@ -40,6 +40,7 @@
 #include "report.h"
 #include "scratch.h"
 #include "solver.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -177,6 +178,22 @@ TEST(CheckKeys, AValidInputUsesEveryKeyIncludingArraysOfTables) {
     EXPECT_TRUE(r.ok());
 }
 
+TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
+    const Input input = parse_input_string("[t]\nn = 1\nx = 2.0\nchecked = 3\n");
+    const Input & t = input.at("t");
+    if (contains_optional(t, "n")) find_value<int>(t, "n");
+    if (contains_optional(t, "x")) find_real(input, "t", "x", dim::length);
+    if (!t.contains("checked")) throw missing_key(t, "t.checked");
+    find_value<int>(t, "checked");
+    const ResolvedInput resolved = resolve_input(input);
+    for (const auto & [path, required] :
+         {std::pair{"t.n", false}, std::pair{"t.x", false}, std::pair{"t.checked", true}}) {
+        const KeyRecord * record = resolved.find(path);
+        ASSERT_NE(record, nullptr) << path;
+        EXPECT_EQ(record->use.required, required) << path;
+    }
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");
@@ -239,6 +256,17 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
     EXPECT_TRUE(mentions(fast.warnings(), "stability limit of SSPRK3"));
     EXPECT_TRUE(fast.ok());  // a warning, not an error
+}
+
+TEST(CheckTimeStep, EveryIntegratorHasItsLimitAndWarnsAboveIt) {
+    for (const auto & [name, type] : TIME_INTEGRATOR_TYPES) {
+        std::string input = box("1.0", "t_stop = 0.5\ncfl = 5.0\n");
+        input.replace(input.find("\"SSPRK3\""), 8, "\"" + name + "\"");
+        const CheckReport r = check(input);
+        EXPECT_EQ(r.integrator, name);
+        EXPECT_EQ(r.cfl_limit, cfl_limit(type)) << name;
+        EXPECT_TRUE(mentions(r.warnings(), "stability limit of " + name)) << name;
+    }
 }
 
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
@@ -340,6 +368,20 @@ TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
     EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
 }
 
+TEST(CheckSizing, CellsPerRankStayWithinTheEntriesOfAView) {
+    // With a terabyte per rank, a View of rank 2 or more runs out of entries before the memory does
+    CheckOptions options;
+    options.memory = 1ull << 40;
+    options.memory_name = "1TiB";
+    const CheckReport r = check(sized_box(256, 64), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    ASSERT_GE(r.view_entries_per_cell, double(N_CONSERVATIVE));  // the conserved state at least
+    EXPECT_EQ(r.view_max_local_cells, uint64_t(double(view_entries::MAX) / r.view_entries_per_cell));
+    EXPECT_TRUE(r.sizing_view_entries);
+    EXPECT_EQ(r.max_local_cells, r.view_max_local_cells);
+    EXPECT_LT(double(r.max_local_cells) * r.bytes_per_cell, double(options.memory));
+}
+
 TEST(CheckSizing, MemoryIsASizeWithItsUnitOrAGpu) {
     CheckOptions options;
     EXPECT_EQ(set_memory_target("40GB", options), "");
@@ -435,6 +477,22 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
 }
 
+TEST(CheckSettings, TriggerThatCannotFireBeforeTStopIsAWarning) {
+    auto warned = [](const std::string & trigger) {
+        const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[triggers]]\nname = \"late\"\n" + trigger +
+                                                                                  "do = \"checkpoint\"\n"));
+        EXPECT_TRUE(r.ok()) << first_error(r);
+        return mentions(r.warnings(), "triggers[0] (late)");
+    };
+    EXPECT_TRUE(warned("when = \"t >= 5\"\n"));  // ms meant
+    EXPECT_TRUE(warned("when = \"t > 0.6 or t < 0\"\n"));
+    EXPECT_TRUE(warned("when = \"0\"\n"));
+    EXPECT_TRUE(warned("when = \"t >= 0.25\"\nfor = 1.0\n"));
+    EXPECT_FALSE(warned("when = \"t >= 0.25\"\n"));
+    EXPECT_FALSE(warned("when = \"t > 0.6 or t == 0.5\"\n"));
+    EXPECT_FALSE(warned("when = \"step >= 1000000\"\n"));  // reads more than t: not decided
+}
+
 namespace {
 
 /** @brief A periodic box of n^d cells and side 2 pi with viscosity mu, rho = 1; velocity components as expressions. */
@@ -512,6 +570,100 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
     EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
     EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
+}
+
+namespace {
+
+// Taylor-Green on the periodic box of side 2 pi, of n^d cells, and the corner [0, pi/4]^d (whole cells for n a
+// multiple of 8): over it <cos^2> = a and <sin^2> = b, so that <|S|^2> = 4 a^2 (2D) or 4 a^3 + 2 a b^2 (3D),
+// against 1 and 3/4 over the box
+const int TG_N = N_DIM == 3 ? 24 : 64;
+const double TG_NU = 0.01;
+
+std::vector<std::string> taylor_green() {
+    return N_DIM == 3 ? std::vector<std::string>{"sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"}
+                      : std::vector<std::string>{"sin(x) * cos(y)", "-cos(x) * sin(y)"};
+}
+
+double tg_strain(const bool corner) {
+    const double a = corner ? 0.5 + 1.0 / std::numbers::pi : 0.5, b = 1.0 - a;
+    return N_DIM == 3 ? 4.0 * a * a * a + 2.0 * a * b * b : 4.0 * a * a;
+}
+
+std::string with_check(std::string input, const std::string & check) {
+    const std::string corner = N_DIM == 3
+        ? "{type = \"box\", center = [0.39269908169872414, 0.39269908169872414, 0.39269908169872414], "
+          "size = [0.7853981633974483, 0.7853981633974483, 0.7853981633974483]}"
+        : "{type = \"rectangle\", center = [0.39269908169872414, 0.39269908169872414], "
+          "size = [0.7853981633974483, 0.7853981633974483]}";
+    return input + "[regions]\ncorner = " + corner + "\n[check]\nregions = [\"corner\"]\n" + check;
+}
+
+const CheckEstimate * find_estimate(const CheckReport & r, const std::string & id) {
+    for (const CheckEstimate & e : r.resolution) {
+        if (e.id == id) return &e;
+    }
+    return nullptr;
+}
+
+/** @brief The restart file of one tiny step of Taylor-Green averaging these [statistics] fields and products. */
+std::string tg_statistics(const std::string & name, const std::string & statistics) {
+    const std::string prefix = (rank_scratch_dir() / name).string();
+    std::string input = periodic_box(TG_N, TG_NU, taylor_green());
+    input.replace(input.find("t_stop = 1.0\ncfl = 0.5\n"), 22, "n_steps = 1\ndt = 1e-7\n");
+    input += "[output]\ncheck_interval = 1000000\n[statistics]\n" + statistics + "[[write_data]]\nprefix = \"" +
+             prefix + "\"\nformat = \"restart\"\ninterval = 1\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_input_string(input));
+    solver.run();
+    return prefix + "_000001.restart";
+}
+
+} // namespace
+
+TEST(CheckResolution, ValuesPerRegionFromTheInitialDissipation) {
+    const CheckReport r = check(with_check(periodic_box(TG_N, TG_NU, taylor_green()), ""));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    const CheckEstimate * size = find_estimate(r, "region.corner.cell_size_mean");
+    const CheckEstimate * eps = find_estimate(r, "region.corner.epsilon");
+    const CheckEstimate * eta = find_estimate(r, "region.corner.eta");
+    ASSERT_TRUE(size && eps && eta);
+    EXPECT_EQ(eps->region, "corner");
+    EXPECT_EQ(eps->quantity, "corner: dissipation epsilon, mean");
+    EXPECT_NEAR(size->value, 2.0 * std::numbers::pi / TG_N, roundoff(1e-12));
+    const double expected = TG_NU * tg_strain(true);
+    EXPECT_NEAR(eps->value, expected, 0.05 * expected);
+    EXPECT_NEAR(r.epsilon, TG_NU * tg_strain(false), 0.05 * TG_NU * tg_strain(false));
+    EXPECT_NEAR(eta->value, std::pow(TG_NU * TG_NU * TG_NU / eps->value, 0.25), roundoff(1e-11) * eta->value);
+    // The region dissipates more than the box: a DNS needing finer cells there warns of the region
+    const CheckReport coarse = check(with_check(periodic_box(TG_N, TG_NU / 100.0, taylor_green()), ""));
+    EXPECT_TRUE(mentions(coarse.warnings(), "eta on average in region corner"));
+}
+
+TEST(CheckResolution, DissipationFromAnEarlierRunsStatistics) {
+    const std::string file =
+        tg_statistics("tg_strain", "fields = [\"STRAIN_RATE\"]\nproducts = [\"STRAIN_RATE*STRAIN_RATE\"]\n");
+    // A flow at rest has no dissipation of its own: every value comes from the file
+    const std::string at_rest = periodic_box(TG_N, TG_NU, std::vector<std::string>(N_DIM, "0.0"));
+    const CheckReport r = check(with_check(at_rest, "statistics = \"" + file + "\"\n"));
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    EXPECT_NEAR(r.epsilon, TG_NU * tg_strain(false), 0.05 * TG_NU * tg_strain(false));
+    const CheckEstimate * domain = find_estimate(r, "epsilon");
+    const CheckEstimate * corner = find_estimate(r, "region.corner.epsilon");
+    ASSERT_TRUE(domain && corner);
+    EXPECT_NE(domain->basis.find(file), std::string::npos);
+    EXPECT_NEAR(corner->value, TG_NU * tg_strain(true), 0.05 * TG_NU * tg_strain(true));
+    EXPECT_EQ(find_estimate(r, "taylor"), nullptr);
+    // Enstrophy alone gives nu <omega^2>, which equals nu <|S|^2> over the periodic box
+    const std::string vorticity = tg_statistics("tg_enstrophy", "fields = [\"ENSTROPHY\"]\n");
+    const CheckReport w = check(with_check(at_rest, "statistics = \"" + vorticity + "\"\n"));
+    ASSERT_TRUE(w.ok()) << (first_error(w));
+    EXPECT_NEAR(w.epsilon, r.epsilon, 0.02 * r.epsilon);
+    // A file without either is an error that says what to average
+    const std::string density = tg_statistics("tg_density", "fields = [\"RHO\"]\n");
+    const CheckReport none = check(with_check(at_rest, "statistics = \"" + density + "\"\n"));
+    EXPECT_NE(first_error(none).find("STRAIN_RATE*STRAIN_RATE"), std::string::npos) << first_error(none);
 }
 
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
@@ -730,6 +882,49 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
                                         "\np = 1.0\nT = 1.0\n"));
     EXPECT_TRUE(mentions(r.errors(), "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
         << (first_error(r));
+}
+
+TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitErrors) {
+    // A box 0.4 m wide in the 2 x 1 domain (3D: 2 x 1 x 0.25): in 2D across z = 0, which its section is
+    const auto box_stl = [](const double scale) {
+        const double z0 = N_DIM == 3 ? 0.05 : -0.1, z1 = N_DIM == 3 ? 0.2 : 0.1;
+        const double lo[3] = {0.8 * scale, 0.3 * scale, z0 * scale}, hi[3] = {1.2 * scale, 0.7 * scale, z1 * scale};
+        const int faces[6][4] = {{0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5}};
+        std::ostringstream s;
+        s << "solid box\n";
+        for (const auto & f : faces) {
+            for (const int t : {0, 1}) {
+                s << "facet normal 0 0 0\nouter loop\n";
+                for (const int c : {f[0], f[1 + t], f[2 + t]}) {
+                    s << "vertex " << ((c & 1) ? hi[0] : lo[0]) << " " << ((c & 2) ? hi[1] : lo[1]) << " "
+                      << ((c & 4) ? hi[2] : lo[2]) << "\n";
+                }
+                s << "endloop\nendfacet\n";
+            }
+        }
+        return s.str() + "endsolid box\n";
+    };
+    const std::string m = write_temp_shared("check_box_m.stl", box_stl(1.0));
+    const std::string mm = write_temp_shared("check_box_mm.stl", box_stl(1000.0));
+    const auto run = [](const std::string & region) {
+        return check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                         "[[sponges]]\nstrength = 1.0\nregion = " + region + "\nu = " + U_ZERO + "\np = 1.0\nT = 1.0\n"));
+    };
+    const CheckReport placed = run("{type = \"stl\", file = \"" + m + "\", units = \"m\"}");
+    ASSERT_TRUE(placed.ok()) << first_error(placed);
+    EXPECT_FALSE(mentions(placed.warnings(), "region sponges[0].region"));
+    const CheckRegion & g = placed.regions.back();
+    ASSERT_TRUE(g.from_file);
+    EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
+    EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
+    EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    // Millimeters read as meters: 1000 times larger than it should be
+    const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
+    EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
+    EXPECT_FALSE(mentions(run("{type = \"stl\", file = \"" + mm + "\", units = \"mm\"}").warnings(), "region sponges[0].region"));
+    const CheckReport out = run("{type = \"stl\", file = \"" + m + "\", units = \"m\", translate = [1, 0, 0]}");
+    EXPECT_TRUE(mentions(out.warnings(), "region sponges[0].region spans (1.8, 0.3")) << first_error(out);
+    EXPECT_TRUE(mentions(out.warnings(), "its part outside the domain is left out"));
 }
 
 namespace {

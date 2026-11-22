@@ -11,6 +11,7 @@ Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 - [Building and testing](#building-and-testing)
 - [Code style](#code-style)
 - [Adding a feature, end to end](#adding-a-feature-end-to-end)
+- [Reproducibility](#reproducibility)
 - [Pull requests and CI](#pull-requests-and-ci)
 
 ## Reporting bugs and asking questions
@@ -61,6 +62,9 @@ cmake --build build -j
   solver communicates with its own rank alone, so every rank writes its files:
   give them `rank_scratch_dir()` or `serial_name()`. `MALLARD_TEST_TIMEOUT=<seconds>`
   aborts a test that runs longer, naming it, as CI does for the MPI runs.
+  Ranks on several machines need `TMPDIR` on a filesystem they all share: the
+  tests' files live there, and the suite stops at once, saying so, when a rank
+  cannot see rank 0's temporary directory.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -89,25 +93,26 @@ cmake --build build -j
   common cases. A run and `mallard check` report it the same way, and
   `test/error_messages_test.cpp` holds an example of each kind.
 - **Kokkos device code** must run on CUDA and HIP, not only on the CPU backends:
-  - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
-    references to host objects. Copy the members a kernel needs into locals first.
-  - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
-    calls, no allocation, no I/O. Functions called from kernels are
-    `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
-  - Kokkos computes a View's offset in the common type of the indices, so at
-    least one index is 32 bits or wider: indices that are all `uint8_t` or
-    `uint16_t` wrap the offset, and the build rejects them.
-  - Data lives in `Kokkos::View`s in the default memory space; copy to the host
-    with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
-  - A View of rank 2 or more holds at most 2^31 entries: Kokkos computes its offset
-    in the common type of the indices, which can be `int`, and every allocation is
-    checked (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
-    with 64 bits, as `teno::PackedStencils` does.
-  - Results must not depend on the backend, thread count or rank count: reductions
-    that feed the solution must be deterministic (the suite checks bitwise
-    reproducibility across ranks and restarts).
-  - nvcc compiles every source, including host-only code, so a host-only change can
-    still break the CUDA build; the CUDA compile jobs in CI catch this.
+    - Kernels (`KOKKOS_LAMBDA`, functors) capture by value; never capture `this` or
+      references to host objects. Copy the members a kernel needs into locals first.
+    - Inside kernels: no `std::` containers or strings, no exceptions, no virtual
+      calls, no allocation, no I/O. Functions called from kernels are
+      `KOKKOS_INLINE_FUNCTION`; types captured by kernels are trivially copyable.
+    - Kokkos computes a View's offset in the common type of the indices, so at
+      least one index is 32 bits or wider: indices that are all `uint8_t` or
+      `uint16_t` wrap the offset, and the build rejects them.
+    - Data lives in `Kokkos::View`s in the default memory space; copy to the host
+      with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
+    - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
+      in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
+      (`src/CMakeLists.txt`), and every allocation is checked
+      (`src/common/view_entries.h`). Larger data goes in a rank-1 View indexed
+      with 64 bits, as `teno::PackedStencils` does.
+    - Results must not depend on the backend, thread count or rank count: reductions
+      that feed the solution must be deterministic (the suite checks bitwise
+      reproducibility across ranks and restarts; see [Reproducibility](#reproducibility)).
+    - nvcc compiles every source, including host-only code, so a host-only change can
+      still break the CUDA build; the CUDA compile jobs in CI catch this.
 
 ## Adding a feature, end to end
 
@@ -140,17 +145,17 @@ that adds or changes behavior includes:
    combination of features lists them in [test/features.toml](test/features.toml)
    for the [feature matrix](docs/guide/features.md).
 3. **Documentation**, following [docs/design/documentation.md](docs/design/documentation.md):
-   - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
-     defaults, pitfalls) in the topic's page of `docs/guide/`;
-   - every new key with its default in [docs/input.md](docs/input.md);
-   - equations and sources in `docs/theory/`, design rationale and measurements in
-     `docs/design/`, and new references in [docs/references.md](docs/references.md);
-   - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
-     (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
-     hand-edited images;
-   - a new output field in the units table of `src/io/field_units.cpp` (or the
-     derived-field catalog `src/solver/derived_catalog.h`), and in the output
-     guide's field table (`python tools/docs/fields.py --mallard build/src/mallard`).
+    - the user-facing explanation (when to use it, a minimal TOML snippet, keys with
+      defaults, pitfalls) in the topic's page of `docs/guide/`;
+    - every new key with its default in [docs/input.md](docs/input.md);
+    - equations and sources in `docs/theory/`, design rationale and measurements in
+      `docs/design/`, and new references in [docs/references.md](docs/references.md);
+    - figures drawn by a script in `tools/docs/` as a light/dark SVG pair
+      (`python tools/docs/make_figures.py --mallard build/src/mallard`), never
+      hand-edited images;
+    - a new output field in the units table of `src/io/field_units.cpp` (or the
+      derived-field catalog `src/solver/derived_catalog.h`), and in the output
+      guide's field table (`python tools/docs/fields.py --mallard build/src/mallard`).
 4. **An example** in `examples/<case>/` with its `input.toml` and a row in
    [examples/README.md](examples/README.md), ideally compared with a reference
    (exact solution, experiment, DNS). Add it to the example list in
@@ -170,6 +175,29 @@ that adds or changes behavior includes:
 Small fixes need only what applies: a bug fix needs a test that failed before the
 fix and a `fixed` fragment; a documentation fix needs neither.
 
+## Reproducibility
+
+- **Always bitwise:** within one build and version, results do not depend on the
+  rank count, partition, thread count, `step_queue`, CUDA graphs or restarts. Sums
+  that feed the solution are exact (fixed point, as in `ExactSums`) or in an order
+  fixed by global ids, never floating-point atomics or reductions whose order depends
+  on the ranks or the schedule, and the TENO setup gives the same tables on
+  the host and the device (the stencil cache is portable). This is never traded
+  for speed: it costs under 0.5% per step and 4% of the TENO fits
+  ([measurements](docs/design/performance.md#16-cost-of-bitwise-reproducibility-429)),
+  and it is what lets `mallard diff` check restarts and partitions with no
+  tolerance.
+- **Bitwise against `main` by default:** a change that is not meant to change the
+  arithmetic (refactors, memory layout, scheduling, most performance work) shows
+  restart files bitwise identical to `main` on the cases of
+  [Verification](docs/design/performance.md#verification).
+- **Last bits may move with a measured reason:** a change that reorders arithmetic
+  for speed may change the last bits against `main` if the PR gives the speedup
+  (performance suite or a real case, before and after), `mallard diff --tol` on the
+  same cases showing round-off differences only, an unchanged verification manual
+  (every study within its bounds), and a `changed` changelog fragment. The
+  guarantees above still hold for the new code.
+
 ## Pull requests and CI
 
 - Branch from `main` (on a fork, or a branch if you have access) and open a pull
@@ -181,16 +209,16 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   tidy; push new commits rather than rewriting history once a review has started.
 - Pull requests open at the same time edit the same docs, so write them to merge
   without conflicts:
-  - in the README and the docs, one item per line (a bullet or a table row): a new
-    item is a line of its own, not more text on another item's line;
-  - where the order of a list carries no meaning (the README's command-line tools,
-    the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
-    items in their place, so that additions of different pull requests land on
-    different lines;
-  - in a merge, generated text is regenerated, not merged by hand: the "Used in"
-    lines (`python tools/docs/used_in.py`), the feature matrix
-    (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
-    (`python tools/dev/input_catalog.py build ...`).
+    - in the README and the docs, one item per line (a bullet or a table row): a new
+      item is a line of its own, not more text on another item's line;
+    - where the order of a list carries no meaning (the README's command-line tools,
+      the calls of `tools/docs/make_figures.py`), keep it alphabetical and add new
+      items in their place, so that additions of different pull requests land on
+      different lines;
+    - in a merge, generated text is regenerated, not merged by hand: the "Used in"
+      lines (`python tools/docs/used_in.py`), the feature matrix
+      (`python tools/docs/feature_matrix.py`) and `docs/input-keys.json`
+      (`python tools/dev/input_catalog.py build ...`).
 - **Before asking for CI**, run `tools/dev/precheck.sh`: in a few seconds and without a
   build, it checks that the branch merges into `main` and runs CI's checks that need no
   build (spelling, docs, feature matrix, changelog) on the merge.
@@ -201,8 +229,11 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   passing `CI` status on the PR's current head, so a new push needs a new run.
   CI builds with warnings as errors. A branch runs the gate: the full suite in 2D and 3D
   with OpenMP, MPI on 1 to 4 ranks and single precision, and GCC 16 and Clang 23, on
-  x86-64. Each job also shows on the PR as its own status, `CI / <job>`; the longest
-  suites are split across several jobs (`CI / mpi-3d-1of4`, ...) on one build
+  x86-64. The MPI builds check the bounds of every Kokkos View access
+  (`-DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON`), so an index out of range aborts the test that
+  reaches it, naming the View, even when only several ranks or a large mesh reach it; build
+  the same way to reproduce such a failure. Each job also shows on the PR as its own status,
+  `CI / <job>`; the longest suites are split across several jobs (`CI / mpi-3d-1of6`, ...) on one build
   (`CI / build-mpi-3d`), each running a share of the tests of about equal duration
   (`tools/dev/test_split.py`, from the durations of `main`'s newest passed run, or else
   `tools/dev/test_times.json`, which `test_split.py refresh` rewrites), and the suites without MPI run as several processes at once, so a test must
@@ -238,13 +269,27 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   in three jobs (`CI / cuda-13.5-2d-1of3`, ...) and links them in `CI / cuda-13.5-2d`.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
   CI, outside GitHub Actions: CUDA 12 and 13 builds in 2D and 3D, the full test suite
-  on the GPU (including the CUDA-graph path; NCCL is not built), the MPI tests on 2 ranks, and
-  the [performance suite](benchmarks/README.md) against per-hardware baselines. It
+  on the GPU (including the CUDA-graph path), the MPI tests on 2 ranks with NCCL's and MPI's
+  halo exchanges, and the [performance suite](benchmarks/README.md) against per-hardware baselines. It
   posts the commit statuses `gpu/tests` and `gpu/perf` on the PR's head commit, so
   its results show on the PR next to `CI`. A PR that changes device code merges only
   with both passing. You do not need a GPU to contribute: say in the PR template
   whether device code changed, and a maintainer runs it. Performance claims need
   numbers from the performance suite or a real case, before and after.
+- **GPU runtime checks**, run on demand when A100 time is available, with one command:
+  `tools/dev/gpu_runtime_tests.sh [--full] BUILD` on a CUDA build. It runs the step graph and
+  stream ordering tests, then NVIDIA's compute-sanitizer (`memcheck`, `racecheck`, `synccheck`)
+  on a representative set of tests, on one GPU and on 2 ranks (`MPIEXEC=none` on one GPU).
+  compute-sanitizer misreports kernels in step graphs
+  ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)), so the sanitized tests run
+  with `MALLARD_TEST_CUDA_GRAPHS=off`: every solver as with `[run] cuda_graphs = false`, and
+  the assertions that steps were graphed are skipped. `racecheck` fails on hazards it rates as
+  errors, not on its warnings, which Kokkos' reductions of large values raise. `memcheck` and
+  `initcheck` skip the CUDA API errors that NCCL and Open MPI make and handle
+  (`tools/dev/compute_sanitizer_suppressions.xml`), and `memcheck` reports explicit API errors
+  only: the driver's log lines cannot be suppressed. `--full` adds
+  `initcheck`, `memcheck` on the whole suite but the chemistry reactor tests (hours), and every MPI test on the ranks `MPIEXEC` starts (several nodes for NCCL
+  across the network).
 - Sanitizers (AddressSanitizer and UndefinedBehaviorSanitizer) run nightly on
   `main`.
 - **Support matrix.** [Supported platforms](docs/guide/support.md) lists every CI job and
@@ -265,12 +310,13 @@ A maintainer releases version X.Y.Z in three steps:
    (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
    `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
 2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
-   container images and the Spack package from `main`, pushes the images, and only then
-   creates the tag `vX.Y.Z`. A failed build leaves no tag: fix it on `main` and dispatch
-   again.
-3. `gh release create vX.Y.Z --verify-tag --title "Mallard X.Y.Z"` publishes the release
-   notes (starting from `python3 tools/dev/changelog.py notes X.Y.Z`), which also
-   publishes the website.
+   container images, the relocatable archives and the Spack package from `main`, pushes
+   the images, and only then creates the tag `vX.Y.Z` and a draft release holding the
+   archives and `release-manifest.json`. A failed build leaves no tag: fix it on `main`
+   and dispatch again.
+3. `gh release edit vX.Y.Z --draft=false --notes-file notes.md` publishes the draft with
+   the release notes (`python3 tools/dev/changelog.py notes X.Y.Z > notes.md`, then
+   edited), which also publishes the website.
 
 By contributing, you agree that your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).

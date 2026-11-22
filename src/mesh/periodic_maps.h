@@ -114,6 +114,21 @@ struct PeriodicMaps {
 };
 
 /**
+ * @brief The shift row of every entry of a neighbor list (VertexNeighbors::shift):
+ *        rows is empty, and every entry's row 0 (the identity), when no entry
+ *        crosses a periodic boundary.
+ */
+template <typename View>
+struct ShiftRowsOf {
+    View rows;
+
+    KOKKOS_INLINE_FUNCTION
+    uint8_t operator()(const uint32_t k) const { return rows.extent(0) > 0 ? rows(k) : uint8_t(0); }
+};
+using ShiftRows = ShiftRowsOf<Kokkos::View<uint8_t *>>;
+using HostShiftRows = ShiftRowsOf<Kokkos::View<uint8_t *>::host_mirror_type>;
+
+/**
  * @brief f(std::true_type()) if maps turns vectors, else f(std::false_type()):
  *        kernels instantiated with ROTATIONS = decltype(arg)::value leave the
  *        rotations out on meshes without rotational pairs, where they would

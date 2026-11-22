@@ -1,10 +1,11 @@
 # Installation
 
-Three ways to install Mallard, quickest first:
+Four ways to install Mallard, quickest first:
 
 | | Best for | Compiling |
 |---|---|---|
 | [Container](#container) (Docker, Apptainer, Kubernetes) | Trying Mallard; workstations; GPU nodes; Kubernetes clusters | None |
+| [Relocatable archive](#relocatable-archive) | Linux clusters with an MPICH-based MPI; no container runtime | None |
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development; options the others lack | CMake |
 
@@ -12,7 +13,7 @@ Each needs a [supported platform](#supported-platforms): GCC 15, Clang 22 or App
 
 Each installs the solvers `mallard2d` and `mallard3d`, the `mallard` command that runs whichever a case needs (by its mesh: a generated mesh is 3D when `[mesh]` sets `Nz` or `Lz`; `mallard --dim 2|3` states it), and, under `share/mallard`, the `examples`, `mechanisms`, `tools` and `tutorials`. One command does everything: `mallard -i input.toml` runs a case, `mallard check`, `new`, `ctl` and `input upgrade` help set it up and run it, `mallard reactor` integrates 0D reactors and `mallard mesh convert` writes meshes to HDF5; `mallard --help` lists them by purpose and `mallard <command> --help` explains each ([command line](guide/cli.md)). Each also installs tab completion for bash, zsh and fish under `share/` ([shell completion](guide/cli.md#shell-completion)).
 
-Each also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `pip install` ([Python package](#python-package)).
+Each but the archive also installs the [Python package](guide/python.md) `mallard`, which reads every output file into numpy arrays and runs the commands from Python: `import mallard` works in the containers' Python and after `spack load mallard`, and a source build adds it to a Python environment with one `uv pip install` ([Python package](#python-package)).
 
 ## Supported platforms
 
@@ -28,6 +29,7 @@ Mallard supports the two newest major releases of GCC and of Clang, the current 
 | AMD GPUs | x86-64 | ROCm's Clang | 4.2 | ROCm 10.1 | `ci.yml/hip` (compile) |
 | Intel GPUs | x86-64 | oneAPI `icpx` | 4.2 | oneAPI 2026.2 | `ci.yml/sycl` (compile) |
 | Containers (`docker/`), Spack on Ubuntu | x86-64, arm64 | GCC 15 | 4.2, 4.4 | CUDA 13.5 | `release.yml/cpu`, `release.yml/cuda`, `release.yml/spack` |
+| Relocatable archives (built on AlmaLinux 8, run on glibc 2.28 and newer) | x86-64, arm64 | GCC 16 (gcc-toolset) | manylinux's | | `release.yml/archive` |
 
 The GPU builds are compiled in CI on every change to device code; only the NVIDIA A100 also runs them ([GPU CI](guide/support.md#builds)). ROCm and oneAPI are tested on x86-64 only.
 
@@ -35,20 +37,21 @@ The GPU builds are compiled in CI on every change to device code; only the NVIDI
 
 - **A cluster**: load a newer compiler module if there is one (`module avail gcc`, then e.g. `module load gcc/15`), or let [Spack](#spack) build one:
 
-  ```sh
-  spack install gcc@15
-  spack install mallard %gcc@15
-  ```
+    ```sh
+    spack install gcc@15
+    spack install mallard %gcc@15
+    ```
 
-  For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+    For a source build with that compiler, `spack load gcc@15` puts it on `PATH`; then configure with `-DCMAKE_CXX_COMPILER=g++`.
+
 - **Ubuntu 26.04**: `sudo apt-get install g++ cmake` installs GCC 15 and CMake 4.2; `sudo apt-get install clang-22` adds Clang 22 (configure with `-DCMAKE_CXX_COMPILER=clang++-22`).
 - **Debian 13**: its GCC 14 is too old; use Clang 22 and, with `trixie-backports` enabled, the backported CMake: `sudo apt-get install clang-22 libomp-22-dev && sudo apt-get install -t trixie-backports cmake`.
 - **Fedora 44**: `sudo dnf install gcc-c++ cmake` installs GCC 16 and CMake 4.3.
-- **Older Ubuntu or Debian releases**: Clang 22 or 23 from [apt.llvm.org](https://apt.llvm.org), and CMake from `pip install cmake`.
+- **Older Ubuntu or Debian releases**: Clang 22 or 23 from [apt.llvm.org](https://apt.llvm.org), and CMake from `uv tool install cmake`.
 - **macOS**: install the current Xcode (26.4 or newer, for Apple Clang 21) from the App Store, or Homebrew's GCC: `brew install gcc cmake`, then configure with `-DCMAKE_CXX_COMPILER=g++-16`.
 - **Anywhere with Docker or Apptainer**: the [container images](#container) have Mallard built; `docker/Dockerfile` builds them from a checkout with their own toolchain (`docker build -f docker/Dockerfile -t mallard .`).
 
-A CMake older than 4.2 is replaced the same way (`spack install cmake`, `brew install cmake`, or `pip install cmake`).
+A CMake older than 4.2 is replaced the same way (`spack install cmake`, `brew install cmake`, or `uv tool install cmake`).
 
 ### MPI
 
@@ -98,7 +101,23 @@ cd examples/sod && apptainer exec ../../mallard.sif mallard -i input.toml
 
 For a GPU, pull `docker://ghcr.io/matthewbonanni/mallard:cuda` and add `--nv`: `apptainer exec --nv mallard-cuda.sif mallard -i input.toml`.
 
+[`docker/mallard.def`](https://github.com/MatthewBonanni/mallard/blob/main/docker/mallard.def) builds the same image with a run script and a self-test (`apptainer test mallard.sif`), from any tag or digest: `apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.11.0 mallard.sif docker/mallard.def`, then `apptainer run mallard.sif -i input.toml`.
+
 On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, and resumes from a restart file after preemption; an `MPIJob` ([Kubeflow MPI Operator](https://github.com/kubeflow/mpi-operator)) runs it across nodes, with the images' Open MPI in the launcher and the workers ([manifests and guide](guide/running.md#kubernetes)). On clusters with their own MPI and no Kubernetes, run across nodes with Spack or a source build.
+
+## Relocatable archive
+
+From 0.11.0, each release attaches an archive of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer):
+
+```sh
+v=0.11.0 a=mallard-$v-linux-$(uname -m)-cpu.tar.gz
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a
+curl -fLO https://github.com/MatthewBonanni/mallard/releases/download/v$v/$a.sha256
+sha256sum -c $a.sha256 && tar -xzf $a
+export PATH=$PWD/mallard-$v-linux-$(uname -m)-cpu/bin:$PATH && mallard --version
+```
+
+It carries MPICH's library, so it runs on one node as it is. Across nodes, load the site's MPI built on MPICH (Cray MPICH, Intel MPI, MVAPICH, MPICH: the MPICH ABI, `libmpi.so.12`) with `module load` first, and start it with the site's launcher (`srun`, `mpiexec`): its library on `LD_LIBRARY_PATH` replaces the archive's. Open MPI sites use Spack or a source build. `share/mallard/archive.toml` names the archive's variant and glibc floor, and `release-manifest.json`, beside the archives on the release, lists every archive and image with its SHA-256 or digest (what the [GUI](https://github.com/MatthewBonanni/mallard/blob/main/docs/design/gui.md) installs from). The archive has no Python package: use a container or Spack for it.
 
 ## Spack
 
@@ -169,7 +188,7 @@ On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loo
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel; with MPI, `-DMallard_ENABLE_NCCL=ON` for halo exchanges with NCCL). The CUDA container is built this way, for several GPUs at once (`docker/Dockerfile.cuda`). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
 
-For AMD GPUs, build with ROCm's Clang (ROCm 10.1, with the HIP development headers):
+For AMD GPUs, build with ROCm's Clang (ROCm 10.1, with the HIP development headers and hipCUB):
 
 ```sh
 cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
@@ -184,7 +203,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `USE_SYSTEM_KOKKOS` | `ON` | Use an installed Kokkos instead of the submodule |
 | `Mallard_DIM` | `2` | Spatial dimension, `2` or `3`: the solver `mallard2d` or `mallard3d` (one per build; `mallard` runs either) |
 | `Mallard_USE_DOUBLE` | `ON` | Double precision (single precision otherwise) |
-| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N mallard -i input.toml` splits the mesh between ranks; with generated meshes or HDF5 mesh files (`mallard mesh convert`) no rank ever holds the whole mesh, while other mesh files are read whole by every rank |
+| `Mallard_ENABLE_MPI` | `OFF` | Distributed memory with MPI: `mpirun -n N mallard -i input.toml` splits the mesh between ranks; no rank ever holds the whole mesh: generated meshes and HDF5 mesh files (`mallard mesh convert`) are read per rank, and mesh files of other formats by the ranks together |
 | `Mallard_GPU_AWARE_MPI` | `OFF` | With MPI on GPUs: hand device buffers to a CUDA- or ROCm-aware MPI (e.g. Open MPI over UCX built with CUDA or ROCm) instead of staging halos through host memory |
 | `Mallard_ENABLE_NCCL` | `OFF` | With MPI on NVIDIA GPUs: exchange halos with NCCL, stream-ordered with the kernels, so the host never waits for a halo (finds NCCL through `NCCL_HOME` or `NCCL_ROOT`); `[parallel] halo_exchange` chooses at run time |
 | `Mallard_ENABLE_KAMINPAR` | `OFF` | With MPI: the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner for `[parallel] partitioner = "graph"` (fetched at configure time; needs [oneTBB](https://github.com/uxlfoundation/oneTBB), found through `CMAKE_PREFIX_PATH`, e.g. built with `cmake -S oneTBB -B build -DTBB_TEST=OFF -DCMAKE_INSTALL_PREFIX=$HOME/tbb && cmake --build build -j && cmake --install build`). The default multi-jagged partitions need no library and cut box meshes at least as well. With CUDA, configure with the host compiler (`-DCMAKE_CXX_COMPILER=g++`) instead of `nvcc_wrapper`: Kokkos then compiles the code that uses it through `nvcc_wrapper` itself, and dKaMinPar does not compile with nvcc |
@@ -205,7 +224,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 Every build makes the library of the [Python package](guide/python.md); after `cmake --install`, one command adds the package (distribution `mallard-python`, imported as `mallard`) to a Python environment (3.10 or newer; it brings numpy):
 
 ```sh
-pip install $HOME/mallard/share/mallard/tools     # or: uv pip install, or pip install -e tools in the repository
+uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
 It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF` builds without the library ([Python](guide/python.md#installing)).
