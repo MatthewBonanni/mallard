@@ -127,7 +127,7 @@ struct ExactSumsColumn {
     using value_type = int64_t[];
     uint32_t value_count = EXACT_SUMS_WIDTH;
     Terms terms;
-    Kokkos::View<const uint32_t> count;
+    Kokkos::View<const uint32_t> count = {};
     uint32_t k = 0;
     bool counted = false;
 
