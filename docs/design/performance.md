@@ -1099,6 +1099,22 @@ under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), a
 1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
 recomputes the central coefficients, so 2D keeps 1.
 
+**An eighth of the cells.** `troubled_capacity` now defaults to 0.125 in 3D: 440 bytes less per cell at TENO5, results
+again bitwise unchanged. `mallard check --memory a100-80 --steps 1`, perfect gas, TENO5, cells per A100-80GB
+(the setup's peak, which holds the scratch too, binds in both):
+
+| | $32^3$ hexahedra | $16^3 \times 6$ tetrahedra |
+|---|---|---|
+| CPU (2 Threads), capacity 0.25 | 12,153,598 (6.47 kB per cell) | 12,232,604 (6.43 kB) |
+| CPU, capacity 0.125 | 13,040,617 (6.03 kB), +7.3% | 13,131,619 (5.99 kB), +7.4% |
+| A100 (CUDA 13.5) with #1306, capacity 0.25 | 13,324,340 (5.87 kB) | 12,616,797 (6.20 kB) |
+| A100 with #1306, capacity 0.125 | 14,403,365 (5.43 kB), +8.1% | 13,579,908 (5.76 kB), +7.6% |
+
+On one A100-80GB the time per step stays within the run-to-run spread (about 2% in the explosion, under 1% in
+the Taylor-Green vortex; the $96^3$ hexahedral and $48^3 \times 6$ tetrahedral Taylor-Green vortex and the $96^3$
+explosion, 5 alternated runs each, numbers in #978): the two extra rounds of five kernels per stage find no work
+where few cells are troubled.
+
 ### 20. TENO setup: one fit per stencil shape (#986)
 
 With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
