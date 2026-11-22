@@ -1,0 +1,11 @@
+{
+ "dimension": "length (m)",
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/tracer_vortex/input.toml"
+ ],
+ "type": "array"
+}

@@ -150,16 +150,22 @@ inline std::string lattice_mesh(const std::string & type, uint32_t n) {
 }
 
 /**
- * @param mesh The [mesh] table of a tiling of the unit box by n^d equal blocks, zones left/right, bottom/top (and back/front).
+ * @param mesh The [mesh] table of a box of the given lengths tiled by blocks[d]
+ *        equal blocks along each axis d, zones left/right, bottom/top (and back/front).
  * @param reconstruction Further keys of [numerics.face_reconstruction].
  */
-inline LatticeJacobian lattice_jacobian(const std::string & mesh, uint32_t n, int order, const std::string & reconstruction = "") {
+inline LatticeJacobian lattice_jacobian(const std::string & mesh, const std::array<double, N_DIM> & box,
+                                        const std::array<uint32_t, N_DIM> & blocks, int order,
+                                        const std::string & reconstruction = "") {
+    static const char * zones[3][2] = {{"left", "right"}, {"bottom", "top"}, {"back", "front"}};
     std::ostringstream in;
-    in << "[run]\nn_steps = 1\ncfl = 0.2\n"
-       << mesh << "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-       << "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0" << (N_DIM == 3 ? ", 0.0" : "") << "]\n"
-       << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n" : "")
-       << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\np = \"1.0\"\n"
+    in << "[run]\nn_steps = 1\ncfl = 0.2\n" << mesh;
+    for (size_t d = 0; d < N_DIM; d++) {
+        in << "[[periodic]]\nzones = [\"" << zones[d][0] << "\", \"" << zones[d][1] << "\"]\ntranslation = [";
+        for (size_t e = 0; e < N_DIM; e++) in << (e > 0 ? ", " : "") << std::to_string(e == d ? box[d] : 0.0);
+        in << "]\n";
+    }
+    in << "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\nu = [\"0.0\", \"0.0\"" << (N_DIM == 3 ? ", \"0.0\"" : "") << "]\np = \"1.0\"\n"
        << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
        << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n" << reconstruction
        << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
@@ -171,18 +177,20 @@ inline LatticeJacobian lattice_jacobian(const std::string & mesh, uint32_t n, in
     const uint32_t n_cells = mesh_data->n_cells;
     auto xc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh_data->cell_coords);
     LatticeJacobian jacobian;
-    jacobian.h = 1.0 / double(n);
-    const double h = jacobian.h;
+    std::array<double, N_DIM> h;
+    for (size_t d = 0; d < N_DIM; d++) h[d] = box[d] / double(blocks[d]);
+    jacobian.h = h[0];
     jacobian.block.resize(n_cells);
     std::vector<std::array<double, N_DIM>> offset(n_cells);
     std::vector<uint32_t> base;
     for (uint32_t c = 0; c < n_cells; c++) {
         bool first = true;
         for (size_t d = 0; d < N_DIM; d++) {
-            const int b = static_cast<int>(std::floor(double(xc(c, d)) / h));
-            offset[c][d] = double(xc(c, d)) - b * h;
+            const int b = static_cast<int>(std::floor(double(xc(c, d)) / h[d]));
+            const int n = static_cast<int>(blocks[d]);
+            offset[c][d] = double(xc(c, d)) - b * h[d];
             first = first && b == 0;
-            jacobian.block[c][d] = 2 * b > static_cast<int>(n) ? b - static_cast<int>(n) : b;
+            jacobian.block[c][d] = 2 * b > n ? b - n : b;
         }
         if (first) base.push_back(c);
     }
@@ -220,6 +228,15 @@ inline LatticeJacobian lattice_jacobian(const std::string & mesh, uint32_t n, in
         }
     }
     return jacobian;
+}
+
+/** @brief On n^d equal blocks of the unit box. */
+inline LatticeJacobian lattice_jacobian(const std::string & mesh, uint32_t n, int order, const std::string & reconstruction = "") {
+    std::array<double, N_DIM> box;
+    std::array<uint32_t, N_DIM> blocks;
+    box.fill(1.0);
+    blocks.fill(n);
+    return lattice_jacobian(mesh, box, blocks, order, reconstruction);
 }
 
 #endif // LATTICE_SYMBOL_H

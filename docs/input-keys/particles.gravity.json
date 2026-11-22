@@ -1,0 +1,10 @@
+{
+ "dimension": "acceleration (m s^-2)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/solid_particles.toml"
+ ],
+ "type": "array"
+}
