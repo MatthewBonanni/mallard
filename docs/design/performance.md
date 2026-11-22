@@ -936,22 +936,26 @@ a face's nodes once for the points it evaluates on that face: `SmoothTeamPass` g
 of consecutive points rather than every fifth one, and the troubled passes load them per face. The image points of
 transmissive faces are placed on the host for those faces alone.
 
-`mallard check --memory a100-80` (CUDA build on an A100, one step) of the 3D TENO5 Taylor-Green vortex on $32^3$
-hexahedra and $16^3 \times 6$ tetrahedra:
+`mallard check --memory a100-80 --steps 1` (CUDA 13.5 build on an A100) of the 3D TENO5 Taylor-Green vortex on
+$32^3$ hexahedra and $16^3 \times 6$ tetrahedra, `main` at a7a5432e:
 
-| device memory | hexahedra: `main` | change | tetrahedra: `main` | change |
+| | hexahedra: `main` | change | tetrahedra: `main` | change |
 |---|---|---|---|---|
-| after setup | 243 MB | 224 MB (-580 B per cell) | 183 MB | 175 MB (-330 B per cell) |
-| most cells per A100-80GB | 10,378,159 | 11,261,449 (+8.5%) | 10,455,116 | 10,904,334 (+4.3%) |
+| bytes per cell (setup's peak) | 6.47 kB | 5.87 kB (-600 B) | 6.51 kB | 6.20 kB (-310 B) |
+| most cells per A100-80GB | 12,103,636 | 13,324,340 (+10.1%) | 12,018,308 | 12,616,797 (+5.0%) |
 
-On one A100 (alternating runs, three each; CUDA 13.5, TENO5, 100 steps, wall time per step), with restart files
-after the last step bitwise those of `main`:
+On one A100 (CUDA 13.5, TENO5, 300 steps, median wall time per step of the progress rows from step 100, five runs
+each alternated with `main`'s on the same GPU; spread = (max - min) / median):
 
 | case | `main` | change |
 |---|---|---|
-| Taylor-Green, $96^3$ hexahedra | 104 / 103 / 103 ms | 101 / 101 / 101 ms |
-| explosion, $96^3$ hexahedra | 185 / 184 / 183 ms | 153 / 153 / 153 ms |
-| Taylor-Green, $48^3 \times 6$ tetrahedra | 89.1 / 89.1 / 89.0 ms | 87.9 / 87.7 / 87.7 ms |
+| Taylor-Green, $96^3$ hexahedra | 101.49 ms (spread 0.1%) | 100.69 ms (-0.8%, spread 0.1%) |
+| explosion, $96^3$ hexahedra | 233.75 ms (1.3%) | 183.94 ms (-21.3%, 2.6%) |
+| Taylor-Green, $48^3 \times 6$ tetrahedra | 87.38 ms (0.4%) | 86.81 ms (-0.7%, 0.1%) |
+
+Restart files after 100 steps are bitwise those of `main` (`mallard diff`) in the three cases and in the hexahedral
+Taylor-Green vortex at $48^3$ with `viscous_gradients = "reconstruction"`, whose viscous flux places the points as
+the TENO kernels do. An earlier measurement (100 steps, three runs) gave the same picture.
 
 Nsight Systems over the 100 steps: `SmoothTeamPass` 8.33 s / 8.23 s (Taylor-Green, hexahedra), 7.08 s / 7.00 s
 (tetrahedra), and `TroubledSelectTeamPass` 6.40 s / 3.53 s in the explosion, whose threads (one per face and
