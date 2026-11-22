@@ -1,7 +1,8 @@
 {
  "default": "\"volume_fraction\"",
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [],
  "type": "string",

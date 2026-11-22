@@ -326,8 +326,9 @@ TEST(InputUpgradeTest, OldBoundaryTypesBecomeTypesWithOptions) {
 TEST(InputUpgradeTest, OutputQuantitiesAreFieldsInWriteDataAndProbes) {
     const std::string text = "[[write_data]]\nprefix = \"f\"\nvariables = [\"RHO\"]  # kept\n"
                              "[[probes]]\nname = \"p\"\nvariables = [\"P\"]\n";
+    // The setup of 0.10 read the old name as the new one
     Input input = parse_input_string(text);
-    const std::vector<Finding> deprecated = input_upgrade::apply(input);
+    const std::vector<Finding> deprecated = input_upgrade::apply(input, "0.10.0");
     ASSERT_EQ(deprecated.size(), 2u);
     for (const Finding & f : deprecated) EXPECT_FALSE(f.removed) << f.key;
     EXPECT_EQ(input.at("write_data").at(0).at("fields").at(0).as_string(), "RHO");
@@ -356,6 +357,31 @@ TEST(InputUpgradeTest, NamesDeprecatedIn090AreRemoved) {
              {"[[mesh.curved]]\nzone = \"w\"\nshape = \"circle\"\n", "use mesh.curved[0].type"},
              {"[mesh]\ntype = \"cartesian\"\nperiodic = [\"x\"]\n",
               "use [[periodic]] zones = [\"left\", \"right\"]"}}) {
+        Input input = parse_input_string(text);
+        try {
+            input_upgrade::apply(input);
+            ADD_FAILURE() << "accepted:\n" << text;
+        } catch (const InputError & e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find(error), std::string::npos) << what;
+            EXPECT_NE(what.find("mallard input upgrade"), std::string::npos) << what;
+        }
+    }
+}
+
+// The names deprecated in 0.10.0 are rejected by this source, before its
+// version reaches 0.11.0, with the replacement and the command that rewrites
+// them. Fails if a run reads one again.
+TEST(InputUpgradeTest, NamesDeprecatedIn0100AreRemoved) {
+    for (const auto & [text, error] : std::vector<std::pair<std::string, std::string>>{
+             {"[[write_data]]\nprefix = \"f\"\nvariables = [\"RHO\"]\n",
+              "write_data[0].variables was removed in 0.11.0: use write_data[0].fields"},
+             {"[[probes]]\nname = \"p\"\nvariables = [\"P\"]\n",
+              "probes[0].variables was removed in 0.11.0: use probes[0].fields"},
+             {"[numerics]\npreset = \"robust\"\n",
+              "numerics.preset = \"robust\" was removed in 0.11.0: use \"second_order\""},
+             {"[numerics]\npreset = \"accurate\"\n",
+              "numerics.preset = \"accurate\" was removed in 0.11.0: use \"high_order\""}}) {
         Input input = parse_input_string(text);
         try {
             input_upgrade::apply(input);
@@ -476,7 +502,7 @@ TEST(InputUpgradeTest, MeshPeriodicOnlyTakesTheDirectionsOfAGeneratedMesh) {
     }
 }
 
-TEST(InputUpgradeTest, PresetsNamedForTheirOrderReadTheOldNamesWithAWarning) {
+TEST(InputUpgradeTest, PresetsNamedForTheirOrderWereReadUnderTheOldNamesIn0100) {
     for (const auto & [old_name, new_name] : {std::pair{"robust", "second_order"}, {"accurate", "high_order"}}) {
         Input input = parse_input_string(std::string("[run]\nt_stop = 1.0\n[numerics]\npreset = \"") + old_name + "\"\n");
         const std::vector<Finding> findings = input_upgrade::apply(input, "0.10.0");

@@ -10,6 +10,7 @@
  */
 
 #include "mesh_block.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -556,7 +557,7 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axis
         return static_cast<const double *>(&remote_coords[N_DIM * j]);
     };
     std::vector<CellGeometry> out(block.n_cells());
-    Kokkos::parallel_for(
+    gated::parallel_for(
         "block_cell_geometry", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, block.n_cells()),
         [&](const uint64_t c) {
             thread_local std::vector<std::array<rtype, N_DIM>> nodes;
