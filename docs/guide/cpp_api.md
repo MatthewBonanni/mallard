@@ -173,6 +173,12 @@ every rank. `monitors()` gives the same values on every rank; fields hold each
 rank's owned cells, which `GLOBAL_ID` places in the whole mesh. Callbacks run on
 every rank.
 
+To run on some of the processes only, for instance beside another code, initialize
+MPI in your program and give the session a communicator:
+`mallard::Session session(argc, argv, &comm);` with `comm` an `MPI_Comm`. The
+solvers then communicate on a copy of it, never on `MPI_COMM_WORLD`, and every
+process of it creates the session and runs the same cases.
+
 ## Compatibility
 
 `MALLARD_API_VERSION` in the header and `mallard::api_version()` give the

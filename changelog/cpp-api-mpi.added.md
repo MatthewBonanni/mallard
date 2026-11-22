@@ -1,0 +1,1 @@
+- Solvers on an MPI communicator of your own (#345): `mallard::Session(argc, argv, &comm)` in C++, and `mallard.Session(comm=comm)` with an mpi4py communicator in Python (extra `mallard-python[mpi]`), run Mallard on some of a job's processes, beside other codes, on a copy of the communicator. Guide: docs/guide/python.md#running-cases, docs/guide/cpp_api.md#mpi.

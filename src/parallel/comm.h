@@ -38,6 +38,10 @@ namespace comm {
 class Session {
     public:
         Session(int & argc, char **& argv);
+#ifdef Mallard_HAS_MPI
+        /** @brief On a copy of `world` instead of MPI_COMM_WORLD, in an MPI initialized by the program. */
+        Session(int & argc, char **& argv, MPI_Comm world);
+#endif
         ~Session();
         Session(const Session &) = delete;
         Session & operator=(const Session &) = delete;
@@ -45,6 +49,7 @@ class Session {
 #ifdef Mallard_HAS_MPI
     private:
         bool owns_mpi = false;
+        bool owns_world = false;
 #endif
 };
 
@@ -175,7 +180,7 @@ void alltoallv(const T * send, std::span<const uint64_t> send_counts, std::span<
 } // namespace detail
 
 #ifdef Mallard_HAS_MPI
-/** @brief The communicator of every call: the world, or this rank alone within a SelfScope. */
+/** @brief The communicator of every call: the world (the Session's), or this rank alone within a SelfScope. */
 MPI_Comm communicator();
 
 /**

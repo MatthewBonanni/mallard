@@ -115,9 +115,11 @@ Later slices add, each additive to the API version:
 
 Collective semantics: under MPI every call of `Solver` is collective, and
 values (`monitors()`) are the same on every rank. A solver runs on
-`MPI_COMM_WORLD`, as the executable does; taking a communicator (an MPI
-`MPI_Comm` as an opaque handle, mpi4py's in Python) comes with the bindings,
-through `comm.cpp`'s communicator, which `SelfScope` already swaps.
+`MPI_COMM_WORLD`, as the executable does, or on a communicator the `Session`
+takes (a pointer to an `MPI_Comm`, so the header needs no `mpi.h`; mpi4py's
+`MPI._addressof` in Python). `comm::Session` then duplicates it and
+`comm::communicator()`, which every collective and `SelfScope` go through,
+returns the copy, so the solver's messages never match the program's.
 
 ## Typed configs and the TOML front end: one path
 
@@ -332,7 +334,8 @@ no Rust API:
    records; `step(n)`.
 4. Python bindings (nanobind) over 1-2, in `mallard-python`
    ([The Python package](python_package.md)), and `Case::dimension()`; then
-   MPI under mpi4py and the reader moved into the extension.
+   a `Session` on a communicator (mpi4py's in Python, `mallard-python[mpi]`),
+   and the reader moved into the extension.
 5. Typed configs generated from the key catalog, `Case::set`, and the check
    report and resolved input as structs; round-trip tests (code-built case to
    TOML to `mallard -i`, bit for bit).

@@ -10,6 +10,10 @@ requires-python = ">=3.10"
 dependencies = ["numpy"]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+# mallard.Session(comm=...): the solver on an mpi4py communicator
+mpi = ["mpi4py"]
+
 [project.urls]
 Homepage = "https://github.com/MatthewBonanni/mallard"
 Documentation = "https://github.com/MatthewBonanni/mallard/blob/main/docs/guide/python.md"

@@ -183,7 +183,7 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
     m.def("version", &mallard::version);
     m.def("dimension", &mallard::dimension);
 
-    m.def("start_session", [](const std::vector<std::string> & args) {
+    m.def("start_session", [](const std::vector<std::string> & args, uintptr_t mpi_comm) {
         if (session) throw std::runtime_error("mallard: a session is already started in this process");
         std::vector<std::string> storage = {"mallard"};
         storage.insert(storage.end(), args.begin(), args.end());
@@ -192,7 +192,7 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         argv.push_back(nullptr);
         int argc = static_cast<int>(storage.size());
         char ** p = argv.data();
-        session = std::make_unique<mallard::Session>(argc, p);
+        session = std::make_unique<mallard::Session>(argc, p, reinterpret_cast<const void *>(mpi_comm));
     });
     m.def("end_session", [] { session.reset(); });
     m.def("has_session", [] { return session != nullptr; });

@@ -72,6 +72,13 @@ class Session {
          *        `--kokkos-device-id=N`); MPI and Kokkos remove the ones they consume.
          */
         Session(int & argc, char **& argv);
+        /**
+         * @brief Solvers run on the processes of an MPI communicator instead of MPI_COMM_WORLD (on a copy of
+         *        it, so their messages never match yours): `mpi_comm` points to an `MPI_Comm` (`&comm`) of an MPI
+         *        the program initialized. Every process of the communicator creates the Session and runs the same
+         *        cases. Throws Error if the library is built without MPI or MPI is not initialized.
+         */
+        Session(int & argc, char **& argv, const void * mpi_comm);
         ~Session();
         Session(const Session &) = delete;
         Session & operator=(const Session &) = delete;

@@ -333,6 +333,17 @@ solver.finish()
 - **MPI.** Start the script with `mpirun -n 4 python3 script.py` on a build
   with MPI: every call is collective, fields hold each rank's owned cells
   (`GLOBAL_ID` places them), and `monitors()` are the same on every rank.
+  To run on some of the ranks only, for instance beside another code, give the
+  session an [mpi4py](https://mpi4py.readthedocs.io) communicator
+  (`uv pip install "mallard-python[mpi]"`): every rank of it starts the session
+  and runs the same cases, and the other ranks are free.
+
+  ```python
+  from mpi4py import MPI
+  world = MPI.COMM_WORLD
+  comm = world.Split(color=int(world.Get_rank() < 4))   # the first 4 ranks run Mallard
+  mallard.Session(comm=comm)
+  ```
 
 ## Pitfalls
 
