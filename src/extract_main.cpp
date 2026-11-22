@@ -407,6 +407,9 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         if (!output.contains(table)) return false;
         return key == nullptr || (output.at(table).is_table() && output.at(table).contains(key));
     };
+    const bool flamelet = top.contains("physics") && top.at("physics").is_table() &&
+                          top.at("physics").contains("gas") && top.at("physics").at("gas").is_string() &&
+                          top.at("physics").at("gas").as_string() == "flamelet";
     for (const std::string & name : fields) {
         if (!field_units::post_derive(name)) {
             std::vector<std::string> names;
@@ -420,6 +423,8 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
         }
         const derived::Field f = derived::find(name.c_str());
         if (f == derived::N_FIELDS) continue;
+        // A flamelet gas has Z and C of its own
+        if (flamelet && (f == derived::MIXTURE_FRACTION || f == derived::C_NORM)) continue;
         const uint16_t needs = derived::FIELDS[f].needs;
         uint16_t missing = 0;
         if ((needs & derived::need::REFERENCE) && !has("reference", nullptr)) missing = derived::need::REFERENCE;
