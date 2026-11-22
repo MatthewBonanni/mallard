@@ -59,6 +59,16 @@ std::string flamelet_physics(const std::string & table, const std::string & type
 
 namespace {
 
+/** @brief strip() with the conditions left and right (the lines after name) in place of symmetry at x = 0 and x = Lx. */
+std::string strip_between(uint32_t nx, double Lx, const std::string & left, const std::string & right) {
+    std::string s = strip(nx, Lx);
+    for (const auto & [zone, body] : {std::pair<std::string, std::string>{"left", left}, {"right", right}}) {
+        const std::string symmetry = "name = \"" + zone + "\"\ntype = \"symmetry\"\n";
+        s.replace(s.find(symmetry), symmetry.size(), "name = \"" + zone + "\"\n" + body);
+    }
+    return s;
+}
+
 constexpr double tol(double in_double, double in_float) {
     return sizeof(rtype) == sizeof(double) ? in_double : in_float;
 }
@@ -241,6 +251,136 @@ TEST(FlameletSolverTest, PressuresFarFromTheTablesWarn) {
     const std::string outlet = warnings("1e5", "type = \"outlet_pressure\"\np = 2e5\n");
     EXPECT_NE(outlet.find("boundary right"), std::string::npos) << outlet;
     EXPECT_EQ(outlet.find("initial pressure"), std::string::npos) << outlet;
+}
+
+// Steady conduction at rest between a heat-flux wall (q into the fluid) at x = 0 and an isothermal
+// wall at T_w, x = L, uniform Z: the flux -(kappa / cp) dh/dx = q is uniform, so h(x) = h(T_w) +
+// q cp / kappa (L - x) at the table's kappa and cp. Catches T_w taken as the conducted enthalpy,
+// a conductivity ratio from the absent species transport, and heat-flux walls off by cp.
+TEST(FlameletSolverTest, WallsConductEnthalpyToTheirSteadyProfile) {
+    const double p = 100.0, T_w = 300.0, q = 2630.0, L = 1e-3, Z = 0.5, kappa = 0.0263, cp = 1004.5;
+    const double alpha = kappa / (p / (287.0 * T_w) * cp), t = 4.0 * L * L / alpha;
+    std::ostringstream input;
+    input << std::setprecision(17) << "[run]\nt_stop = " << t << "\nn_steps = 100000\ncfl = 0.5\n"
+          << strip_between(20, L, "type = \"wall_heat_flux\"\nq = " + std::to_string(q) + "\n",
+                           "type = \"wall_isothermal\"\nT = " + std::to_string(T_w) + "\n")
+          << "[initialize]\np = " << p << "\nT = " << T_w << "\nu = "
+          << (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") << "\nZ = " << Z << "\n"
+          << flamelet_physics("solver_mixing.h5", "navier_stokes");
+    Solver solver;
+    run(solver, input.str());
+    ASSERT_GT(solver.get_time(), 0.999 * t);
+    const flamelet::FlameletModel table(std::make_shared<const flamelet::Table>(
+                                            flamelet::Table::read(TABLES + "solver_mixing.h5")),
+                                        false);
+    const flamelet::Thermo th = table.thermo(Z, 0.0);
+    const double rise = q * cp / kappa * L;
+    double err = 0.0;
+    for (const auto & [x, T_c] : column(solver, N_DIM + 1)) {
+        err = std::max(err, std::abs(th.enthalpy(T_c) - (th.enthalpy(T_w) + q * cp / kappa * (L - x))));
+    }
+    EXPECT_LT(err, 2e-3 * rise);
+}
+
+namespace {
+
+/** @brief The state of a steady uniform channel flow on the reactor table at Z, burnt: T, u, p, Z, C at every cell. */
+void expect_uniform(const Solver & solver, double T, double u, double p, double Z, double C, double rel) {
+    for (const auto & [x, T_c] : column(solver, N_DIM + 1)) EXPECT_NEAR(T_c, T, rel * T) << x;
+    for (const auto & [x, u_c] : column(solver, 0)) EXPECT_NEAR(u_c, u, rel * 400.0) << x;
+    for (const auto & [x, p_c] : column(solver, N_DIM)) EXPECT_NEAR(p_c, p, rel * p) << x;
+    for (const auto & [x, Z_c] : column(solver, 0, 0)) EXPECT_NEAR(Z_c, Z, tol(1e-9, 1e-5)) << x;
+    for (const auto & [x, C_c] : column(solver, 0, 1)) EXPECT_NEAR(C_c, C, tol(1e-9, 1e-5)) << x;
+}
+
+std::string channel_initial(double p, double T, double Z) {
+    std::ostringstream s;
+    s << std::setprecision(17) << "[initialize]\np = " << p << "\nT = " << T << "\nu = "
+      << (N_DIM == 2 ? "[0.0, 0.0]" : "[0.0, 0.0, 0.0]") << "\nZ = " << Z << "\nC = \"burnt\"\n";
+    return s.str();
+}
+
+} // namespace
+
+// Subsonic inlet_stagnation into an outlet at p: the steady flow is uniform at p, on the isentrope of
+// the inlet's burnt state through (T0, p0), int cp / T dT = R ln(p / p0), with h(T) + u^2 / 2 = h(T0)
+// (the reactor table's burnt state has gamma0 = 1.35, a_gamma = -3e-5, R = 297). Catches the
+// isentrope and enthalpy of the species thermodynamics, or of the wrong composition.
+TEST(FlameletSolverTest, StagnationInletFollowsTheTablesIsentrope) {
+    const double p0 = 1.1e5, T0 = 400.0, p = 1.0e5, Z = 0.3;
+    std::ostringstream input;
+    input << "[run]\nt_stop = 0.3\ncfl = 0.5\n"
+          << strip_between(20, 1.0, "type = \"inlet_stagnation\"\np0 = 1.1e5\nT0 = 400.0\nZ = 0.3\nC = \"burnt\"\n",
+                           "type = \"outlet_pressure\"\np = 1.0e5\n")
+          << channel_initial(p, T0, Z) << flamelet_physics("solver_reactor.h5", "euler");
+    Solver solver;
+    run(solver, input.str());
+    const flamelet::FlameletModel table(std::make_shared<const flamelet::Table>(
+                                            flamelet::Table::read(TABLES + "solver_reactor.h5")),
+                                        false);
+    const double C = table.burnt_progress(Z);
+    const flamelet::Thermo th = table.thermo(Z, C);
+    double lo = 200.0, hi = T0;
+    for (int i = 0; i < 200; i++) {
+        const double T = 0.5 * (lo + hi);
+        (th.entropy(T) - th.entropy(T0) > th.R * std::log(p / p0) ? hi : lo) = T;
+    }
+    const double T = 0.5 * (lo + hi), u = std::sqrt(2.0 * (th.enthalpy(T0) - th.enthalpy(T)));
+    EXPECT_NEAR(C, 0.2, 1e-12);
+    expect_uniform(solver, T, u, p, Z, C, tol(1e-4, 1e-3));
+}
+
+// inlet_mass_flow at mass flux G and temperature T into an outlet at p: the steady flow is uniform at
+// T and p, with rho u = G and rho = p / (R T) of the inlet's burnt state (R = 297, not the fresh 287).
+// Catches a mass-flow state from the species gas constant or the wrong composition.
+TEST(FlameletSolverTest, MassFlowInletSetsTheMassFlux) {
+    const double G = 50.0, T = 400.0, p = 1.0e5, Z = 0.3;
+    std::ostringstream input;
+    input << "[run]\nt_stop = 0.3\ncfl = 0.5\n"
+          << strip_between(20, 1.0, "type = \"inlet_mass_flow\"\nmass_flux = 50.0\nT = 400.0\nZ = 0.3\nC = \"burnt\"\n",
+                           "type = \"outlet_pressure\"\np = 1.0e5\n")
+          << channel_initial(p, T, Z) << flamelet_physics("solver_reactor.h5", "euler");
+    Solver solver;
+    run(solver, input.str());
+    const double rho = p / (297.0 * T);
+    expect_uniform(solver, T, G / rho, p, Z, 0.2, tol(1e-4, 1e-3));
+}
+
+// A supersonic inlet_state prescribes the whole state, so after a few flow-through times every cell
+// holds the inlet's: Z of y and of t (evaluated on the device each stage) with C = "0.2", or Z of y
+// with C = "burnt" (evaluated once on the host), T = 400. Catches Z and C normalized as mass
+// fractions, a gas constant or energy from the wrong composition, and a burnt C read as fresh.
+TEST(FlameletSolverTest, InletExpressionsOfSpaceAndTimeSetZAndC) {
+    const double L = 1.0, H = 0.2, u = 800.0, p = 1.0e5, T = 400.0, t1 = 1e-4, t = t1 + 5.0 * L / u;
+    for (const std::string & C : {std::string("\"0.2\""), std::string("\"burnt\"")}) {
+        const bool timed = C == "\"0.2\"";
+        std::ostringstream input;
+        input << std::setprecision(17) << "[run]\nt_stop = " << t << "\ncfl = 0.5\n[mesh]\ntype = \"cartesian\"\n"
+              << "Nx = 20\nNy = 4\nLx = " << L << "\nLy = " << H << "\n"
+              << (N_DIM == 3 ? "Nz = 1\nLz = 0.05\n[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                               "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                             : "")
+              << "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
+              << "type = \"symmetry\"\n[[boundaries]]\nname = \"right\"\ntype = \"outlet_extrapolation\"\n"
+              << "[[boundaries]]\nname = \"left\"\ntype = \"inlet_state\"\np = " << p << "\n"
+              << "u = " << (N_DIM == 2 ? "[800.0, 0.0]" : "[800.0, 0.0, 0.0]") << "\n"
+              << "T = \"" << (timed ? "t < " + std::to_string(t1) + " ? 300 : 400" : std::string("400")) << "\"\n"
+              << "Z = \"" << (timed ? "t < " + std::to_string(t1) + " ? 0.3 : " : std::string()) << "0.2 + 2.5 * y\"\n"
+              << "C = " << C << "\n"
+              << "[initialize]\np = " << p << "\nT = 300.0\nu = " << (N_DIM == 2 ? "[800.0, 0.0]" : "[800.0, 0.0, 0.0]")
+              << "\nZ = 0.3\nC = 0.2\n" << flamelet_physics("solver_reactor.h5", "euler");
+        Solver solver;
+        run(solver, input.str());
+        const auto mesh = solver.get_mesh();
+        auto coords = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), mesh->cell_coords);
+        for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+            const double rho = double(solver.h_conservatives(c, 0)), y = double(coords(c, 1));
+            EXPECT_NEAR(double(solver.h_species(c, 0)) / rho, 0.2 + 2.5 * y, tol(1e-6, 1e-4)) << C << " " << y;
+            EXPECT_NEAR(double(solver.h_species(c, 1)) / rho, 0.2, tol(1e-6, 1e-4)) << C;
+            EXPECT_NEAR(double(solver.h_primitives(c, N_DIM + 1)), T, tol(1e-6, 1e-4) * T) << C;
+            EXPECT_NEAR(rho, p / (297.0 * T), tol(1e-6, 1e-4) * rho) << C;
+        }
+    }
 }
 
 // C = "burnt" in an initial region takes the table's burnt progress variable (C_max = 0.2 in the

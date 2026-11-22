@@ -408,8 +408,17 @@ diffusivity, source and the map `C -> Lambda` together.
   pass through other pressures on purpose, and acoustics or a shock move the
   pressure without invalidating the table.
 
-Still to come in stage 2: isothermal walls and the other boundary types, and
-the 2D counterflow against Cantera.
+- **Boundaries.** The boundary data carry the `Mixture` (species tables or
+  the flamelet gas) instead of the species thermodynamics alone, so inlet ghost
+  states take `R`, `e(T)`, `h(T)` and the isentrope from the same dispatch as
+  the cells. For `saghafian2015`, `int cp / T dT = R ln(T / T0) + R / b
+  (ln(T / T0) - ln((gamma(T) - 1) / (gamma0 - 1)))` with `b = gamma0 - 1 -
+  a_gamma T0`, in closed form. Expressions of `Z` and `C` are compiled as the
+  species' are and are not normalized. Walls convert their temperature to the
+  conducted enthalpy at the cell's `Z` and `C`; the table's `kappa / cp` does
+  not depend on `T`, so the wall's conductivity is the cell's.
+
+Still to come in stage 2: the 2D counterflow against Cantera.
 
 **The counterflow validation needs a generator.** It compares Mallard's 2D
 counterflow (`examples/counterflow_diffusion`) with Cantera's

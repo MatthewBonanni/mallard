@@ -731,16 +731,21 @@ struct TimedFieldsFunctor : FirstError {
                     Y(static_cast<uint32_t>(balance)) = static_cast<rtype>(rest);
                     sum += rest;
                 }
-                if (!(sum > 0.0)) fail(k, BoundaryFields::N_SLOTS, t, sum);
-                double norm = sum;
-                if (set_composition(s, 3)) {
-                    norm = 0.0;
-                    for (uint32_t i = 0; i < n_species; i++) norm += double(Y(i)) / gas.thermo.inv_W(i);
-                    for (uint32_t i = 0; i < n_species; i++) Y(i) = static_cast<rtype>(double(Y(i)) / gas.thermo.inv_W(i));
+                // A flamelet gas's Z and C are not fractions of a whole
+                if (!gas.gas.tabulated()) {
+                    if (!(sum > 0.0)) fail(k, BoundaryFields::N_SLOTS, t, sum);
+                    double norm = sum;
+                    if (set_composition(s, 3)) {
+                        norm = 0.0;
+                        for (uint32_t i = 0; i < n_species; i++) norm += double(Y(i)) / gas.gas.thermo.inv_W(i);
+                        for (uint32_t i = 0; i < n_species; i++) {
+                            Y(i) = static_cast<rtype>(double(Y(i)) / gas.gas.thermo.inv_W(i));
+                        }
+                    }
+                    for (uint32_t i = 0; i < n_species; i++) Y(i) = static_cast<rtype>(double(Y(i)) / norm);
                 }
-                for (uint32_t i = 0; i < n_species; i++) Y(i) = static_cast<rtype>(double(Y(i)) / norm);
             }
-            R = gas.thermo.gas_constant(BoundaryComposition{gas.bc_Y, static_cast<int32_t>(i_bc)});
+            R = gas.gas.gas_constant(BoundaryComposition{gas.bc_Y, static_cast<int32_t>(i_bc)});
         }
         auto positive = [&](const int j) {
             if (!(value[j] > 0.0)) fail(k, j, t, value[j]);
@@ -780,16 +785,20 @@ struct TimedFieldsFunctor : FirstError {
         const BoundaryComposition y{gas.bc_Y, static_cast<int32_t>(i_bc)};
         const double T = value[BoundaryFields::SLOT_T];
         double e, cv;
-        gas.thermo.e_cv(T, y, e, cv);
+        gas.gas.e_cv(T, y, e, cv);
         gas.bc_thermo(i_bc, 0) = static_cast<rtype>((cv + R) / cv);
         gas.bc_thermo(i_bc, 1) = static_cast<rtype>(e - cv * T);
         if (gas.transport.extent(0) == 0) return;
         const uint32_t n_species = static_cast<uint32_t>(gas.bc_Y.extent(1));
+        gas.transport(i_bc, 0) = static_cast<rtype>(gas.gas.conducted(T, y));
+        if (gas.gas.tabulated()) {
+            for (uint32_t i = 0; i < n_species; i++) gas.transport(i_bc, 1 + i) = static_cast<rtype>(y(i));
+            return;
+        }
         double moles = 0.0;
-        for (uint32_t i = 0; i < n_species; i++) moles += y(i) * gas.thermo.inv_W(i);
-        gas.transport(i_bc, 0) = static_cast<rtype>(T);
+        for (uint32_t i = 0; i < n_species; i++) moles += y(i) * gas.gas.thermo.inv_W(i);
         for (uint32_t i = 0; i < n_species; i++) {
-            gas.transport(i_bc, 1 + i) = static_cast<rtype>(y(i) * gas.thermo.inv_W(i) / moles);
+            gas.transport(i_bc, 1 + i) = static_cast<rtype>(y(i) * gas.gas.thermo.inv_W(i) / moles);
         }
     }
 };

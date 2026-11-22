@@ -1302,7 +1302,7 @@ void Solver::init_boundaries() {
     init_wall_model(face_bc, bcs);
     if (is_mixture()) {
         const uint32_t n_species = mixture.n_species;
-        boundary_data.thermo = mixture.thermo;
+        boundary_data.mixture_gas = mixture;
         boundary_data.bc_Y = Kokkos::View<rtype **, Kokkos::LayoutRight>("bc_Y", bcs.size(), n_species);
         boundary_data.bc_thermo = Kokkos::View<rtype *[2]>("bc_thermo", bcs.size());
         if (is_viscous()) {
@@ -1336,10 +1336,6 @@ void Solver::init_boundaries() {
         }
         // Only ranks with faces of the inlet integrate its profile
         if (!own.empty()) timed_fields.add(profile, own, x);
-    }
-    if (!timed_fields.empty() && mixture.tabulated()) {
-        throw InputError("boundaries: values that vary in time are not yet supported with gas = "
-                         "\"flamelet\"; give numbers.");
     }
     if (!timed_fields.empty()) timed_fields.finish();
     dirichlet_states = DirichletStates();
@@ -1601,7 +1597,7 @@ void Solver::apply_boundary_fields() {
     gas.R = double(physics.R);
     if (is_mixture()) {
         gas.mixture = true;
-        gas.thermo = boundary_data.thermo;
+        gas.gas = boundary_data.mixture_gas;
         gas.bc_Y = boundary_data.bc_Y;
         gas.bc_thermo = boundary_data.bc_thermo;
         gas.transport = bc_transport_values;
