@@ -1026,6 +1026,8 @@ void Solver::thicken_transport() {
 
 void Solver::init_les() {
     if (!les_on) return;
+    // TFLES's setup reads the vertex neighbors
+    init_vertex_gradient();
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");
     les_delta = Kokkos::View<rtype *>("les_delta", mesh->n_cells);

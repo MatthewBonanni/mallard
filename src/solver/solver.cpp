@@ -2630,7 +2630,7 @@ void Solver::init_vertex_gradient() {
                       (is_mixture() && is_viscous()) || les_on || tfles_on || probes.any_gradients() ||
                       derived_selection.need(derived::need::SPECIES_GRADIENTS) ||
                       (is_viscous() && !force_monitors.empty()) || particles;
-    if (!viscous_gradients.is_allocated() || !read) return;
+    if (!viscous_gradients.is_allocated() || !read || vertex_gradient.weights.ghost_offsets.is_allocated()) return;
     vertex_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh, true,
                                            n_gradient_cells());
 }
