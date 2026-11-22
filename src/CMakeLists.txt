@@ -111,6 +111,7 @@ add_library(MallardCore STATIC
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
+    solver/solver_flamelet.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_wall_model.cpp

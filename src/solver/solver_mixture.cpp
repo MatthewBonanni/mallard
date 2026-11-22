@@ -68,9 +68,14 @@ struct MixtureCellFunctor {
         }
         FOR_I_CONSERVATIVE W(c, i) = W_c[i];
         if (molar_mass.extent(0) > 0) {
-            double n = 0.0;
-            for (uint32_t k = 0; k < gas.n_species; k++) n += static_cast<double>(rhoY_c[k]) * gas.thermo.inv_W(k);
-            molar_mass(c) = static_cast<rtype>(static_cast<double>(cons[0]) / n);
+            if (gas.tabulated()) {
+                const PartialDensities y{rhoY_c, 1.0 / static_cast<double>(cons[0])};
+                molar_mass(c) = static_cast<rtype>(chemistry::GAS_CONSTANT / gas.gas_constant(y));
+            } else {
+                double n = 0.0;
+                for (uint32_t k = 0; k < gas.n_species; k++) n += static_cast<double>(rhoY_c[k]) * gas.thermo.inv_W(k);
+                molar_mass(c) = static_cast<rtype>(static_cast<double>(cons[0]) / n);
+            }
         }
         const rtype inv_rho = 1.0_r / cons[0];
         for (uint32_t k = 0; k < gas.n_species; k++) scalars(c, k) = rhoY_c[k] * inv_rho;
@@ -138,9 +143,9 @@ struct ResetEnergyFunctor {
         const double p = (static_cast<double>(frozen(c, 0)) - 1.0) *
                          (static_cast<double>(U(c, E)) - rho * static_cast<double>(frozen(c, 1)) - kinetic);
         const PartialDensities y{cell_species(rhoY, c), 1.0 / rho};
-        const double T = p / (rho * gas.thermo.gas_constant(y));
+        const double T = p / (rho * gas.gas_constant(y));
         double e, cv;
-        gas.thermo.e_cv(T, y, e, cv);
+        gas.e_cv(T, y, e, cv);
         U(c, E) = static_cast<rtype>(rho * e + kinetic);
     }
 };
@@ -289,8 +294,9 @@ struct MixtureDiagnosticsFunctor {
         rtype u2 = 0.0_r, sum_Y = 0.0_r;
         FOR_I_DIM u2 += W[1 + i] * W[1 + i];
         for (uint32_t k = 0; k < gas.n_species; k++) sum_Y += rhoY(c, k);
+        // A flamelet gas's scalars [Z, C] need not sum to one
         const rtype values[6] = {W[0], W[N_DIM + 1], -Kokkos::sqrt(u2 * W[0] / (gamma * W[N_DIM + 1])), T, -T,
-                                 -Kokkos::fabs(sum_Y / W[0] - 1.0_r)};
+                                 gas.tabulated() ? 0.0_r : -Kokkos::fabs(sum_Y / W[0] - 1.0_r)};
         for (int i = 0; i < 6; i++) m.v[i] = Kokkos::fmin(m.v[i], values[i]);
     }
 };
@@ -543,6 +549,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     SpeciesSumFunctor species_sum{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                   mesh->cell_measure, species_slots, rhs_state.species, n_species};
     Kokkos::parallel_for("species_sum", n_owned, species_sum);
+    if (mixture.tabulated()) add_progress_source(rhs_state.species);
 
     if (axisymmetric) {
         const bool viscous = is_viscous();
@@ -655,10 +662,27 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
         const std::string name = find_value<std::string>(bound, "name");
         const std::string where = "boundaries[name = \"" + name + "\"]";
         auto unsupported = [&](const std::string & what) {
+            if (mixture.tabulated()) {
+                throw InputError(where + ": " + what + " is not yet supported with gas = \"flamelet\" (it is with "
+                                 "outlet_extrapolation, symmetry, wall_adiabatic, inlet_state and outlet_pressure "
+                                 "without average, with numbers for T, Z and C).");
+            }
             throw InputError(where + ": " + what + " is not yet supported with gas = \"mixture\" (it is with "
                              "outlet_extrapolation, symmetry, the wall_* types, inlet_state, inlet_stagnation, "
                              "inlet_mass_flow and outlet_pressure without average).");
         };
+        if (mixture.tabulated()) {
+            // The ghost states of these conditions, and boundary values that vary, evaluate species thermodynamics
+            const BoundaryType type = bcs[i_bc].type;
+            if (type == BoundaryType::WALL_ISOTHERMAL || type == BoundaryType::WALL_HEAT_FLUX ||
+                type == BoundaryType::INLET_STAGNATION || type == BoundaryType::INLET_MASS_FLOW) {
+                unsupported("type = \"" + BOUNDARY_NAMES.at(type) + "\"");
+            }
+            if (type == BoundaryType::INLET_STATE &&
+                (BoundaryValue::is_expression(bound.at("T")) || MixtureModel::composition_varies(bound))) {
+                unsupported("an expression for T, Z or C");
+            }
+        }
         switch (bcs[i_bc].type) {
             case BoundaryType::OUTLET_EXTRAPOLATION:
             case BoundaryType::SYMMETRY:

@@ -223,6 +223,7 @@ struct Settings {
     Kokkos::View<rtype *> progress_weights;
     rtype T_unburnt = 0.0, T_burnt = 1.0;
     bool mixture = false, viscous = false;
+    bool tabulated = false;  // a flamelet gas: no species thermodynamics (ENTROPY) nor species (the mixture group)
 
     /**
      * @brief From [output] reference, [output.mixture] and, for a perfect gas,
