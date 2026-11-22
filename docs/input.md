@@ -1563,7 +1563,8 @@ reductions = ["mean", "rms"]
 ## `[particles]`
 
 Lagrangian particles: massless tracers or solid spheres
-([Particles](guide/particles.md)). Restart files carry them and their
+([Particles](guide/particles.md); equations in the theory manual's
+[Lagrangian particles](theory/particles.md)). Restart files carry them and their
 quantities: a run restarted from a file with particles continues them and does
 not seed; a file without particles (or a `remap` start) seeds them from these
 keys.
@@ -1573,7 +1574,7 @@ keys.
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
 | `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
 | `density` | Material density (`"solid"`). Required for solid particles |
-| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (Singh et al., continuum to free-molecular, subsonic to hypersonic) (`"solid"`), default `"schiller_naumann"` |
+| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
 | `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, default none |
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
