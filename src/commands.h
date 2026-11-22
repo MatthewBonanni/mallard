@@ -84,6 +84,12 @@ int average_main(const cli::Args & args);
 /** @brief The work of `mallard post average`, with MPI and Kokkos started (tests call it). */
 int post_average(const cli::Args & args);
 
+/** @brief `mallard post flame FILE...`: position, thickness and speeds of a premixed flame in saved snapshots. */
+int flame_main(const cli::Args & args);
+
+/** @brief The work of `mallard post flame`, with MPI and Kokkos started (tests call it). */
+int post_flame(const cli::Args & args);
+
 /** @brief `mallard pack RUN_DIR`: one archive that reproduces a run; `--verify ARCHIVE` checks one. */
 int pack_main(const cli::Args & args);
 

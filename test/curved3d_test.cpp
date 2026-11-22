@@ -211,7 +211,7 @@ TEST(Curved3DGeometry, FaceQuadratureClosesEveryCell) {
             teno->set_mesh(mesh);
             teno->set_boundaries(bd);
             teno->init(parse_toml("type = \"TENO\"\norder = 3\n"));
-            auto w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+            auto w = teno->face_quad_weights.host();
             auto n = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_normals);
             ASSERT_GT(n.extent(0), 0u);
             std::vector<double> sum(3 * mesh->n_cells, 0.0);
@@ -320,7 +320,7 @@ std::pair<double, double> shell_wall_errors(int n, const std::string & geometry,
     teno->calc_face_values(W, face_W);
     auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
     auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
-    auto h_weights = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_weights);
+    auto h_weights = teno->face_quad_weights.host();
     double err = 0.0, sum = 0.0, area = 0.0;
     for (uint32_t f = 0; f < mesh->n_faces; f++) {
         if (mesh->h_cells_of_face(f, 1) >= 0) continue;

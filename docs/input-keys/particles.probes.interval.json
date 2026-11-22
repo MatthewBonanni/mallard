@@ -1,0 +1,11 @@
+{
+ "default": "1",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/particle_vortex/input.toml",
+  "examples/tracer_vortex/input.toml"
+ ],
+ "type": "integer"
+}

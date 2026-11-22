@@ -10,7 +10,7 @@
 # mallard reactor. Needs Python 3 with NumPy and SciPy, and h5py for builds with HDF5. Where
 # the reader library (lib/libmallard2d) is installed, also reads the 2D run with the
 # Python package mallard, which must then be importable (a container's Python, `spack load
-# mallard`, or `pip install PREFIX/share/mallard/tools`).
+# mallard`, or `uv pip install PREFIX/share/mallard/tools`).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
