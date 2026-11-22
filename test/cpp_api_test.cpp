@@ -136,14 +136,15 @@ TEST(CppApiTest, AdvanceToLandsOnTheTimeAsTStopDoes) {
 
     mallard::Solver solver(mallard::Case::from_toml_file(write_case("api", "t_stop = 0.1\n")));
     EXPECT_TRUE(solver.advance_to(t_half));
-    EXPECT_EQ(solver.time(), t_half);
+    // Time is in rtype, as the solver keeps it
+    EXPECT_EQ(solver.time(), double(rtype(t_half)));
     expect_same_values(solver.monitors(), reference);
     // Times already reached take no step
     const uint64_t steps = solver.step_count();
     EXPECT_TRUE(solver.advance_to(0.01));
     EXPECT_EQ(solver.step_count(), steps);
     EXPECT_FALSE(solver.advance_to(1.0));
-    EXPECT_EQ(solver.time(), 0.1);
+    EXPECT_EQ(solver.time(), double(rtype(0.1)));
     EXPECT_EQ(solver.finish(), 0);
 }
 
