@@ -1,0 +1,69 @@
+# Strong and weak scaling of the Taylor-Green vortex (input.toml) on GPUs:
+# the same flow and scheme (TENO5, HLLC, SSPRK3), 160 steps at cfl = 0.4 and
+# no output, so that the time per step is all there is. Needs the 3D build
+# with MPI. The Multi-GPU scaling section of docs/guide/parallel.md shows the
+# results on NVIDIA A100-SXM4-80GB GPUs.
+#
+# As written, a fixed box of 128^3 hexahedra (2,097,152 cells) for strong
+# scaling, on 1 to 8 GPUs:
+#   mpirun -n 4 --bind-to none ../../build3d/src/mallard -i scaling.toml --kokkos-map-device-id-by=mpi_rank
+# scaling.py writes the inputs of a whole study, strong (this box) and weak
+# (64^3 hexahedra per GPU: Nx = 64 n and Lx = 2 pi n on n GPUs), one
+# directory per run:
+#   python scaling.py --gpus 1 2 4 8
+# Each run's mallard.jsonl holds its times per step;
+#   python ../../tools/docs/scaling.py --strong strong/n* --weak weak/n* --out scaling.json
+# reduces them to the median time per step from step 60 on and draws the
+# efficiencies.
+#
+# Expected result: about 30.6 ms per step of 64^3 cells on one A100, and 98%
+# or more weak-scaling efficiency up to 16 GPUs on two nodes.
+
+[run]
+n_steps = 160
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 128
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
+
+[initialize]
+type = "analytical"
+u = ["sin(x) * cos(y) * cos(z)", "-cos(x) * sin(y) * cos(z)", "0.0"]
+p = "71.42857142857143 + (cos(2 * x) + cos(2 * y)) * (cos(2 * z) + 2) / 16"
+T = "1.0"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 71.42857142857143
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.000625
+Pr = 0.71
+
+[output]
+check_interval = 20

@@ -203,6 +203,47 @@ the run: GPU-aware MPI, NCCL, unbound OpenMP threads
 
 The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/#scaling) plots the efficiencies below.
 
+### 3D Taylor–Green vortex, Mallard 0.11.0 {#scaling-3d-taylor-green}
+
+The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and SSPRK3, on hexahedra, from `examples/taylor_green_3d/scaling.toml`. The hardware is NVIDIA A100-SXM4-80GB GPUs, 8 per node, with NVLink within a node and HDR InfiniBand with GPUDirect RDMA between nodes. There is one rank per GPU (12 OpenMP host threads each), NCCL halo exchanges, multi-jagged partitions and the step's CUDA graph, all defaults. Each point is the median time per step from step 60 to 160 over two runs, setup excluded. Efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong scaling and T<sub>1</sub>/T<sub>n</sub> for weak scaling.
+
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-light.svg#gh-light-mode-only)
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-dark.svg#gh-dark-mode-only)
+
+__TABLES__
+
+**Measuring your own machine.** `scaling.py` in the example writes the inputs of the whole study. Run them one after the other, then reduce their run logs:
+
+```bash
+cd examples/taylor_green_3d
+python scaling.py --gpus 1 2 4 8          # writes strong/n1 ... weak/n8 and prints the command of each run
+# run the printed commands one at a time (on a cluster, from your job script), then:
+python ../../tools/docs/scaling.py --strong strong/n* --weak weak/n* --out scaling.json
+```
+
+The input is the example's flow, shortened to 160 steps with no output, so the time per step is all that is measured:
+
+```toml
+[run]
+n_steps = 160
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 128   # weak scaling: Nx = 64 n and Lx = 2 pi n on n GPUs, Ny = Nz = 64
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+```
+
+It adds no keys; `[output] check_interval = 20` sets how often the progress records that `tools/docs/scaling.py` reads are written. Pitfalls:
+
+- **Grow the box, not the cells.** The weak-scaling boxes keep cubic cells and grow along x. Refining in one direction changes TENO's stencils and their cost, so the time per step would no longer compare.
+- **Skip the first steps.** The first steps include capturing the step graph and warming up the GPU, so the times start at step 60 (`--from`).
+- **One run per GPU at a time.** Two runs sharing a GPU, or a rank count above the GPUs of the node without `--kokkos-map-device-id-by=mpi_rank`, measure contention rather than Mallard.
+
 ### 3D, Mallard 0.8.0 {#scaling-3d}
 
 The Taylor–Green vortex (viscous) on hexahedra with fifth-order TENO-E and HLLC, on NVIDIA A100-80GB GPUs: 4 per node, NVLink within a node, HDR InfiniBand with GPUDirect RDMA between nodes, GPU-aware MPI. Times are steady times per step, setup excluded; efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong and T<sub>1</sub>/T<sub>n</sub> for weak scaling. Measured with the development code of [#261](https://github.com/MatthewBonanni/mallard/pull/261), which made multi-jagged partitions the default; `docs/design/performance.md` in the repository has the details.

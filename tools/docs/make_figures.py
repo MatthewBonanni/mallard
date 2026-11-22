@@ -33,6 +33,7 @@ import python
 import regions
 import run_report
 import runs
+import scaling
 import schematics
 import teno
 import theory
@@ -56,6 +57,7 @@ def main():
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    scaling.figures()
     schematics.figures()
     teno.figures()
     theory.figures()
