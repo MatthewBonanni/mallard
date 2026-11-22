@@ -328,18 +328,31 @@ The numerical methods Mallard implements and the reference data it is validated 
 
 ## Lagrangian particles
 
+- <a id="stokes-1851"></a>G. G. Stokes, On the effect of the internal friction of fluids on the motion of pendulums, *Trans. Camb. Phil. Soc.* 9, 8–106 (1851).
+  Used in: `drag = "stokes"` of solid particles, the drag of a sphere in creeping flow.
 - <a id="schiller-naumann-1933"></a>L. Schiller and A. Naumann, Über die grundlegenden Berechnungen bei der Schwerkraftaufbereitung, *Z. Ver. Dtsch. Ing.* 77, 318–320 (1933).
-  Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`).
+  Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`), with [Clift, Grace & Weber (1978)](#clift-grace-weber-1978) for its range and accuracy.
 - <a id="singh-2022"></a>N. Singh, M. Kroells, C. Li, E. Ching, M. Ihme, C. J. Hogan and T. E. Schwartzentruber, General drag coefficient for flow over spherical particles, *AIAA J.* 60, 587–597 (2022). [doi:10.2514/1.J060648](https://doi.org/10.2514/1.J060648), [arXiv:2012.04813](https://arxiv.org/abs/2012.04813)
   Used in: `drag = "singh"` of solid particles (`src/particles/particle_forces.h`, Appendix C).
 - <a id="maxey-riley-1983"></a>M. R. Maxey and J. J. Riley, Equation of motion for a small rigid sphere in a nonuniform flow, *Phys. Fluids* 26, 883–889 (1983). [doi:10.1063/1.864230](https://doi.org/10.1063/1.864230)
-  Used in: the `"pressure_gradient"` and `"added_mass"` forces of solid particles.
+  Used in: the equation of motion of solid particles, and its `"pressure_gradient"` and `"added_mass"` forces.
 - <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
   Used in: the `"saffman_lift"` force of solid particles.
 - <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
   Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
 - <a id="capecelatro-desjardins-2013"></a>J. Capecelatro and O. Desjardins, An Euler–Lagrange strategy for simulating particle-laden flows, *J. Comput. Phys.* 238, 1–31 (2013). [doi:10.1016/j.jcp.2012.12.015](https://doi.org/10.1016/j.jcp.2012.12.015)
   Used in: the deposition of two-way coupling sources and dispersed-phase fields as a deposit spread by diffusion over a width in physical units (`deposition_width` in `[particles]`, `src/particles/particle_coupling.cpp`).
+- <a id="maxey-1987"></a>M. R. Maxey, The gravitational settling of aerosol particles in homogeneous turbulence and random flow fields, *J. Fluid Mech.* 174, 441–465 (1987). [doi:10.1017/S0022112087000193](https://doi.org/10.1017/S0022112087000193)
+- <a id="ferry-balachandar-2001"></a>J. Ferry and S. Balachandar, A fast Eulerian method for disperse two-phase flow, *Int. J. Multiphase Flow* 27, 1199–1226 (2001). [doi:10.1016/S0301-9322(00)00069-0](https://doi.org/10.1016/S0301-9322%2800%2900069-0)
+  Used in (these two): the expansion of a small particle's velocity in its relaxation time, whose first term is the equilibrium velocity toward which particles faster than the step relax.
+- <a id="squires-eaton-1991"></a>K. D. Squires and J. K. Eaton, Preferential concentration of particles by turbulence, *Phys. Fluids A* 3, 1169–1178 (1991). [doi:10.1063/1.858045](https://doi.org/10.1063/1.858045)
+- <a id="elghobashi-1994"></a>S. Elghobashi, On predicting particle-laden turbulent flows, *Appl. Sci. Res.* 52, 309–329 (1994). [doi:10.1007/BF00936835](https://doi.org/10.1007/BF00936835)
+- <a id="balachandar-eaton-2010"></a>S. Balachandar and J. K. Eaton, Turbulent dispersed multiphase flow, *Annu. Rev. Fluid Mech.* 42, 111–133 (2010). [doi:10.1146/annurev.fluid.010908.165243](https://doi.org/10.1146/annurev.fluid.010908.165243)
+  Used in (these three): the regimes of particle-laden flow (one-way coupling of dilute suspensions, Stokes numbers) in the [theory manual](theory/particles.md) and the [user guide](guide/particles.md#which-particles).
+- <a id="crowe-2011"></a>C. T. Crowe, J. D. Schwarzkopf, M. Sommerfeld and Y. Tsuji, *Multiphase Flows with Droplets and Particles*, 2nd ed., CRC Press (2011). [doi:10.1201/b11103](https://doi.org/10.1201/b11103)
+  Used in: the forces on a particle that Mallard leaves out, and their magnitudes.
+- <a id="haselbacher-2007"></a>A. Haselbacher, F. M. Najjar and J. P. Ferry, An efficient and robust particle-localization algorithm for unstructured grids, *J. Comput. Phys.* 225, 2198–2213 (2007). [doi:10.1016/j.jcp.2007.03.018](https://doi.org/10.1016/j.jcp.2007.03.018)
+  Used in: the location of particles by walking across faces (`Walker`, `src/particles/particles.h`).
 
 ## Derived output fields
 
