@@ -312,7 +312,8 @@ std::set<std::string> tool_scripts(const std::vector<std::string> & commands) {
  * @brief Adds the tools the scripts import (the mallard package, and scripts
  * next to them), and returns the third-party Python packages they need. The
  * packages of a module imported only inside a function (such as mallard.h5,
- * for HDF5 snapshots) are optional.
+ * for HDF5 snapshots) are optional, as are those the mallard package imports
+ * inside a function (pyvista for mallard.vtu.read_pyvista).
  */
 std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs::path> & extra_scripts,
                                     std::set<std::string> & scripts) {
@@ -352,7 +353,7 @@ std::set<std::string> close_imports(const fs::path & tools, const std::vector<fs
             } else if (script.parent_path().parent_path() == tools && fs::exists(sibling)) {
                 scripts.insert(fs::relative(sibling, tools).generic_string());
                 pending.emplace_back(sibling, top_level);
-            } else if (needed) {
+            } else if (needed && !(script.parent_path() == tools / "mallard" && match[1].length() != 0)) {
                 for (const auto & [mod, pkg] : known) {
                     if (mod == module) packages.insert(pkg);
                 }
