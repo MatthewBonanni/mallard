@@ -2897,6 +2897,8 @@ void Solver::advance_run(const uint64_t until_step, const rtype until_time) {
         const bool timed = until_time < std::numeric_limits<rtype>::infinity();
         const rtype time_reached = until_time - precision_tol(1e-9, 1e-5) * Kokkos::abs(until_time);
         try {
+            // The caller may have read the state with the chemistry's pending half step applied
+            if (stop_reason().empty()) unflush_chemistry();
             while (stop_reason().empty() && step < until_step && !(timed && t >= time_reached)) advance_once();
         } catch (const DivergedError &) {
             stop_diverged();
@@ -2907,7 +2909,7 @@ void Solver::advance_run(const uint64_t until_step, const rtype until_time) {
 void Solver::advance_once() {
     // The first step runs kernel by kernel, which also sets up what the
     // kernels allocate on first use
-    if (use_device_steps && step > step_run_start) {
+    if (use_device_steps && step > step_run_start && !host_step_next) {
         Kokkos::Timer step_timer;
         if (n_launched == n_taken) resume_device_steps();
         while (n_launched - n_taken < queue_depth) {
@@ -2922,6 +2924,7 @@ void Solver::advance_once() {
             drain_device_steps();
             after_step(step_timer, &record);
             if (record.reasons & step_queue::PROBES) destroy_step_graph();
+            call_step_hook();
             return;
         }
         n_queued_steps++;
@@ -2948,9 +2951,46 @@ void Solver::advance_once() {
     // Acted on by every rank after the next step, whose time-step reduction carries it
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
     Kokkos::Timer step_timer;
+    host_step_next = false;
     calc_dt();
     take_step();
     after_step(step_timer, nullptr);
+    call_step_hook();
+}
+
+void Solver::call_step_hook() {
+    if (!step_hook) return;
+    // The hook may replace itself
+    const std::function<void()> hook = step_hook;
+    hook();
+    if (stop_reason().empty()) unflush_chemistry();
+}
+
+void Solver::set_stage_hook(std::function<void(const State &, rtype, int)> hook) {
+    stage_hook = std::move(hook);
+    if (!run_hold) return;
+    destroy_step_graph();
+    use_device_steps = device_steps_unsupported().empty();
+    use_step_graph = use_device_steps && step_graph_unsupported().empty();
+}
+
+State Solver::boundary_state() {
+    flush_chemistry();
+    Kokkos::fence("boundary_state");
+    return state();
+}
+
+void Solver::state_set(const std::string & what) {
+    const comm::SelfScope scope = communication_scope();
+    Kokkos::fence("state_set");
+    // The pending half step is in the state set, as in the state read
+    chemistry_pending = 0.0;
+    chemistry_flushed = false;
+    halo_current = false;
+    host_step_next = true;
+    update_primitives();
+    save_last_good();
+    logging::event(step, double(t), "state_set", what);
 }
 
 int Solver::finish_run() {
@@ -3633,14 +3673,26 @@ void Solver::take_step() {
         freeze_thermodynamics();
         cells_frozen = true;
     }
-    time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+    const std::function<void(const State &, rtype, int)> hook = stage_hook;
+    int stage = 0;
+    RHSFunction staged;
+    if (hook) {
+        staged = [&](State solution, State rhs, rtype t_stage, rtype c) {
+            Kokkos::fence("stage_hook");
+            hook(solution, t_stage, stage++);
+            rhs_func(solution, rhs, t_stage, c);
+        };
+    }
+    const RHSFunction & rhs_of_stage = hook ? staged : rhs_func;
+    time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_of_stage);
     for (int tries = 1; step_controller.enabled() && !accept_controlled_step(); tries++) {
         n_rejected++;
         check_rejections(tries);
         // The retry advances the characteristic faces again, from the step's start
         t_characteristic = -std::numeric_limits<rtype>::infinity();
         calc_dt();
-        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_func);
+        stage = 0;
+        time_integrator->take_step(t, dt, solution_vec, rhs_vec, rhs_of_stage);
     }
     run_health.ledger.end_step(static_cast<double>(dt));
     if (particles) {

@@ -70,22 +70,44 @@ solver's internals change freely. The first slice is one header,
 
 Later slices add, each additive to the API version:
 
-- **State access**: `Solver::fields()` gives named views of the owned cells
-  (`RHO`, `U`, `P`, `Y_<species>`; conservative and primitive), as a
-  `mallard::Field` with extents, strides, scalar type and memory space
-  (host or device pointer), read-only by default; `set_state(...)` writes the
-  conservative state at a step boundary only (between steps, never inside one),
-  through the same path a restart takes, and the run log records that the state
-  was set. These map to DLPack and `__cuda_array_interface__` in Python without
-  copies. The geometry (cell centroids, volumes, global ids) comes the same way.
-- **Callbacks**: `on_step(f)` after every step the host takes, `on_output(f)`,
-  `on_progress(f)` with the progress record as a struct (the same fields as the
-  run log's `progress` record), `on_stage(f)` at each Runge-Kutta stage. A run
-  with a per-step or per-stage callback cannot enqueue steps ahead, so it takes
-  every step on the host as a run with host triggers does today
-  (`step_horizon`); `on_progress` and `on_output` keep the device queue, since
-  the host already acts at those steps.
-- **Diagnostics**: statistics means and their convergence, forces, the run
+- **State access** (slice 2): `Solver::field(name, memory)` gives a view of
+  the owned cells of a field as a `mallard::Field` (data pointer, scalar type,
+  device and device ordinal, shape, strides in elements, unit): the
+  conservative variables and partial densities (the state), the primitives
+  (computed from the state when asked for), their blocks, the statistics
+  averages and the geometry (`CENTROID`, `VOLUME`, `GLOBAL_ID`). With
+  `Memory::solver` it is the solver's own memory, on the device in GPU builds,
+  never copied; `Memory::host` copies to host memory only where the solver's
+  memory is a device's. The state read has a reacting run's pending chemistry
+  half step applied (`Solver::boundary_state`, which the next step undoes,
+  bit for bit). A `Field` is exactly what DLPack and
+  `__cuda_array_interface__` describe, so the bindings wrap it without copies.
+  `writable_field` hands out the state's views for writing; `commit_state()`
+  (or the next step) takes the state as a restart does
+  (`Solver::state_set`: host copies written back, the chemistry's pending half
+  step dropped, primitives, halo cells and the last valid state from it, the
+  next step on the host side of the queue, kernel by kernel, which takes the
+  queue's steps bit for bit), and the run log records an event `state_set`
+  naming the fields. Setting the state is runtime control like `mallard ctl
+  set`: the input stays the record of the configuration, the run log that of
+  where the run departed from it.
+- **Callbacks** (slice 2): `on_step(f)` after every step, `on_stage(f)` at
+  each stage of the time integrator, before the stage's right-hand side.
+  Neither runs inside captured work. The solver holds one hook of each
+  (`set_step_hook`, `set_stage_hook`), empty without callbacks, so a run
+  without them does nothing more per step. A step hook adds `step + 1` to the
+  horizon, as host triggers do: the device takes one queued step at a time,
+  still as captured CUDA graphs, and the hook runs after the host's
+  `after_step`. A stage hook makes `device_steps_unsupported` give a reason,
+  so steps run kernel by kernel on the host, where `take_step` wraps the
+  right-hand side's function to call it; removing it brings the queue and the
+  graphs back. Callbacks may not step or end the run (re-entrance throws).
+  Still to come: `on_output(f)` and `on_progress(f)` with the progress record
+  as a struct (the same fields as the run log's `progress` record), which
+  keep the device queue since the host already acts at those steps, and
+  `step(n)`.
+- **Diagnostics**: statistics means (slice 2: `MEAN_`/`COV_` fields and
+  `Solver::statistics()`, the averaging window) and their convergence, the run
   status (`RunStatus`, as `mallard ctl status` reports it), the check report
   (`mallard check`) and the resolved input with its key catalog records.
 - **Logging sink**: where the text the solver prints goes (stdout by default,
@@ -304,10 +326,10 @@ no Rust API:
    `setup`, `step`, `advance_to`, `finish`, `run`, `time`, `step_count`,
    `monitors`; the CMake package; an example built against an install; tests
    that the API's runs match `mallard -i` bit for bit.
-2. State access (`fields()`, geometry, `set_state` at step boundaries) and
-   `step(n)`.
-3. Callbacks (`on_step`, `on_progress`, `on_output`, `on_stage`) and the logging
-   sink, with structured progress records.
+2. State access (`field()`, geometry, statistics, `writable_field` and
+   `commit_state` at step boundaries) and callbacks (`on_step`, `on_stage`).
+3. `on_progress`, `on_output` and the logging sink, with structured progress
+   records; `step(n)`.
 4. Python bindings (nanobind) over 1-3, in `mallard-python`; the reader moves
    into the extension.
 5. Typed configs generated from the key catalog, `Case::set`, and the check

@@ -11,7 +11,9 @@
 #ifndef MALLARD_MALLARD_H
 #define MALLARD_MALLARD_H
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -108,6 +110,65 @@ struct Monitor {
     std::optional<uint64_t> step;  ///< step of the latest write, none before it
 };
 
+/** @brief The type of a Field's elements. */
+enum class ScalarType : uint8_t {
+    float32,  ///< a single-precision build's state (Mallard_USE_DOUBLE=OFF)
+    float64,
+    uint64,   ///< GLOBAL_ID
+};
+
+/** @brief The memory a Field's data is in: the host's, or a device's (accessible only from its kernels). */
+enum class Device : uint8_t { host, cuda, hip, sycl };
+
+/** @brief Which copy of a field Solver::field gives. */
+enum class Memory : uint8_t {
+    solver,  ///< the solver's own memory, without a copy: on the device in GPU builds
+    host,    ///< host memory: the solver's own in CPU builds, else a copy (written back by commit_state)
+};
+
+/**
+ * @brief A view of one rank's owned cells of a field, in the solver's memory or a host copy: DLPack's and
+ *        `__cuda_array_interface__`'s description of an array. Element (i, j) is at
+ *        `data + i * strides[0] + j * strides[1]` elements. A view is valid until the next call of the Solver
+ *        that steps or ends the run (step, advance_to, finish, run).
+ */
+struct Field {
+    std::string name;               ///< "RHO", "conservatives", "MEAN_P", ...
+    std::string unit;               ///< UDUNITS ("kg m-3"); "1" if dimensionless or nondimensional; empty for a block
+    void * data = nullptr;          ///< first element
+    ScalarType type = ScalarType::float64;
+    Device device = Device::host;
+    int device_id = 0;              ///< the device's ordinal (CUDA, HIP), 0 on the host
+    std::vector<int64_t> shape;     ///< {cells} for a variable, {cells, components} for a block or a vector
+    std::vector<int64_t> strides;   ///< in elements, per dimension
+    bool writable = false;          ///< writes reach the state at the next commit_state
+
+    /** @brief The number of elements. */
+    int64_t size() const {
+        int64_t n = 1;
+        for (const int64_t e : shape) n *= e;
+        return n;
+    }
+};
+
+/** @brief The stage of a step a per-stage callback runs at: the solver evaluates dU/dt of the stage's state next. */
+struct Stage {
+    uint64_t step;  ///< the step being taken, from step_count() to step_count() + 1
+    int index;      ///< 0 for the first stage of the time integrator; the stages of a rejected step count again
+    double time;    ///< the stage's time t_n + c_i dt (s)
+};
+
+/** @brief The [statistics] means' averaging, as the output files' attributes give it. */
+struct Statistics {
+    uint64_t samples = 0;  ///< samples averaged so far
+    double start;          ///< start of the averaging window (s); NaN before the first sample
+    double end;            ///< the last sample's time (s); NaN before it
+    uint64_t batches = 0;  ///< closed batches of the confidence intervals ([statistics] batch)
+};
+
+/** @brief Identifies a registered callback, for Solver::remove_callback. */
+using CallbackId = uint64_t;
+
 /**
  * @brief Runs a case: setup(), then step() or advance_to(t) as often as wanted, then finish(). The run writes
  *        its output, run log and restart files exactly as `mallard -i` does; run() is that whole run, and gives
@@ -159,6 +220,53 @@ class Solver {
         std::vector<Monitor> monitors() const;
         /** @brief The monitored quantity of this name, or none. Collective. */
         std::optional<Monitor> monitor(std::string_view name) const;
+
+        /**
+         * @brief The names field() takes for this case (after setup): the conservative variables (RHO, RHOU_X,
+         *        ..., RHOE) and partial densities (RHOY_<species>), the primitive ones (U_X, ..., P, T, H), the
+         *        blocks (conservatives, species, primitives), the [statistics] averages (MEAN_<field>,
+         *        COV_<a>_<b>) and the geometry (CENTROID, VOLUME, GLOBAL_ID).
+         */
+        std::vector<std::string> field_names() const;
+        /**
+         * @brief A read-only view of a field on this rank's owned cells (setup() first if not done). The state
+         *        is that at the last step, with a reacting run's pending chemistry half step applied; the
+         *        primitives are computed from it now. Inside a per-stage callback, the conservative variables,
+         *        partial densities and their blocks are those of the stage's state. Throws Error for an unknown
+         *        name.
+         */
+        Field field(std::string_view name, Memory memory = Memory::solver);
+        /**
+         * @brief A writable view of a conservative variable, partial density or block (conservatives, species),
+         *        to set the state between steps: write it, then commit_state(), or let the next step commit it.
+         *        Not inside a per-stage callback.
+         */
+        Field writable_field(std::string_view name, Memory memory = Memory::solver);
+        /**
+         * @brief Takes what was written through writable fields as the state: host copies are copied to the
+         *        solver's memory, the next step starts from the state as from a restart (the primitives, halo
+         *        cells and time step computed from it), and the run log records that the state was set. Does
+         *        nothing if no writable field was taken. Collective.
+         */
+        void commit_state();
+        /** @brief The [statistics] means' averaging so far. */
+        Statistics statistics() const;
+
+        /**
+         * @brief Calls f after every step the run takes (and after a rejected step's retry is accepted), in the
+         *        order registered. f may read fields and monitors and set the state, but not step or end the
+         *        run. A run with a per-step callback takes steps one at a time on the device (captured CUDA
+         *        graphs are kept), as one with host triggers does; a run without one has no per-step host work.
+         */
+        CallbackId on_step(std::function<void(Solver &)> f);
+        /**
+         * @brief Calls f at each stage of every step, before dU/dt of the stage's state is evaluated; field()
+         *        views the stage's state there. A run with a per-stage callback takes its steps kernel by
+         *        kernel on the host, without the device queue or CUDA graphs: register one only while needed.
+         */
+        CallbackId on_stage(std::function<void(Solver &, const Stage &)> f);
+        /** @brief Removes a callback; unknown ids are ignored. */
+        void remove_callback(CallbackId id);
 
     private:
         struct Impl;
