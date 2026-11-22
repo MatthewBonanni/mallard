@@ -21,6 +21,7 @@
 
 #include "comm.h"
 #include "device_comm.h"
+#include "gated.h"
 
 /**
  * @brief 2^b for terms summed over n_global rows, b leaving room for every row in 63 bits: b = 62 - ceil(log2(n_global
@@ -70,7 +71,7 @@ std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const 
     std::array<double, N> largest = {};
     for (size_t k = 0; k < N; k++) {
         double local = 0.0;
-        Kokkos::parallel_reduce(
+        gated::parallel_reduce(
             "exact_sums_largest", n_owned,
             KOKKOS_LAMBDA(const uint32_t c, double & m) { m = Kokkos::fmax(m, Kokkos::fabs(terms(c, k))); },
             Kokkos::Max<double>(local));
@@ -87,7 +88,7 @@ std::array<double, N> exact_sums(const Kokkos::View<double *[N]> & terms, const 
         const double s = unit / largest[k];
         scale[k] = s;
         int64_t local = 0;
-        Kokkos::parallel_reduce(
+        gated::parallel_reduce(
             "exact_sums", n_owned,
             KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
                 sum += static_cast<int64_t>(Kokkos::round(terms(c, k) * s));
@@ -138,10 +139,10 @@ class ExactSums {
         template <typename Terms>
         void sum(const Terms & terms, const Kokkos::View<const uint32_t> & count) const {
             const Kokkos::View<int64_t *> n = rows;
-            Kokkos::parallel_for("exact_sums_rows", 1, KOKKOS_LAMBDA(const int) { n(0) = count(); });
+            gated::parallel_for("exact_sums_rows", 1, KOKKOS_LAMBDA(const int) { n(0) = count(); });
             if (distributed) comm::allreduce_device(n, comm::Op::SUM, use_nccl);
             const Kokkos::View<double> u = counted_unit;
-            Kokkos::parallel_for("exact_sums_unit", 1, KOKKOS_LAMBDA(const int) {
+            gated::parallel_for("exact_sums_unit", 1, KOKKOS_LAMBDA(const int) {
                 u() = exact_sums_unit(static_cast<uint64_t>(n(0)));
             });
             sum_rows(terms, count, counted_unit);
@@ -158,20 +159,20 @@ class ExactSums {
             const bool counted = count.is_allocated();
             const Kokkos::View<double *> m = largest;
             for (uint32_t k = 0; k < n_columns; k++) {
-                Kokkos::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
+                gated::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
                     if (!counted || c < count()) x = Kokkos::fmax(x, exact_sums_magnitude(terms(c, k)));
                 }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(m.data() + k)));
             }
             if (distributed) comm::allreduce_device(m, comm::Op::MAX, use_nccl);
             const Kokkos::View<int64_t *> f = fixed;
             for (uint32_t k = 0; k < n_columns; k++) {
-                Kokkos::parallel_reduce("exact_sums", n_rows, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
+                gated::parallel_reduce("exact_sums", n_rows, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
                     if (!counted || c < count()) sum += exact_sums_fixed(terms(c, k), unit_(), m(k));
                 }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(f.data() + k)));
             }
             if (distributed) comm::allreduce_device(f, comm::Op::SUM, use_nccl);
             const Kokkos::View<double *> out = totals;
-            Kokkos::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
+            gated::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
                 out(k) = exact_sums_total(f(k), unit_(), m(k));
             });
         }

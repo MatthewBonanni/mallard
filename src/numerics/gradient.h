@@ -19,6 +19,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "gated.h"
 #include "mesh.h"
 
 /**
@@ -537,7 +538,7 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
     // Only boundary faces have ghosts: the weights of a cell's faces are stored for those alone
     const Kokkos::View<uint32_t *> ghost_offsets = functor.weights.ghost_offsets;
     uint32_t n_ghosts = 0;
-    Kokkos::parallel_scan("vertex_gradient_ghost_offsets", n_cells + 1,
+    gated::parallel_scan("vertex_gradient_ghost_offsets", n_cells + 1,
                           KOKKOS_LAMBDA(const uint32_t c, uint32_t & sum, const bool final) {
         if (final) ghost_offsets(c) = sum;
         if (c == n_cells) return;
@@ -548,14 +549,14 @@ inline LSQVertexGradientFunctor make_vertex_gradient(const LSQGradientFunctor & 
     functor.weights.ghost_faces = Kokkos::View<uint32_t *>("vertex_gradient_weights_ghost_faces", n_ghosts);
     functor.weights.faces = Kokkos::View<rtype *[N_DIM]>("vertex_gradient_weights_faces", n_ghosts);
     const Kokkos::View<uint32_t *> ghost_faces = functor.weights.ghost_faces;
-    Kokkos::parallel_for("vertex_gradient_ghost_faces", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("vertex_gradient_ghost_faces", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         uint32_t g = ghost_offsets(c);
         for (uint32_t k = faces.offsets_faces_of_cell(c); k < faces.offsets_faces_of_cell(c + 1); k++) {
             const uint32_t i_face = faces.faces_of_cell(k);
             if (functor.ghost_face(i_face)) ghost_faces(g++) = i_face;
         }
     });
-    Kokkos::parallel_for("vertex_gradient_weights", n_cells,
+    gated::parallel_for("vertex_gradient_weights", n_cells,
                          KOKKOS_LAMBDA(const uint32_t i_cell) { functor.compute_weights(i_cell); });
     return functor;
 }

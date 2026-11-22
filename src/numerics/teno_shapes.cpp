@@ -18,6 +18,7 @@
 #include <Kokkos_BitManipulation.hpp>
 
 #include "comm.h"
+#include "gated.h"
 
 namespace teno {
 
@@ -263,7 +264,7 @@ namespace {
 
 /** @brief Each cell's hash of its nodes and boundary faces with their conditions, sorted, in its own units. */
 void compute_shapes(const ShapeSearch & g, const uint32_t n_cells) {
-    Kokkos::parallel_for("teno_shape_shapes", Kokkos::RangePolicy<>(0, n_cells), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("teno_shape_shapes", Kokkos::RangePolicy<>(0, n_cells), KOKKOS_LAMBDA(const uint32_t c) {
         int64_t items[MAX_SHAPE_ITEMS][N_DIM + 1];
         const uint32_t n0 = g.offsets_nodes_of_cell(c), n1 = g.offsets_nodes_of_cell(c + 1);
         const uint32_t f0 = g.offsets_faces_of_cell(c), f1 = g.offsets_faces_of_cell(c + 1);
@@ -314,7 +315,7 @@ void each_search(const ShapeSearch & g, const uint32_t slots, const uint32_t n, 
     if constexpr (DEVICE_IS_HOST) {
         Kokkos::Experimental::UniqueToken<Kokkos::DefaultExecutionSpace, Kokkos::Experimental::UniqueTokenScope::Global>
             token;
-        Kokkos::parallel_for("teno_shape_search",
+        gated::parallel_for("teno_shape_search",
                              Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, n),
                              [=](const uint32_t t) {
             const int id = token.acquire();
@@ -323,7 +324,7 @@ void each_search(const ShapeSearch & g, const uint32_t slots, const uint32_t n, 
         });
     } else {
         for (uint32_t t0 = 0; t0 < n; t0 += slots) {
-            Kokkos::parallel_for("teno_shape_search", Kokkos::RangePolicy<>(0, std::min(slots, n - t0)),
+            gated::parallel_for("teno_shape_search", Kokkos::RangePolicy<>(0, std::min(slots, n - t0)),
                                  KOKKOS_LAMBDA(const uint32_t i) { f(t0 + i, g.lanes(i)); });
         }
     }
@@ -373,7 +374,7 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
     Kokkos::deep_copy(s.translations, h_translations);
     s.h = Kokkos::View<double *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_h"), n_cells);
     auto h_h = Kokkos::create_mirror_view(s.h);
-    Kokkos::parallel_for("teno_shape_scales", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
+    gated::parallel_for("teno_shape_scales", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
                          [&](const uint32_t c) { h_h(c) = teno_setup::cell_scale(mesh, c); });
     Kokkos::deep_copy(s.h, h_h);
 
@@ -541,7 +542,7 @@ std::vector<std::vector<uint64_t>> ShapeKeys::records(const teno_setup::TableBat
     auto small_pinv = host(batch.small_pinv);
     const size_t nk = batch.nk;
     std::vector<std::vector<uint64_t>> out(n);
-    Kokkos::parallel_for("teno_shape_records", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n), [&](const uint32_t j) {
+    gated::parallel_for("teno_shape_records", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n), [&](const uint32_t j) {
         std::vector<uint64_t> & r = out[j];
         if (h_size(j) == 0) {
             r = {0};

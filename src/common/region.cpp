@@ -10,6 +10,7 @@
  */
 
 #include "region.h"
+#include "gated.h"
 #include "region_sampler.h"
 
 #include <algorithm>
@@ -343,7 +344,7 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
     const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
-    Kokkos::parallel_for("region_cell_fractions",
+    gated::parallel_for("region_cell_fractions",
                          Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
                          [&](const uint32_t i_cell) {
         double inside = 0.0, total = 0.0;
