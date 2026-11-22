@@ -14,6 +14,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -98,7 +99,7 @@ void Solver::allocate_chemistry() {
 
 void Solver::set_chemistry_dt(const double dt_chem) {
     const Kokkos::View<double> d = chem_dt;
-    Kokkos::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { d() = dt_chem; });
+    gated::parallel_for("chemistry_dt", 1, KOKKOS_LAMBDA(const int) { d() = dt_chem; });
 }
 
 void Solver::run_chemistry(const ChemistryForcing * forcing, const bool audited) {
@@ -115,7 +116,7 @@ void Solver::run_chemistry(const ChemistryForcing * forcing, const bool audited)
     if (ledger) run_health.ledger.chemistry_end(species, clipped);
     if (audit) {
         run_health.repairs.touch(run_health.clip_site, run_health.clip_flags);
-        Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), run_health.clip_flags, uint8_t(0));
+        gated::fill(run_health.clip_flags, uint8_t(0));
     }
 }
 
@@ -143,18 +144,18 @@ void Solver::allocate_unflushed() {
 void Solver::keep_unflushed() {
     const Kokkos::DefaultExecutionSpace exec;
     deep_copy(exec, unflushed, state());
-    Kokkos::deep_copy(exec, unflushed_T_seed, T_seed);
-    Kokkos::deep_copy(exec, unflushed_chem_h, chem_h);
-    Kokkos::deep_copy(exec, unflushed_chem_cost, chem_cost);
+    gated::copy(exec, unflushed_T_seed, T_seed);
+    gated::copy(exec, unflushed_chem_h, chem_h);
+    gated::copy(exec, unflushed_chem_cost, chem_cost);
     cell_chemistry.keep();
 }
 
 void Solver::restore_unflushed() {
     const Kokkos::DefaultExecutionSpace exec;
     deep_copy(exec, state(), unflushed);
-    Kokkos::deep_copy(exec, T_seed, unflushed_T_seed);
-    Kokkos::deep_copy(exec, chem_h, unflushed_chem_h);
-    Kokkos::deep_copy(exec, chem_cost, unflushed_chem_cost);
+    gated::copy(exec, T_seed, unflushed_T_seed);
+    gated::copy(exec, chem_h, unflushed_chem_h);
+    gated::copy(exec, chem_cost, unflushed_chem_cost);
     cell_chemistry.restore();
     halo_current = false;
 }
@@ -190,12 +191,12 @@ void Solver::swap_unflushed() {
 void Solver::reduce_chemistry_failures() {
     const Kokkos::View<uint64_t *> tally = cell_chemistry.tallies();
     const Kokkos::View<int64_t *> f = chem_failures;
-    Kokkos::parallel_for("chemistry_failures_total", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_failures_total", 1, KOKKOS_LAMBDA(const int) {
         f(0) = static_cast<int64_t>(tally(CellChemistry::FAILURES));
     });
     if (is_distributed()) comm::allreduce_device(chem_failures, comm::Op::SUM, halo.uses_nccl());
     const Kokkos::View<double *, Kokkos::SharedHostPinnedSpace> io = chem_io;
-    Kokkos::parallel_for("chemistry_failures_out", 1, KOKKOS_LAMBDA(const int) { io(1) = static_cast<double>(f(0)); });
+    gated::parallel_for("chemistry_failures_out", 1, KOKKOS_LAMBDA(const int) { io(1) = static_cast<double>(f(0)); });
 }
 
 void Solver::check_chemistry() {
@@ -220,7 +221,7 @@ void Solver::update_heat_release_rate() {
     // The modeled rates of the thickened flame or the partially stirred reactor
     Kokkos::View<rtype *> q = hrr, scale = chem_time_scale;
     Kokkos::View<rtype **, Kokkos::LayoutRight> w = production;
-    Kokkos::parallel_for("tfles_rates", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("tfles_rates", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         q(c) *= scale(c);
         for (uint32_t k = 0; k < w.extent(1); k++) w(c, k) *= scale(c);
     });
@@ -254,7 +255,7 @@ void Solver::subtract_transport_rate(const State & rhs) {
     const StateView F = transport_rate.flow, dU = rhs.flow;
     const SpeciesView F_Y = transport_rate.species, dY = rhs.species;
     const uint32_t ns = transport_rate.n_species();
-    Kokkos::parallel_for("simpler_correction", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("simpler_correction", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
         FOR_I_CONSERVATIVE dU(c, i) -= F(c, i);
         for (uint32_t k = 0; k < ns; k++) dY(c, k) -= F_Y(c, k);
     });
@@ -262,12 +263,12 @@ void Solver::subtract_transport_rate(const State & rhs) {
 
 void Solver::chemistry_reductions(step_queue::Chemistry * out) {
     using Memory = Kokkos::DefaultExecutionSpace::memory_space;
-    Kokkos::parallel_reduce("chemistry_cost", mesh->n_owned(), MaxCostFunctor{chem_cost},
+    gated::parallel_reduce("chemistry_cost", mesh->n_owned(), MaxCostFunctor{chem_cost},
                             Kokkos::Max<rtype, Memory>(Kokkos::View<rtype, Memory>(&out->max_cost)));
     const Kokkos::View<uint64_t *> tally = cell_chemistry.tallies();
     const Kokkos::View<uint64_t[2]> substeps = cell_chemistry.substeps();
     const bool counted = substeps.is_allocated();
-    Kokkos::parallel_for("chemistry_counts", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("chemistry_counts", 1, KOKKOS_LAMBDA(const int) {
         out->last_active = tally(CellChemistry::LAST_ACTIVE);
         for (int i = 0; i < 2; i++) out->substeps[i] = counted ? substeps(i) : 0;
     });

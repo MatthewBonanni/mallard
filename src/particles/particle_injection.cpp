@@ -738,7 +738,7 @@ void Injectors::reserve(const uint32_t capacity) {
 void Injectors::inject(const rtype t_now, const InjectionTarget & target) {
     if (empty()) return;
     const Kokkos::View<rtype> th = t_host;
-    Kokkos::parallel_for("particle_injection_host_time", 1, KOKKOS_LAMBDA(const int) { th() = t_now; });
+    gated::parallel_for("particle_injection_host_time", 1, KOKKOS_LAMBDA(const int) { th() = t_now; });
     inject(t_host.data(), target);
 }
 
@@ -756,7 +756,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     const auto overflow = n_overflow;
     const uint32_t TOTAL = 2 * n, FIRST_ID = 2 * n + 1, LOCAL = 2 * n + 2, FREE_SLOTS = 2 * n + 3;
     // Parcels of each injector over (t_prev, t_now]
-    Kokkos::parallel_for("particle_injection_counts", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("particle_injection_counts", 1, KOKKOS_LAMBDA(const int) {
         const double t0 = t_prev();
         const double t1 = Kokkos::fmax(static_cast<double>(*t_now), t0);
         uint64_t total = 0;
@@ -781,7 +781,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     });
     // Which of them this rank owns
     const auto list = local_list;
-    Kokkos::parallel_scan("particle_injection_local", capacity, KOKKOS_LAMBDA(const uint32_t k, uint32_t & m, const bool last) {
+    gated::parallel_scan("particle_injection_local", capacity, KOKKOS_LAMBDA(const uint32_t k, uint32_t & m, const bool last) {
         bool mine = false;
         if (k < info(TOTAL)) {
             uint32_t j;
@@ -794,7 +794,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     });
     const auto ids = target.id;
     const auto slots = free_list;
-    Kokkos::parallel_scan("particle_injection_free", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & m, const bool last) {
+    gated::parallel_scan("particle_injection_free", capacity, KOKKOS_LAMBDA(const uint32_t s, uint32_t & m, const bool last) {
         const bool free = ids(s) == FREE;
         if (last && free) slots(m) = s;
         m += free ? 1u : 0u;
@@ -808,7 +808,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     const uint32_t w = target.width, n_aux = static_cast<uint32_t>(target.aux.extent(1)), first_q = target.first_quantity;
     const bool solid = target.solid, heated = target.heated;
     const Solid sphere = target.sphere;
-    Kokkos::parallel_for("particle_injection_insert", capacity, KOKKOS_LAMBDA(const uint32_t m) {
+    gated::parallel_for("particle_injection_insert", capacity, KOKKOS_LAMBDA(const uint32_t m) {
         if (m >= info(LOCAL)) return;
         if (m >= info(FREE_SLOTS)) {
             Kokkos::atomic_inc(&overflow());

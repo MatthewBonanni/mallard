@@ -235,7 +235,7 @@ struct ViscousFluxFunctor {
     FacePoints points = {};
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution = {};
     Kokkos::View<rtype *> quad_weights = {};
-    Kokkos::View<rtype **> face_weights = {};
+    FaceWeights<> face_weights = {};
     Kokkos::View<rtype ***> quad_normals = {};
     rtype jump_damping = 4.0_r / 3.0_r;
 
