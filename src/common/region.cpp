@@ -34,6 +34,9 @@ using Vec = std::array<double, 3>;
 constexpr double INF = std::numeric_limits<double>::infinity();
 constexpr double PI = 3.14159265358979323846;
 
+using Box = std::array<Vec, 2>;
+constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
+
 double dot(const Vec & a, const Vec & b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 [[maybe_unused]] Vec cross(const Vec & a, const Vec & b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
@@ -339,9 +342,44 @@ struct HostNodes {
     }
 };
 
-/** @brief The fractions of a filled region of shapes. */
-std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view) {
+Box filled_bounds(const Region & region, uint32_t i);
+
+/**
+ * @brief The fractions of filled region i, of shapes. Without a smooth edge, the
+ *        distance is not negative outside the region's bounds, so a straight cell
+ *        whose nodes lie outside them is 0 without sampling: its samples lie
+ *        within its nodes' box.
+ */
+std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, const RegionView<Kokkos::HostSpace> & view,
+                                    const uint32_t i) {
     const sampler::Shape<HostDistance> shape{HostDistance{view}, view.edge, region.bounded()};
+    // Programs that can run away are evaluated everywhere, so that a runaway is reported wherever it is
+    Box box = view.edge > 0.0 || view.programs.loops ? EVERYWHERE : filled_bounds(region, i);
+    // Padded well past the rounding of the bounds and of the samples
+    double scale = 1.0;
+    for (const Vec & corner : box) {
+        for (const double x : corner) scale = std::isfinite(x) ? std::max(scale, std::abs(x)) : scale;
+    }
+    for (size_t k = 0; k < 3; k++) {
+        box[0][k] -= 1e-6 * scale;
+        box[1][k] += 1e-6 * scale;
+    }
+    auto outside = [&](const uint32_t c) {
+        Vec lo = {INF, INF, INF}, hi = {-INF, -INF, -INF};
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+            double x[3];
+            HostNodes{mesh, c}(k, x);
+            for (size_t d = 0; d < 3; d++) {
+                lo[d] = std::min(lo[d], x[d]);
+                hi[d] = std::max(hi[d], x[d]);
+            }
+        }
+        // 2D: x and y only, as every user of the bounds reads them: the cells lie at z = 0 whatever a center's z
+        for (size_t d = 0; d < N_DIM; d++) {
+            if (hi[d] < box[0][d] || lo[d] > box[1][d]) return true;
+        }
+        return false;
+    };
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     gated::parallel_for("region_cell_fractions",
@@ -356,6 +394,8 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                 const double a[3] = {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, b[3] = {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0};
                 sampler::cone(shape, mesh.axisymmetric, cone, k, a, b, inside, total);
             }
+        } else if (outside(i_cell)) {
+            return;
         } else {
             sampler::straight_cell(shape, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell}, inside,
                                    total);
@@ -449,7 +489,7 @@ std::vector<double> fractions_of(const Mesh & mesh, const Region & region, const
         case Filled::Kind::SHAPES: {
             RegionView<Kokkos::HostSpace> view = region.host(f);
             if (i == region.root()) view.edge = region.edge();
-            return shape_fractions(mesh, region, view);
+            return shape_fractions(mesh, region, view, i);
         }
         case Filled::Kind::ALL:
             return std::vector<double>(mesh.n_cells, 1.0);
@@ -496,9 +536,6 @@ std::vector<double> cell_fractions(const Mesh & mesh, const Region & region, con
 }
 
 namespace {
-
-using Box = std::array<Vec, 2>;
-constexpr Box EVERYWHERE = {Vec{-INF, -INF, -INF}, Vec{INF, INF, INF}};
 
 /** @brief A box around a primitive: its local box, through its frame. */
 Box primitive_bounds(const Node & n, const std::vector<double> & vertices) {
