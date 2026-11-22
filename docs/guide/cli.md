@@ -31,6 +31,25 @@ A few things hold for every command:
   `list`, `post extract`, `post convergence`) are functions of the
   [Python package](python.md), `mallard.info(path)` and `mallard.post.extract(files, latest=True)`,
   which run the command and return its JSON as a dict.
+- **Programs that drive Mallard** (a GUI, a workflow tool) start with
+  `mallard version --format json`: its build and the schema of each interface
+  below. Each interface's JSON carries the same `schema` and integer `version`;
+  an addition (a member, a record type) keeps the version, and a change that
+  breaks a reader increments it.
+
+| Interface | Where | Schema |
+|---|---|---|
+| Capabilities | `mallard version --format json` | `mallard-capabilities` |
+| Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
+| Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
+| Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
+| Snapshot block | every snapshot and restart file | `mallard-snapshot` |
+| Probe sampling block | probe files | `mallard-probe-sampling` |
+| Run directory | `mallard info RUN_DIR --format json` | `mallard-run-directory` |
+| Run control | `mallard ctl`, control files ([Running](running.md)) | `mallard-run-control` |
+| Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
+| Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
 
 ## Shell completion
 
@@ -145,7 +164,7 @@ Commands:
     mallard test              Run the unit and regression tests
     mallard completion        Print the shell completion script for bash, zsh or
                               fish
-    mallard --version         Print the version
+    mallard version           Print the version, or what this build supports
 
 Options:
   -i FILE                  The input file (TOML). Required.
@@ -201,13 +220,13 @@ Sends a request to the run started in run-dir, through its control socket
 mallard.sock, and prints the reply. It must run on the node of the run's rank 0.
 
 status: step, t, dt, CFL number, progress, wall time per step, cells per second,
-ETA and memory. checkpoint: write a restart file now; the reply names it. stop:
-write a restart file and end the run (exit status 3). set: change settings from
-the next step on: n_steps, t_stop, t_wall_stop (0 removes a limit; one must
-remain; times in seconds or with a unit, e.g. t_wall_stop=2h), check_interval,
-write_data.<prefix or index>.interval or .time_interval, probes.<name>.interval
-or .time_interval, forces.<zone>.interval, integrals.interval. Other keys are
-refused.
+ETA, memory and the state of each trigger. checkpoint: write a restart file now;
+the reply names it. stop: write a restart file and end the run (exit status 3).
+set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
+removes a limit; one must remain; times in seconds or with a unit, e.g.
+t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
+.time_interval, probes.<name>.interval or .time_interval,
+forces.<zone>.interval, integrals.interval. Other keys are refused.
 
 Options:
   -h, --help  Show this page.
@@ -1043,9 +1062,10 @@ Options:
                          input's [regions] or of the mesh, or an inline TOML
                          table, as [[write_data]] region takes it. Default: the
                          whole mesh.
-  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, every
-                         snapshot in one file, or .vtu files with a .pvd index.
-                         Default: vtkhdf, or vtu in builds without HDF5.
+  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, the
+                         series of a file per snapshot, or .vtu files with a
+                         .pvd index. Default: vtkhdf, or vtu in builds without
+                         HDF5.
   --name NAME            The name of the snapshots: NAME.vtkhdf. Default:
                          derived.
   --steps LIST           Derive the snapshots of these steps, separated by
@@ -1505,8 +1525,8 @@ made from the same table as the help pages and from the catalogs mallard list
 keys and mallard list fields print, so it knows every command, key and field of
 this build; templates come from mallard new when completing.
 
-An install (cmake --install, Spack, the containers) puts the scripts where the
-shells look: share/bash-completion/completions/mallard,
+An install (cmake --install, Spack, the containers, the archives) puts the
+scripts where the shells look: share/bash-completion/completions/mallard,
 share/zsh/site-functions/_mallard and
 share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
 or a prefix the shell does not search, load it from the shell's startup file, as
@@ -1528,22 +1548,43 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-completion
 ```
 
-### mallard --version
+### mallard version
 
 ```text
-Usage: mallard --version
+Usage: mallard version [--format text|json]
+       mallard --version
 
 Prints the version of this build: the git description of the commit it was built
 from, else the release.
 
+With --format json, one JSON object for programs that drive Mallard, such as a
+GUI or a workflow tool, to learn what this mallard supports before using it: the
+version and commit (mallard), the build (dimension, precision, Kokkos backends,
+MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the versions of the libraries it
+uses (dependencies), the dimensions of the solvers installed with it (mallard
+--dim 3 version --format json describes the 3D one's build), and under
+interfaces the schema name and version of every machine-readable output: the key
+catalog, the check report, the run log, the run, snapshot and probe sampling
+blocks of output files, the run directory report, run control (with its commands
+and control files), the grid convergence report and the pack manifest. Each of
+these carries the same schema and version fields; an addition keeps the version,
+a change that breaks a reader increments it.
+
 Options:
-  -h, --help  Show this page.
+  --format text|json  text: the version alone, as mallard --version prints it;
+                      json: the version, commit, build and dependencies, the
+                      dimensions of the solvers installed with it, and the
+                      schema and version of every machine-readable interface,
+                      for programs that drive Mallard. Default: text.
+  -h, --help          Show this page.
 
 Examples:
   $ mallard --version
+  $ mallard version --format json
 
 Exit status:
-  0  always
+  0  printed
+  2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-version
 ```

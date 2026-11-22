@@ -478,6 +478,7 @@ Reynolds stress imposed as
     transverse length divided by `points_per_length` (default 6), and
     $\Delta t_p = L_\mathrm{stream}/(n_p\,U_c)$ likewise, with $n_p$ = `points_per_length` and $L_\mathrm{stream}$ the smallest streamwise length. On periodic directions
     the grid wraps and the half width is capped at what fits in a period.
+
 3. **Interpolation.** Face centroids interpolate the filtered planes
     bilinearly in space and linearly in time, and divide by the exact
     standard deviation of the interpolated value (from the correlation

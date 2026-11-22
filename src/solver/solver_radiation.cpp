@@ -11,6 +11,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -91,6 +92,6 @@ void Solver::init_radiation() {
 }
 
 void Solver::add_radiation(StateView rhs, SpeciesView rhoY) {
-    Kokkos::parallel_for("radiation", mesh->n_owned(), RadiationFunctor{radiation, mixture, W_cells, rhoY,
+    gated::parallel_for("radiation", mesh->n_owned(), RadiationFunctor{radiation, mixture, W_cells, rhoY,
                                                                          mesh->cell_measure, rhs});
 }
