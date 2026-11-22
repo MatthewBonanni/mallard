@@ -40,8 +40,10 @@ state management, its own tests) lives there.
    UIs over VTK). One codebase serves a web UI in a browser and a desktop app.
 2. **The GUI never duplicates solver logic.** Everything that needs to know
    physics, keys, defaults, units, file formats or validation asks the `mallard`
-   of the place the case runs, through its command line and JSON output. The GUI
-   hard-codes no input key; new keys appear without a GUI release.
+   of the place the case runs, through [`mallard session`](session.md): one
+   resident process per case speaking JSON-RPC over stdio, whose every request
+   is also a one-shot command. The GUI hard-codes no input key; new keys appear
+   without a GUI release.
 3. **`input.toml` is the single source of truth for a case.** The GUI edits it in
    place, keeping comments and layout, and its own project file never holds a
    solver key.
@@ -81,13 +83,13 @@ state management, its own tests) lives there.
  user's machine                                    a remote (cluster or Kubernetes)
  ┌──────────────────────────────────────┐         ┌───────────────────────────────────────┐
  │ browser or desktop shell (UI only)   │         │ login node / API server               │
- │        │ websocket, 127.0.0.1+token  │         │   mallard list keys | check | info |  │
- │ mallard-gui backend (Python, trame)  │  SSH    │   files | ctl   (short commands)      │
- │   backends: local | ssh+slurm | k8s  ├─────────┤                                       │
+ │        │ websocket, 127.0.0.1+token  │  stdio  │   mallard session  (one per case,     │
+ │ mallard-gui backend (Python, trame)  │  over   │     JSON-RPC, idle timeout)           │
+ │   backends: local | ssh+slurm | k8s  │  SSH /  │   mallard ctl | files (routed, short) │
  │   transfer engine, project model     │ kubectl │ solver job      mallard -i input.toml │
- │   local mallard (check, previews)    │         │   writes mallard.jsonl, outputs       │
- │        │ subprocess                  │ tunnel/ │ viewer job      trame/VTK server,     │
- │ local mallard runs                   │ port-fwd│   idle-stops, next to the data        │
+ │   local mallard session (setup)      │  exec   │   writes mallard.jsonl, outputs,      │
+ │        │ stdio                       │ tunnel/ │   its endpoint record mallard.run.json│
+ │ local mallard runs (detached)        │ port-fwd│ viewer job      trame/VTK, near data  │
  └──────────────────────────────────────┘         └───────────────────────────────────────┘
 ```
 
@@ -95,17 +97,20 @@ state management, its own tests) lives there.
   matters; closing it loses nothing.
 - **Backend**: one Python process per user session, bound to `127.0.0.1` on a
   random port, with a per-session token in the URL, since other users of a shared
-  machine can reach its localhost ports. It runs `mallard` commands as
-  subprocesses (locally, or through SSH or `kubectl exec`), owns the project
-  model and the transfer engine, and renders local data with VTK.
-- **Remote processes**: short `mallard` commands on the login node or in a
-  helper pod (metadata only: anything that reads a large mesh or snapshot runs
-  as a job, see [Scale](#scale)); solver jobs; viewer jobs while viewing;
-  extraction and query jobs for large meshes. All of them end on their own.
+  machine can reach its localhost ports. It talks to Mallard through one
+  [`mallard session`](session.md) per open case (locally, or through
+  `ssh host mallard session` or `kubectl exec -i`), which keeps the case's mesh
+  and setup between edits, owns the project model and the transfer engine, and
+  renders local data with VTK.
+- **Remote processes**: a `mallard session` per open case on the login node or
+  in a helper pod (for small cases; a case whose mesh is large runs its session
+  as a job, see [Scale](#scale)), ended by EOF or its idle timeout; short
+  `mallard ctl` and `mallard files` commands; solver jobs; viewer jobs while
+  viewing. All of them end on their own.
 - **No in-process solver.** The programmatic interface of
   [#345](https://github.com/MatthewBonanni/mallard/issues/345) is not on the
-  critical path: remote runs need a process boundary anyway, and the command
-  line with JSON output is the programmatic interface the GUI sits on. The Python
+  critical path: remote runs need a process boundary anyway, and
+  `mallard session` is the programmatic interface the GUI sits on. The Python
   bindings become useful later for in-process previews of local cases.
 
 Why a separate repository (user decision; the tradeoff, for the record): the GUI
@@ -117,11 +122,14 @@ needed no compatibility matrix.
 
 ## Versioned interfaces and compatibility
 
-The GUI talks to Mallard only through these, each with a schema name and an
-integer version in its JSON:
+The GUI talks to Mallard only through [`mallard session`](session.md) and the
+run-side files and commands below, each with a schema name, an integer version
+in its JSON and a JSON Schema in `schemas/`. Every session request is also a
+one-shot command (the rows below), which runs the same handler:
 
 | Interface | Command | Version today |
 |---|---|---|
+| Session | `mallard session [INPUT]`: JSON-RPC 2.0 over stdio, the requests of [The session](session.md#requests) | missing |
 | Capabilities | `mallard version --format json`: version, build (dimension, precision, backends, MPI, HDF5, ...), installed dimensions, and the schema and version of every interface below | `mallard-capabilities` 1 (#1314) |
 | Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` 1 |
 | Check report | `mallard check INPUT --format json` | `mallard-check` 1 |
@@ -136,7 +144,8 @@ Rules:
 - **Minor changes are additive** (new fields, new record types); readers ignore
   what they do not know. A **major** change (a field removed or its meaning
   changed) bumps the version. Mallard publishes a JSON Schema per interface in
-  `docs/schemas/` and tests its output against it.
+  `schemas/` and tests its output against it ([schemas and
+  versions](session.md#schemas-versions-and-compatibility)).
 - **The GUI declares the range it supports per interface.** On connecting to a
   `mallard`, local or remote, it runs the capabilities query once and caches it
   per install.
@@ -268,8 +277,9 @@ once in the code that reads them, exported by `mallard list keys --format json`)
   rule; expressions a code field listing the variables they read (`x`, `y`, `t`,
   `u`, `v`, `n`); basic or expert a disclosure level; description and guide
   anchor the help.
-- **What applies**: after each edit (debounced), the GUI asks the case's
-  `mallard list keys INPUT --format json` which keys this input reads, so the
+- **What applies**: after each edit (debounced), the GUI sends the text to the
+  case's session (`case.update`) and asks which keys this input reads
+  (`case.keys`, the one-shot `mallard list keys INPUT --format json`), so the
   form shows exactly the keys that apply (the boundary fields of the chosen
   condition, the keys of the chosen reconstruction). This needs a partial-input
   mode: today the command fails until the input is complete (see the
@@ -281,10 +291,12 @@ once in the code that reads them, exported by `mallard list keys --format json`)
 - **Roles of string keys**: which strings are files (mesh, mechanism, restart,
   data tables) and of what kind, so the GUI offers file pickers, previews and
   transfers for them.
-- **Validation** is `mallard check INPUT --format json`, run on demand and after
-  edits that change the setup. Its diagnostics are attached to fields by key and
-  line, which needs structured `key` and `line` fields (today they are only in
-  the message text).
+- **Validation** is the session's `case.check` (the one-shot `mallard check
+  INPUT --format json`), run on demand and after edits that change the setup;
+  the session redoes only the setup stages the edit invalidates, so the mesh is
+  never read again for an edit outside `[mesh]`. Its diagnostics are attached
+  to fields by key, line and element, which needs structured fields (today they
+  are only in the message text).
 - **Editing the file**: a style-preserving TOML editor (tomlkit) changes values
   in place, so comments, order and layout survive; a side-by-side TOML view is
   two-way synchronized. `mallard input upgrade` is offered when the input uses
@@ -423,10 +435,10 @@ SSH backend, which differ only in submission and queue queries):
 | Connect | none | `ssh -o ControlMaster=auto -o ControlPersist=…` to the host alias; MFA once | kube context and namespace from kubeconfig; `kubectl auth can-i` for jobs, pods, exec, port-forward |
 | Probe | `mallard version --format json` | same, through the install's path or `module load` line; `sinfo` (partitions, GPU types), `module avail`, `apptainer`, `spack` | same in a short pod of the chosen image; node labels for GPU types |
 | Stage inputs | none | transfer engine: rsync over the master connection | transfer engine into the PVC through a helper pod |
-| Submit | subprocess (`mpirun -n N` optional) | job script in the run directory, `sbatch` (`qsub`, `bsub`) | a `Job` (or `MPIJob`) with GPU requests and node selectors, the image pinned by digest, the PVC mounted |
+| Submit | the session's `run.launch`: a detached `mallard -i` (`mpirun -n N` optional) | job script in the run directory, `sbatch` (`qsub`, `bsub`) | a `Job` (or `MPIJob`) with GPU requests and node selectors, the image pinned by digest, the PVC mounted |
 | Queue state | process status | `squeue`, `sacct` (`qstat`, `bjobs`) | `kubectl get job,pod -o json`, events |
 | Logs | files | `mallard.jsonl` and stdout files on the shared filesystem | `mallard.jsonl` on the PVC; `kubectl logs` for the container's output |
-| Control | `STOP`/`CHECKPOINT` files; `mallard ctl` | the same files; `mallard ctl` on rank 0's node through `srun --jobid=<id> --overlap` | the same files through the helper pod; `mallard ctl` through `kubectl exec` in the rank 0 pod |
+| Control | `mallard ctl RUN` (routed by the run's endpoint record) | `mallard ctl RUN` on the login node, which routes through `srun --jobid=<id> --overlap` | `mallard ctl RUN` in the helper pod, or its `route_hint` (`kubectl exec` in the rank 0 pod) run by the backend |
 | List files | `mallard files RUN_DIR` | `mallard files` over SSH | `mallard files` in the helper pod |
 | Transfer | local copy | rsync, or streams with offsets | streams through `kubectl exec` (tar or offsets); `kubectl cp` only for small files |
 | Remote view | local VTK | viewer job, SSH tunnel | viewer pod on the PVC, `kubectl port-forward` |
@@ -460,12 +472,16 @@ shared filesystem the login node sees directly, and job-step attachment
   name every file written with its size and SHA-256, and the end record says how
   the run ended. Probes, forces and integrals are small CSV files read the same
   way. Monitoring survives the GUI closing, since it is only reading files.
-- **Control**: `STOP` and `CHECKPOINT` files work from anywhere the run
-  directory is visible; they need `[run] control_file_interval > 0`, which is
-  0 by default, so a GUI-launched run needs a way to turn it on without editing
-  the user's input (a `--set` option, listed in [Command line](cli.md) but not
-  implemented, or a different default). `status` comes from the run log; `set`
-  needs `mallard ctl` on rank 0's node until a `SET` control file exists.
+- **Control**: one call, `mallard ctl <run_dir|run_id> stop|checkpoint|set|status`
+  (the session's `run.control`), on whatever machine sees the run directory.
+  It reads the endpoint record the run writes at start (host, PID, socket,
+  scheduler job and step) and picks the transport: the socket on the same host,
+  `srun --overlap` on the job's node, `kubectl exec` in the run's pod, SSH to a
+  PBS or LSF job's node, a scheduler signal, and control files last. The reply
+  carries the request's ID and returns when the run confirms ("stop accepted at
+  step N, restart written: path"), and the request and its result are run-log
+  records. The GUI never writes a control file
+  ([Run control](session.md#run-control)).
 
 ## Data: locations, manifest and transfers
 
@@ -753,9 +769,9 @@ with its cost before the job starts.
 surfaces stay GPU clipping planes on the tiles shown (instant). The cut face
 through the volume (the cells a plane crosses) is computed at full resolution
 on the server: by the parallel `pvserver` for results, and for setup (a mesh
-without a solution) by a resident `mallard` process that keeps the mesh
-partitioned in memory and answers slice and pick requests until idle
-([#1319](https://github.com/MatthewBonanni/mallard/issues/1319)); each request
+without a solution) by the case's [`mallard session`](session.md), which keeps
+the mesh partitioned in memory and answers `mesh.cut` and `mesh.pick` until
+idle ([#1319](https://github.com/MatthewBonanni/mallard/issues/1319)); each request
 returns a decimated result first and the full one after. Picking a zone is exact
 from hardware selection on any level, since decimation keeps zone membership;
 the face or cell under the cursor is found by the same server from the picked
@@ -1068,7 +1084,8 @@ tested like any other.
 
 | Prerequisite | State | Gap |
 |---|---|---|
-| Programmatic API (#345) | open | not needed for the MVP: the command line with JSON is the interface |
+| Programmatic API (#345) | open | not needed for the MVP: `mallard session` is the interface |
+| `mallard session` ([design](session.md), [#1340](https://github.com/MatthewBonanni/mallard/issues/1340)) | missing | the resident JSON-RPC process, its schemas, routed `mallard ctl` with acknowledgments, detached launch |
 | `mallard check` (#321) | done: `--format json`, `--view`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON; no block metadata in the case view; no geometry-only view |
 | Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; no variants for arrays of tables; no roles for file keys; the general catalog is read from a data directory, not the binary |
 | `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node; no `SET` control file |
@@ -1166,7 +1183,7 @@ data that never moves silently.**
 Mallard prerequisites of the MVP: the catalog with types, units, descriptions,
 variants and a schema version (#1256, at least for the keys of the guided
 steps); partial-input `list keys` (#1311); structured diagnostics (#1312); the
-capabilities query (#1314); `mallard files` (#1317); a way to turn control files
+capabilities query (#1314); `mallard session` with routed run control (#1340); `mallard files` (#1317); a way to turn control files
 on from the command line (#1316).
 
 **After the MVP:**
@@ -1191,6 +1208,7 @@ Filed, each part of #346.
 | `list keys` and `check` on partial inputs | [#1311](https://github.com/MatthewBonanni/mallard/issues/1311) |
 | Structured check diagnostics, setup warnings in the JSON, several errors at once | [#1312](https://github.com/MatthewBonanni/mallard/issues/1312) |
 | Case-view block metadata and a geometry-only `--view`; at scale, zone metadata without reading the volume, surface-only views, partitioned check | [#1313](https://github.com/MatthewBonanni/mallard/issues/1313) (extended in a comment) |
+| `mallard session`: the resident JSON-RPC interface, schemas of every interface, routed and acknowledged `mallard ctl`, detached launch ([design](session.md)) | [#1340](https://github.com/MatthewBonanni/mallard/issues/1340) |
 | `mallard version --format json`, the capabilities query | [#1314](https://github.com/MatthewBonanni/mallard/issues/1314) |
 | JSON Schemas of the interfaces, tested in CI; the examples' JSON as a CI artifact | [#1315](https://github.com/MatthewBonanni/mallard/issues/1315) |
 | `--set KEY=VALUE` (or control files on by default) and a `SET` control file | [#1316](https://github.com/MatthewBonanni/mallard/issues/1316) |
