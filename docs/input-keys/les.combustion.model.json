@@ -6,7 +6,9 @@
  ],
  "set_in": [
   "examples/flame_turbulence/les.toml",
-  "examples/triple_flame/tfles/input.toml"
+  "examples/triple_flame/tfles/input.toml",
+  "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
+  "tools/dev/catalog_inputs/3d/flamelet_tfles.toml"
  ],
  "type": "string"
 }
