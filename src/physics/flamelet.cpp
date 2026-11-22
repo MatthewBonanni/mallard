@@ -16,6 +16,7 @@
 #include <type_traits>
 
 #include "common.h"
+#include "log.h"
 
 namespace flamelet {
 
@@ -107,6 +108,31 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     if (type != "euler" && type != "navier_stokes") {
         throw not_accepted(physics, "physics.type", type, {"euler", "navier_stokes"});
     }
+    // The variance keys before the table, which a build without HDF5 cannot read
+    const bool les = input.contains("les");
+    for (const char * key : {"variance", "C_Z"}) {
+        if (!les && physics.contains(key)) {
+            throw InputError({.key = std::string("physics.") + key,
+                              .line = line_of(physics, key),
+                              .message = "closes the subgrid variance of Z, which exists only in LES",
+                              .fix = "Remove it, or add [les]",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
+    Variance variance = Variance::NONE;
+    double C_Z = 0.1;
+    if (les) {
+        const std::string name = find_value_or<std::string>(physics, "variance", "algebraic");
+        if (name != "algebraic") throw not_accepted(physics, "physics.variance", name, {"algebraic"});
+        variance = Variance::ALGEBRAIC;
+        C_Z = static_cast<double>(find_real_or(physics, "C_Z", dim::none, static_cast<rtype>(C_Z)));
+        if (!(C_Z >= 0.0)) {
+            throw InputError({.key = "physics.C_Z",
+                              .line = line_of(physics, "C_Z"),
+                              .message = "must not be negative",
+                              .docs = "docs/guide/flamelet.md"});
+        }
+    }
     std::shared_ptr<const Table> table;
     try {
         table = std::make_shared<const Table>(Table::read(file));
@@ -121,6 +147,8 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     }
     FlameletModel model(table, type == "navier_stokes");
     model.m_file = file;
+    model.m_variance = variance;
+    model.m_C_Z = C_Z;
     return model;
 }
 
@@ -128,8 +156,8 @@ double FlameletModel::burnt_progress(const double Z) const {
     return host_gas.burnt(Z);
 }
 
-Thermo FlameletModel::thermo(const double Z, const double C) const {
-    return host_gas.thermo(host_gas.locate(Z, 0.0, C));
+Thermo FlameletModel::thermo(const double Z, const double C, const double Zvar) const {
+    return host_gas.thermo(host_gas.locate(Z, Zvar, C));
 }
 
 void FlameletModel::conservatives(const double p, const double T, const double * u, const double Z, const double C,
@@ -151,8 +179,8 @@ void FlameletModel::surrogates(const double T, const double Z, const double C, d
     e0 = th.energy(T) - th.cv(T) * T;
 }
 
-void FlameletModel::outputs(const double rho, const double Z, const double C, double * out) const {
-    const Point<3> p = host_gas.locate(Z, 0.0, C);
+void FlameletModel::outputs(const double rho, const double Z, const double C, const double Zvar, double * out) const {
+    const Point<3> p = host_gas.locate(Z, Zvar, C);
     out[0] = host_gas.thermo(p).T0;
     for (size_t i = 0; i < m_output_fields.size(); i++) out[1 + i] = host_gas.field(p, m_output_fields[i]);
     if (m_heat_release) {
@@ -170,6 +198,9 @@ report::Summary FlameletModel::summary() const {
                            (m_table->single() ? ", float32" : "") + ")");
     s.setting("Mechanism", m_table->mechanism());
     if (m_viscous) s.setting("Transport", "from the table, unity Lewis number");
+    if (m_variance == Variance::ALGEBRAIC) {
+        s.setting("Subgrid variance", "algebraic, C_Z Delta^2 |grad Z|^2 with C_Z = " + logging::real(m_C_Z));
+    }
     return s;
 }
 

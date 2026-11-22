@@ -790,7 +790,7 @@ struct TimedFieldsFunctor : FirstError {
         gas.bc_thermo(i_bc, 1) = static_cast<rtype>(e - cv * T);
         if (gas.transport.extent(0) == 0) return;
         const uint32_t n_species = static_cast<uint32_t>(gas.bc_Y.extent(1));
-        gas.transport(i_bc, 0) = static_cast<rtype>(gas.gas.conducted(T, y));
+        gas.transport(i_bc, 0) = static_cast<rtype>(gas.gas.conducted(T, y, 0.0));  // inflow: no subgrid variance
         if (gas.gas.tabulated()) {
             for (uint32_t i = 0; i < n_species; i++) gas.transport(i_bc, 1 + i) = static_cast<rtype>(y(i));
             return;

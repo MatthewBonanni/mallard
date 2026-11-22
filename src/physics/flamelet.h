@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <Kokkos_Core.hpp>
+#include "common_typedef.h"
 #include "input.h"
 
 #include "flamelet_table.h"
@@ -74,9 +75,10 @@ struct Transport {
 
 /**
  * @brief Device side of the flamelet gas: the FPV map of a table that meets the
- *        fpv / saghafian2015 contract, and the indices of the fields the solver
- *        reads. Plain aggregate, captured by value in kernels; empty (inactive)
- *        unless gas = "flamelet". The transported scalars are Z and C, in this order.
+ *        fpv / saghafian2015 contract, the indices of the fields the solver
+ *        reads and, in LES, each cell's subgrid variance of Z. Plain aggregate,
+ *        captured by value in kernels; empty (inactive) unless gas = "flamelet".
+ *        The transported scalars are Z and C, in this order.
  */
 template <typename MemorySpace = Kokkos::DefaultExecutionSpace::memory_space>
 struct Gas {
@@ -86,8 +88,14 @@ struct Gas {
     uint32_t thermo_fields[5] = {};     // T0, e0, R, gamma0, a_gamma
     uint32_t transport_fields[3] = {};  // mu, kappa, cp
     uint32_t source_fields[2] = {};     // omega_C, rho0
+    Kokkos::View<rtype *, MemorySpace> variance;  // LES: Zvar of each cell (Solver::update_flamelet_variance), else empty
 
     KOKKOS_INLINE_FUNCTION bool active() const { return fpv.table.values.extent(0) > 0; }
+
+    /** @brief The subgrid variance of Z in cell c: 0 without LES. */
+    KOKKOS_INLINE_FUNCTION double cell_variance(const uint32_t c) const {
+        return variance.extent(0) > 0 ? static_cast<double>(variance(c)) : 0.0;
+    }
 
     /** @brief The table point of a mean Z, its subgrid variance and the mean C. */
     KOKKOS_INLINE_FUNCTION Point<3> locate(const double Z_mean, const double Zvar, const double C_mean) const {
@@ -127,9 +135,9 @@ struct Gas {
     /** @brief Field f of the table at point p, for output. */
     KOKKOS_INLINE_FUNCTION double field(const Point<3> & p, const uint32_t f) const { return fpv.table(p, f); }
 
-    /** @brief The normalized progress variable Lambda = (C - C_min) / (C_max - C_min) of the laminar table at Z, in [0, 1]. */
-    KOKKOS_INLINE_FUNCTION double lambda(const double Z_mean, const double C_mean) const {
-        const Point<3> p = locate(Z_mean, 0.0, 0.0);
+    /** @brief Normalized progress variable Lambda = (C - C_min) / (C_max - C_min) of the table at (Z, Zvar), in [0, 1]. */
+    KOKKOS_INLINE_FUNCTION double lambda(const double Z_mean, const double Zvar, const double C_mean) const {
+        const Point<3> p = locate(Z_mean, Zvar, 0.0);
         const double C_min = fpv.table.at_last_node(p, 0, fpv.field_C);
         const double span = fpv.table.at_last_node(p, fpv.table.n_nodes[2] - 1, fpv.field_C) - C_min;
         const double Lambda = span > 0.0 ? (C_mean - C_min) / span : 0.0;
@@ -144,9 +152,13 @@ struct Gas {
  */
 class FlameletModel {
     public:
+        /** @brief The closure of the subgrid variance of Z: none (laminar), or algebraic in LES. */
+        enum class Variance : uint8_t { NONE, ALGEBRAIC };
+
         /**
          * @brief From the [physics] table: table (the file, relative to the
-         *        working directory); type = "euler" or "navier_stokes".
+         *        working directory); type = "euler" or "navier_stokes"; with
+         *        [les], variance = "algebraic" and its constant C_Z.
          */
         static FlameletModel from_input(const Input & input);
 
@@ -164,8 +176,13 @@ class FlameletModel {
         /** @brief The table's C at mixture fraction Z for fully burnt (Lambda = 1) laminar (Sz = 0) states. */
         double burnt_progress(double Z) const;
 
-        /** @brief Thermodynamics of the laminar table point of (Z, C). */
-        Thermo thermo(double Z, double C) const;
+        /** @brief The closure of the subgrid variance of Z. */
+        Variance variance() const { return m_variance; }
+        /** @brief The constant of the algebraic variance, Zvar = C_Z Delta^2 |grad Z|^2. */
+        double variance_constant() const { return m_C_Z; }
+
+        /** @brief Thermodynamics of the table point of (Z, Zvar, C); Zvar = 0 is the laminar flamelet. */
+        Thermo thermo(double Z, double C, double Zvar = 0.0) const;
 
         /**
          * @brief Conservatives and the scalars' partial densities at pressure p,
@@ -184,11 +201,11 @@ class FlameletModel {
         const std::vector<std::string> & output_names() const { return m_output_names; }
 
         /**
-         * @brief The output fields at density rho and scalars (Z, C) into out, in the order of
-         *        output_names(); HRR is scaled from the table's density rho0 by (rho / rho0)^2, as
-         *        the source of C.
+         * @brief The output fields at density rho, scalars (Z, C) and subgrid variance Zvar into out,
+         *        in the order of output_names(); HRR is scaled from the table's density rho0 by
+         *        (rho / rho0)^2, as the source of C.
          */
-        void outputs(double rho, double Z, double C, double * out) const;
+        void outputs(double rho, double Z, double C, double Zvar, double * out) const;
 
         /** @brief Display lines for the run log. */
         report::Summary summary() const;
@@ -202,6 +219,8 @@ class FlameletModel {
         std::vector<std::string> m_output_names;
         std::vector<uint32_t> m_output_fields;  // after T_TABLE: the fields of m_output_names
         bool m_heat_release = false;            // the first of m_output_fields is HRR
+        Variance m_variance = Variance::NONE;
+        double m_C_Z = 0.1;
 };
 
 } // namespace flamelet

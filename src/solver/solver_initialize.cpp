@@ -86,6 +86,7 @@ void Solver::init_solution() {
         statistics.start(t);
         probes.start_averages(t);
     }
+    if (!from_file) apply_initial_variance();
     if (is_mixture() && (!from_file || layered)) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();

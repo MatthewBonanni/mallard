@@ -652,8 +652,20 @@ class Solver {
          */
         void init_chemistry();
 
-        /** @brief gas = "flamelet": refuse the models it does not combine with (yet): [chemistry], [radiation], [les]. */
+        /** @brief gas = "flamelet": refuse the models it does not combine with (yet): [chemistry], [radiation], [les.combustion]. */
         void check_flamelet_input() const;
+
+        /**
+         * @brief gas = "flamelet" in LES: the subgrid variance of Z of every cell of state s, read by every lookup;
+         *        computed on owned cells and exchanged to the halo (collective).
+         */
+        void update_flamelet_variance(const State & s);
+
+        /**
+         * @brief gas = "flamelet" in LES: an initial state given by p, T, u, Z and C holds them at its subgrid
+         *        variance, not at the laminar flamelet's (InitialState converts them at zero variance).
+         */
+        void apply_initial_variance();
 
         /**
          * @brief gas = "flamelet": warns (W-TABLE-PRESSURE) where the initial pressure or a boundary's prescribed
@@ -1339,6 +1351,9 @@ class Solver {
             State halo;
         } reconstruction_gradients;
         Kokkos::View<rtype *[3]>::host_mirror_type h_les_coefficients;
+        Kokkos::View<rtype *> flamelet_variance;       // gas = "flamelet": (cell) Zvar, mixture.flamelet.variance
+        Kokkos::View<rtype *>::host_mirror_type h_flamelet_variance;
+        State flamelet_halo;                           // its halo exchange, with a distributed mesh
         bool budget_pass = false;                      // calc_rhs evaluates kinetic_energy_budget
         bool tfles_on = false;                         // [les.combustion]: thickened flame
         ThickenedFlame thickened_flame;

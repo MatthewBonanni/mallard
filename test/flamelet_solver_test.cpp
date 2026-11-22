@@ -408,16 +408,23 @@ TEST(FlameletSolverTest, InvalidFlameletInputsAreRejected) {
                              "[initialize]\ntype = \"constant\"\np = 1e5\nT = 300\nu = " +
                              (N_DIM == 2 ? std::string("[0.0, 0.0]") : std::string("[0.0, 0.0, 0.0]")) +
                              "\nZ = 0.5\n" + flamelet_physics("solver_mixing.h5", "euler");
+    const std::string les = N_DIM == 2 ? "[les]\nmodel = \"wale\"\n" : "[les]\nmodel = \"sigma\"\n";
+    std::string variance_without_les = base;
+    variance_without_les.insert(variance_without_les.find("[numerics]"), "C_Z = 0.2\n");
+    std::string transported = base;
+    transported.insert(transported.find("[numerics]"), "variance = \"transported\"\n");
     const std::vector<std::pair<std::string, std::string>> cases = {
-        {"[chemistry]\nintegrator = \"bdf\"\n", "chemistry"},
-        {"[radiation]\n", "radiation"},
-        {"[les]\nmodel = \"sigma\"\n", "les"},
+        {base + "[chemistry]\nintegrator = \"bdf\"\n", "chemistry"},
+        {base + "[radiation]\n", "radiation"},
+        {base + les + "[les.combustion]\nmodel = \"pasr\"\n", "les.combustion"},
+        {variance_without_les, "physics.C_Z"},
+        {transported + les, "physics.variance"},
     };
-    for (const auto & [extra, key] : cases) {
+    for (const auto & [text, key] : cases) {
         Solver solver;
         solver.set_distributed(false);
         try {
-            solver.init(parse_toml(base + extra));
+            solver.init(parse_toml(text));
             ADD_FAILURE() << key << " was accepted";
         } catch (const InputError & e) {
             EXPECT_NE(std::string(e.what()).find(key), std::string::npos) << e.what();

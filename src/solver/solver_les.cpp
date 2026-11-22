@@ -70,6 +70,8 @@ struct EddyViscosityFunctor {
  *        mu_t / (Sc_t W)], from the transport gradients; the time-step
  *        diffusivity NU_EFF grows by max(4/3 nu_t, lambda_t / (rho cv),
  *        nu_t / Sc_t), a bound on the growth of the largest diffusivity.
+ *        A flamelet gas conducts enthalpy and diffuses its scalars along
+ *        their own gradients: [mu_t, mu_t / Pr_t, mu_t / Sc_t].
  */
 struct MixtureEddyViscosityFunctor {
     LES les;
@@ -95,14 +97,25 @@ struct MixtureEddyViscosityFunctor {
         const double rho = static_cast<double>(W(c, 0));
         const double nu_t = static_cast<double>(les.nu_t(g, delta(c), static_cast<rtype>(state(0))));
         const ScalarMassFractions y{&scalars(c, 0)};
-        const double R = gas.thermo.gas_constant(y);
-        const double cp = gas.thermo.cp_mass(static_cast<double>(values(c, N_DIM)), y);
         const double mu_t = rho * nu_t;
-        const double lambda_t = cp * mu_t / static_cast<double>(les.Pr_t);
-        const double Sc_t = static_cast<double>(les.Sc_t);
+        const double Pr_t = static_cast<double>(les.Pr_t), Sc_t = static_cast<double>(les.Sc_t);
+        double R, cp, lambda_t;
         sgs(c, 0) = static_cast<rtype>(mu_t);
-        sgs(c, 1) = static_cast<rtype>(lambda_t);
-        sgs(c, 2) = static_cast<rtype>(mu_t / Sc_t * R / chemistry::GAS_CONSTANT);
+        if (gas.tabulated()) {
+            // The transport values hold h, not T: the cell's T from its state
+            const double Zvar = gas.flamelet.cell_variance(c);
+            R = gas.gas_constant(y, Zvar);
+            cp = gas.cp_mass(static_cast<double>(W(c, N_DIM + 1)) / (rho * R), y, Zvar);
+            lambda_t = cp * mu_t / Pr_t;
+            sgs(c, 1) = static_cast<rtype>(mu_t / Pr_t);
+            sgs(c, 2) = static_cast<rtype>(mu_t / Sc_t);
+        } else {
+            R = gas.thermo.gas_constant(y);
+            cp = gas.thermo.cp_mass(static_cast<double>(values(c, N_DIM)), y);
+            lambda_t = cp * mu_t / Pr_t;
+            sgs(c, 1) = static_cast<rtype>(lambda_t);
+            sgs(c, 2) = static_cast<rtype>(mu_t / Sc_t * R / chemistry::GAS_CONSTANT);
+        }
         const double growth = Kokkos::fmax(Kokkos::fmax(4.0 / 3.0 * nu_t, lambda_t / (rho * (cp - R))), nu_t / Sc_t);
         coefficients(c, NU_EFF) += static_cast<rtype>(growth);
     }
@@ -1045,6 +1058,12 @@ void Solver::init_les() {
         dynamic_stresses = Kokkos::View<double *[6]>("dynamic_stresses", mesh->n_cells);
     }
     les_coefficients = Kokkos::View<rtype *[3]>("les_coefficients", mesh->n_cells);
+    if (mixture.tabulated()) {
+        flamelet_variance = Kokkos::View<rtype *>("flamelet_variance", mesh->n_cells);
+        h_flamelet_variance = pinned_mirrors(flamelet_variance);
+        if (halo.active()) flamelet_halo = State("flamelet_variance_halo", mesh->n_cells, 1);
+        mixture.flamelet.variance = flamelet_variance;
+    }
     les_state = Kokkos::View<double *>("les_state", 3);
     Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
     h_les_coefficients = pinned_mirrors(les_coefficients);
@@ -1154,7 +1173,7 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
             Kokkos::parallel_for("mixture_gradients", n,
                                  MixtureGradientFunctor<decltype(rotations)::value>{
                                      viscous_gradient, transport_values, transport_gradients, bc_transport_values,
-                                     mixture.n_species, cell_transport});
+                                     mixture.n_species, cell_transport, mixture.flamelet});
         });
     } else {
         const Euler phys = physics;

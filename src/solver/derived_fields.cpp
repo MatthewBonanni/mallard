@@ -454,6 +454,7 @@ void compute(const Selection & selection, const Settings & settings, const Input
             put(MIXTURE_FRACTION, Y(c, flamelet::Gas<>::Z));
             if (wants(C_NORM)) {
                 put(C_NORM, static_cast<rtype>(flamelet.lambda(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
+                                                               flamelet.cell_variance(c),
                                                                static_cast<double>(Y(c, flamelet::Gas<>::C)))));
             }
         } else if (wants(MIXTURE_FRACTION)) {
