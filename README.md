@@ -43,6 +43,15 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Thickened flames with dynamic efficiency; synthetic turbulent inflow
 - Wall models: Griffin-Fu-Moin compressible and equilibrium ODE
 
+**Particles** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/))
+
+- Lagrangian tracers moved with the velocity of the high-order reconstruction: pathlines converge at the scheme's order in space and the integrator's in time
+- Solid particles with Stokes, Schiller-Naumann or Singh et al. drag (compressible and rarefied gas), gravity, pressure-gradient, added-mass and Saffman lift forces, and Ranz-Marshall heat transfer
+- Stiff particles, whose relaxation time is below the time step, integrated exponentially: the time step never depends on the particles
+- Wall bounces with restitution, located within the step, or deposition on sticking walls
+- Quantities along each path (time integrals, extrema, first times, turns about an axis) and particle probes of the particles in a region
+- On GPUs and many MPI ranks, bitwise the same on any number of ranks and across restarts
+
 **Boundary conditions** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/boundary_conditions/))
 
 - Walls, inlets, outlets, far field and symmetry, with composable options (NSCBC, averaging, turbulence, wall models)
@@ -79,8 +88,6 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - A [divergence report](https://matthewbonanni.github.io/mallard/docs/guide/running/#the-divergence-report) when a run fails: where and when, the likely causes ranked with their evidence, and what to try
 - VTKHDF output for ParaView, with [derived fields](https://matthewbonanni.github.io/mallard/docs/guide/output/#derived-fields) in the run or after it (`mallard post derive`): Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient, and for flames mixture fraction, progress variable, flame index and scalar dissipation
 - Probes on points, curves, surfaces, boundaries and regions
-- Lagrangian tracer particles, moved with the velocity of the high-order reconstruction, with quantities along their paths and particle probes ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/))
-- Solid particles with drag (Stokes, Schiller-Naumann, Singh et al. for compressible and rarefied gas), gravity, pressure-gradient, added-mass and Saffman lift forces, Ranz-Marshall heat transfer, exponential integration of stiff particles and wall bounces located within the step or deposition ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#solid-particles))
 - Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 - A [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): run a case from your own program, step by step, with the same results as `mallard -i`, through an installed CMake package (`find_package(Mallard)`)
