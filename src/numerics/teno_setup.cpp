@@ -5431,13 +5431,13 @@ teno::Moments SetupHandle::moments(const uint32_t n_direct, const Kokkos::View<u
     return impl->moments(n_direct, extra);
 }
 
-void SetupHandle::compute_moments(const std::vector<uint32_t> & cells) {
-    if constexpr (N_DIM == 3) impl->compute_moments(cells);
-}
-
-void SetupHandle::compute_all_moments() {
-    if constexpr (N_DIM == 3) impl->compute_all_moments();
-}
+#if N_DIM == 3
+void SetupHandle::compute_moments(const std::vector<uint32_t> & cells) { impl->compute_moments(cells); }
+void SetupHandle::compute_all_moments() { impl->compute_all_moments(); }
+#else
+void SetupHandle::compute_moments(const std::vector<uint32_t> &) {}
+void SetupHandle::compute_all_moments() {}
+#endif
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);
