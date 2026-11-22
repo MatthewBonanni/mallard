@@ -19,6 +19,7 @@
 
 #include "comm.h"
 #include "common_io.h"
+#include "gated.h"
 #include "mesh.h"
 #include "particles.h"
 #include "provenance.h"
@@ -193,7 +194,7 @@ void Particles::remember_positions() {
     const auto starts = crossing_start;
     const auto start_id = crossing_id;
     const uint32_t w = width;
-    Kokkos::parallel_for("particle_remember_positions", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_remember_positions", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         start_id(s) = ids(s);
         for (uint32_t i = 0; i < 3; i++) starts(s, i) = i < N_DIM ? static_cast<double>(xs(w * s + i)) : 0.0;
     });
@@ -210,7 +211,7 @@ void Particles::detect_crossings() {
     const auto start_id = crossing_id;
     const auto recorded = events;
     const uint32_t w = width;
-    Kokkos::parallel_for("particle_detect_crossings", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_detect_crossings", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         // A particle that was not in this slot at the step's start (it arrived since) has no path here
         if (ids(s) == EMPTY || start_id(s) != ids(s)) return;
         const double p0[3] = {starts(s, 0), starts(s, 1), starts(s, 2)};
@@ -262,7 +263,7 @@ void Particles::evaluate_crossings() {
     const bool inertia = is_solid, heat = heated;
     const particles::Solid sphere = solid;
     const particles::QuantityFunctor q = quantities.functor();
-    Kokkos::parallel_for("particle_evaluate_crossings", out.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("particle_evaluate_crossings", out.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         if (k >= recorded.count() || widths(recorded.entry(k)) == 0) return;
         const uint32_t s = recorded.slot(k), e = recorded.entry(k);
         rtype values[particles::MAX_VARIABLES];
