@@ -338,12 +338,12 @@ solver.finish()
   (`uv pip install "mallard-python[mpi]"`): every rank of it starts the session
   and runs the same cases, and the other ranks are free.
 
-  ```python
-  from mpi4py import MPI
-  world = MPI.COMM_WORLD
-  comm = world.Split(color=int(world.Get_rank() < 4))   # the first 4 ranks run Mallard
-  mallard.Session(comm=comm)
-  ```
+    ```python
+    from mpi4py import MPI
+    world = MPI.COMM_WORLD
+    comm = world.Split(color=int(world.Get_rank() < 4))   # the first 4 ranks run Mallard
+    mallard.Session(comm=comm)
+    ```
 
 ## Pitfalls
 
