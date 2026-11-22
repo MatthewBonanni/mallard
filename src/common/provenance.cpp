@@ -39,6 +39,7 @@
 #include "binding.h"
 #include "build_info.h"
 #include "comm.h"
+#include "file_hash.h"
 #include "common_typedef.h"
 #include "git_version.h"
 #include "input.h"
@@ -496,8 +497,8 @@ std::string modified(const std::string & path) {
     return text;
 }
 
-/** @brief The size and SHA-256 that the writing run's output record gives a file, if its run log has one. */
-std::optional<std::pair<uint64_t, std::string>> recorded(const ReadFile & f) {
+/** @brief The size and hash (sha256 or sha256_tree) the writing run's output record gives a file, if its run log has one. */
+std::optional<std::pair<uint64_t, json::Value>> recorded(const ReadFile & f) {
     namespace fs = std::filesystem;
     if (f.run_id.empty() || f.directory.empty()) return std::nullopt;
     const fs::path log = fs::path(f.directory) / f.run_log;
@@ -513,11 +514,10 @@ std::optional<std::pair<uint64_t, std::string>> recorded(const ReadFile & f) {
             if (!run_id || run_id->string != f.run_id || !files) continue;
             for (const json::Value & w : files->array) {
                 const json::Value * path = w.find("path");
-                const json::Value * sha = w.find("sha256");
                 const json::Value * bytes = w.find("bytes");
-                if (!path || !sha || !bytes) continue;
+                if (!path || file_hash::recorded(w).empty() || !bytes) continue;
                 if (fs::weakly_canonical(fs::path(f.directory) / path->string, error) == file) {
-                    return std::make_pair(static_cast<uint64_t>(bytes->number), sha->string);
+                    return std::make_pair(static_cast<uint64_t>(bytes->number), w);
                 }
             }
         } catch (const std::exception &) {
@@ -558,7 +558,13 @@ std::string read_file_json(const ReadFile & f) {
     }
     const auto record = f.how == ReadFile::How::IDENTITY ? recorded(f) : std::nullopt;
     if (record && record->first == bytes) {
-        o.add("sha256", record->second).add("sha256_from", "the output record of the run that wrote it");
+        const json::Value & w = record->second;
+        if (const json::Value * sha = w.find("sha256")) {
+            o.add("sha256", sha->string);
+        } else {
+            o.add("sha256_tree", w["sha256_tree"].string).add("chunk_bytes", static_cast<uint64_t>(w["chunk_bytes"].number));
+        }
+        o.add("sha256_from", "the output record of the run that wrote it");
     } else {
         o.raw("sha256", "null").add("modified", modified(f.path));
         o.add("note", record ? "not hashed (its size differs from its output record: changed since written)"

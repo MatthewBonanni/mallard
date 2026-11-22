@@ -282,6 +282,17 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     EXPECT_TRUE(fast.ok());  // a warning, not an error
 }
 
+TEST(CheckTimeStep, EveryIntegratorHasItsLimitAndWarnsAboveIt) {
+    for (const auto & [name, type] : TIME_INTEGRATOR_TYPES) {
+        std::string input = box("1.0", "t_stop = 0.5\ncfl = 5.0\n");
+        input.replace(input.find("\"SSPRK3\""), 8, "\"" + name + "\"");
+        const CheckReport r = check(input);
+        EXPECT_EQ(r.integrator, name);
+        EXPECT_EQ(r.cfl_limit, cfl_limit(type)) << name;
+        EXPECT_TRUE(mentions(r.warnings(), "stability limit of " + name)) << name;
+    }
+}
+
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
     CheckOptions options;
     options.throughput = 1e6;

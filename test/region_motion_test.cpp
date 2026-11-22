@@ -307,7 +307,11 @@ TEST(RegionMotionTest, MovingFractionsAreTheFractionsOfTheRegionWhereItIs) {
           ball(point(0.4, 0.5), 0.2) + ", rotate = " + (N_DIM == 2 ? "\"30 * t\"" : "{axis = [0, 0, 1], angle = \"30 * t\"}") +
               ", pivot = " + point(0.5, 0.5) + ", scale = \"1 + 0.5 * t\", edge = 0.05}",
           std::string("{type = \"difference\", a = ") + ball(center, 0.25) + "}, b = {type = \"implicit\", f = \"y - 0.4 - 0.1 * t\"}}",
-          ball(center, 0.1) + ", repeat = {count = 3, translate = " + point(0.2, 0.0, 0.0) + "}}"}) {
+          ball(center, 0.1) + ", repeat = {count = 3, translate = " + point(0.2, 0.0, 0.0) + "}}",
+          // Cut along its faces (region_clip.h)
+          std::string(N_DIM == 2 ? "{type = \"rectangle\", size = [0.3, 0.2]" : "{type = \"box\", size = [0.3, 0.2, 0.25]") +
+              ", center = " + center + ", rotate = " +
+              (N_DIM == 2 ? "\"30 * t\"" : "{axis = [1, 2, 3], angle = \"30 * t\"}") + ", pivot = " + point(0.5, 0.5) + "}"}) {
         const region::Region r = read(table);
         ASSERT_TRUE(r.moving()) << table;
         const region::MovingFractions moving(*mesh, r);
@@ -354,6 +358,33 @@ TEST(RegionMotionTest, MovingFractionsFollowCurvedWalls) {
     }
 }
 #endif
+
+TEST(RegionMotionTest, BooleansOfTheMeshNestAsDeepAsTheFractionsStack) {
+    // Each intersection nested as a later part deepens the postfix stack by one: n of them need n + 1
+    const auto mesh = unit_mesh();
+    const region::MeshRegions automatic(*mesh);
+    const std::string center = N_DIM == 2 ? "[\"0.4 + 0.2 * t\", 0.5]" : "[\"0.4 + 0.2 * t\", 0.5, 0.5]";
+    auto nested = [&](const int n) {
+        std::string s = "\"domain\"";
+        for (int k = 0; k < n; k++) {
+            s = "{type = \"intersection\", regions = [" + ball(center, 0.2 + 0.01 * k) + "}, " + s + "]}";
+        }
+        return s;
+    };
+    const region::Region r = read(nested(region::MAX_STACK - 1), &automatic);
+    const region::MovingFractions moving(*mesh, r);
+    moving.update(0.5);
+    const std::vector<double> expected = region::cell_fractions(*mesh, r.at(0.5)), got = host(moving);
+    ASSERT_EQ(got.size(), expected.size());
+    for (size_t c = 0; c < got.size(); c++) EXPECT_NEAR(got[c], expected[c], 1e-14) << "cell " << c;
+    try {
+        read(nested(region::MAX_STACK), &automatic);
+        FAIL() << "a stack of " << region::MAX_STACK + 1 << " was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("a stack of " + std::to_string(region::MAX_STACK + 1) + ", at most " +
+                                             std::to_string(region::MAX_STACK)), std::string::npos) << e.what();
+    }
+}
 
 TEST(RegionMotionTest, ConditionsOfLinearFieldsCoverTheirExactVolume) {
     // Each cell's level is linear and exact for a linear field, and its fraction its exact clip
