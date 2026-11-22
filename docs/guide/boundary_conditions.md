@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 47 more.
+and 49 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -678,7 +678,7 @@ type = "wall_adiabatic"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall)
-and 7 more.
+and 8 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -1155,7 +1155,7 @@ type = "symmetry"
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach),
 [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge),
 [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d)
-and 31 more.
+and 32 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.
@@ -1216,7 +1216,7 @@ axis = [0.0, 0.0, 1.0]
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
 [`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
-and 16 more.
+and 17 more.
 
 Rules: zone B must match zone A node for node (to 1e-6 of the zones' shortest
 edge) after the translation or rotation, and a node without a partner is

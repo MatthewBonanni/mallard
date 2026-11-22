@@ -1,0 +1,80 @@
+# Water droplets settling in still air (2D build): terminal velocity against
+# the Schiller-Naumann correlation.
+#
+# Droplets of 100 um (density 1000 kg/m^3) released at rest in air at 300 K
+# and 1 bar relax in about tau = rho_p d^2 / (18 mu f) = 26 ms to their
+# terminal velocity, where drag balances gravity less buoyancy. At that speed
+# their Reynolds number is 1.6, where Schiller-Naumann drag is 1.21 times
+# Stokes drag: they settle at 0.250 m/s, not the 0.302 m/s of Stokes' law.
+# The air stays at rest (gravity acts on the particles only), and the box is
+# periodic, so the droplets fall through it forever.
+#
+# Run (21,700 steps: under a minute on one CPU thread):
+#   ../../build/src/mallard -i input.toml
+#   python check_particle_settling.py droplets
+#
+# Result: after 0.25 s, about ten relaxation times, every droplet falls at
+# 0.25025 m/s, within 2e-5 of the correlation's terminal velocity.
+# smoke.toml runs 1 um particles, which relax faster than a step: they relax
+# exponentially within each step to their equilibrium velocity.
+
+[run]
+t_stop = 0.25
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 4
+Ny = 4
+Lx = 0.04
+Ly = 0.04
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+mu = 1.8e-5
+Pr = 0.72
+
+[particles]
+type = "solid"
+diameter = 100e-6        # m
+density = 1000.0         # kg/m^3
+drag = "schiller_naumann"
+gravity = [0.0, -9.81]   # m/s^2, on the particles only
+velocity = [0.0, 0.0]    # released at rest
+
+[particles.lattice]
+lo = [0.005, 0.005]
+hi = [0.035, 0.035]
+n = [3, 3]
+
+# The particles at the start and the end, droplets_particles_<n>.vtkhdf
+[[write_data]]
+prefix = "droplets"
+particle_fields = ["V"]
+time_interval = 0.25
+
+[output]
+check_interval = 5000
