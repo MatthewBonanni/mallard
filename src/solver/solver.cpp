@@ -1822,17 +1822,14 @@ void Solver::init_axisymmetric_weights() {
     const auto & points = face_reconstruction->quadrature_face.h_points;
     const auto & weights = face_reconstruction->quadrature_face.h_weights;
     const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
-    flux_weights = Kokkos::View<rtype **>("flux_weights", mesh->n_state_faces(), n_q);
-    auto h_weights = Kokkos::create_mirror_view(flux_weights);
-    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
+    flux_weights = share_face_weights("flux_weights", mesh->n_state_faces(), n_q, [&](const uint32_t f, rtype * w_f) {
         const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
         const rtype dy = mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1);
         for (uint32_t q = 0; q < n_q; q++) {
             const rtype r_q = mesh->h_face_coords(f, 1) + 0.5_r * points(q, 0) * dy;
-            h_weights(f, q) = weights(q) * std::max(r_q, 0.0_r);
+            w_f[q] = weights(q) * std::max(r_q, 0.0_r);
         }
-    }
-    Kokkos::deep_copy(flux_weights, h_weights);
+    });
     geometric_source = Kokkos::View<rtype *>("geometric_source", mesh->n_cells);
     if (!is_mixture() && physics.is_viscous()) cell_mu = Kokkos::View<rtype *>("cell_mu", mesh->n_cells);
 }

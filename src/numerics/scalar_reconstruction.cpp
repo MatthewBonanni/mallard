@@ -489,7 +489,7 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
 
 template <typename Eval>
 void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot,
-                                        Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                        Kokkos::View<rtype *> quad_weights, FaceWeights<> face_weights,
                                         Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
     SpeciesSlotFunctor<Eval> functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                      mesh->face_area, quad_weights, face_weights, face_mdot, values, boundaries,
@@ -498,7 +498,7 @@ void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype 
 }
 
 void ScalarReconstruction::species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot,
-                                         Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                         Kokkos::View<rtype *> quad_weights, FaceWeights<> face_weights,
                                          Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
     if (!teno) {
         launch_slots(face_values(scalars), face_mdot, quad_weights, face_weights, slots);
