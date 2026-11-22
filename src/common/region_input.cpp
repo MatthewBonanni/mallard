@@ -479,6 +479,16 @@ class Parser {
             return p;
         }
 
+        /** @brief The stack that evaluating f in postfix order (as MovingFractions does) needs. */
+        int stack_depth(const Filled & f) const {
+            if (f.parts.empty() || f.cells) return 1;
+            int deepest = 0;
+            for (size_t k = 0; k < f.parts.size(); k++) {
+                deepest = std::max(deepest, stack_depth(filled[f.parts[k]]) + (k >= 1 ? 1 : 0));
+            }
+            return deepest;
+        }
+
         /** @brief Place a filled region of shapes among the filled regions; the index of a filled one. */
         uint32_t place(Parsed & p, const std::string & where) {
             if (p.filled >= 0) return static_cast<uint32_t>(p.filled);
@@ -1078,6 +1088,12 @@ class Parser {
             for (Parsed * p : mesh_parts) f.parts.push_back(place(*p, where));
             f.cells = true;
             for (const uint32_t i : f.parts) f.cells = f.cells && filled[i].cells;
+            if (const int deepest = stack_depth(f); deepest > MAX_STACK) {
+                fail(where, line_of(t, "type"),
+                     "nests too many booleans of regions of the mesh or the solution (a stack of " +
+                         std::to_string(deepest) + ", at most " + std::to_string(MAX_STACK) + ")",
+                     "List the most deeply nested region first", "docs/guide/geometry.md#booleans");
+            }
             filled.push_back(f);
             out.filled = static_cast<int32_t>(filled.size() - 1);
             return out;

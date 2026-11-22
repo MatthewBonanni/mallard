@@ -25,6 +25,8 @@ page explains the regions they share and how Mallard puts them on a mesh. Every 
 | `[[initialize.regions]]` `region` | a [region](#regions) or its [name](#named-regions); cut cells averaged exactly for flat surfaces; a [moving region](#moving-regions) where it is at `t = 0` | [Initialization](initialization.md#regions) |
 | `[[initialize.data]]` `region` | a [region](#regions) or its [name](#named-regions): its signed distance is a table's coordinate | [Initialization](initialization.md#tabulated-data-and-point-clouds) |
 | `[[mesh.curved]]` | a surface (2D: a curve), e.g. `{type = "sphere", ..., filled = false}` or a `circle` | [Curved boundaries](meshes.md#curved-boundaries) |
+| `[[particles.probes]]` `region` | a filled [region](#regions) of primitives or its [name](#named-regions), that does not move: the particles inside it | [Particles](particles.md#particle-probes) |
+| `[[particles.quantities]]` `in(name)` | the [name](#named-regions) of a filled region of primitives that does not move: 1 inside, 0 outside, smooth across its `edge` | [Particles](particles.md#per-particle-quantities) |
 
 Every region may be [repeated](#arrays-of-copies), and wraps across
 [periodic boundaries](#periodic-boundaries). Filled regions are volumes (areas in 2D runs). Surfaces and curves, such as

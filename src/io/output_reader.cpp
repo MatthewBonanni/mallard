@@ -29,6 +29,7 @@
 #include "log.h"
 #include "mesh_block.h"
 #include "provenance.h"
+#include "vtkhdf_series.h"
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
 #endif
@@ -1776,7 +1777,8 @@ std::vector<std::string> run_files(const std::string & dir) {
     std::error_code error;
     for (auto it = fs::recursive_directory_iterator(dir, error); !error && it != fs::recursive_directory_iterator();
          it.increment(error)) {
-        if (it.depth() > 1) it.disable_recursion_pending();
+        // Files a rewind set aside are not the run's
+        if (it.depth() > 1 || it->path().filename() == ".rewound") it.disable_recursion_pending();
         if (it->is_regular_file(error)) files.push_back(it->path().string());
     }
     std::sort(files.begin(), files.end());
@@ -1803,6 +1805,8 @@ std::vector<std::string> run_files(const std::string & dir) {
                 }
             } else if (ext == ".pvtu") {
                 for (const auto & p : pvtu_pieces(f, read_bytes(f))) members.insert(fs::path(p).lexically_normal().string());
+            } else if (ext == ".vtkhdf" && vtkhdf_series::is_index(f)) {
+                for (const auto & m : vtkhdf_series::members(f)) members.insert(normal(m));
             }
         } catch (const std::exception &) {
             // An unreadable index lists nothing; info reports its error
