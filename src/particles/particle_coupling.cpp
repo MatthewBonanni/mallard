@@ -18,6 +18,7 @@
 
 #include "comm.h"
 #include "exact_sums.h"
+#include "gated.h"
 #include "mesh.h"
 #include "particles.h"
 
@@ -119,7 +120,7 @@ void Deposition::init(const Mesh & mesh, const Walker & walker, const std::vecto
     const bool rotated = mesh.periodic_maps().rotated();
     const auto V = measure;
     double rate = 0.0;
-    Kokkos::parallel_reduce("particle_spread_weights", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
+    gated::parallel_reduce("particle_spread_weights", n_owned, KOKKOS_LAMBDA(const uint32_t c, double & m) {
         rtype x[N_DIM], n_out[N_DIM];
         double sum = 0.0;
         for (uint32_t k = off(c); k < off(c + 1); k++) {
@@ -142,7 +143,7 @@ void Deposition::init(const Mesh & mesh, const Walker & walker, const std::vecto
     const double total = 0.5 * static_cast<double>(width) * static_cast<double>(width);
     steps = static_cast<uint32_t>(std::max(1.0, std::ceil(2.0 * total * rate)));
     const rtype step = static_cast<rtype>(total / steps);
-    Kokkos::parallel_for("particle_spread_scale", wt.extent(0), KOKKOS_LAMBDA(const uint32_t k) { wt(k) *= step; });
+    gated::parallel_for("particle_spread_scale", wt.extent(0), KOKKOS_LAMBDA(const uint32_t k) { wt(k) *= step; });
     density = State("particle_spread_density", n_cells, n_species);
     moments = State("particle_spread_moments", n_cells, N_DIM * n_columns - N_CONSERVATIVE);
     faces_of_neighbor = faces;
@@ -153,9 +154,9 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
                          const ParticleView & positions, const uint32_t stride,
                          const std::function<void(const State &)> & exchange) {
     const Kokkos::DefaultExecutionSpace exec;
-    Kokkos::deep_copy(exec, largest, 0.0);
-    Kokkos::deep_copy(exec, fixed, int64_t(0));
-    Kokkos::deep_copy(exec, count, 0u);
+    gated::fill(exec, largest, 0.0);
+    gated::fill(exec, fixed, int64_t(0));
+    gated::fill(exec, count, 0u);
     const uint32_t n_slots = static_cast<uint32_t>(values.extent(0));
     const uint32_t n = n_columns, n_sums = static_cast<uint32_t>(largest.extent(1));
     const auto v = values;
@@ -164,13 +165,13 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     const auto counts = count;
     const auto coords = cell_coords;
     const Term term{v, positions, coords, stride, n};
-    Kokkos::parallel_for("particle_deposit_largest", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_deposit_largest", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         const uint32_t c = cells(s);
         Kokkos::atomic_inc(&counts(c));
         for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_max(&m(c, k), exact_sums_magnitude(term(s, c, k)));
     });
-    Kokkos::parallel_for("particle_deposit_fixed", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_deposit_fixed", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         const uint32_t c = cells(s);
         const double unit = cell_unit(counts(c));
@@ -182,7 +183,7 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     const SpeciesView moment_species = moments.species;
     const auto V = measure;
     const uint32_t n_flow = std::min<uint32_t>(n, N_CONSERVATIVE);
-    Kokkos::parallel_for("particle_deposit_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_deposit_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const double unit = cell_unit(counts(c));
         for (uint32_t k = 0; k < n_sums; k++) {
             const rtype total = static_cast<rtype>(exact_sums_total(f(c, k), unit, m(c, k)));
@@ -207,7 +208,7 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     // The first moments move each sum by -div of its moment density, face averaged: the deposit then has the
     // particles' first moments, not the cell centers', so the spread converges at second order, not first
     exchange(moments);
-    Kokkos::parallel_for("particle_deposit_moments", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("particle_deposit_moments", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         for (uint32_t j = 0; j < n; j++) {
             rtype change = 0.0_r;
             for (uint32_t k = off(c); k < off(c + 1); k++) {
@@ -223,12 +224,12 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     const StateView rho_flow = density.flow;
     const SpeciesView rho_species = density.species;
     for (uint32_t step = 0; step < steps; step++) {
-        Kokkos::parallel_for("particle_spread_density", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("particle_spread_density", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE rho_flow(c, i) = flow(c, i) / V(c);
             for (uint32_t k = 0; k < n_species; k++) rho_species(c, k) = species(c, k) / V(c);
         });
         exchange(density);
-        Kokkos::parallel_for("particle_spread", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("particle_spread", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE {
                 rtype change = 0.0_r;
                 for (uint32_t k = off(c); k < off(c + 1); k++) change += wt(k) * (rho_flow(nb(k), i) - rho_flow(c, i));

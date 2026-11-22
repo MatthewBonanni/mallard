@@ -21,6 +21,7 @@
 
 #include "comm.h"
 #include "exact_sums.h"
+#include "gated.h"
 #include "provenance.h"
 #include "region_input.h"
 
@@ -114,7 +115,7 @@ std::vector<ProbeRow> ParticleProbes::reduce(const uint64_t step,
     const uint32_t n = n_fields();
     // Sums of the values and their squares, exact in fixed point: the same on any rank count
     Kokkos::View<double **, Kokkos::LayoutRight> terms("particle_probe_terms", n_slots, 2 * n);
-    Kokkos::parallel_for("particle_probe_terms", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+    gated::parallel_for("particle_probe_terms", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
         for (uint32_t j = 0; j < n; j++) {
             const double v = values(s, j);
             const bool in = !Kokkos::isnan(v);
@@ -128,11 +129,11 @@ std::vector<ProbeRow> ParticleProbes::reduce(const uint64_t step,
     std::vector<double> lo(n), hi(n);
     for (uint32_t j = 0; j < n; j++) {
         double a = std::numeric_limits<double>::infinity(), b = -std::numeric_limits<double>::infinity();
-        Kokkos::parallel_reduce("particle_probe_min", n_slots, KOKKOS_LAMBDA(const uint32_t s, double & m) {
+        gated::parallel_reduce("particle_probe_min", n_slots, KOKKOS_LAMBDA(const uint32_t s, double & m) {
             const double v = values(s, j);
             if (!Kokkos::isnan(v) && v < m) m = v;
         }, Kokkos::Min<double>(a));
-        Kokkos::parallel_reduce("particle_probe_max", n_slots, KOKKOS_LAMBDA(const uint32_t s, double & m) {
+        gated::parallel_reduce("particle_probe_max", n_slots, KOKKOS_LAMBDA(const uint32_t s, double & m) {
             const double v = values(s, j);
             if (!Kokkos::isnan(v) && v > m) m = v;
         }, Kokkos::Max<double>(b));

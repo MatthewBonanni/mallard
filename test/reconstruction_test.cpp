@@ -32,6 +32,14 @@
 
 namespace {
 
+/** @brief The mixture of a thermodynamics table, as the scalar reconstruction takes it. */
+Mixture gas_of(const chemistry::ThermoTable<> & thermo) {
+    Mixture gas;
+    gas.thermo = thermo;
+    gas.n_species = thermo.n_species;
+    return gas;
+}
+
 // Linear field W(x, y) = c + gx * x + gy * y, positive for x, y in [0, 1]
 constexpr rtype C[N_CONSERVATIVE] = {1.0_r, 0.3_r, -0.2_r, 2.0_r};
 constexpr rtype GX[N_CONSERVATIVE] = {0.5, -1.0, 0.25, 0.75};
@@ -411,7 +419,7 @@ class AirScalars : public ::testing::Test {
         FaceStates reconstruct(const std::string & limiter, const AirComposition & composition) {
             auto muscl = make_muscl(mesh, bd, limiter);
             ScalarReconstruction recon;
-            recon.init(mesh, bd, thermo, *muscl);
+            recon.init(mesh, bd, gas_of(thermo), *muscl);
             const AirCells cells = air_cells(*mesh, host, composition);
             Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, 1);
             Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, 1);
@@ -574,7 +582,7 @@ TEST(TENOScalarsTest, RoundOffTraceSpeciesKeepsThetaAtOneAndStaysNonNegative) {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, nq);
     teno->calc_face_values(cells.W, face_W);
     ScalarReconstruction recon;
-    recon.init(mesh, bd, chemistry::make_thermo_table(mech), *teno);
+    recon.init(mesh, bd, gas_of(chemistry::make_thermo_table(mech)), *teno);
     Kokkos::View<rtype **[2][2]> face_thermo("face_thermo", mesh->n_faces, nq);
     recon.calc(cells.S, cells.W, face_W, face_thermo);
     // theta = 1: gamma at every face point is its unscaled reconstruction
@@ -609,7 +617,8 @@ TEST(MUSCL2D, FusedAndBlockPathsGiveTheSeparateKernelsFaceValuesAndLimitersBitwi
         Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
         auto h_W = Kokkos::create_mirror_view(W);
         for (uint32_t c = 0; c < mesh->n_cells; c++) {
-            const double x = mesh->h_cell_coords(c, 0), y = mesh->h_cell_coords(c, 1);
+            const double x = static_cast<double>(mesh->h_cell_coords(c, 0));
+            const double y = static_cast<double>(mesh->h_cell_coords(c, 1));
             const bool inside = (x - 0.45) * (x - 0.45) + (y - 0.4) * (y - 0.4) < 0.06;
             h_W(c, 0) = inside ? 1.0_r : 0.125_r;
             h_W(c, 1) = static_cast<rtype>(0.1 * std::sin(3.0 * x));

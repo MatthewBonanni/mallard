@@ -18,6 +18,7 @@
 
 #include "common_typedef.h"
 #include "derived_catalog.h"
+#include "flamelet.h"
 #include "gradient.h"
 #include "input.h"
 #include "physics.h"
@@ -223,6 +224,7 @@ struct Settings {
     Kokkos::View<rtype *> progress_weights;
     rtype T_unburnt = 0.0, T_burnt = 1.0;
     bool mixture = false, viscous = false;
+    bool tabulated = false;  // a flamelet gas: no species thermodynamics (ENTROPY) nor species (the mixture group)
 
     /**
      * @brief From [output] reference, [output.mixture] and, for a perfect gas,
@@ -290,6 +292,7 @@ struct Inputs {
     Kokkos::View<rtype *[N_PRIMITIVE]> primitives{};          ///< u, p, T, h of each cell
     Kokkos::View<rtype **, Kokkos::LayoutRight> Y{};          ///< mixtures: (cell, [Y_1 .. Y_Ns, ...])
     chemistry::ThermoTable<> thermo{};                        ///< mixtures: species thermodynamics
+    flamelet::Gas<> flamelet{};                               ///< a flamelet gas: its table (Y holds Z, C)
     Kokkos::View<rtype *[3]> transport{};                     ///< viscous mixtures: (cell, [mu, lambda, -])
     Kokkos::View<rtype ***, Kokkos::LayoutRight> scalar_gradients{};  ///< Workspace::gradients
 };
