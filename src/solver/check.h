@@ -161,7 +161,7 @@ struct CheckReport {
     double dt = 0.0;
     double dt_cfl1 = 0.0;    // the time step at CFL 1
     double cfl = 0.0;        // that dt's CFL number
-    double cfl_limit = 0.0;  // the time integrator's for smooth flow, infinity if it has none
+    double cfl_limit = 0.0;  // the time integrator's for smooth flow
     std::string integrator;
     std::string dt_limit;  // what sets dt: "CFL", "sponge" or "fixed"
     uint64_t limiting_cell = 0;

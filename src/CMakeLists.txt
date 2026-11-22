@@ -24,6 +24,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
+    common/file_hash.cpp
     common/provenance.cpp
     common/sha256_hw.cpp
     common/snapshot_block.cpp
@@ -58,6 +59,7 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
@@ -68,9 +70,11 @@ add_library(MallardCore STATIC
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
     numerics/teno_setup.cpp
+    numerics/teno_shapes.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
+    physics/flamelet.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -108,6 +112,7 @@ add_library(MallardCore STATIC
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
+    solver/solver_flamelet.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
@@ -130,6 +135,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
@@ -140,6 +146,9 @@ add_library(MallardCore STATIC
     parallel/halo_exchange.cpp
     parallel/lock_arrays.cpp
     parallel/partition.cpp
+    particles/particle_probes.cpp
+    particles/particle_quantities.cpp
+    particles/particles.cpp
 )
 
 target_include_directories(MallardCore PUBLIC
@@ -153,6 +162,7 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/solver
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
+    ${CMAKE_CURRENT_SOURCE_DIR}/particles
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
@@ -257,7 +267,7 @@ endforeach()
 # contract either. [statistics.convergence] updates its estimate on the device
 # as the host does, bit for bit, and the device cuts isosurfaces into the host's
 # quadrature points (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno_shapes.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
                        solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
