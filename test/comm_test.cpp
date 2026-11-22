@@ -239,7 +239,7 @@ TEST(CommTest, SharedDirectoriesAreRemovedOrFailAlikeOnEveryRank) {
     if (comm::is_root()) EXPECT_FALSE(std::filesystem::exists(dir));
     // A name no file system takes: rank 0's failure reaches every rank, and nothing throws
     std::string failure;
-    EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(5000, 'x')));
+    EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(300, 'x')));
     EXPECT_NE(failure, "");
     EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
 }
