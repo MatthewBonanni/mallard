@@ -1467,6 +1467,18 @@ void scatter_slots(const teno_setup::TableBatch & from, const std::vector<uint32
     });
 }
 
+/** @brief The moments of cells, on the host. */
+teno::Moments::host_mirror_type moment_rows(const teno::Moments & all, const std::vector<uint32_t> & cells) {
+    const uint32_t nm = static_cast<uint32_t>(all.extent(1));
+    Kokkos::View<uint32_t *> d_cells(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_reps"), cells.size());
+    Kokkos::deep_copy(d_cells, HostUnmanaged<const uint32_t>(cells.data(), cells.size()));
+    teno::Moments picked(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_rep_moments"), cells.size(), nm);
+    gated::parallel_for("teno_shape_rep_moments", Kokkos::RangePolicy<>(0, cells.size()), KOKKOS_LAMBDA(const size_t k) {
+        for (uint32_t m = 0; m < nm; m++) picked(k, m) = all(d_cells(k), m);
+    });
+    return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), picked);
+}
+
 /**
  * @brief With shared tables, the setup fits one cell of each stencil shape
  *        (teno::ShapeKeys): the cell with the lowest global id of each key,
@@ -1512,14 +1524,8 @@ class KeyedSetup {
             if (N_DIM == 3 && scheme.sector_stencils && !reps.empty()) {
                 const teno::Moments all = setup.moments(uint32_t(mesh.n_cells), {});
                 n_moments = static_cast<uint32_t>(all.extent(1));
-                Kokkos::View<uint32_t *> d_reps(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_reps"), reps.size());
-                Kokkos::deep_copy(d_reps, HostUnmanaged<const uint32_t>(reps.data(), reps.size()));
-                teno::Moments picked(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_rep_moments"), reps.size(), n_moments);
                 const uint32_t nm = n_moments;
-                gated::parallel_for("teno_shape_rep_moments", Kokkos::RangePolicy<>(0, reps.size()), KOKKOS_LAMBDA(const size_t k) {
-                    for (uint32_t m = 0; m < nm; m++) picked(k, m) = all(d_reps(k), m);
-                });
-                auto h_picked = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), picked);
+                const auto h_picked = moment_rows(all, reps);
                 for (size_t k = 0; k < reps.size(); k++) {
                     auto & rec = records[rep_group[k]];
                     if (rec.empty() || rec[0] != 1) continue;
