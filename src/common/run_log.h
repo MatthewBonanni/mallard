@@ -14,6 +14,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "json.h"
 
@@ -36,6 +37,19 @@ bool is_open();
 
 /** @brief Rank 0: the step of the last record of the log appended to, if it has one. */
 std::optional<uint64_t> last_step();
+
+/** @brief Where a rewind sets a file aside: .rewound/<run_id>/ in the file's directory. */
+std::string rewound_path(const std::string & file, const std::string & run_id);
+
+/**
+ * @brief Rank 0, continuing at step the log appended to: sets aside every file
+ *        that one of these writers wrote at a later step, as its output records
+ *        give (the steps a rewind repeats), so that no file is written twice
+ *        under one name, and keeps them for the start record.
+ */
+void supersede(uint64_t step, const std::string & run_id, const std::vector<std::string> & writers);
+/** @brief The files supersede() set aside, for restart.superseded of the start record; "" if none. */
+const std::string & superseded();
 
 /**
  * @brief Writes a record as one line and flushes it, and adds it to the
