@@ -153,7 +153,7 @@ spack install mallard ^openmpi@5                         # a particular MPI
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
 | `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
 
-`spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, its library, Python and numpy.
+`spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, Python and numpy; the library stays, for the [C++ API](guide/cpp_api.md).
 
 For tab completion, add `source <(mallard completion bash)` (or the [zsh or fish line](guide/cli.md#shell-completion)) to the shell's startup file, after `spack load mallard`. Spack builds its own Kokkos to match. A cluster's MPI, CUDA or compilers can be registered with `spack external find` (e.g. `spack external find openmpi cuda`). dKaMinPar is not in the package: build from source for `partitioner = "graph"`.
 
@@ -210,7 +210,8 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_ENABLE_PYTHON` | `ON` | `libmallard2d` or `libmallard3d`, the output reader as a library for the [Python package](guide/python.md), installed in `lib/`; compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_ENABLE_LIBRARY` | `ON` | `libmallard2d` or `libmallard3d`, installed in `lib/`: the [C++ API](guide/cpp_api.md), with its header in `include/mallard/` and the CMake package `Mallard` in `lib/cmake/Mallard/`, and the output reader of the [Python package](guide/python.md); compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
+| `Mallard_ENABLE_PYTHON` | `ON` | Checks that the [Python package](guide/python.md)'s version is Mallard's, for `Mallard_PYTHON_INSTALL_DIR`; needs `Mallard_ENABLE_LIBRARY` |
 | `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |
 | `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
 | `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
@@ -227,4 +228,4 @@ Every build makes the library of the [Python package](guide/python.md); after `c
 uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
-It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF` builds without the library ([Python](guide/python.md#installing)).
+It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)).
