@@ -17,8 +17,9 @@ rho = f.read_all("RHO")                       # (11, 800): every snapshot
 x = f.geometry().vertex_averages()[:, 0]      # where each cell is
 ```
 
-Every function and class: [Python API](python_api.md). To run cases from a
-program instead, see the [C++ API](cpp_api.md).
+Every function and class: [Python API](python_api.md). With the solver
+bindings, the package also runs cases in the Python process, step by step
+([Running cases](#running-cases)); the [C++ API](cpp_api.md) is the same from C++.
 
 ## Installing
 
@@ -279,6 +280,59 @@ quantities as results (`d["exit_status"]` is 1), since those are their
 verdicts, and so does `mallard.pack(archive, verify=True)` with the files that
 differ from the archive's manifest. `mallard.command` runs any other command that has `--format json`:
 `mallard.command("check", "input.toml")`, `mallard.command("list", "fields", "input.toml")`.
+
+## Running cases
+
+`mallard.Case`, `mallard.Session` and `mallard.Solver` run a case in the
+Python process, as the [C++ API](cpp_api.md) does in a program: the same run as
+`mallard -i input.toml`, with the same output, run log and results bit for bit,
+stepped from Python, with its fields as arrays. They need the solver bindings,
+an extension module of the package (`mallard._core2d`, `mallard._core3d`) that
+the containers and Spack install; from source, configure with
+`-DMallard_ENABLE_PYTHON_BINDINGS=ON`. The rest of the package works without
+them, and loads them only when a case is built.
+
+```python
+import mallard
+
+mallard.Session(["--kokkos-num-threads=4"])           # optional: Kokkos' defaults otherwise
+solver = mallard.Solver(mallard.Case.from_toml_file("input.toml"))
+solver.setup()
+while solver.advance_to(solver.time() + 0.01):
+    p = solver.field("P")                              # numpy, the solver's own memory
+    print(solver.time(), p.max(), solver.monitor("integrals_kinetic_energy").value)
+solver.finish()
+```
+
+- **The input is the record.** A case is TOML: `Case.from_toml_file(path)` or
+  `Case.from_toml(text)` for one a script writes; the run log and every output
+  file record its exact text, so `mallard -i` on it reruns the run. There is
+  no other way to configure a run from Python.
+- **Calls.** `setup()`, `step()`, `advance_to(t)`, `finish()`, `run()`,
+  `time()`, `step_count()`, `finished()`, `monitors()`, `monitor(name)`,
+  `statistics()`, as in [C++](cpp_api.md#running-a-case); failures raise
+  `mallard.Error`, with the message `mallard` prints and its `code`.
+- **Fields without copies.** `field(name)` is a read-only NumPy array of the
+  solver's memory on a CPU build; on a GPU it is a `mallard.DeviceArray` of
+  device memory, which `cupy.asarray`, `torch.from_dlpack` and Numba take
+  without a copy (`__cuda_array_interface__`, DLPack); `field(name, memory="host")`
+  copies it to NumPy. The names are those of the
+  [C++ API](cpp_api.md#fields): `RHO`, `P`, `conservatives`, `MEAN_U_X`,
+  `CENTROID`, ... (`field_names()`).
+- **Setting the state.** `writable_field(name)` is a writable view of the
+  state: change it in place (`rho = solver.writable_field("RHO"); rho *= 1.01`),
+  then `commit_state()` or step; the run log records a `state_set` event.
+- **Callbacks.** `on_step(f)` calls `f(solver)` after every step and
+  `on_stage(f)` calls `f(solver, stage)` at each stage of the time integrator
+  (`stage.step`, `stage.index`, `stage.time`); `remove_callback(id)`. An
+  exception in a callback ends the run as an error and is raised from the call
+  that stepped.
+- **One session per process.** Kokkos starts once per process, and a process
+  runs cases of one dimension: run others in another process
+  (`multiprocessing`, a job array). The session ends when Python exits.
+- **MPI.** Start the script with `mpirun -n 4 python3 script.py` on a build
+  with MPI: every call is collective, fields hold each rank's owned cells
+  (`GLOBAL_ID` places them), and `monitors()` are the same on every rank.
 
 ## Pitfalls
 

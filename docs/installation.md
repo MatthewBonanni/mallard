@@ -151,7 +151,7 @@ spack install mallard ^openmpi@5                         # a particular MPI
 | `cuda` + `cuda_arch`, `rocm` + `amdgpu_target`, `sycl` | off | Kokkos GPU backend |
 | `mpi`, `gpu_aware_mpi`, `nccl` | `+mpi` | MPI; device buffers to a GPU-aware MPI; halo exchanges with NCCL |
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
-| `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
+| `python` | on | The [Python package](guide/python.md) `mallard`, its library and its solver bindings, with Python and numpy |
 
 `spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, Python and numpy; the library stays, for the [C++ API](guide/cpp_api.md).
 
@@ -212,6 +212,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
 | `Mallard_ENABLE_LIBRARY` | `ON` | `libmallard2d` or `libmallard3d`, installed in `lib/`: the [C++ API](guide/cpp_api.md), with its header in `include/mallard/` and the CMake package `Mallard` in `lib/cmake/Mallard/`, and the output reader of the [Python package](guide/python.md); compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
 | `Mallard_ENABLE_PYTHON` | `ON` | Checks that the [Python package](guide/python.md)'s version is Mallard's, for `Mallard_PYTHON_INSTALL_DIR`; needs `Mallard_ENABLE_LIBRARY` |
+| `Mallard_ENABLE_PYTHON_BINDINGS` | `OFF` | The Python package's solver bindings, `mallard._core2d` or `_core3d` ([running cases from Python](guide/python.md#running-cases)): needs Python's headers (`python3-dev`) and [nanobind](https://nanobind.readthedocs.io) (in the Python's environment, `uv pip install nanobind`, or else fetched); the containers and Spack's `+python` build them |
 | `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |
 | `Mallard_ENABLE_TESTS` | `ON` | Build the test suite, `mallard-test2d` or `mallard-test3d` (fetches GoogleTest) |
 | `Mallard_INSTALL_TESTS` | `ON` | Install the test suite and its data, so that `mallard test` checks an installed build |
@@ -228,4 +229,4 @@ Every build makes the library of the [Python package](guide/python.md); after `c
 uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
-It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)).
+It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)). `-DMallard_ENABLE_PYTHON_BINDINGS=ON` adds the extension module that runs cases in Python (`mallard.Solver`), installed with the package.

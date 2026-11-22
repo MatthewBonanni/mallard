@@ -330,8 +330,9 @@ no Rust API:
    `commit_state` at step boundaries) and callbacks (`on_step`, `on_stage`).
 3. `on_progress`, `on_output` and the logging sink, with structured progress
    records; `step(n)`.
-4. Python bindings (nanobind) over 1-3, in `mallard-python`; the reader moves
-   into the extension.
+4. Python bindings (nanobind) over 1-2, in `mallard-python`
+   ([The Python package](python_package.md)), and `Case::dimension()`; then
+   MPI under mpi4py and the reader moved into the extension.
 5. Typed configs generated from the key catalog, `Case::set`, and the check
    report and resolved input as structs; round-trip tests (code-built case to
    TOML to `mallard -i`, bit for bit).

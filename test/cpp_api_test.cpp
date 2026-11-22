@@ -401,3 +401,23 @@ TEST(CppApiTest, StatisticsAveragesAreFieldsAsTheRestartFileHasThem) {
     EXPECT_EQ(means, *restart.find("MEAN_RHO"));
     EXPECT_EQ(covariances, *restart.find("COV_RHO_P"));
 }
+
+TEST(CppApiTest, ACaseOfTheOtherDimensionIsRefused) {
+    const mallard::Case same = mallard::Case::from_toml(case_text("dimension", "n_steps = 1\n"));
+    EXPECT_EQ(same.dimension(), Mallard_DIM);
+#if Mallard_DIM == 2
+    const std::string mesh = "[mesh]\ntype = \"cartesian\"\nNx = 2\nNy = 2\nNz = 2\n";
+#else
+    const std::string mesh = "[mesh]\ntype = \"cartesian_tri\"\nNx = 2\nNy = 2\n";
+#endif
+    const mallard::Case other = mallard::Case::from_toml("[run]\nn_steps = 1\n" + mesh);
+    EXPECT_EQ(other.dimension(), 5 - Mallard_DIM);
+    try {
+        mallard::Solver solver(other);
+        ADD_FAILURE() << "no error";
+    } catch (const mallard::Error & e) {
+        EXPECT_EQ(e.code(), "E-INPUT");
+        EXPECT_NE(std::string(e.what()).find("libmallard" + std::to_string(5 - Mallard_DIM) + "d"), std::string::npos)
+            << e.what();
+    }
+}

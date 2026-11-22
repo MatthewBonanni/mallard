@@ -25,6 +25,13 @@
 /** @brief Version of this API: a program built against one version runs only with a library of the same. */
 #define MALLARD_API_VERSION 1
 
+/** @brief Types the library and a program both use across their boundary (exceptions) keep one identity. */
+#if defined(__GNUC__) || defined(__clang__)
+#define MALLARD_VISIBLE __attribute__((visibility("default")))
+#else
+#define MALLARD_VISIBLE
+#endif
+
 namespace mallard {
 
 /** @brief MALLARD_API_VERSION of the library linked. */
@@ -40,9 +47,10 @@ int dimension();
  * @brief What every function of the API throws on failure: an input error, a diverged run, a missing file.
  *        what() is the message the executable prints, which says how to fix it.
  */
-class Error : public std::runtime_error {
+class MALLARD_VISIBLE Error : public std::runtime_error {
     public:
         Error(std::string code, const std::string & message) : std::runtime_error(message), code_(std::move(code)) {}
+        ~Error() override;
         /** @brief The diagnostic code `mallard` reports with the message: "E-INPUT", "E-DIVERGED", ... */
         const std::string & code() const { return code_; }
 
@@ -92,6 +100,11 @@ class Case {
         const std::string & toml() const;
         /** @brief The input file of from_toml_file, else empty. */
         const std::string & path() const;
+        /**
+         * @brief The case's dimension, 2 or 3, as `mallard` tells which solver runs it: from its generated mesh or
+         *        its mesh file's header. Throws Error if neither tells it (the mesh file is missing).
+         */
+        int dimension() const;
 
     private:
         Case(std::string text, std::string path, std::string name);
@@ -176,6 +189,7 @@ using CallbackId = uint64_t;
  */
 class Solver {
     public:
+        /** @brief Throws Error if the case is not of this library's dimension(). */
         explicit Solver(Case c);
         ~Solver();
         Solver(Solver &&) noexcept;
