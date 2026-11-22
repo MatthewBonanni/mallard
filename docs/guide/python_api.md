@@ -269,6 +269,16 @@ The TOML text, exactly as read: write it to a file to rerun the case with mallar
 
 The input file of from_toml_file, else "".
 
+#### `case.set(key, value)`
+
+This case with one key set, a new case: its TOML text with that key's line changed (or added), so toml()
+stays the run's whole record. key is a path of bare keys, an element of an array of tables by its index
+("run.n_steps", "probes[0].interval"); value is a bool, int, float, str, or a list or dict of them.
+
+#### `case.save(path)`
+
+Writes toml() to path and returns the case of that file, which a run then builds from.
+
 #### `case.dimension()`
 
 2 or 3, as mallard tells which solver runs the case.
@@ -299,9 +309,10 @@ Frees the solver; arrays of its fields are invalid after it.
 
 The setup of mallard -i, then the start of the run (its first output and progress row).
 
-#### `solver.step()`
+#### `solver.step(n=1)`
 
-One step; False once the case's stop condition is reached.
+n steps (queued on the device ahead of the host: the same results as n calls); False once the case's
+stop condition is reached.
 
 #### `solver.advance_to(t)`
 
@@ -366,9 +377,30 @@ Calls f(solver) after every step; returns an id for remove_callback.
 Calls f(solver, stage) at each stage of the time integrator; field() views the stage's state there.
 Steps run kernel by kernel on the host while one is registered.
 
+#### `solver.on_progress(f)`
+
+Calls f(progress) with each progress row (step, time, dt, cfl, fraction, eta, diagnostics, written, json)
+on every rank, keeping the device queue; f gets the record only, and may not call the solver.
+
+#### `solver.on_output(f)`
+
+Calls f(output) with each output completely written (kind, path, reason, writer, files, json), on rank 0;
+f may not call the solver.
+
+#### `solver.on_record(f)`
+
+Calls f(record) with each record of the run log (type, json) as rank 0 writes it, on rank 0; f may not
+call the solver.
+
 #### `solver.remove_callback(callback_id)`
 
 Removes a callback; unknown ids are ignored.
+
+#### `solver.set_log(sink)`
+
+Where the solver's console output goes: None (the default) prints it, as mallard -i does; else
+sink(message) gets every line, warning and error (message.level "info", "warning" or "error", message.code,
+message.text), without color, and nothing is printed: lambda message: None silences the solver.
 
 ### `mallard.DeviceArray`
 

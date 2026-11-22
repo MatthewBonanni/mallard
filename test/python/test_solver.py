@@ -142,6 +142,67 @@ def test_stage_callbacks_see_each_stage_and_errors_end_the_run(tmp_path, monkeyp
     assert end["outcome"] == "error"
 
 
+def same_files(a, b):
+    files = sorted(os.listdir(a))
+    assert files and files == sorted(os.listdir(b))
+    for name in files:
+        report = mallard.diff(a / name, b / name)
+        assert report["result"] == "ok" and report["time"]["difference"] == 0, (name, report)
+        assert report["fields"] and all(f["differing"] == 0 for f in report["fields"]), (name, report)
+
+
+def test_a_case_set_from_python_emits_the_toml_mallard_runs_bit_for_bit(tmp_path, monkeypatch):
+    base = mallard.Case.from_toml(case_text(4))
+    case = (base.set("run.n_steps", 8).set("run.cfl", 0.3).set("numerics.riemann_solver", "HLL")
+            .set("statistics", {"fields": ["RHO", "P"], "interval": 1}))
+    text = case.toml()
+    # Only the lines of the keys set change; the new table goes at the end
+    changed = base.toml().replace("n_steps = 4", "n_steps = 8").replace("cfl = 0.4", "cfl = 0.3")
+    assert text.startswith(changed.replace('"HLLC"', '"HLL"') + "\n[statistics]\n"), text
+    with pytest.raises(mallard.Error) as e:
+        base.set("probes[0].interval", 1)
+    assert e.value.code == "E-INPUT"
+
+    exe, py = tmp_path / "executable", tmp_path / "python"
+    exe.mkdir()
+    py.mkdir()
+    (exe / "input.toml").write_text(text)
+    run_executable(exe)
+    monkeypatch.chdir(py)
+    saved = case.save("input.toml")
+    assert saved.path() == "input.toml" and saved.toml() == text
+    solver = mallard.Solver(saved)
+    assert solver.step(3) and solver.step_count() == 3
+    assert not solver.step(100) and solver.step_count() == 8
+    assert solver.finish() == 0
+    same_files(exe / "solut", py / "solut")
+    start = [r for r in events(py)[1] if r["type"] == "start"][-1]
+    assert start["provenance"]["input"]["text"] == text
+
+
+def test_progress_output_and_record_callbacks_and_the_log_sink(tmp_path, monkeypatch, capfd):
+    monkeypatch.chdir(tmp_path)
+    solver = mallard.Solver(mallard.Case.from_toml(case_text(8)).set("output.check_interval", 4))
+    rows, outputs, records, messages = [], [], [], []
+    solver.on_progress(rows.append)
+    solver.on_output(outputs.append)
+    solver.on_record(records.append)
+    solver.set_log(messages.append)
+    capfd.readouterr()
+    assert solver.run() == 0
+    assert capfd.readouterr().out == ""
+    assert [r.step for r in rows] == [0, 4, 8] and rows[-1].fraction == 1.0
+    assert rows[0].diagnostics[0][0] == "min_rho"
+    with open(tmp_path / "mallard.jsonl") as f:
+        lines = f.read().splitlines()
+    assert [r.json for r in records] == lines
+    assert [r.json for r in rows] == [line for line in lines if json.loads(line)["type"] == "progress"]
+    assert {(o.kind, o.step) for o in outputs} >= {("vtu", 8), ("restart", 8)}
+    assert all(o.files and o.files[0].bytes > 0 for o in outputs)
+    assert messages and all(m.level == "info" and "\033" not in m.text for m in messages)
+    assert any(m.text.startswith("== Run ") for m in messages)
+
+
 def test_inputs_are_checked_as_the_executable_checks_them(tmp_path):
     with pytest.raises(mallard.Error) as e:
         mallard.Case.from_toml("[run\n")

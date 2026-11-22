@@ -15,7 +15,9 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/function.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/vector.h>
@@ -35,8 +37,8 @@ namespace {
 /** @brief A mallard::Solver that Python can close before Kokkos is finalized, and the error a callback raised. */
 struct PySolver {
     std::unique_ptr<mallard::Solver> solver;
-    nb::object step_hook, stage_hook;
-    mallard::CallbackId step_id = 0, stage_id = 0;
+    nb::object step_hook, stage_hook, progress_hook, output_hook, record_hook, log_hook;
+    mallard::CallbackId step_id = 0, stage_id = 0, progress_id = 0, output_id = 0, record_id = 0;
     std::unique_ptr<nb::python_error> callback_error;
 
     mallard::Solver & get() {
@@ -161,6 +163,15 @@ nb::object field(nb::handle self, PySolver & s, const std::string & name, const 
 
 std::unique_ptr<mallard::Session> session;
 
+/** @brief Replaces the callback `id` of hook `held` with `hook` (None: none), registered by `on`. */
+template <typename On>
+void set_hook(PySolver & s, nb::object & held, mallard::CallbackId & id, nb::object hook, On && on) {
+    if (id) s.get().remove_callback(id);
+    id = 0;
+    held = hook;
+    if (!hook.is_none()) id = on();
+}
+
 } // namespace
 
 NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
@@ -201,6 +212,10 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         return mallard::Case::from_toml(text, name).dimension();
     });
     m.def("check_case", [](const std::string & text, const std::string & name) { mallard::Case::from_toml(text, name); });
+    m.def("case_set", [](const std::string & text, const std::string & name, const std::string & key,
+                         const std::string & value) {
+        return mallard::Case::from_toml(text, name).set(key, mallard::Value::toml(value)).toml();
+    });
 
     nb::class_<mallard::Monitor>(m, "Monitor")
         .def_ro("name", &mallard::Monitor::name)
@@ -220,6 +235,62 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
                    ", time=" + std::to_string(x.time) + ")";
         });
 
+    nb::class_<mallard::Progress>(m, "Progress")
+        .def_ro("step", &mallard::Progress::step)
+        .def_ro("time", &mallard::Progress::time)
+        .def_ro("dt", &mallard::Progress::dt)
+        .def_ro("cfl", &mallard::Progress::cfl)
+        .def_ro("fraction", &mallard::Progress::fraction)
+        .def_ro("wall", &mallard::Progress::wall)
+        .def_ro("wall_per_step", &mallard::Progress::wall_per_step)
+        .def_ro("cells_per_second", &mallard::Progress::cells_per_second)
+        .def_ro("eta", &mallard::Progress::eta)
+        .def_ro("cells", &mallard::Progress::cells)
+        .def_ro("ranks", &mallard::Progress::ranks)
+        .def_ro("diagnostics", &mallard::Progress::diagnostics)
+        .def_ro("written", &mallard::Progress::written)
+        .def_ro("json", &mallard::Progress::json)
+        .def("__repr__", [](const mallard::Progress & x) {
+            return "Progress(step=" + std::to_string(x.step) + ", time=" + std::to_string(x.time) +
+                   ", fraction=" + std::to_string(x.fraction) + ")";
+        });
+
+    nb::class_<mallard::OutputFile>(m, "OutputFile")
+        .def_ro("path", &mallard::OutputFile::path)
+        .def_ro("bytes", &mallard::OutputFile::bytes)
+        .def("__repr__", [](const mallard::OutputFile & x) {
+            return "OutputFile(path='" + x.path + "', bytes=" + std::to_string(x.bytes) + ")";
+        });
+
+    nb::class_<mallard::Output>(m, "Output")
+        .def_ro("step", &mallard::Output::step)
+        .def_ro("time", &mallard::Output::time)
+        .def_ro("kind", &mallard::Output::kind)
+        .def_ro("path", &mallard::Output::path)
+        .def_ro("reason", &mallard::Output::reason)
+        .def_ro("writer", &mallard::Output::writer)
+        .def_ro("files", &mallard::Output::files)
+        .def_ro("json", &mallard::Output::json)
+        .def("__repr__", [](const mallard::Output & x) {
+            return "Output(kind='" + x.kind + "', path='" + x.path + "', step=" + std::to_string(x.step) + ")";
+        });
+
+    nb::class_<mallard::Record>(m, "Record")
+        .def_ro("type", &mallard::Record::type)
+        .def_ro("json", &mallard::Record::json)
+        .def("__repr__", [](const mallard::Record & x) { return "Record(type='" + x.type + "')"; });
+
+    nb::class_<mallard::LogMessage>(m, "LogMessage")
+        .def_prop_ro("level",
+                     [](const mallard::LogMessage & x) {
+                         return x.level == mallard::LogLevel::info      ? "info"
+                                : x.level == mallard::LogLevel::warning ? "warning"
+                                                                        : "error";
+                     })
+        .def_ro("code", &mallard::LogMessage::code)
+        .def_ro("text", &mallard::LogMessage::text)
+        .def("__repr__", [](const mallard::LogMessage & x) { return "LogMessage(text='" + x.text + "')"; });
+
     nb::class_<mallard::Statistics>(m, "Statistics")
         .def_ro("samples", &mallard::Statistics::samples)
         .def_ro("start", &mallard::Statistics::start)
@@ -237,7 +308,7 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         .def("close", [](PySolver & s) { s.solver.reset(); })
         .def("closed", [](PySolver & s) { return s.solver == nullptr; })
         .def("setup", [](PySolver & s) { s.released([&] { s.get().setup(); }); })
-        .def("step", [](PySolver & s) { return s.released([&] { return s.get().step(); }); })
+        .def("step", [](PySolver & s, uint64_t n) { return s.released([&] { return s.get().step(n); }); }, "n"_a = 1)
         .def("advance_to", [](PySolver & s, double t) { return s.released([&] { return s.get().advance_to(t); }); })
         .def("finish", [](PySolver & s) { return s.released([&] { return s.get().finish(); }); })
         .def("run", [](PySolver & s) { return s.released([&] { return s.get().run(); }); })
@@ -271,5 +342,28 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
             if (hook.is_none()) return;
             s.stage_id =
                 s.get().on_stage([&s](mallard::Solver &, const mallard::Stage & stage) { s.call(s.stage_hook, stage); });
-        }, nb::arg("hook").none());
+        }, nb::arg("hook").none())
+        .def("set_progress_hook", [](PySolver & s, nb::object hook) {
+            set_hook(s, s.progress_hook, s.progress_id, hook, [&] {
+                return s.get().on_progress([&s](const mallard::Progress & p) { s.call(s.progress_hook, p); });
+            });
+        }, nb::arg("hook").none())
+        .def("set_output_hook", [](PySolver & s, nb::object hook) {
+            set_hook(s, s.output_hook, s.output_id, hook, [&] {
+                return s.get().on_output([&s](const mallard::Output & o) { s.call(s.output_hook, o); });
+            });
+        }, nb::arg("hook").none())
+        .def("set_record_hook", [](PySolver & s, nb::object hook) {
+            set_hook(s, s.record_hook, s.record_id, hook, [&] {
+                return s.get().on_record([&s](const mallard::Record & r) { s.call(s.record_hook, r); });
+            });
+        }, nb::arg("hook").none())
+        .def("set_log", [](PySolver & s, nb::object hook) {
+            s.log_hook = hook;
+            if (hook.is_none()) {
+                s.get().set_log({});
+                return;
+            }
+            s.get().set_log([&s](const mallard::LogMessage & message) { s.call(s.log_hook, message); });
+        }, nb::arg("sink").none());
 }

@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -89,6 +90,39 @@ class Session {
 };
 
 /**
+ * @brief A TOML value for Case::set: a bool, an integer, a float, a string, or an array of values (`{1.0, 2.0}`, a
+ *        `std::vector`). Value::toml takes any other TOML value as written (an inline table, a date).
+ */
+class Value {
+    public:
+        Value(bool b);
+        Value(int i);
+        Value(long i);
+        Value(long long i);
+        Value(unsigned i);
+        Value(unsigned long i);
+        Value(unsigned long long i);
+        /** @brief As written, it reads back as exactly this double. */
+        Value(double x);
+        Value(const char * s);
+        Value(const std::string & s);
+        Value(std::string_view s);
+        Value(std::initializer_list<Value> items);
+        template <typename T>
+        Value(const std::vector<T> & items) : Value(array(std::vector<Value>(items.begin(), items.end()))) {}
+        /** @brief A TOML value as written: `Value::toml("{type = \"box\", size = [1.0, 2.0]}")`, checked by set. */
+        static Value toml(std::string text);
+        /** @brief The value's TOML text. */
+        const std::string & text() const { return text_; }
+
+    private:
+        struct Text {};
+        Value(Text, std::string text) : text_(std::move(text)) {}
+        static Value array(const std::vector<Value> & items);
+        std::string text_;
+};
+
+/**
  * @brief A case: the TOML input of a run. The input is the run's record: Solver runs exactly this text, and the
  *        run's provenance (run log, output files) records it, so `mallard -i` on it reruns the run bit for bit.
  *        Paths in the input are relative to the working directory, as for `mallard -i`.
@@ -105,6 +139,21 @@ class Case {
 
         /** @brief The TOML text, exactly as read: write it to a file to rerun the case with `mallard -i`. */
         const std::string & toml() const;
+        /**
+         * @brief This case with one key set, a new case (cases are values): its TOML text with that key's line
+         *        changed, or added after its table's last key (a new table at the end), so toml() stays the run's
+         *        whole record. `key` is a path of bare keys, an element of an array of tables by its index:
+         *        "run.n_steps", "numerics.face_reconstruction.type", "probes[0].interval". The text is reformatted
+         *        (comments kept) only where the key's line cannot change alone (a dotted key, a key of an inline
+         *        table, a value over several lines). Keys are checked by setup, as a file's are. Throws Error for a
+         *        malformed key or value, or one whose table is not a table of the case.
+         */
+        Case set(std::string_view key, const Value & value) const;
+        /**
+         * @brief Writes toml() to `path` and returns the case of that file, which a run then builds from (the
+         *        file on disk is the run's input, as for `mallard -i path`).
+         */
+        Case save(const std::string & path) const;
         /** @brief The input file of from_toml_file, else empty. */
         const std::string & path() const;
         /**
@@ -186,6 +235,68 @@ struct Statistics {
     uint64_t batches = 0;  ///< closed batches of the confidence intervals ([statistics] batch)
 };
 
+/**
+ * @brief A progress row: the run log's progress record (docs/guide/output.md#run-record-mallardjsonl), as the
+ *        progress table prints it every [output] check_interval steps and at the start and end of the run.
+ */
+struct Progress {
+    uint64_t step = 0;
+    double time = 0.0;           ///< s
+    double dt = 0.0;             ///< s
+    double cfl = 0.0;            ///< dt over the stable time step at CFL 1
+    double fraction = 0.0;       ///< of the run done, by the first stop condition to be reached
+    double wall = 0.0;           ///< s since the solver started
+    std::optional<double> wall_per_step;     ///< s of time stepping per step since the last row
+    std::optional<double> cells_per_second;  ///< likewise
+    std::optional<double> eta;               ///< s to the stop condition
+    uint64_t cells = 0;
+    int ranks = 1;
+    std::vector<std::pair<std::string, double>> diagnostics;  ///< the row's columns: min_rho, min_p, max_mach, ...
+    std::string written;  ///< the files written since the last row: "16 vtu, 1 restart"
+    std::string json;     ///< the run log's progress record, one line of JSON
+};
+
+/** @brief One file of an Output, with its size. */
+struct OutputFile {
+    std::string path;
+    uint64_t bytes = 0;
+};
+
+/** @brief Output completely written: the run log's output record (a snapshot, a restart file, a probe's snapshot). */
+struct Output {
+    uint64_t step = 0;
+    double time = 0.0;              ///< s
+    std::string kind;               ///< "vtu", "vtkhdf", "restart", "spectra", ...
+    std::string path;               ///< the file, or the series' index
+    std::string reason;             ///< "interval", "start", "end", "trigger", ...
+    std::string writer;             ///< the [[write_data]] prefix or the probe's file that wrote it
+    std::vector<OutputFile> files;  ///< every file written
+    std::string json;               ///< the run log's output record, one line of JSON
+};
+
+/** @brief A record of the run log as written: start, progress, output, event, ... (docs/guide/output.md). */
+struct Record {
+    std::string type;  ///< the record's "type"
+    std::string json;  ///< the record, one line of JSON
+};
+
+/** @brief What a message of the solver's console output is. */
+enum class LogLevel : uint8_t {
+    info,     ///< a line of what `mallard -i` prints on stdout (setup, the progress table, the summary)
+    warning,  ///< a warning, which `mallard -i` prints on stderr
+    error,    ///< an error, likewise
+};
+
+/** @brief A message of the solver's console output, without color. */
+struct LogMessage {
+    LogLevel level = LogLevel::info;
+    std::string code;  ///< a warning's or error's diagnostic code ("W-...", "E-..."), else empty
+    std::string text;  ///< the line, or the warning's or error's message
+};
+
+/** @brief Where Solver::set_log sends the solver's console output. */
+using LogSink = std::function<void(const LogMessage &)>;
+
 /** @brief Identifies a registered callback, for Solver::remove_callback. */
 using CallbackId = uint64_t;
 
@@ -216,6 +327,12 @@ class Solver {
          *         without taking a step.
          */
         bool step();
+        /**
+         * @brief Takes n steps, as many calls of step() would, but queued on the device ahead of the host: the same
+         *        steps and results bit for bit.
+         * @return false once the case's stop condition is reached, which ends the steps early.
+         */
+        bool step(uint64_t n);
         /**
          * @brief Takes steps until the time is t, the last step landing on it, as on t_stop (setup() first if
          *        not done). Stops earlier at the case's stop condition.
@@ -286,8 +403,31 @@ class Solver {
          *        kernel on the host, without the device queue or CUDA graphs: register one only while needed.
          */
         CallbackId on_stage(std::function<void(Solver &, const Stage &)> f);
+        /**
+         * @brief Calls f with each progress row, on every rank, at the steps the host acts on anyway, so the device
+         *        queue and CUDA graphs are kept. Values are the same on every rank but the wall-clock times. f gets
+         *        the record only: it may not call the Solver (the device may already be steps ahead).
+         */
+        CallbackId on_progress(std::function<void(const Progress &)> f);
+        /**
+         * @brief Calls f with each output completely written, on rank 0 (which writes the run log and knows every
+         *        file), when its record is written. f may not call the Solver.
+         */
+        CallbackId on_output(std::function<void(const Output &)> f);
+        /**
+         * @brief Calls f with every record of the run log as rank 0 writes it, on rank 0, whether or not the case
+         *        writes a run log file ([output] run_log). f may not call the Solver.
+         */
+        CallbackId on_record(std::function<void(const Record &)> f);
         /** @brief Removes a callback; unknown ids are ignored. */
         void remove_callback(CallbackId id);
+        /**
+         * @brief Where the solver's console output goes: by default (an empty sink) stdout and stderr, as
+         *        `mallard -i` prints it; else every line and every warning and error to `sink`, without color, and
+         *        nothing to the console (a sink that does nothing silences the solver). Rank 0 prints the lines and
+         *        warnings, every rank its errors. The run log and output files are unchanged.
+         */
+        void set_log(LogSink sink);
 
     private:
         struct Impl;

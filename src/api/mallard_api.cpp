@@ -11,10 +11,12 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
 #include <new>
+#include <random>
 
 #include <Kokkos_Core.hpp>
 
@@ -22,12 +24,18 @@
 #include <mpi.h>
 #endif
 
+#include "common_io.h"
 #include "diagnostic_code.h"
 #include "field_units.h"
 #include "front_end.h"
 #include "input.h"
+#include "input_upgrade.h"
+#include "json.h"
+#include "log.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
+#include "run_log.h"
+#include "run_status.h"
 #include "solver/solver.h"
 #include "common/units.h"
 #include "version.h"
@@ -206,6 +214,31 @@ Session::~Session() {
     impl->mpi.reset();
 }
 
+Value::Value(const bool b) : text_(b ? "true" : "false") {}
+Value::Value(const int i) : text_(std::to_string(i)) {}
+Value::Value(const long i) : text_(std::to_string(i)) {}
+Value::Value(const long long i) : text_(std::to_string(i)) {}
+Value::Value(const unsigned i) : text_(std::to_string(i)) {}
+Value::Value(const unsigned long i) : Value(static_cast<unsigned long long>(i)) {}
+Value::Value(const unsigned long long i) : text_(std::to_string(i)) {
+    if (i > static_cast<unsigned long long>(std::numeric_limits<int64_t>::max())) {
+        throw Error(diagnostic_code::INPUT, "mallard::Value: " + text_ + " is past TOML's largest integer, 2^63 - 1");
+    }
+}
+Value::Value(const double x) : text_(input_detail::float_text(x)) {}
+Value::Value(const char * s) : Value(std::string(s)) {}
+Value::Value(const std::string & s) : text_(input_detail::string_text(s)) {}
+Value::Value(const std::string_view s) : Value(std::string(s)) {}
+Value::Value(const std::initializer_list<Value> items) : Value(array(std::vector<Value>(items))) {}
+
+Value Value::toml(std::string text) { return Value(Text{}, std::move(text)); }
+
+Value Value::array(const std::vector<Value> & items) {
+    std::string text = "[";
+    for (size_t i = 0; i < items.size(); i++) text += (i ? ", " : "") + items[i].text_;
+    return Value(Text{}, text + "]");
+}
+
 Case::Case(std::string text, std::string path, std::string name)
     : text_(std::move(text)), path_(std::move(path)), name_(std::move(name)) {
     translating(name_, diagnostic_code::INPUT, [&] { return parse_input_string(text_, name_); });
@@ -220,6 +253,34 @@ Case Case::from_toml_file(const std::string & path) {
 Case Case::from_toml(const std::string & text, const std::string & name) { return Case(text, "", name); }
 
 const std::string & Case::toml() const { return text_; }
+
+Case Case::set(const std::string_view key, const Value & value) const {
+    std::string text;
+    try {
+        text = input_upgrade::set_value(text_, std::string(key), value.text());
+    } catch (const std::invalid_argument & e) {
+        throw Error(diagnostic_code::INPUT, name_ + ": " + e.what());
+    }
+    return Case(std::move(text), "", name_);
+}
+
+Case Case::save(const std::string & path) const {
+    // Every rank of a run may save the case: each writes its own file and renames it, which replaces atomically
+    const std::string own = path + ".tmp" + std::to_string(std::random_device{}());
+    {
+        std::ofstream out(own, std::ios::binary);
+        out << text_;
+        out.close();
+        if (!out) throw Error(diagnostic_code::INPUT, error_text(cannot_write("the input file", own)));
+    }
+    std::error_code error;
+    std::filesystem::rename(own, path, error);
+    if (error) {
+        std::filesystem::remove(own, error);
+        throw Error(diagnostic_code::INPUT, error_text(cannot_write("the input file", path)));
+    }
+    return from_toml_file(path);
+}
 
 const std::string & Case::path() const { return path_; }
 
@@ -242,10 +303,16 @@ struct Solver::Impl {
         CallbackId id;
         std::function<void(Solver &)> step;
         std::function<void(Solver &, const Stage &)> stage;
+        std::function<void(const Progress &)> progress;
+        std::function<void(const Output &)> output;
+        std::function<void(const Record &)> record;
     };
     std::vector<Callback> callbacks;
     CallbackId next_id = 1;
     int in_callback = 0;
+    int in_record = 0;  // inside a progress, output or record callback
+    LogSink sink;
+    int in_scope = 0;  // inside a call that runs the solver, with this solver's sink and record hook set
     bool stage_hooked = false;
     const ::State * stage_state = nullptr;  // inside a per-stage callback
 
@@ -268,7 +335,144 @@ struct Solver::Impl {
         }
     }
 
+    void no_record_callback(const char * call) const {
+        if (in_record) {
+            throw std::logic_error(std::string("mallard::Solver::") + call + " inside a progress, output or record "
+                                   "callback: these get their record only");
+        }
+    }
+
+    template <typename M>
+    bool any(M Callback::*member) const {
+        return std::any_of(callbacks.begin(), callbacks.end(), [&](const Callback & c) { return bool(c.*member); });
+    }
+
+    /** @brief A progress, output or record callback's call: no Solver calls in it, and none that step. */
+    template <typename F>
+    void record_call(F && f) {
+        in_callback++;
+        in_record++;
+        struct Leave {
+            int & depth;
+            int & record;
+            ~Leave() {
+                depth--;
+                record--;
+            }
+        } leave{in_callback, in_record};
+        f();
+    }
+
+    void progress_callbacks(const ::RunStatus & s, const std::string & files) {
+        Progress p;
+        p.step = s.step;
+        p.time = s.t;
+        p.dt = s.dt;
+        p.cfl = s.cfl;
+        p.fraction = s.progress;
+        p.wall = s.wall;
+        if (s.wall_per_step >= 0.0) p.wall_per_step = s.wall_per_step;
+        if (s.cells_per_second >= 0.0) p.cells_per_second = s.cells_per_second;
+        if (s.eta >= 0.0) p.eta = s.eta;
+        p.cells = s.n_cells;
+        p.ranks = s.n_ranks;
+        p.diagnostics = s.monitors;
+        p.written = files;
+        p.json = s.record().str();
+        record_call([&] {
+            const std::vector<Callback> now = callbacks;
+            for (const Callback & c : now) {
+                if (c.progress) c.progress(p);
+            }
+        });
+    }
+
+    void record_callbacks(const std::string & line) {
+        json::Value v;
+        try {
+            v = json::parse(line);
+        } catch (const std::exception &) {
+            return;
+        }
+        const json::Value * type = v.find("type");
+        const Record record{type ? type->string : std::string(), line};
+        std::optional<Output> output;
+        if (record.type == "output") {
+            Output & o = output.emplace();
+            const auto number = [&](const char * key) { return v.find(key) ? v[key].number : 0.0; };
+            const auto text = [&](const json::Value & from, const char * key) {
+                return from.find(key) ? from[key].string : std::string();
+            };
+            o.step = static_cast<uint64_t>(number("step"));
+            o.time = number("t");
+            o.kind = text(v, "kind");
+            o.path = text(v, "path");
+            o.reason = text(v, "reason");
+            o.writer = text(v, "writer");
+            if (const json::Value * files = v.find("files")) {
+                for (const json::Value & f : files->array) {
+                    o.files.push_back({text(f, "path"), static_cast<uint64_t>(f.find("bytes") ? f["bytes"].number : 0.0)});
+                }
+            }
+            o.json = line;
+        }
+        record_call([&] {
+            const std::vector<Callback> now = callbacks;
+            for (const Callback & c : now) {
+                if (c.record) c.record(record);
+                if (c.output && output) c.output(*output);
+            }
+        });
+    }
+
+    /** @brief While a call runs the solver: this solver's log sink and record callbacks, then those before. */
+    struct Scope {
+        Impl & m;
+        logging::Sink sink;
+        run_log::RecordHook hook;
+        explicit Scope(Impl & m_) : m(m_) {
+            sink = logging::set_sink(m.log_sink());
+            hook = run_log::set_record_hook(m.record_hook());
+            m.in_scope++;
+        }
+        ~Scope() {
+            m.in_scope--;
+            logging::set_sink(std::move(sink));
+            run_log::set_record_hook(std::move(hook));
+        }
+        Scope(const Scope &) = delete;
+        Scope & operator=(const Scope &) = delete;
+    };
+
+    logging::Sink log_sink() {
+        if (!sink) return {};
+        return [this](logging::Level level, std::string_view code, std::string_view text) {
+            LogMessage message;
+            message.level = level == logging::Level::WARNING ? LogLevel::warning
+                            : level == logging::Level::ERROR ? LogLevel::error
+                                                             : LogLevel::info;
+            message.code = code;
+            message.text = text;
+            const LogSink f = sink;
+            f(message);
+        };
+    }
+
+    run_log::RecordHook record_hook() {
+        if (!any(&Callback::output) && !any(&Callback::record)) return {};
+        return [this](const std::string & line) { record_callbacks(line); };
+    }
+
     void install_hooks() {
+        if (any(&Callback::progress)) {
+            solver.set_progress_hook([this](const ::RunStatus & s, const std::string & w) { progress_callbacks(s, w); });
+        } else {
+            solver.set_progress_hook({});
+        }
+        if (in_scope) {
+            logging::set_sink(log_sink());
+            run_log::set_record_hook(record_hook());
+        }
         const bool steps = std::any_of(callbacks.begin(), callbacks.end(), [](const Callback & c) { return bool(c.step); });
         const bool stages = std::any_of(callbacks.begin(), callbacks.end(), [](const Callback & c) { return bool(c.stage); });
         solver.set_step_hook(steps ? std::function<void()>([this] { step_callbacks(); }) : std::function<void()>());
@@ -327,6 +531,7 @@ struct Solver::Impl {
 
     template <typename F>
     auto run(const char * code, F && f) {
+        const Scope scope(*this);
         return translating(input.name_, code, std::forward<F>(f));
     }
 
@@ -385,11 +590,16 @@ Solver & Solver::operator=(Solver && other) noexcept {
 
 void Solver::setup() { impl->ensure_setup(); }
 
-bool Solver::step() {
+bool Solver::step() { return step(1); }
+
+bool Solver::step(const uint64_t n) {
     impl->not_in_callback("step");
     impl->ensure_setup();
     if (impl->solver.run_stopped()) return false;
-    return impl->advance(impl->solver.get_step() + 1, std::numeric_limits<rtype>::infinity());
+    if (n == 0) return true;
+    const uint64_t now = impl->solver.get_step();
+    const uint64_t until = n > std::numeric_limits<uint64_t>::max() - now ? std::numeric_limits<uint64_t>::max() : now + n;
+    return impl->advance(until, std::numeric_limits<rtype>::infinity());
 }
 
 bool Solver::advance_to(const double t) {
@@ -420,6 +630,7 @@ double Solver::time() const { return static_cast<double>(impl->solver.get_time()
 uint64_t Solver::step_count() const { return impl->solver.get_step(); }
 
 std::vector<Monitor> Solver::monitors() const {
+    impl->no_record_callback("monitors");
     const ::Solver & s = impl->solver;
     if (!impl->set_up) return {};
     const auto monitored = s.monitored();
@@ -505,6 +716,7 @@ void copy_to_host(H & host, const V & v) {
 } // namespace
 
 Field Solver::field(const std::string_view name_view, const Memory memory) {
+    impl->no_record_callback("field");
     impl->ensure_setup();
     Impl & m = *impl;
     ::Solver & s = m.solver;
@@ -609,6 +821,7 @@ Field Solver::field(const std::string_view name_view, const Memory memory) {
 }
 
 Field Solver::writable_field(const std::string_view name_view, const Memory memory) {
+    impl->no_record_callback("writable_field");
     impl->ensure_setup();
     Impl & m = *impl;
     if (m.stage_state) {
@@ -633,6 +846,7 @@ Field Solver::writable_field(const std::string_view name_view, const Memory memo
 }
 
 void Solver::commit_state() {
+    impl->no_record_callback("commit_state");
     impl->ensure_setup();
     impl->run(diagnostic_code::RUN, [&] { impl->commit(); });
 }
@@ -653,7 +867,7 @@ Statistics Solver::statistics() const {
 CallbackId Solver::on_step(std::function<void(Solver &)> f) {
     if (!f) throw std::invalid_argument("mallard::Solver::on_step: an empty function");
     const CallbackId id = impl->next_id++;
-    impl->callbacks.push_back({id, std::move(f), {}});
+    impl->callbacks.push_back({id, std::move(f), {}, {}, {}, {}});
     impl->install_hooks();
     return id;
 }
@@ -661,9 +875,38 @@ CallbackId Solver::on_step(std::function<void(Solver &)> f) {
 CallbackId Solver::on_stage(std::function<void(Solver &, const Stage &)> f) {
     if (!f) throw std::invalid_argument("mallard::Solver::on_stage: an empty function");
     const CallbackId id = impl->next_id++;
-    impl->callbacks.push_back({id, {}, std::move(f)});
+    impl->callbacks.push_back({id, {}, std::move(f), {}, {}, {}});
     impl->install_hooks();
     return id;
+}
+
+CallbackId Solver::on_progress(std::function<void(const Progress &)> f) {
+    if (!f) throw std::invalid_argument("mallard::Solver::on_progress: an empty function");
+    const CallbackId id = impl->next_id++;
+    impl->callbacks.push_back({id, {}, {}, std::move(f), {}, {}});
+    impl->install_hooks();
+    return id;
+}
+
+CallbackId Solver::on_output(std::function<void(const Output &)> f) {
+    if (!f) throw std::invalid_argument("mallard::Solver::on_output: an empty function");
+    const CallbackId id = impl->next_id++;
+    impl->callbacks.push_back({id, {}, {}, {}, std::move(f), {}});
+    impl->install_hooks();
+    return id;
+}
+
+CallbackId Solver::on_record(std::function<void(const Record &)> f) {
+    if (!f) throw std::invalid_argument("mallard::Solver::on_record: an empty function");
+    const CallbackId id = impl->next_id++;
+    impl->callbacks.push_back({id, {}, {}, {}, {}, std::move(f)});
+    impl->install_hooks();
+    return id;
+}
+
+void Solver::set_log(LogSink sink) {
+    impl->sink = std::move(sink);
+    if (impl->in_scope) logging::set_sink(impl->log_sink());
 }
 
 void Solver::remove_callback(const CallbackId id) {

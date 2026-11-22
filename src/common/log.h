@@ -10,6 +10,7 @@
 #define LOG_H
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -53,6 +54,18 @@ std::string style(std::string_view text, Style s, bool on);
  */
 bool color_stdout();
 bool color_stderr();
+
+/** @brief What a message of the console output is: a line of stdout, a warning or an error. */
+enum class Level { INFO, WARNING, ERROR };
+
+/**
+ * @brief Where the console output goes instead of stdout and stderr (the library API's log sink): each complete line
+ *        of stdout as INFO, with code empty, and each warning and error as one message (as printed, without the
+ *        docs line) with its code; no color while one is set. An empty sink is the console.
+ */
+using Sink = std::function<void(Level level, std::string_view code, std::string_view text)>;
+/** @brief Sets the sink; returns the one it replaces. */
+Sink set_sink(Sink sink);
 
 /**
  * @brief Prints a line on stdout from rank 0.

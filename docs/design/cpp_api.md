@@ -102,16 +102,29 @@ Later slices add, each additive to the API version:
   so steps run kernel by kernel on the host, where `take_step` wraps the
   right-hand side's function to call it; removing it brings the queue and the
   graphs back. Callbacks may not step or end the run (re-entrance throws).
-  Still to come: `on_output(f)` and `on_progress(f)` with the progress record
-  as a struct (the same fields as the run log's `progress` record), which
-  keep the device queue since the host already acts at those steps, and
-  `step(n)`.
+  Record callbacks (slice 3): `on_progress(f)` gets each progress row as
+  `mallard::Progress`, the run log's `progress` record as a struct (and its
+  JSON), from a hook `print_progress` calls on every rank after it builds the
+  record (`set_progress_hook`; with a hook it builds the whole record, as with a
+  run log); `on_output(f)` and `on_record(f)` get the run log's output records
+  and all its records from a hook in `run_log` (`set_record_hook`), on rank 0,
+  which writes the log and alone knows every file. All three run at steps the
+  host acts on anyway (progress rows and outputs are horizons of the device
+  queue), so they keep the queue and the graphs and add nothing to a step; they
+  get their record only, since the device may be ahead of it, and may not call
+  the solver. `step(n)` is `advance_run(step + n, inf)`: one horizon, the
+  steps queued as for `advance_to`.
 - **Diagnostics**: statistics means (slice 2: `MEAN_`/`COV_` fields and
   `Solver::statistics()`, the averaging window) and their convergence, the run
   status (`RunStatus`, as `mallard ctl status` reports it), the check report
   (`mallard check`) and the resolved input with its key catalog records.
-- **Logging sink**: where the text the solver prints goes (stdout by default,
-  a callback, or nowhere), and the run log's records as structs.
+- **Logging sink** (slice 3): `Solver::set_log(sink)` sends what the solver
+  prints (`logging::line` and the setup phases, line by line; warnings and
+  errors as messages with their code) to a callback instead of stdout and
+  stderr, without color; a sink that does nothing silences it. `logging` holds
+  one sink and `run_log` one record hook for the process: each `Solver` call
+  that runs the solver sets its own for the call and restores the previous
+  ones after, so solvers in one process keep theirs.
 
 Collective semantics: under MPI every call of `Solver` is collective, and
 values (`monitors()`) are the same on every rank. A solver runs on
@@ -140,9 +153,19 @@ documented way to write the `Input` tree: each object writes its keys into a
   generator in `tools/dev/` writes `include/mallard/config.h` from the catalog;
   CI checks it is current as it checks the catalog.
 
-Escape hatch: `Case::set(key, value)` with a TOML value edits the same text by
-key path, for keys the generated objects do not yet cover. It returns a new
-`Case` (cases are values), so a sweep builds many cases from one.
+`Case::set(key, value)` (slice 3) edits the text by key path, for every key
+until the generated objects exist and for those they do not cover. It returns
+a new `Case` (cases are values), so a sweep builds many cases from one. The
+edit (`input_upgrade::set_value`, beside the upgrade's own rewrites) changes
+only the key's line, or adds the key after its table's last key (a new table
+at the end), and checks that the parsed result is the input with that key set;
+where the line cannot change alone (a dotted key, a key of an inline table, a
+value over several lines) it reformats the whole text, comments kept. Values
+are `mallard::Value`: booleans, integers, floats written to read back exactly
+(`float_text`), strings and arrays, or any TOML text. Keys are not checked
+when set: setup checks them as it checks a file's, with the same messages.
+`Case::save(path)` writes the text and returns the case of the file, for
+programs whose runs build from the input on disk.
 
 ## Stepping and the run's loop
 
@@ -330,13 +353,14 @@ no Rust API:
    that the API's runs match `mallard -i` bit for bit.
 2. State access (`field()`, geometry, statistics, `writable_field` and
    `commit_state` at step boundaries) and callbacks (`on_step`, `on_stage`).
-3. `on_progress`, `on_output` and the logging sink, with structured progress
-   records; `step(n)`.
+3. `on_progress`, `on_output`, `on_record` and the logging sink, with
+   structured progress and output records; `step(n)`; `Case::set` and
+   `Case::save`, with round-trip tests (code-built case to TOML to
+   `mallard -i`, bit for bit).
 4. Python bindings (nanobind) over 1-2, in `mallard-python`
    ([The Python package](python_package.md)), and `Case::dimension()`; then
    a `Session` on a communicator (mpi4py's in Python, `mallard-python[mpi]`),
    and the reader moved into the extension.
-5. Typed configs generated from the key catalog, `Case::set`, and the check
-   report and resolved input as structs; round-trip tests (code-built case to
-   TOML to `mallard -i`, bit for bit).
+5. Typed configs generated from the key catalog over `Case::set`, and the
+   check report and resolved input as structs.
 6. Plugin API (#336) on the same package.

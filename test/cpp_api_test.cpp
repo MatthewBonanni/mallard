@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include "data_writer.h"
 #include "json.h"
 #include "solver.h"
+#include "step_graph_guard.h"
 
 namespace {
 
@@ -136,6 +138,21 @@ std::vector<std::string> event_kinds(const std::string & dir) {
         if (v["type"].string == "event") kinds.push_back(v["kind"].string);
     }
     return kinds;
+}
+
+/** @brief The lines of dir's run log (rank 0, which writes it). */
+std::vector<std::string> log_lines(const std::string & dir) {
+    std::vector<std::string> lines;
+    std::ifstream in(dir + "/mallard.jsonl");
+    for (std::string line; std::getline(in, line);) lines.push_back(line);
+    return lines;
+}
+
+/** @brief The case saved as dir/input.toml, dir created by rank 0. */
+mallard::Case saved(const std::string & dir, const mallard::Case & c) {
+    if (comm::is_root()) fs::create_directories(dir);
+    comm::barrier();
+    return c.save(dir + "/input.toml");
 }
 
 void expect_same_values(const std::vector<mallard::Monitor> & monitors, const std::vector<double> & reference) {
@@ -449,4 +466,239 @@ TEST(CppApiTest, ASessionOnACommunicatorRunsOnACopyOfIt) {
         EXPECT_NE(std::string(e.what()).find("Mallard_ENABLE_MPI"), std::string::npos) << e.what();
     }
 #endif
+}
+
+TEST(CppApiTest, StepNTakesTheStepsOfOneAtATime) {
+    const std::vector<double> reference = executable_run(write_case("executable", "n_steps = 10\n", 5));
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("api", "n_steps = 10\n", 5)));
+    EXPECT_TRUE(solver.step(0));
+    EXPECT_EQ(solver.step_count(), 0u);
+    EXPECT_TRUE(solver.step(4));
+    EXPECT_EQ(solver.step_count(), 4u);
+    // The stop condition ends the steps early
+    EXPECT_FALSE(solver.step(100));
+    EXPECT_EQ(solver.step_count(), 10u);
+    EXPECT_FALSE(solver.step(1));
+    expect_same_values(solver.monitors(), reference);
+    EXPECT_EQ(solver.finish(), 0);
+    const RestartData a = last_restart("executable"), b = last_restart("api");
+    EXPECT_EQ(b.fields, a.fields);
+}
+
+TEST(CppApiTest, ProgressOutputAndRecordCallbacksGetTheRunLogsRecords) {
+    const auto with = [](const std::string & dir) {
+        const std::string snapshots =
+            "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\nfields = [\"RHO\"]\ninterval = 4\n";
+        return mallard::Case::from_toml(case_text(dir, "n_steps = 8\n", 4, snapshots)).set("output.check_interval", 2);
+    };
+    executable_run(saved("executable", with("executable")).path());
+
+    mallard::Solver solver(saved("records", with("records")));
+    std::vector<mallard::Progress> rows;
+    std::vector<mallard::Output> outputs;
+    std::vector<mallard::Record> records;
+    solver.on_progress([&](const mallard::Progress & p) {
+        rows.push_back(p);
+        // The record only: the device may be steps ahead of it
+        EXPECT_THROW(solver.field("RHO"), std::logic_error);
+        EXPECT_THROW(solver.step(), std::logic_error);
+    });
+    solver.on_output([&](const mallard::Output & o) { outputs.push_back(o); });
+    solver.on_record([&](const mallard::Record & r) { records.push_back(r); });
+    EXPECT_EQ(solver.run(), 0);
+
+    std::vector<uint64_t> steps;
+    for (const mallard::Progress & p : rows) steps.push_back(p.step);
+    EXPECT_EQ(steps, (std::vector<uint64_t>{0, 2, 4, 6, 8}));
+    EXPECT_EQ(rows.back().fraction, 1.0);
+    EXPECT_EQ(rows.back().time, solver.time());
+    ASSERT_FALSE(rows.back().diagnostics.empty());
+    EXPECT_EQ(rows.back().diagnostics[0].first, "min_rho");
+    const RestartData a = last_restart("executable"), b = last_restart("records");
+    EXPECT_EQ(b.fields, a.fields);
+    if (!comm::is_root()) {
+        EXPECT_TRUE(outputs.empty());
+        EXPECT_TRUE(records.empty());
+        return;
+    }
+    // Every record of the run log, as written; progress and output records as structs too
+    const std::vector<std::string> lines = log_lines("records");
+    ASSERT_EQ(records.size(), lines.size());
+    std::vector<std::string> progress_lines, output_lines;
+    for (size_t i = 0; i < lines.size(); i++) {
+        EXPECT_EQ(records[i].json, lines[i]);
+        EXPECT_EQ(records[i].type, json::parse(lines[i])["type"].string);
+        if (records[i].type == "progress") progress_lines.push_back(lines[i]);
+        if (records[i].type == "output") output_lines.push_back(lines[i]);
+    }
+    ASSERT_EQ(progress_lines.size(), rows.size());
+    for (size_t i = 0; i < rows.size(); i++) EXPECT_EQ(rows[i].json, progress_lines[i]);
+    ASSERT_EQ(outputs.size(), output_lines.size());
+    std::vector<std::string> snapshots;
+    for (size_t i = 0; i < outputs.size(); i++) {
+        EXPECT_EQ(outputs[i].json, output_lines[i]);
+        ASSERT_FALSE(outputs[i].files.empty());
+        EXPECT_GT(outputs[i].files[0].bytes, 0u);
+        EXPECT_TRUE(fs::exists(outputs[i].files[0].path)) << outputs[i].files[0].path;
+        if (outputs[i].kind == "vtu") snapshots.push_back(std::to_string(outputs[i].step) + " " + outputs[i].reason);
+    }
+    EXPECT_EQ(snapshots, (std::vector<std::string>{"0 start", "4 interval", "8 interval"}));
+}
+
+TEST(CppApiTest, ALogSinkTakesTheConsoleOutput) {
+    std::vector<mallard::LogMessage> messages;
+    {
+        mallard::Solver solver(mallard::Case::from_toml_file(write_case("sink", "n_steps = 2\n")));
+        solver.set_log([&](const mallard::LogMessage & m) { messages.push_back(m); });
+        testing::internal::CaptureStdout();
+        EXPECT_EQ(solver.run(), 0);
+        EXPECT_EQ(testing::internal::GetCapturedStdout(), "");
+    }
+    if (comm::is_root()) {
+        ASSERT_FALSE(messages.empty());
+        bool run_section = false;
+        for (const mallard::LogMessage & m : messages) {
+            EXPECT_EQ(m.level, mallard::LogLevel::info);
+            EXPECT_EQ(m.text.find('\n'), std::string::npos) << m.text;
+            EXPECT_EQ(m.text.find('\033'), std::string::npos) << m.text;
+            run_section = run_section || m.text.rfind("== Run ", 0) == 0;
+        }
+        EXPECT_TRUE(run_section);
+    } else {
+        EXPECT_TRUE(messages.empty());
+    }
+    // A solver without a sink prints as mallard -i does
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("console", "n_steps = 2\n")));
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(solver.run(), 0);
+    const std::string printed = testing::internal::GetCapturedStdout();
+    if (comm::is_root()) EXPECT_NE(printed.find("== Run "), std::string::npos);
+}
+
+TEST(CppApiTest, GraphedAndUngraphedRunsWithCallbacksMatchBitForBit) {
+    // Progress rows every 4 steps and snapshots every 6, which the host acts on anyway: steps queued on the device
+    // (in CUDA graphs where the build has them) take the steps of the host, kernel by kernel, bit for bit
+    struct Run {
+        std::vector<std::string> rows, outputs;
+        RestartData restart;
+    };
+    const auto with = [](const std::string & dir, const std::string & run) {
+        const std::string snapshots =
+            "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\nfields = [\"RHO\"]\ninterval = 6\n";
+        return mallard::Case::from_toml(case_text(dir, "n_steps = 12\n" + run, 3, snapshots))
+            .set("output.check_interval", 4);
+    };
+    const auto row = [](uint64_t step, double t, double dt, const std::vector<std::pair<std::string, double>> & d) {
+        std::ostringstream s;
+        s.precision(17);
+        s << step << " " << t << " " << dt;
+        for (const auto & [name, value] : d) s << " " << name << "=" << value;
+        return s.str();
+    };
+    const auto api_run = [&](const std::string & dir, const std::string & run) {
+        Run r;
+        mallard::Solver solver(saved(dir, with(dir, run)));
+        solver.set_log([](const mallard::LogMessage &) {});
+        solver.on_progress([&](const mallard::Progress & p) {
+            r.rows.push_back(row(p.step, p.time, p.dt, p.diagnostics));
+        });
+        solver.on_output([&](const mallard::Output & o) {
+            r.outputs.push_back(o.kind + " " + std::to_string(o.step) + " " + fs::path(o.path).filename().string());
+        });
+        while (solver.step(5)) {
+        }
+        EXPECT_EQ(solver.finish(), 0);
+        r.restart = last_restart(dir);
+        return r;
+    };
+    const Run host = api_run("host", "step_queue = 0\ncuda_graphs = false\n");
+    const Run queued = api_run("queued", "");
+    EXPECT_EQ(queued.restart.fields, host.restart.fields);
+    EXPECT_EQ(queued.rows, host.rows);
+    EXPECT_EQ(queued.outputs, host.outputs);
+    EXPECT_EQ(host.rows.size(), 4u);
+    if (comm::is_root()) EXPECT_FALSE(host.outputs.empty());
+
+    // The step graphs' path on every backend (uncaptured off CUDA): nothing of the callbacks is in a capture
+    std::vector<std::string> rows;
+    {
+        const StepGraphGuard guard;
+        ::Solver solver;
+        solver.set_uncaptured_step_graphs(true);
+        solver.set_progress_hook([&](const RunStatus & s, const std::string &) {
+            std::vector<std::pair<std::string, double>> d = s.monitors;
+            rows.push_back(row(s.step, s.t, s.dt, d));
+        });
+        solver.init(saved("graphed", with("graphed", "")).path());
+        EXPECT_EQ(solver.run(), 0);
+        for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
+        if (!Solver::are_cuda_graphs_off()) EXPECT_GT(guard.captures(), 0u);
+    }
+    EXPECT_EQ(rows, host.rows);
+    EXPECT_EQ(last_restart("graphed").fields, host.restart.fields);
+}
+
+TEST(CppApiTest, ACaseSetInCodeEmitsTheTomlThatReproducesTheRun) {
+    const auto built = [](const std::string & dir) {
+        return mallard::Case::from_toml(case_text(dir, "n_steps = 3\n", 5))
+            .set("run.n_steps", 6)
+            .set("run.cfl", 0.1 + 0.2)
+            .set("numerics.riemann_solver", "HLL")
+            .set("probes[0].interval", 2)
+            .set("statistics.fields", {"RHO", "P"})
+            .set("statistics.interval", 1);
+    };
+    // Only the lines of the keys set change; a new table goes at the end
+    std::string expected = case_text("api", "n_steps = 3\n", 5);
+    const auto replace = [&](const std::string & from, const std::string & to) {
+        const size_t at = expected.find(from);
+        ASSERT_NE(at, std::string::npos) << from;
+        expected.replace(at, from.size(), to);
+    };
+    replace("n_steps = 3\n", "n_steps = 6\n");
+    replace("cfl = 0.4\n", "cfl = 0.30000000000000004\n");
+    replace("riemann_solver = \"HLLC\"", "riemann_solver = \"HLL\"");
+    replace("reductions = [\"mean\"]\ninterval = 5", "reductions = [\"mean\"]\ninterval = 2");
+    expected += "\n[statistics]\nfields = [\"RHO\", \"P\"]\ninterval = 1\n";
+    const mallard::Case c = built("api");
+    EXPECT_EQ(c.toml(), expected);
+    EXPECT_TRUE(c.path().empty());
+
+    // mallard -i on the emitted TOML is the run of the case built in code, bit for bit
+    const std::string file = write_case("executable", "n_steps = 1\n");
+    if (comm::is_root()) std::ofstream(file) << built("executable").toml();
+    comm::barrier();
+    const std::vector<double> reference = executable_run(file);
+    if (comm::is_root()) fs::create_directories("api");
+    comm::barrier();
+    mallard::Solver solver(c);
+    EXPECT_EQ(solver.run(), 0);
+    expect_same_values(solver.monitors(), reference);
+    const RestartData a = last_restart("executable"), b = last_restart("api");
+    EXPECT_EQ(b.step, 6u);
+    EXPECT_EQ(b.names, a.names);
+    EXPECT_EQ(b.fields, a.fields);
+    if (comm::is_root()) EXPECT_EQ(record("api", "start")["provenance"]["input"]["text"].string, c.toml());
+
+    // save: the file a run then builds from
+    const mallard::Case on_disk = c.save("api/saved.toml");
+    EXPECT_EQ(on_disk.path(), "api/saved.toml");
+    EXPECT_EQ(on_disk.toml(), c.toml());
+
+    // A key of an inline table: the text is reformatted, its comments kept, with the value set
+    const mallard::Case reformatted =
+        mallard::Case::from_toml("# box\n" + c.toml()).set("probes[0].region.center", {0.25, 0.5});
+    EXPECT_NE(reformatted.toml().find("# box"), std::string::npos);
+    EXPECT_NE(reformatted.toml().find("0.25"), std::string::npos);
+    EXPECT_EQ(reformatted.set("probes[0].region.center", {0.25, 0.5}).toml(), reformatted.toml());
+
+    for (const auto & [key, value] : std::vector<std::pair<std::string, mallard::Value>>{
+             {"run..cfl", 1}, {"probes[3].interval", 1}, {"run.cfl", mallard::Value::toml("[1,")}, {"run.cfl[0]", 1}}) {
+        try {
+            c.set(key, value);
+            ADD_FAILURE() << key << ": no error";
+        } catch (const mallard::Error & e) {
+            EXPECT_EQ(e.code(), "E-INPUT") << key;
+        }
+    }
 }

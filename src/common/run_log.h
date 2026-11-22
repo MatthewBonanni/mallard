@@ -11,6 +11,7 @@
 #define RUN_LOG_H
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <string>
@@ -70,6 +71,15 @@ void release(const json::Object & start);
 void stream_progress(std::ostream * stream);
 /** @brief Whether progress records go to a stream. */
 bool streams_progress();
+
+/**
+ * @brief Called on rank 0 with each record as written, one line of JSON, whether or not a log is open (the library
+ *        API's record callbacks); empty: none. Returns the hook it replaces.
+ */
+using RecordHook = std::function<void(const std::string & record)>;
+RecordHook set_record_hook(RecordHook hook);
+/** @brief Whether a record hook is set. */
+bool has_record_hook();
 
 /** @brief A progress record: write, and a line on the stream of stream_progress. */
 void write_progress(const json::Object & record);

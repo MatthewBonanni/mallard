@@ -845,6 +845,77 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     return toml::format(ordered);
 }
 
+std::string set_value(const std::string & text, const std::string & key, const std::string & value) {
+    static const std::regex step_pattern(R"(^([A-Za-z0-9_-]+)(\[([0-9]+)\])?$)");
+    Concrete path;
+    std::stringstream ss(key);
+    for (std::string part; std::getline(ss, part, '.');) {
+        std::smatch m;
+        if (!std::regex_match(part, m, step_pattern)) {
+            throw std::invalid_argument("\"" + key + "\" is not a key path: bare keys separated by dots, an element of "
+                                        "an array of tables by its index (\"run.n_steps\", \"probes[0].interval\")");
+        }
+        path.emplace_back(m[1].str(), m[3].matched ? std::stol(m[3].str()) : -1L);
+    }
+    if (key.empty() || key.back() == '.' || path.empty() || path.back().second >= 0) {
+        throw std::invalid_argument("\"" + key + "\" is not a key path: it ends in a key (\"run.n_steps\")");
+    }
+    OrderedValue new_value;
+    try {
+        new_value = parse_toml<toml::ordered_type_config>("x = " + value + "\n").at("x");
+    } catch (const std::exception & e) {
+        throw std::invalid_argument(value + " is not a TOML value: " + e.what());
+    }
+    OrderedValue root = parse_toml<toml::ordered_type_config>(text);
+    OrderedValue expected = root;
+    OrderedValue * table = at(expected, parent(path), true);
+    if (table == nullptr || !table->is_table()) {
+        throw std::invalid_argument("cannot set " + key + ": " + to_string(parent(path)) + " is not a table of the input");
+    }
+    entries_of(*table)[path.back().first] = new_value;
+    const std::string name = path.back().first;
+    const std::string line_text = name + " = " + bare_text(new_value);
+
+    std::vector<std::string> lines = split_lines(text);
+    bool edited = false;
+    bool plain = true;
+    for (const auto & step : path) plain = plain && step.second < 0;
+    if (new_value.is_table() && at(root, path) == nullptr && plain) {
+        // A new table: its own header and keys at the end
+        if (!lines.empty() && lines.back().find_first_not_of(" \t") != std::string::npos) lines.push_back("");
+        lines.push_back("[" + dotted(path) + "]");
+        for (const auto & [k, v] : entries_of(new_value)) lines.push_back(k + " = " + bare_text(v));
+        edited = true;
+    } else if (const OrderedValue * old = at(root, path)) {
+        const auto & where = old->location();
+        const size_t first = where.first_line_number() - 1;
+        if (where.is_ok() && first == where.last_line_number() - 1 && first < lines.size() &&
+            key_column(lines[first], name)) {
+            const size_t column = where.first_column_number() - 1;
+            if (column + where.length() <= lines[first].size()) {
+                lines[first].replace(column, where.length(), bare_text(new_value));
+                edited = true;
+            }
+        }
+    } else if (const auto end = end_of_table(lines, parent(path))) {
+        lines.insert(lines.begin() + static_cast<long>(*end), line_text);
+        edited = true;
+    } else if (plain) {
+        if (!lines.empty() && lines.back().find_first_not_of(" \t") != std::string::npos) lines.push_back("");
+        lines.push_back("[" + dotted(parent(path)) + "]");
+        lines.push_back(line_text);
+        edited = true;
+    }
+    if (edited) {
+        const std::string candidate = join_lines(lines);
+        try {
+            if (same(parse_toml<toml::ordered_type_config>(candidate), expected)) return candidate;
+        } catch (const std::exception &) {
+        }
+    }
+    return toml::format(expected);
+}
+
 int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
