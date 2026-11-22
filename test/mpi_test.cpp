@@ -17,6 +17,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -37,6 +39,7 @@
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "teno_shapes.h"
 #include "scratch.h"
 
 namespace {
@@ -282,6 +285,138 @@ TEST(MPITest, StreamsWaitForEachOtherWhenOneRunsLate) {
     expect_matches_serial_with_and_without_step_graphs(
         mixture_input("", "type = \"TENO\"\norder = 3\n", "", "navier_stokes"));
 #endif
+}
+
+namespace {
+
+/**
+ * @brief Gmsh file of nx x ny quadrilaterals of [0, 1] x [0, ly], clustered
+ *        toward x = 0 and x = 1 alike, with zones left/right/bottom/top; the
+ *        interior nodes move by up to 1e-13 of a cell, far below the stencil
+ *        shapes' grid, so that cells of one shape have fits that differ at
+ *        round-off.
+ */
+std::string clustered_quads(const uint32_t nx, const uint32_t ny, const double ly) {
+    std::mt19937 rng(3);
+    std::uniform_real_distribution<double> jitter(-1e-13, 1e-13);
+    auto id = [&](uint32_t i, uint32_t j) { return std::to_string(j * (nx + 1) + i + 1); };
+    std::ostringstream s;
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n"
+      << "$Nodes\n" << (nx + 1) * (ny + 1) << "\n";
+    s.precision(17);
+    for (uint32_t j = 0; j <= ny; j++) {
+        for (uint32_t i = 0; i <= nx; i++) {
+            double x = 0.5 + 0.5 * std::tanh(1.2 * (2.0 * i / nx - 1.0)) / std::tanh(1.2), y = ly * j / ny;
+            if (i > 0 && i < nx && j > 0 && j < ny) {
+                x += jitter(rng) / nx;
+                y += jitter(rng) * ly / ny;
+            }
+            s << id(i, j) << " " << x << " " << y << " 0\n";
+        }
+    }
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < nx; i++) {
+        elements.push_back("1 2 1 1 " + id(i, 0) + " " + id(i + 1, 0));
+        elements.push_back("1 2 3 3 " + id(i + 1, ny) + " " + id(i, ny));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        elements.push_back("1 2 4 4 " + id(0, j + 1) + " " + id(0, j));
+        elements.push_back("1 2 2 2 " + id(nx, j) + " " + id(nx, j + 1));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        for (uint32_t i = 0; i < nx; i++) {
+            elements.push_back("3 2 0 1 " + id(i, j) + " " + id(i + 1, j) + " " + id(i + 1, j + 1) + " " + id(i, j + 1));
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(MPITest, TENOStencilShapesAtWallsAndInHalosMatchSerial) {
+    // Order 3: each cell takes the fit of its stencil shape's cell with the lowest
+    // global id, which differs from its own fit at round-off, so every rank must
+    // give a cell the same shape and tables, halo cells included (gas mixtures
+    // reconstruct halo layer 1 locally). Each column and its mirror image have a
+    // shape of their own: on 3 ranks the first rank's halo column has a shape
+    // that the rank owns no cell of
+    const std::string teno3 = "type = \"TENO\"\norder = 3\n";
+    auto on_file = [](std::string input, const std::string & mesh, const std::string & file) {
+        return input.replace(input.find(mesh), mesh.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    };
+    expect_matches_serial(on_file(box_input("cartesian", teno3, EULER,
+                                            bcs("type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n",
+                                                "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15),
+                                  "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n",
+                                  write_temp_shared("mallard_mpi_clustered.msh", clustered_quads(24, 18, 0.8))));
+    expect_matches_serial(on_file(mixture_input("", teno3, "", "euler"),
+                                  "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n",
+                                  write_temp_shared("mallard_mpi_clustered_strip.msh", clustered_quads(24, 24, 0.3))));
+}
+
+TEST(MPITest, TENOStencilShapeKeysOfReconstructedHaloCellsAreTheirOwnersKeys) {
+    // A gas mixture reconstructs halo layer 1: each rank must give every cell it
+    // reconstructs its owner's key, or none where the owner has none, halo cells
+    // whose key the rank owns no cell of included
+    if (comm::size() == 1) GTEST_SKIP() << "needs several ranks";
+    const uint32_t nx = 24, ny = 24;
+    const double ly = 0.3;
+    std::string input = mixture_input("", "type = \"TENO\"\norder = 3\n", "", "euler");
+    const std::string grid = "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n";
+    input.replace(input.find(grid), grid.size(),
+                  "type = \"file\"\nfilename = \"" +
+                      write_temp_shared("mallard_mpi_clustered_keys.msh", clustered_quads(nx, ny, ly)) + "\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    const auto mesh = solver.get_mesh();
+    const uint32_t n = mesh->n_reconstructed(), n_owned = mesh->n_owned();
+    ASSERT_GT(n, n_owned);
+    // The solver releases the device's node views after the setup
+    auto restore = [](auto & device, const auto & host) {
+        device = std::remove_reference_t<decltype(device)>("restored", host.extent(0));
+        Kokkos::deep_copy(device, host);
+    };
+    restore(mesh->node_coords, mesh->h_node_coords);
+    restore(mesh->nodes_of_cell, mesh->h_nodes_of_cell);
+    restore(mesh->offsets_nodes_of_cell, mesh->h_offsets_nodes_of_cell);
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, 1.4_r);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 18, 10, 256).keys(n);
+    std::set<std::pair<uint64_t, uint64_t>> owned_keys;
+    for (uint32_t c = 0; c < n_owned; c++) owned_keys.insert({keys[c].hash, keys[c].check});
+    // (global id, owned, hash, check, column, row) of each reconstructed cell; the
+    // columns invert clustered_quads' clustering
+    std::vector<uint64_t> local;
+    uint64_t halo_only = 0;
+    for (uint32_t c = 0; c < n; c++) {
+        const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
+        const double i = 0.5 * nx * (std::atanh((2.0 * x - 1.0) * std::tanh(1.2)) / 1.2 + 1.0);
+        local.insert(local.end(), {mesh->h_global_cell(c), uint64_t(c < n_owned), keys[c].hash, keys[c].check,
+                                   uint64_t(std::floor(i)), uint64_t(std::floor(y / ly * ny))});
+        if (c >= n_owned && keys[c] && !owned_keys.count({keys[c].hash, keys[c].check})) halo_only++;
+    }
+    EXPECT_GT(comm::allreduce(halo_only, comm::Op::SUM), 0u) << "no halo cell has a key its rank owns no cell of";
+    const std::vector<uint64_t> all = comm::allgatherv(local);
+    std::map<uint64_t, std::pair<uint64_t, uint64_t>> owner_key;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        if (all[k + 1]) owner_key[all[k]] = {all[k + 2], all[k + 3]};
+    }
+    ASSERT_EQ(owner_key.size(), size_t(nx) * ny);
+    // Away from the walls, the cells of a column have one shape
+    std::map<uint64_t, std::set<std::pair<uint64_t, uint64_t>>> column_keys;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        EXPECT_EQ(std::make_pair(all[k + 2], all[k + 3]), owner_key.at(all[k]))
+            << "cell " << all[k] << (all[k + 1] ? ", owned" : ", in a halo");
+        if (all[k + 5] >= 8 && all[k + 5] < ny - 8) column_keys[all[k + 4]].insert({all[k + 2], all[k + 3]});
+    }
+    EXPECT_EQ(column_keys.size(), size_t(nx));
+    for (const auto & [column, set] : column_keys) {
+        EXPECT_EQ(set.size(), 1u) << "column " << column;
+        EXPECT_NE(set.begin()->first, 0u) << "column " << column;
+    }
 }
 
 namespace {
