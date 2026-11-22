@@ -219,6 +219,44 @@ TEST(ChemistryThermoTest, MixturePropertiesMatchCanteraAndTemperatureInvertsEner
     }
 }
 
+TEST(ChemistryThermoTest, FitsBlendAcrossRangeBoundsSoEveryEnergyHasATemperature) {
+    // A species' fits need not meet at a range bound (C3H7 in GRI-Mech 3.0: h jumps by 0.16 J/mol at
+    // 1000 K), so an energy between the two fits' values at the bound had no temperature: T(e) stopped
+    // at the bound, off e by the jump. Blended below the bound, e(T) is continuous, with cp = dh/dT
+    std::vector<Case> cases = CASES;
+    cases.push_back({"ndodecane", SOURCE_DIR + "/mechanisms/nDodecane_Reitz.yaml", "nDodecane_IG"});
+    using Table = ThermoTable<Kokkos::HostSpace>;
+    for (const Case & c : cases) {
+        const Mechanism mech = read_mechanism(c.file, c.phase);
+        const Table table = make_thermo_table<Kokkos::HostSpace>(mech);
+        std::vector<double> Y(table.n_species, 0.0);
+        const MassFractions y{Y.data()};
+        for (uint32_t k = 0; k < table.n_species; k++) {
+            const SpeciesThermo & th = mech.species[k].thermo;
+            Y.assign(table.n_species, 0.0);
+            Y[k] = 1.0;
+            for (size_t i = 1; i + 1 < th.T_bounds.size(); i++) {
+                const double b = th.T_bounds[i];
+                const std::string what = c.name + " " + mech.species[k].name + " at " + std::to_string(b) + " K";
+                double e_below, e_above, e_T, cv;
+                table.e_cv(std::nextafter(b, 0.0), y, e_below, cv);
+                table.e_cv(std::nextafter(b, 2.0 * b), y, e_above, cv);
+                const double e = 0.5 * (e_below + e_above);
+                table.e_cv(table.T_from_e(e, y, b + 5.0), y, e_T, cv);
+                EXPECT_LE(std::abs(e_T - e) / cv, 1e-7) << what << ": K off the energy";
+                for (const double x : {0.25, 0.5, 0.75}) {
+                    const double T = b - x * Table::BLEND_WIDTH, dT = 1e-3;
+                    const auto H = [&](double t) { return t * table.h_RT(k, Table::powers(t)); };
+                    const auto cp = [&](double t) { return table.cp_R(k, Table::powers(t)); };
+                    EXPECT_NEAR(cp(T), (H(T + dT) - H(T - dT)) / (2.0 * dT), 1e-6 * cp(T)) << what << " cp";
+                    EXPECT_NEAR(table.dcp_R_dT(k, Table::powers(T)), (cp(T + dT) - cp(T - dT)) / (2.0 * dT), 1e-5)
+                        << what << " dcp/dT";
+                }
+            }
+        }
+    }
+}
+
 TEST(ChemistryThermoTest, UnsupportedOrMalformedInputNamesTheEntry) {
     const std::string dir = rank_scratch_dir().string();
     auto expect_error = [&](const std::string & yaml, const std::string & phase, const std::string & needle) {
@@ -239,4 +277,18 @@ TEST(ChemistryThermoTest, UnsupportedOrMalformedInputNamesTheEntry) {
     expect_error(phases + h2 + "    model: constant-cp\n", "liquid", "liquid");
     expect_error("phases:\n- name: gas\n  thermo: ideal-gas\n  elements: [O]\n  species: [H2]\n" + h2 +
                      "    model: constant-cp\n", "", "element H");
+    // Fits that the blend between ranges cannot join
+    const auto expect_table_error = [&](const std::string & ranges, const std::string & needle) {
+        const std::string file = dir + "/mech.yaml";
+        std::ofstream(file) << phases + h2 + "    model: NASA7\n    temperature-ranges: " + ranges +
+                                   "\n    data:\n    - [3.5, 0, 0, 0, 0, 0, 0]\n    - [3.5, 0, 0, 0, 0, 2.0, 0]\n";
+        try {
+            make_thermo_table<Kokkos::HostSpace>(read_mechanism(file));
+            ADD_FAILURE() << "accepted: " << needle;
+        } catch (const std::runtime_error & e) {
+            EXPECT_NE(std::string(e.what()).find(needle), std::string::npos) << e.what();
+        }
+    };
+    expect_table_error("[200, 1000, 3500]", "H2: h jumps by 16.6");
+    expect_table_error("[200, 1000, 1000.5]", "H2: a temperature range is narrower");
 }

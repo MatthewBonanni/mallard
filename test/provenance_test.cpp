@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -19,6 +21,7 @@
 #include "compression.h"
 #include "comm.h"
 #include "data_writer.h"
+#include "file_hash.h"
 #include "json.h"
 #include "mesh_block.h"
 #include "output_reader.h"
@@ -30,6 +33,7 @@
 #include "test_fixtures.h"
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
+#include "hdf5_output.h"
 #endif
 
 namespace {
@@ -137,6 +141,49 @@ TEST(ProvenanceTest, FileHashesCoverContentsAndDirectoryLayout) {
     // The same bytes under another name are another mesh
     std::filesystem::rename(dir / "mesh" / "faces", dir / "mesh" / "owner");
     EXPECT_NE(provenance::sha256_file((dir / "mesh").string()), tree);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ProvenanceTest, FilesOfSeveralChunksHashAsTheTreeOfTheirChunksHashes) {
+    if (!comm::is_root()) return;
+    const auto dir = scratch_dir() / "mallard_chunk_tree";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    constexpr uint64_t chunk = 1000;
+    std::string content;
+    for (int i = 0; content.size() < 2500; i++) content += std::to_string(i) + ",";
+    content.resize(2500);
+    const std::string file = (dir / "data").string();
+    std::ofstream(file, std::ios::binary) << content;
+    const std::vector<std::string> pieces = {provenance::sha256(content.substr(0, 1000)),
+                                             provenance::sha256(content.substr(1000, 1000)),
+                                             provenance::sha256(content.substr(2000))};
+    EXPECT_EQ(file_hash::chunks(file, 0, 3, chunk), pieces);
+    EXPECT_EQ(file_hash::chunks(file, 1, 3, chunk), std::vector<std::string>(pieces.begin() + 1, pieces.end()));
+    EXPECT_TRUE(file_hash::chunks(file, 0, 4, chunk).empty());
+    std::string digests;
+    for (const std::string & hex : pieces) {
+        for (size_t i = 0; i < hex.size(); i += 2) digests += static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16));
+    }
+    const file_hash::Hash tree = file_hash::of_file(file, chunk);
+    EXPECT_TRUE(tree.sha256.empty());
+    EXPECT_EQ(tree.sha256_tree, provenance::sha256(digests));
+    EXPECT_EQ(tree.chunks, pieces);
+    EXPECT_EQ(tree.chunk_bytes, chunk);
+    // One chunk, or none: the file's SHA-256
+    EXPECT_EQ(file_hash::of_file(file, 2500).sha256, provenance::sha256(content));
+    std::ofstream((dir / "empty").string(), std::ios::binary).flush();
+    EXPECT_EQ(file_hash::of_file((dir / "empty").string(), chunk).sha256, provenance::sha256(""));
+    // A record verifies the file by the hash it gives
+    json::Object record;
+    file_hash::add(record, tree);
+    EXPECT_EQ(file_hash::matches(file, json::parse(record.str())), std::optional<bool>(true));
+    EXPECT_EQ(file_hash::matches(file, json::parse("{\"sha256\":\"" + provenance::sha256(content) + "\"}")),
+              std::optional<bool>(true));
+    EXPECT_EQ(file_hash::matches(file, json::parse("{}")), std::nullopt);
+    content[1500] ^= 1;
+    std::ofstream(file, std::ios::binary) << content;
+    EXPECT_EQ(file_hash::matches(file, json::parse(record.str())), std::optional<bool>(false));
     std::filesystem::remove_all(dir);
 }
 
@@ -393,7 +440,7 @@ TEST(ProvenanceTest, RecordsTheFilesTheRunRead) {
         std::ofstream(points) << (N_DIM == 3 ? "0.25 0.25 0.5\n0.75 0.75 0.5\n" : "0.25 0.25\n0.75 0.75\n");
     }
     const std::string probe = "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"" + points +
-                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nvariables = [\"RHO\"]\n";
+                              "\"\nfile = \"" + dir + "/pts.csv\"\ninterval = 2\nfields = [\"RHO\"]\n";
     run_box(dir, 4, UNIFORM, probe);
     const std::string first_id = provenance::run_id();
     const Value first = json::parse(provenance::json());
@@ -504,6 +551,80 @@ TEST(RunLogTest, ResumedRunsAppendAndMarkRewinds) {
         EXPECT_EQ(steps[i].front(), spans[i].first);
         EXPECT_EQ(steps[i].back(), spans[i].second);
     }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(RunLogTest, RecordedOutputsAreWrittenOnceAcrossContinuationsAndRewinds) {
+    // Every file an output record gives keeps the contents it records: a VTKHDF series and its
+    // boundary snapshots are files written once, and a rewind sets aside what it would overwrite
+    const std::string dir = (scratch_dir() / "mallard_run_log_write_once").string();
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    const std::string restart = dir + "/r_000004.restart";
+    const std::string extra =
+        !writes_hdf5() ? ""
+                       : "[[write_data]]\nprefix = \"" + dir + "/v\"\nformat = \"vtkhdf\"\ninterval = 2\nfields = [\"RHO\"]\n"
+                         "[regions]\ncut = {type = \"line\", start = " + std::string(N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") +
+                         ", end = " + std::string(N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]") + ", n_points = 5}\n"
+                         "[[write_data]]\nprefix = \"" + dir + "/w\"\nformat = \"vtkhdf\"\ninterval = 2\nfields = [\"RHO\"]\n"
+                         "regions = [\"cut\"]\n"
+                         "[[probes]]\nname = \"h\"\nformat = \"hdf5\"\nfile = \"" + dir + "/h.h5\"\ninterval = 2\n"
+                         "point = " + std::string(N_DIM == 3 ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") + "\nfields = [\"RHO\"]\n";
+    run_box(dir, 4, UNIFORM, extra);
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n", extra);
+    run_box(dir, 8, "type = \"restart\"\nfile = \"" + restart + "\"\n", extra);
+    if (!comm::is_root()) return;
+    std::vector<Value> starts, outputs;
+    std::map<std::string, std::string> moved;
+    for (const auto & line : lines(dir + "/run.jsonl")) {
+        const Value r = json::parse(line);
+        if (r["type"].string == "start") starts.push_back(r);
+        if (r["type"].string == "output") outputs.push_back(r);
+        if (r["type"].string == "start" && r.has("restart") && r["restart"].has("superseded")) {
+            for (const Value & m : r["restart"]["superseded"].array) moved[m["path"].string] = m["to"].string;
+        }
+    }
+    ASSERT_EQ(starts.size(), 3u);
+    EXPECT_FALSE(starts[1]["restart"].has("superseded")) << "a continuation overwrites nothing";
+    ASSERT_TRUE(starts[2]["restart"].has("superseded"));
+    EXPECT_TRUE(moved.contains(dir + "/r_000008.restart"));
+    EXPECT_TRUE(moved.contains(dir + (comm::size() > 1 ? "/f_000008.pvtu" : "/f_000008.vtu")));
+    EXPECT_EQ(moved.contains(dir + "/v_000008.vtkhdf"), writes_hdf5());
+    const std::string aside = dir + "/.rewound/" + starts[2]["run_id"].string + "/";
+    EXPECT_EQ(moved[dir + "/r_000008.restart"], aside + "r_000008.restart");
+    size_t checked = 0;
+    std::set<std::string> kinds;
+    for (const Value & record : outputs) {
+        // The latest record of a path is the file there; earlier ones, of the steps a rewind repeated, are set aside
+        for (const Value & f : record["files"].array) {
+            const std::string & path = f["path"].string;
+            const bool later = std::any_of(outputs.begin(), outputs.end(), [&](const Value & o) {
+                return &o > &record && std::any_of(o["files"].array.begin(), o["files"].array.end(),
+                                                   [&](const Value & g) { return g["path"].string == path; });
+            });
+            const std::string file = later ? moved[path] : path;
+            ASSERT_FALSE(file.empty()) << path << " was written again without being set aside";
+            EXPECT_EQ(file_hash::matches(file, f), std::optional<bool>(true)) << file << " of step " << record["step"].number;
+            kinds.insert(record["kind"].string);
+            checked++;
+        }
+    }
+    EXPECT_GT(checked, writes_hdf5() ? 10u : 5u);
+    EXPECT_TRUE(kinds.contains("restart") && kinds.contains("vtu")) << checked;
+#ifdef Mallard_HAS_HDF5
+    if (writes_hdf5()) {
+        EXPECT_TRUE(kinds.contains("vtkhdf"));
+        EXPECT_TRUE(std::filesystem::exists(aside + "h.h5")) << "the probe file the rewind cut back";
+        // The series files read as one temporal file of every step, through the index of the snapshots' files
+        for (const char * series : {"/v.vtkhdf", "/w_cut.vtkhdf"}) {
+            EXPECT_EQ(h5_values<double>(dir + series, "VTKHDF/FieldData/STEP"), (std::vector<double>{0, 2, 4, 6, 8}))
+                << series;
+            EXPECT_EQ(h5_values<double>(dir + series, "VTKHDF/Steps/Values"),
+                      h5_values<double>(dir + series, "VTKHDF/FieldData/TIME"))
+                << series;
+        }
+        EXPECT_EQ(h5_values<double>(dir + "/v.vtkhdf", "VTKHDF/CellData/RHO").size(), 5u * (N_DIM == 3 ? 64u : 16u));
+    }
+#endif
     std::filesystem::remove_all(dir);
 }
 

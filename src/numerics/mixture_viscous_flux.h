@@ -53,6 +53,10 @@ struct MixtureTransportFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
+        if (gas.tabulated()) {
+            flamelet(c);
+            return;
+        }
         const ScalarMassFractions y{&scalars(c, 0)};
         const double rho = static_cast<double>(W(c, 0)), p = static_cast<double>(W(c, N_DIM + 1));
         const double R = gas.thermo.gas_constant(y);
@@ -77,6 +81,34 @@ struct MixtureTransportFunctor {
             values(c, N_DIM + 1 + k) = static_cast<rtype>(y(k) / gas.transport.W(k) * W_mean);
         }
     }
+
+    /**
+     * @brief A flamelet gas: mu, kappa and cp from the table at the cell's Z,
+     *        subgrid variance and C. With unity Lewis number the heat and
+     *        enthalpy diffusion fluxes sum to -(kappa / cp) grad h, so the
+     *        conducted variable is h = e + p / rho in place of T, with LAMBDA =
+     *        kappa / cp, and every scalar diffuses with rho D = kappa / cp along
+     *        the gradient of its own value.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void flamelet(const uint32_t c) const {
+        const ScalarMassFractions y{&scalars(c, 0)};
+        const double rho = static_cast<double>(W(c, 0)), p = static_cast<double>(W(c, N_DIM + 1));
+        const flamelet::Point<3> point =
+            gas.flamelet.locate(y(flamelet::Gas<>::Z), gas.flamelet.cell_variance(c), y(flamelet::Gas<>::C));
+        const flamelet::Thermo th = gas.flamelet.thermo(point);
+        const flamelet::Transport tr = gas.flamelet.transport(point);
+        const double T = p / (rho * th.R);
+        const double rho_D = tr.kappa / tr.cp;
+        const double nu = Kokkos::fmax(Kokkos::fmax(4.0 / 3.0 * tr.mu / rho, tr.kappa / (rho * th.cv(T))), rho_D / rho);
+        for (uint32_t k = 0; k < gas.n_species; k++) diffusion(c, k) = rho_D;
+        coefficients(c, MU) = static_cast<rtype>(tr.mu);
+        coefficients(c, LAMBDA) = static_cast<rtype>(rho_D);
+        coefficients(c, NU_EFF) = static_cast<rtype>(nu);
+        FOR_I_DIM values(c, i) = W(c, 1 + i);
+        values(c, N_DIM) = static_cast<rtype>(th.energy(T) + p / rho);
+        for (uint32_t k = 0; k < gas.n_species; k++) values(c, N_DIM + 1 + k) = static_cast<rtype>(y(k));
+    }
 };
 
 /**
@@ -98,8 +130,18 @@ struct MixtureGradientFunctor {
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_values;    // (condition, [T, X_1 .. X_Ns]) of inlet_state
     uint32_t n_species;
     Kokkos::View<rtype *[3]> coefficients;  // (cell, [mu, lambda, -]), for heat-flux walls
+    flamelet::Gas<> flamelet{};             // a flamelet gas, whose conducted variable is h: walls convert T_w
 
     static constexpr uint32_t CHUNK = 16;  // variables per pass over the stencil
+
+    /** @brief The conducted variable of cell c at temperature T: T, or a flamelet gas's h(T) at c's Z, Zvar and C. */
+    KOKKOS_INLINE_FUNCTION
+    double conducted(const uint32_t c, const double T) const {
+        if (!flamelet.active()) return T;
+        const double Z = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::Z));
+        const double C = static_cast<double>(values(c, N_DIM + 1 + flamelet::Gas<>::C));
+        return flamelet.thermo(flamelet.locate(Z, flamelet.cell_variance(c), C)).enthalpy(T);
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -153,7 +195,7 @@ struct MixtureGradientFunctor {
             if (bc.type == BoundaryType::WALL_ISOTHERMAL || bc.type == BoundaryType::WALL_HEAT_FLUX) {
                 rtype dT;
                 if (bc.type == BoundaryType::WALL_ISOTHERMAL) {
-                    dT = 2.0_r * (bc.data[0] - values(c, N_DIM));
+                    dT = 2.0_r * (static_cast<rtype>(conducted(c, static_cast<double>(bc.data[0]))) - values(c, N_DIM));
                 } else {
                     rtype n_vec[N_DIM], n[N_DIM];
                     FOR_I_DIM n_vec[i] = f.face_normals(i_face, i);
@@ -222,7 +264,7 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> slots;
     bool axisymmetric = false;            // face_area is then the revolved area
     Kokkos::View<rtype *[3]> covariance;  // axisymmetric: Mesh::cell_covariance
-    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]), else empty
+    Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]; flamelet: mu_t / Sc_t), else empty
     bool sgs_only = false;                // LES budget: the SGS fluxes alone
     Kokkos::View<rtype *> face_energy_1;  // double flux: side 1's energy flux (MixtureDoubleFluxFunctor), else empty
 
@@ -397,7 +439,11 @@ struct MixtureViscousFluxFunctor {
             rtype dn = 0.0;
             FOR_I_DIM dn += (face_coords(i_face, i) - cell_coords(c0, i)) * n[i];
             isothermal = bc->type == BoundaryType::WALL_ISOTHERMAL;
-            if (isothermal) q_f[N_DIM] = bc->data[0];
+            if (isothermal) {
+                const ScalarMassFractions y{&scalars(c0, 0)};
+                q_f[N_DIM] = static_cast<rtype>(
+                    gas.conducted(static_cast<double>(bc->data[0]), y, gas.flamelet.cell_variance(static_cast<uint32_t>(c0))));
+            }
             for (uint8_t k = 0; k < (isothermal ? NQ : N_DIM); k++) {
                 if (k < N_DIM) q_f[k] = bc->data[1 + k];
                 const rtype correction = (q_f[k] - values(c0, k)) / dn - dot<N_DIM>(g_f[k], n);
@@ -427,9 +473,11 @@ struct MixtureViscousFluxFunctor {
         FOR_I_DIM out.momentum(i, A, tau_n[i]);
         rtype energy = dot<N_DIM>(q_f, tau_n);
         if (isothermal) {
+            // A flamelet table's kappa / cp depends on Z and C alone, not on T
             const ScalarMassFractions y{&scalars(c0, 0)};
-            const double ratio = gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
-                                 gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
+            const double ratio = gas.tabulated() ? 1.0
+                                                 : gas.transport.conductivity(static_cast<double>(q_f[N_DIM]), y) /
+                                                       gas.transport.conductivity(static_cast<double>(values(c0, N_DIM)), y);
             const rtype lambda = coefficients(c0, LAMBDA) * static_cast<rtype>(0.5 * (1.0 + ratio));
             energy += molecular * lambda * dot<N_DIM>(g_f[N_DIM], n);
         } else if (wall && bc->type == BoundaryType::WALL_HEAT_FLUX) {
@@ -452,10 +500,12 @@ struct MixtureViscousFluxFunctor {
                 }
                 return static_cast<double>(dot<N_DIM>(g, n));
             };
+            // A flamelet gas's scalars diffuse along their own gradients, with mu_t / Sc_t
             const double rho_D_t = static_cast<double>(sgs_coefficient(2));
             auto c_k = [&](const uint32_t k) {
                 const double c = two_cells ? 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k)) : diffusion(c0, k);
-                return les ? static_cast<double>(molecular) * c + rho_D_t * gas.transport.W(k) : c;
+                if (!les) return c;
+                return static_cast<double>(molecular) * c + (gas.tabulated() ? rho_D_t : rho_D_t * gas.transport.W(k));
             };
             auto Y_k = [&](const uint32_t k) {
                 return two_cells ? 0.5 * (static_cast<double>(scalars(G.c0, k)) + static_cast<double>(scalars(G.c1, k)))
@@ -474,7 +524,9 @@ struct MixtureViscousFluxFunctor {
                 correction += c * dX;
                 sum_Y += Y_k(k);
             }
-            correction /= sum_Y;
+            // A flamelet gas's scalars are not mass fractions: no correction velocity, and h is conducted
+            const bool tabulated = gas.tabulated();
+            correction = tabulated ? 0.0 : correction / sum_Y;
             const auto p = chemistry::ThermoTable<>::powers(static_cast<double>(q_f[N_DIM]));
             const double RT = chemistry::GAS_CONSTANT * p.T;
             // Soret: -D^T_k (dT/dn) / T, molecular
@@ -489,7 +541,7 @@ struct MixtureViscousFluxFunctor {
                 const double c = k < KEPT ? kept_c[k] : c_k(k), dX = k < KEPT ? kept_dX[k] : dX_dn(k);
                 double j = -c * dX + Y_k(k) * correction;
                 if (soret) j -= DT_k(k) * dlnT_dn;
-                enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
+                if (!tabulated) enthalpy += gas.thermo.h_RT(k, p) * RT * gas.thermo.inv_W(k) * j;
                 out.species(k, A, j);
             }
             energy -= static_cast<rtype>(enthalpy);

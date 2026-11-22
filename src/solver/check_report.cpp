@@ -16,6 +16,7 @@
 
 #include "check.h"
 #include "comm.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "report.h"
@@ -218,6 +219,20 @@ void regions_section(report::Text & text, const CheckReport & r) {
                     "tolerance", "outside"},
                    measures);
     }
+    std::vector<Row> boxes;
+    for (const CheckRegion & g : r.regions) {
+        if (!g.from_file) continue;
+        std::string lo, hi;
+        for (size_t i = 0; i < N_DIM; i++) {
+            lo += (i ? ", " : "(") + logging::real(g.box[0][i]);
+            hi += (i ? ", " : "(") + logging::real(g.box[1][i]);
+        }
+        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")", "m"}});
+    }
+    if (!boxes.empty()) {
+        text.note("Regions from surface files (STL, OBJ): their bounding box, placed and in meters.");
+        text.table({"region", "from", "to", {"units", Kind::UNITS}}, boxes);
+    }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
         std::string images;
@@ -267,13 +282,12 @@ void time_step_section(report::Text & text, const CheckReport & r) {
     const std::string basis = r.dt_limit == "CFL"      ? "run.cfl times the time step at CFL 1"
                               : r.dt_limit == "sponge" ? "the sponges' stable step, below run.cfl's"
                                                        : "run.dt";
-    const bool limited = std::isfinite(r.cfl_limit);
-    const Status cfl = !limited ? Status::NONE : r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
+    const Status cfl = r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
     std::vector<Row> rows = {
         {Status::NONE, {"time step dt", g4(r.dt), "s", "", basis}},
         {cfl,
-         {"CFL number", format("%.3g", r.cfl), "dimensionless", limited ? "<= " + g4(r.cfl_limit) : "",
-          limited ? r.integrator + "'s stability limit for smooth flow" : "no limit known for " + r.integrator}},
+         {"CFL number", format("%.3g", r.cfl), "dimensionless", "<= " + g4(r.cfl_limit),
+          r.integrator + "'s stability limit for smooth flow"}},
         {Status::NONE, {"time step at CFL 1", g4(r.dt_cfl1), "s", "", "the smallest over the cells"}},
         {Status::NONE, {"CFL-limiting cell", count(r.limiting_cell), "global id", "", "at " + point(r.limiting_x)}},
         {Status::NONE,
@@ -694,7 +708,7 @@ std::string check_text(const CheckReport & r, const bool color) {
 
 std::string check_json(const CheckReport & r) {
     json::Object o;
-    o.add("version", 1);
+    o.add("schema", interfaces::CHECK_REPORT.name).add("version", interfaces::CHECK_REPORT.version);
     o.add("status", std::string(report::status_name(r.status())));
     o.add("errors", uint64_t(r.errors().size())).add("warnings", uint64_t(r.warnings().size()));
     o.raw("input_file", r.input_file.empty() ? "null" : json::quote(r.input_file))
@@ -730,6 +744,10 @@ std::string check_json(const CheckReport & r) {
                   .raw("resolution", g.exact ? "null" : std::to_string(g.resolution))
                   .add("solution", g.solution)
                   .add("surface", g.surface)
+                  .raw("box", !g.from_file ? "null"
+                                           : "[[" + json::number(g.box[0][0]) + ", " + json::number(g.box[0][1]) +
+                                                 ", " + json::number(g.box[0][2]) + "], [" + json::number(g.box[1][0]) +
+                                                 ", " + json::number(g.box[1][1]) + ", " + json::number(g.box[1][2]) + "]]")
                   .raw("own", std::isfinite(g.own_measure) ? json::Object()
                                                                  .add("measure", g.own_measure)
                                                                  .add("surface", g.own_surface)

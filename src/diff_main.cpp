@@ -38,6 +38,7 @@
 #include "remap.h"
 #include "report.h"
 #include "diagnostic_code.h"
+#include "file_hash.h"
 
 namespace fs = std::filesystem;
 
@@ -298,7 +299,7 @@ std::map<std::string, std::string> read_files(const json::Value & run) {
     const json::Value * files = at(run, {"files"});
     if (!files || files->type != json::Value::Type::ARRAY) return out;
     for (const json::Value & f : files->array) {
-        out[string_at(f, {"kind"}) + " " + string_at(f, {"path"})] = string_at(f, {"sha256"});
+        out[string_at(f, {"kind"}) + " " + string_at(f, {"path"})] = file_hash::recorded(f);
     }
     return out;
 }

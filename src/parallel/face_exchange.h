@@ -52,7 +52,8 @@ FacePlan plan_face_exchange(const Distribution & dist, const Mesh & mesh, const 
 class FaceExchange {
     public:
         FaceExchange() = default;
-        FaceExchange(const FacePlan & plan, uint8_t n_quad, bool nccl);
+        /** @brief n_quad points of N_CONSERVATIVE values per face side; tag tells exchanges in flight together apart (MPI). */
+        FaceExchange(const FacePlan & plan, uint8_t n_quad, bool nccl, int tag = 1);
 
         /**
          * @brief Pack the requested sides of face_solution on exec and send them.
@@ -69,6 +70,7 @@ class FaceExchange {
     private:
         std::vector<int> ranks;
         bool nccl = false;
+        [[maybe_unused]] int tag = 1;  // MPI only
         uint32_t n_values = 0;  // per face side: quadrature points times states
         std::vector<uint32_t> send_offsets, recv_offsets;  // per neighbor, in face sides
         Kokkos::View<uint32_t *> send_faces, recv_faces;

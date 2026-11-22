@@ -16,6 +16,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "file_hash.h"
+
 #define LEN_STEP 6
 
 /**
@@ -68,11 +70,11 @@ inline std::string partial_name(const std::string & file) { return file + PARTIA
 /** @brief Give a file written under partial_name(file) its name, or throw cannot_write's error. */
 void publish_file(const std::string & what, const std::string & file);
 
-/** @brief A file a run wrote: its size and SHA-256, for the run log's output records. */
+/** @brief A file a run wrote: its size and hash (file_hash.h), for the run log's output records. */
 struct WrittenFile {
     std::string path;
     uint64_t bytes = 0;
-    std::string sha256;
+    file_hash::Hash hash;
 };
 
 /**
@@ -87,7 +89,7 @@ struct OutputSummary {
     std::string contents{};
 };
 
-/** @brief Size and (contents) SHA-256 of a complete file. */
+/** @brief Size and (contents) hash of a complete file. */
 WrittenFile written_file(const std::string & path, bool contents = true);
 
 #endif // COMMON_IO_H

@@ -17,6 +17,7 @@
  */
 
 #include "teno_setup.h"
+#include "gated.h"
 #include "periodic.h"
 
 #include "curved.h"
@@ -420,7 +421,7 @@ struct Geometry {
     R<double **> moments;          // (cell, moment)
     R<double *[9]> metric;         // (reconstructed cell)
     V<rtype ***> quad_points;      // (face, q, d)
-    V<rtype **> quad_weights;      // (face, q)
+    FaceWeights<Space> quad_weights;  // (face, q)
     R<double *[4]> tet_rule;       // (q, [x, y, z, w]) for the moments
 
     KOKKOS_INLINE_FUNCTION
@@ -3323,9 +3324,9 @@ void launch_moments(const Geometry<Kokkos::DefaultExecutionSpace::memory_space> 
     constexpr size_t W = DEVICE_IS_HOST ? MOMENT_LANES : 1;
     const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, (n_cells + uint32_t(W) - 1) / uint32_t(W));
     if (smoothness) {
-        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, W, Space>{g, n_moments, n_cells});
+        gated::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, W, Space>{g, n_moments, n_cells});
     } else {
-        Kokkos::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, W, Space>{g, n_moments, n_cells});
+        gated::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, W, Space>{g, n_moments, n_cells});
     }
 }
 
@@ -3460,7 +3461,7 @@ void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, 
                 const Kokkos::View<uint32_t *, Space> & dest, const uint32_t n) {
     using Exec = typename std::conditional<std::is_same_v<Space, HostMem>, Kokkos::DefaultHostExecutionSpace,
                                            Kokkos::DefaultExecutionSpace>::type;
-    Kokkos::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("teno_setup_copy_slots", Kokkos::RangePolicy<Exec>(0, n), KOKKOS_LAMBDA(const uint32_t i) {
         const uint32_t j = src.extent(0) ? src(i) : i;
         const uint32_t t = dest.extent(0) ? dest(i) : i;
         to.status(t) = from.status(j);
@@ -3542,7 +3543,7 @@ class Setup3D {
             auto h_moments = Kokkos::create_mirror_view_and_copy(HostMem(), device.moments);
             const int nm = tables.nm, n_moments = tables.n_moments;
             const Geometry<HostMem> & h = host;
-            Kokkos::parallel_for("teno_curved_moments",
+            gated::parallel_for("teno_curved_moments",
                                  Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
                                      0, cells.size()),
                                  [&](const uint32_t j) {
@@ -3577,7 +3578,7 @@ class Setup3D {
 
     public:
         Setup3D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                Kokkos::View<rtype **> quad_weights, const Options & opt)
+                FaceWeights<> quad_weights, const Options & opt)
             : options(opt), tables(opt.degree) {
             Kokkos::Timer timer;
             r = opt.degree;
@@ -3638,13 +3639,13 @@ class Setup3D {
                 }
             }
             h.cell_h = Geometry<HostMem>::R<double *>("teno_setup_h", n_cells);
-            Kokkos::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::cbrt(double(mesh.h_cell_volume(c))); });
+            gated::parallel_for("teno_setup_h", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_cells),
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
             using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
-            Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
+            gated::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
                 h.mirror_face(f) = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
                                    h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION &&
                                    !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
@@ -3657,7 +3658,7 @@ class Setup3D {
                 }
             }
             h.has_mirror_face = Geometry<HostMem>::R<uint8_t *>("teno_setup_has_mirror_face", n_cells);
-            Kokkos::parallel_for("teno_setup_mirror_cells", HostRange(0, n_cells), [&](const uint32_t c) {
+            gated::parallel_for("teno_setup_mirror_cells", HostRange(0, n_cells), [&](const uint32_t c) {
                 for (uint32_t k = h.offsets_faces_of_cell(c); k < h.offsets_faces_of_cell(c + 1); k++) {
                     h.has_mirror_face(c) |= h.mirror_face(h.faces_of_cell(k));
                 }
@@ -3667,7 +3668,7 @@ class Setup3D {
             h.metric = Geometry<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
             // Only the cells to set up need theirs
             const uint32_t n_metric = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
-            Kokkos::parallel_for("teno_setup_metric",
+            gated::parallel_for("teno_setup_metric",
                                  Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
                                      0, n_metric),
                                  [&](const uint32_t k) {
@@ -3743,7 +3744,7 @@ class Setup3D {
                 case 9: launch_moments<9>(d, n_cells, tables.n_moments, options.sector_stencils); break;
                 default: throw std::logic_error("TENO setup: unsupported degree.");
             }
-            Kokkos::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
+            gated::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
             Kokkos::fence();
             if (mesh.curved_geometry) curved_moments(*mesh.curved_geometry, n_cells);
 
@@ -3876,7 +3877,7 @@ class Setup3D {
                 CellSetup<Kokkos::DefaultExecutionSpace> task{device, d_tables.data(), scratch, out, cells, {}, r, nk, ns, nss,
                                                               ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
                                                               double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, options.sector_stencils};
-                Kokkos::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
+                gated::parallel_for("teno_setup_cells", HeavyRange<Kokkos::Schedule<Kokkos::Dynamic>>(0, n), task);
             } else {
                 using Exec = Kokkos::DefaultExecutionSpace;
                 const TeamLayout layout = team_layout();
@@ -3892,7 +3893,7 @@ class Setup3D {
                                     out, cells, layout, caps, pool, pool_locks};
                 Kokkos::TeamPolicy<Exec, Kokkos::LaunchBounds<TEAM_SIZE, 3>> policy(static_cast<int>(n), TEAM_SIZE);
                 policy.set_scratch_size(0, Kokkos::PerTeam(layout.shared_bytes));
-                Kokkos::parallel_for("teno_setup_cells", policy, task);
+                gated::parallel_for("teno_setup_cells", policy, task);
             }
             Kokkos::fence();
             // Cells whose search outgrew the scratch: again on the host, with more room
@@ -3921,7 +3922,7 @@ class Setup3D {
             const std::pair<uint32_t, uint32_t> direct(0u, n_direct);
             Kokkos::deep_copy(Kokkos::subview(out, direct, Kokkos::ALL()), Kokkos::subview(device.moments, direct, Kokkos::ALL()));
             const auto from = device.moments;
-            Kokkos::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
+            gated::parallel_for("teno_extra_moments", Kokkos::RangePolicy<>(0, n_extra), KOKKOS_LAMBDA(const uint32_t k) {
                 for (size_t m = 0; m < n_moments; m++) out(n_direct + k, m) = from(extra(k), m);
             });
             return out;
@@ -3935,7 +3936,7 @@ class Setup3D {
             host.moments = Kokkos::create_mirror_view_and_copy(HostMem(), device.moments);
             host.boxes = Kokkos::create_mirror_view_and_copy(HostMem(), device.boxes);
             host.quad_points = Kokkos::create_mirror_view_and_copy(HostMem(), device.quad_points);
-            host.quad_weights = Kokkos::create_mirror_view_and_copy(HostMem(), device.quad_weights);
+            host.quad_weights = device.quad_weights.host();
             host_ready = true;
         }
 
@@ -3967,9 +3968,9 @@ class Setup3D {
                 CellSetup<Kokkos::DefaultHostExecutionSpace> task{host, &tables, h_scratch, h_out, h_cells, {}, r, nk, ns,
                                                                   nss, ns_max, nss_max, double(options.max_condition), wall_nk, wall_ns,
                                                                   double(options.stencil_factor), pyramid_ns, pyramid_wall_ns, options.sector_stencils};
-                Kokkos::parallel_for("teno_setup_cells_host",
-                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
-                                     task);
+                gated::parallel_for("teno_setup_cells_host",
+                                    Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
+                                    task);
                 Kokkos::fence();
                 std::vector<uint32_t> done, again;
                 std::vector<uint32_t> done_slot;
@@ -4996,11 +4997,29 @@ void boundary_behind_faces(const Mesh & mesh, const std::vector<uint8_t> & bound
 
 }  // namespace
 
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries) {
+    auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
+    auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
+    std::vector<uint8_t> boundary(mesh.n_faces);
+    Geometry2D<HostMem>::R<uint8_t *> mirror("teno_setup_boundary_behind", mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        boundary[f] = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
+                      h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
+        mirror(f) = boundary[f];
+    }
+    std::vector<uint32_t> start;
+    std::vector<std::array<double, 4>> pieces;
+    boundary_behind_faces(mesh, boundary, mirror, start, pieces);
+    std::vector<uint8_t> out(mesh.n_faces);
+    for (uint32_t f = 0; f < mesh.n_faces; f++) out[f] = start[f + 1] > start[f];
+    return out;
+}
+
 /** @brief The 2D setup of one mesh. */
 class Setup2D {
     public:
         Setup2D(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                Kokkos::View<rtype **>, const Options & opt)
+                FaceWeights<>, const Options & opt)
             : options(opt) {
             Kokkos::Timer timer;
             r = opt.degree;
@@ -5064,13 +5083,13 @@ class Setup2D {
                 h.boundary_ordinal(f) = mesh.h_cells_of_face(f, 1) < 0 ? int32_t(b++) : -1;
             }
             h.cell_h = Geometry2D<HostMem>::R<double *>("teno_setup_h", n_cells);
-            Kokkos::parallel_for("teno_setup_h", HostRange(0, n_cells),
-                                 [&](const uint32_t c) { h.cell_h(c) = std::sqrt(double(mesh.h_cell_volume(c))); });
+            gated::parallel_for("teno_setup_h", HostRange(0, n_cells),
+                                 [&](const uint32_t c) { h.cell_h(c) = cell_scale(mesh, c); });
             auto h_face_bc = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.face_bc);
             auto h_bcs = Kokkos::create_mirror_view_and_copy(HostMem(), boundaries.bcs);
             h.mirror_face = Geometry2D<HostMem>::R<uint8_t *>("teno_setup_mirror_face", mesh.n_faces);
             std::vector<uint8_t> boundary(mesh.n_faces);
-            Kokkos::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
+            gated::parallel_for("teno_setup_mirror_faces", HostRange(0, mesh.n_faces), [&](const uint32_t f) {
                 boundary[f] = mesh.h_cells_of_face(f, 1) < 0 && h_face_bc(f) >= 0 &&
                               h_bcs(h_face_bc(f)).type != BoundaryType::PARTITION;
                 h.mirror_face(f) = boundary[f] && !one_sided_face(mesh, h_bcs(h_face_bc(f)), f, opt.curved_mirrors);
@@ -5096,7 +5115,7 @@ class Setup2D {
             const uint32_t n_rec = mesh.n_reconstructed();
             n_target = opt.cells ? uint32_t(opt.cells->size()) : n_rec;
             h.metric = Geometry2D<HostMem>::R<double *[9]>("teno_setup_metric", n_rec);
-            Kokkos::parallel_for("teno_setup_metric",
+            gated::parallel_for("teno_setup_metric",
                                  Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
                                      0, n_target),
                                  [&](const uint32_t k) {
@@ -5128,7 +5147,7 @@ class Setup2D {
                 h.quad_points = Kokkos::create_mirror_view_and_copy(HostMem(), quad_points);
                 std::vector<std::vector<curved::Vec3>> xs(n_cells);
                 std::vector<std::vector<double>> ws(n_cells);
-                Kokkos::parallel_for("teno_setup_curved_rules",
+                gated::parallel_for("teno_setup_curved_rules",
                                      Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(
                                          0, n_cells),
                                      [&](const uint32_t c) {
@@ -5268,7 +5287,7 @@ class Setup2D {
                 scratch = Scratch2D<DefaultMem>();
                 scratch = Scratch2D<DefaultMem>(caps, slots, nk, !DEVICE_IS_HOST);
             }
-            Kokkos::parallel_for("teno_setup_cells", CellRange(0, n), task<Kokkos::DefaultExecutionSpace>(device, scratch, out, cells));
+            gated::parallel_for("teno_setup_cells", CellRange(0, n), task<Kokkos::DefaultExecutionSpace>(device, scratch, out, cells));
             Kokkos::fence();
             // Cells whose search outgrew the scratch: again on the host, with more room
             auto status = Kokkos::create_mirror_view_and_copy(HostMem(), Kokkos::subview(out.status, std::make_pair(0u, n)));
@@ -5328,9 +5347,9 @@ class Setup2D {
                 for (uint32_t j = 0; j < m; j++) h_cells(j) = cells(which[j]);
                 TableBatchT<HostMem> h_out(m, nk, ns_max, max_small(), false);
                 Scratch2D<HostMem> h_scratch(caps.scaled(scale), n_threads, nk, false);
-                Kokkos::parallel_for("teno_setup_cells_host",
-                                     Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
-                                     task<Kokkos::DefaultHostExecutionSpace>(host, h_scratch, h_out, h_cells));
+                gated::parallel_for("teno_setup_cells_host",
+                                    Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, m),
+                                    task<Kokkos::DefaultHostExecutionSpace>(host, h_scratch, h_out, h_cells));
                 Kokkos::fence();
                 std::vector<uint32_t> done, done_slot, again;
                 for (uint32_t j = 0; j < m; j++) {
@@ -5375,7 +5394,7 @@ class Setup2D {
 #endif
 
 SetupHandle::SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> quad_points,
-                         Kokkos::View<rtype **> quad_weights, const Options & options)
+                         FaceWeights<> quad_weights, const Options & options)
     : impl(std::make_unique<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>>(mesh, boundaries, quad_points, quad_weights,
                                                                              options)) {}
 
@@ -5590,7 +5609,7 @@ std::vector<uint8_t> search_depths(const Mesh & mesh, const Options & options, c
     };
     std::vector<uint8_t> depths(cells.size());
     using HostRange = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
-    Kokkos::parallel_for("teno_search_depths", HostRange(0, cells.size()), [&](const size_t t) {
+    gated::parallel_for("teno_search_depths", HostRange(0, cells.size()), [&](const size_t t) {
         // Unlike the setup's fixed scratch, grown until the search fits
         for (uint32_t visit_cap = 1024;; visit_cap *= 2) {
             const uint32_t hash_cap = 4 * visit_cap;
