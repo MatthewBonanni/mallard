@@ -1197,9 +1197,10 @@ Options:
                          input's [regions] or of the mesh, or an inline TOML
                          table, as [[write_data]] region takes it. Default: the
                          whole mesh.
-  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, every
-                         snapshot in one file, or .vtu files with a .pvd index.
-                         Default: vtkhdf, or vtu in builds without HDF5.
+  --snapshot vtkhdf|vtu  The format of the snapshots: OUTPUT/NAME.vtkhdf, the
+                         series of a file per snapshot, or .vtu files with a
+                         .pvd index. Default: vtkhdf, or vtu in builds without
+                         HDF5.
   --name NAME            The name of the snapshots: NAME.vtkhdf. Default:
                          derived.
   --steps LIST           Derive the snapshots of these steps, separated by
@@ -1659,8 +1660,8 @@ made from the same table as the help pages and from the catalogs mallard list
 keys and mallard list fields print, so it knows every command, key and field of
 this build; templates come from mallard new when completing.
 
-An install (cmake --install, Spack, the containers) puts the scripts where the
-shells look: share/bash-completion/completions/mallard,
+An install (cmake --install, Spack, the containers, the archives) puts the
+scripts where the shells look: share/bash-completion/completions/mallard,
 share/zsh/site-functions/_mallard and
 share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
 or a prefix the shell does not search, load it from the shell's startup file, as

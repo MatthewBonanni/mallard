@@ -35,6 +35,18 @@ image pairs to its own. What a pull request must document is listed in
   absolute links, `https://matthewbonanni.github.io/mallard/validation/#sod-shock-tube`;
   the site turns them into checked relative links.
 
+## Lists
+
+The website's Markdown is stricter than GitHub's, so a list that looks right on GitHub can
+render there as one paragraph with literal `- `:
+
+- Indent what a list item holds beyond its first paragraph (a code block, another
+  paragraph, a table, a nested list) by 4 spaces per level, whatever the marker's width.
+- Leave a blank line before a list that follows a paragraph, and before the next item
+  after a block that follows a blank line.
+
+`tools/dev/check_doc_lists.py` checks both (in `tools/dev/precheck.sh` and CI).
+
 ## Feature sections of the user guide
 
 Each section of `docs/guide/` that documents an input feature opens with the smallest
@@ -65,14 +77,14 @@ Equations are LaTeX, which both GitHub and the website (MathJax 3) render:
   closing `$` preceded by a non-space, so `$5 and $10` stays text.
 - **Display:** `$$` on lines of their own, with a blank line before and after:
 
-  ```markdown
-  $$
-  \begin{equation}
-  \frac{\mathrm{d} U_i}{\mathrm{d} t} = -\frac{1}{V_i} \sum_f F_f A_f
-  \label{eq:semi-discrete}
-  \end{equation}
-  $$
-  ```
+    ```markdown
+    $$
+    \begin{equation}
+    \frac{\mathrm{d} U_i}{\mathrm{d} t} = -\frac{1}{V_i} \sum_f F_f A_f
+    \label{eq:semi-discrete}
+    \end{equation}
+    $$
+    ```
 
 - **Numbering:** AMS rules. `equation` and `align` (and the other AMS
   environments) are numbered, `$$...$$` alone and the starred environments are

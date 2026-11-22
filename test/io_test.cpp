@@ -381,7 +381,7 @@ TEST(IOTest, AsynchronousOutputWritesTheSameFiles) {
         run_case(output_case(dir + "/sync", "async = false\n", snapshot_keys, restart_keys));
         run_case(output_case(dir + "/async", "io_threads = 3\n", snapshot_keys, restart_keys));
         const auto sync = files_under(dir + "/sync"), async = files_under(dir + "/async");
-        EXPECT_EQ(sync.size(), have_hdf5() ? 34u : 13u) << snapshot_keys;
+        EXPECT_EQ(sync.size(), have_hdf5() ? 39u : 13u) << snapshot_keys;
         ASSERT_EQ(async.size(), sync.size()) << snapshot_keys;
         for (const auto & [name, bytes] : sync) {
             ASSERT_TRUE(async.count(name)) << name;
@@ -506,11 +506,13 @@ TEST(IOTest, CompressedFilesHoldTheSameValuesOrValuesWithinTheRelativeError) {
                                      as_reals(std::string(bytes.begin(), bytes.end())), 1e-3, name);
     }
 
-    // VTKHDF: deflated datasets with the same values; rounding changes only the cell values
-    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/near_000008.vtkhdf"}) {
+    // VTKHDF: deflated datasets with the same values; rounding changes only the cell values. The
+    // series index holds no data of its own, so the size is that of the series' snapshot file
+    for (const char * file : {"/vtkhdf/flow_000008.vtkhdf", "/vtkhdf/series.vtkhdf", "/vtkhdf/series_000008.vtkhdf",
+                              "/vtkhdf/near_000008.vtkhdf"}) {
         const auto raw_file = h5_all_datasets(dir + "/raw" + file);
         EXPECT_EQ(h5_all_datasets(dir + "/zlib" + file), raw_file) << file;
-        if (!std::string(file).starts_with("/vtkhdf/near")) {
+        if (!std::string(file).starts_with("/vtkhdf/near") && std::string(file) != "/vtkhdf/series.vtkhdf") {
             EXPECT_LT(std::filesystem::file_size(dir + "/zlib" + file),
                       std::filesystem::file_size(dir + "/raw" + file))
                 << file;

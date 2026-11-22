@@ -10,6 +10,7 @@
  */
 
 #include "synthetic_inflow.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cctype>
@@ -623,7 +624,7 @@ void SyntheticInflow::plan(const Kokkos::View<rtype> & time) {
     const double dt_p = dt_plane;
     const int64_t n_slots = n_filtered, nt = n_time, none = NO_PLANE;
     constexpr int64_t n_cache = N_CACHE;
-    Kokkos::parallel_for("inflow_plan", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("inflow_plan", 1, KOKKOS_LAMBDA(const int) {
         const double s = static_cast<double>(time()) / dt_p;
         const int64_t m = static_cast<int64_t>(Kokkos::floor(s));
         a() = s - double(m);
@@ -681,7 +682,7 @@ void SyntheticInflow::random_planes() {
     // Unit-variance noise on the padded grid, keyed by the global grid indices, filtered along each
     // transverse direction; slots without a pending plane do nothing
     if constexpr (N_T == 1) {
-        Kokkos::parallel_for("inflow_filter_0",
+        gated::parallel_for("inflow_filter_0",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n[0]}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int i0) {
             const int64_t m = job(slot);
@@ -697,7 +698,7 @@ void SyntheticInflow::random_planes() {
         });
     } else {
         const int n_first = n[0] * np[N_T - 1];
-        Kokkos::parallel_for("inflow_filter_0",
+        gated::parallel_for("inflow_filter_0",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n_first}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int q) {
             const int64_t m = job(slot);
@@ -713,7 +714,7 @@ void SyntheticInflow::random_planes() {
             work(slot, j, q) = sum;
         });
         const int n_out = n[0] * n[N_T - 1];
-        Kokkos::parallel_for("inflow_filter_1",
+        gated::parallel_for("inflow_filter_1",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n_out}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int p) {
             if (job(slot) == none) return;
@@ -736,7 +737,7 @@ void SyntheticInflow::time_filter() {
     const int64_t n_slots = n_filtered, none = NO_PLANE;
     Kokkos::Array<int32_t, N_DIM> N;
     for (uint32_t j = 0; j < N_DIM; j++) N[j] = half_width[j][N_T];
-    Kokkos::parallel_for("inflow_filter_time",
+    gated::parallel_for("inflow_filter_time",
                          Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {2, int(N_DIM), n_points}),
                          KOKKOS_LAMBDA(const int c, const int j, const int p) {
         const int64_t m = job(n_slots + c);
@@ -757,7 +758,7 @@ void SyntheticInflow::net_flux() {
     const int32_t n = n_points;
     const int n_chunks = static_cast<int>(sums.extent(1));
     constexpr int32_t chunk = CHUNK;
-    Kokkos::parallel_for("inflow_flux_chunks",
+    gated::parallel_for("inflow_flux_chunks",
                          Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {2, n_chunks, int(N_DIM)}),
                          KOKKOS_LAMBDA(const int b, const int c, const int j) {
         if (job(n_slots + b) == none) return;
@@ -767,7 +768,7 @@ void SyntheticInflow::net_flux() {
         for (int32_t p = c * chunk; p < end; p++) sum += weight(j, p) * values(slot, j, p);
         sums(b, c, j) = sum;
     });
-    Kokkos::parallel_for("inflow_flux_total", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {2, int(N_DIM)}),
+    gated::parallel_for("inflow_flux_total", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {2, int(N_DIM)}),
                          KOKKOS_LAMBDA(const int b, const int j) {
         if (job(n_slots + b) == none) return;
         rtype sum = 0.0_r;
@@ -807,7 +808,7 @@ void SyntheticInflow::fill(const Kokkos::View<rtype> & time, const Kokkos::View<
     const Kokkos::View<rtype *[N_T]> fraction = face_fraction;
     const Kokkos::View<rtype *[N_DIM]> scale = face_scale, mean = face_mean;
     const Kokkos::View<rtype *[N_STRESS]> chol = face_cholesky;
-    Kokkos::parallel_for("inflow_fill", n_faces, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("inflow_fill", n_faces, KOKKOS_LAMBDA(const uint32_t i) {
         const int64_t s0 = job(n_slots + 2), s1 = job(n_slots + 3);
         const double a = a_t();
         const rtype a_r = static_cast<rtype>(a);

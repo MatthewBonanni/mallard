@@ -175,15 +175,15 @@ Read off the curves (interpolated between the measured meshes):
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
-  - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
-    (Mach 1 in a Mach 0.2 flow);
-  - it undershoots where shocks start from a corner on quads (the density by a
-    third in the first steps of the 2D Riemann problem);
-  - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
+    - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
+      (Mach 1 in a Mach 0.2 flow);
+    - it undershoots where shocks start from a corner on quads (the density by a
+      third in the first steps of the 2D Riemann problem);
+    - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
-  Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
-  For smooth flow, setting `order = 4` under
-  `[numerics.face_reconstruction]` is the cheaper choice.
+    Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
+    For smooth flow, setting `order = 4` under
+    `[numerics.face_reconstruction]` is the cheaper choice.
 
 The same comparison on squares, in 3D, with a shock and on a GPU is in
 [Performance: choosing a scheme for an accuracy target](performance.md#accuracy-target).
@@ -212,7 +212,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 57 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -265,7 +265,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 57 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -442,7 +442,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 52 more.
+and 57 more.
 
 | `riemann_solver` | Use |
 |---|---|

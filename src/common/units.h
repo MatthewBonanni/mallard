@@ -71,6 +71,7 @@ inline constexpr Dimension rate = of(0, 0, -1);
 inline constexpr Dimension pressure = of(1, -1, -2);
 inline constexpr Dimension density = of(1, -3, 0);
 inline constexpr Dimension dynamic_viscosity = of(1, -1, -1);
+inline constexpr Dimension specific_heat = of(0, 2, -2, -1);    // J/(kg K)
 inline constexpr Dimension heat_flux = of(1, 0, -3);
 inline constexpr Dimension mass_flux = of(1, -2, -1);          // kg/(m^2 s), e.g. rho u
 inline constexpr Dimension mass_flow = of(1, 0, -1);           // kg/s
