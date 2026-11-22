@@ -572,7 +572,9 @@ TEST(CppApiTest, ALogSinkTakesTheConsoleOutput) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(solver.run(), 0);
     const std::string printed = testing::internal::GetCapturedStdout();
-    if (comm::is_root()) EXPECT_NE(printed.find("== Run "), std::string::npos);
+    if (comm::is_root()) {
+        EXPECT_NE(printed.find("== Run "), std::string::npos);
+    }
 }
 
 TEST(CppApiTest, GraphedAndUngraphedRunsWithCallbacksMatchBitForBit) {
@@ -617,7 +619,9 @@ TEST(CppApiTest, GraphedAndUngraphedRunsWithCallbacksMatchBitForBit) {
     EXPECT_EQ(queued.rows, host.rows);
     EXPECT_EQ(queued.outputs, host.outputs);
     EXPECT_EQ(host.rows.size(), 4u);
-    if (comm::is_root()) EXPECT_FALSE(host.outputs.empty());
+    if (comm::is_root()) {
+        EXPECT_FALSE(host.outputs.empty());
+    }
 
     // The step graphs' path on every backend (uncaptured off CUDA): nothing of the callbacks is in a capture
     std::vector<std::string> rows;
@@ -632,7 +636,9 @@ TEST(CppApiTest, GraphedAndUngraphedRunsWithCallbacksMatchBitForBit) {
         solver.init(saved("graphed", with("graphed", "")).path());
         EXPECT_EQ(solver.run(), 0);
         for (const std::string & v : guard.violations()) ADD_FAILURE() << "in a step graph's capture: " << v;
-        if (!Solver::are_cuda_graphs_off()) EXPECT_GT(guard.captures(), 0u);
+        if (!Solver::are_cuda_graphs_off()) {
+            EXPECT_GT(guard.captures(), 0u);
+        }
     }
     EXPECT_EQ(rows, host.rows);
     EXPECT_EQ(last_restart("graphed").fields, host.restart.fields);
@@ -678,7 +684,9 @@ TEST(CppApiTest, ACaseSetInCodeEmitsTheTomlThatReproducesTheRun) {
     EXPECT_EQ(b.step, 6u);
     EXPECT_EQ(b.names, a.names);
     EXPECT_EQ(b.fields, a.fields);
-    if (comm::is_root()) EXPECT_EQ(record("api", "start")["provenance"]["input"]["text"].string, c.toml());
+    if (comm::is_root()) {
+        EXPECT_EQ(record("api", "start")["provenance"]["input"]["text"].string, c.toml());
+    }
 
     // save: the file a run then builds from
     const mallard::Case on_disk = c.save("api/saved.toml");
