@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ComputeSanitizerOutput>
+  <!-- Fields are regexes, but compute-sanitizer 2026.4 matches nothing whose regex has a backslash escape:
+       [.] stands for a literal dot -->
   <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back -->
   <record>
     <kind>Api</kind>
@@ -9,10 +11,10 @@
     </what>
     <hostStack>
       <frame>
-        <module>.*lib(cuda|nccl)\.so.*</module>
+        <module>.*lib(cuda|nccl)[.]so.*</module>
       </frame>
       <frame>
-        <module>.*libnccl\.so.*</module>
+        <module>.*libnccl[.]so.*</module>
       </frame>
     </hostStack>
   </record>
@@ -25,10 +27,43 @@
     </what>
     <hostStack>
       <frame>
-        <module>.*(libcuda|mca_accelerator_cuda)\.so.*</module>
+        <module>.*(libcuda|mca_accelerator_cuda)[.]so.*</module>
       </frame>
       <frame>
-        <module>.*(mca_accelerator_cuda|libopen-pal)\.so.*</module>
+        <module>.*(mca_accelerator_cuda|libopen-pal)[.]so.*</module>
+      </frame>
+    </hostStack>
+  </record>
+  <!-- NCCL looks up its kernels for every architecture it was built for; those of other architectures fail -->
+  <record>
+    <kind>Api</kind>
+    <what>
+      <api>cudaFuncGetAttributes|cudaGetLastError</api>
+      <error>cudaErrorNoKernelImageForDevice</error>
+    </what>
+    <hostStack>
+      <frame>
+        <module>.*lib(cuda|nccl)[.]so.*</module>
+      </frame>
+      <frame>
+        <module>.*libnccl[.]so.*</module>
+      </frame>
+    </hostStack>
+  </record>
+  <!-- Open MPI's CUDA accelerator component asks whether a pointer is a VMM or memory-pool allocation; for other
+       device memory the driver answers CUDA_ERROR_INVALID_VALUE -->
+  <record>
+    <kind>Api</kind>
+    <what>
+      <api>cuMemRetainAllocationHandle|cuMemPoolGetAccess</api>
+      <error>CUDA_ERROR_INVALID_VALUE</error>
+    </what>
+    <hostStack>
+      <frame>
+        <module>.*(libcuda|mca_accelerator_cuda)[.]so.*</module>
+      </frame>
+      <frame>
+        <module>.*(mca_accelerator_cuda|libopen-pal)[.]so.*</module>
       </frame>
     </hostStack>
   </record>
