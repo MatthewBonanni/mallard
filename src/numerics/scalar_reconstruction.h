@@ -21,6 +21,7 @@
 #include "face_reconstruction.h"
 #include "mesh.h"
 #include "teno.h"
+#include "mixture.h"
 #include "thermo.h"
 
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
@@ -156,10 +157,10 @@ struct ScalarFaceValues {
 class ScalarReconstruction {
     public:
         /**
-         * @param thermo Species thermodynamics (the scalars are its n_species + 2).
+         * @param gas The gas (the scalars are its n_species + 2; a flamelet gas's are bounded independently).
          * @param flow Face reconstruction of the flow block, whose stencils TENO shares.
          */
-        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const chemistry::ThermoTable<> & thermo,
+        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const Mixture & gas,
                   const FaceReconstruction & flow);
 
         /**
@@ -181,7 +182,7 @@ class ScalarReconstruction {
          * @param face_weights 3D: (face, q) weights of the face points.
          */
         void species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                           Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                           FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
 
         /** @brief Device evaluator of first-order and MUSCL face values, valid after calc(). */
         ScalarFaceValues face_values(ScalarView scalars) const;
@@ -205,7 +206,7 @@ class ScalarReconstruction {
         // Public because nvcc rejects device lambdas in non-public member functions
         template <typename Eval>
         void launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                          Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                          FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
         template <uint8_t DEG>
         void calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo);
 
@@ -215,6 +216,7 @@ class ScalarReconstruction {
         const TENO * teno = nullptr;
         chemistry::ThermoTable<> thermo;
         uint32_t n_species = 0;
+        bool independent = false;
         bool linear = false;
         LimiterType limiter_type = LimiterType::NONE;
         rtype venkat_K = 5.0;
