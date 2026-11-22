@@ -19,6 +19,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "gated.h"
 #include "inflow.h"
 #include "interfaces.h"
 #include "json.h"
@@ -115,7 +116,7 @@ std::string Solver::boundary_values(const std::string & dir) const {
             const auto W = W_cells;
             const auto normals = mesh->face_normals;
             const auto cells = mesh->cells_of_face;
-            Kokkos::parallel_for("boundary_values_ghost", faces.size(), KOKKOS_LAMBDA(const size_t k) {
+            gated::parallel_for("boundary_values_ghost", faces.size(), KOKKOS_LAMBDA(const size_t k) {
                 const uint32_t f = d_faces(k);
                 rtype n_vec[N_DIM], n[N_DIM], W_i[N_DIM + 2], W_g[N_DIM + 2], th_g[2];
                 FOR_I_DIM n_vec[i] = normals(f, i);
@@ -124,7 +125,7 @@ std::string Solver::boundary_values(const std::string & dir) const {
                 const int32_t i_bc = boundaries.face_bc(f);
                 const BoundaryCondition & bc = boundaries.bcs(i_bc);
                 const BoundaryComposition y{boundaries.bc_Y, i_bc};
-                const double R = boundaries.mixture ? boundaries.thermo.gas_constant(y) : double(boundaries.R);
+                const double R = boundaries.mixture ? boundaries.mixture_gas.gas_constant(y) : double(boundaries.R);
                 const double gamma = double(boundaries.mixture ? boundaries.bc_thermo(i_bc, 0) : boundaries.gamma);
                 const double p_i = double(W_i[N_DIM + 1]);
                 const double a_i = Kokkos::sqrt(gamma * p_i / double(W_i[0]));
@@ -139,8 +140,8 @@ std::string Solver::boundary_values(const std::string & dir) const {
                         boundaries.ghost_W(f, W_i, n, W_g, true);
                     }
                 } else if (boundaries.mixture) {
-                    const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> isentrope{
-                        boundaries.thermo, y, R};
+                    const inflow::ThermallyPerfectGas<Mixture, BoundaryComposition> isentrope{
+                        boundaries.mixture_gas, y, R};
                     inflow::stagnation_state_at(isentrope, double(bc.data[0]), double(bc.data[N_DIM + 1]), bc.data + 1, n, p_i,
                                                 W_g, T_b);
                 } else {
