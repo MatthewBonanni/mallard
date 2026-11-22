@@ -79,7 +79,7 @@ struct ShapeSearch {
 
     /**
      * @brief Search of cell c: the layers of the setup's central and sector
-     *        searches, or only the first max_layers of them; on success,
+     *        searches, or only the first layer_limit of them; on success,
      *        w.order holds the visits in key order (by layer, then position)
      *        and the hash set maps each visited cell to its position in that
      *        order. end: the layers' ends. A layer's order does not depend on
@@ -87,7 +87,7 @@ struct ShapeSearch {
      *        order of the walk, ties are not looked for and the hash set is
      *        only for clear().
      */
-    KOKKOS_FUNCTION Result search(uint32_t c, const ShapeLanes & w, uint32_t * end, uint32_t max_layers = ~0u,
+    KOKKOS_FUNCTION Result search(uint32_t c, const ShapeLanes & w, uint32_t * end, uint32_t layer_limit = ~0u,
                                   bool ordered = true) const;
 
     /** @brief Empties the hash set of a search that visited n cells. */

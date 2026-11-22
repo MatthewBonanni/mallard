@@ -103,7 +103,7 @@ KOKKOS_FUNCTION void ShapeSearch::clear(const ShapeLanes & w, const uint32_t n) 
 }
 
 KOKKOS_FUNCTION ShapeSearch::Result ShapeSearch::search(const uint32_t c, const ShapeLanes & w, uint32_t * end,
-                                                         const uint32_t max_layers, const bool ordered) const {
+                                                         const uint32_t layer_limit, const bool ordered) const {
     Result r;
     const uint32_t mask = 2 * cap - 1;
     w.cell[0] = c;
@@ -115,7 +115,7 @@ KOKKOS_FUNCTION ShapeSearch::Result ShapeSearch::search(const uint32_t c, const 
     bool unique = true, exhausted = false, full = false;
     // The search's vertex-neighbor layers (reach_layers in teno_setup.cpp), each cell once
     auto grow = [&]() {
-        if (exhausted || full || n_end > max_layers) return false;
+        if (exhausted || full || n_end > layer_limit) return false;
         const uint32_t begin = n_end > 1 ? end[n_end - 2] : 0;
         const uint32_t last = end[n_end - 1];
         for (uint32_t k = begin; k < last; k++) {
