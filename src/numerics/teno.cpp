@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -812,25 +813,62 @@ class PackedRows {
                 for (uint32_t c = a; c < std::min(n, a + slice); c++) largest = std::max(largest, (tables[c].*cells).size());
                 slice_start.push_back(slice_start.back() + largest);
             }
-            std::vector<teno::CanonicalTable> canonical(n);
-            std::vector<uint64_t> first_value(n + 1, 0);
-            for (uint32_t c = 0; c < n; c++) first_value[c + 1] = first_value[c] + (tables[c].*pinv).size();
-            std::vector<rtype> ordered(first_value[n]);
-            gated::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+            // Cells of one stencil shape (e.g. from a cache) hold bitwise-equal tables: each table is ranked
+            // once, with the lowest global id of its cells, which gives the shapes of ranking every cell
+            using Bits = std::conditional_t<sizeof(rtype) == 8, uint64_t, uint32_t>;
+            std::vector<uint64_t> bits(n);
+            gated::parallel_for("teno_pack_bits", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
                                  [&](const uint32_t c) {
                 const CellTables & t = tables[c];
-                canonical[c] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
-                for (size_t s = 0; s < canonical[c].order.size(); s++) {
-                    const size_t from = canonical[c].order[s];
-                    for (uint32_t l = 0; l < width; l++) ordered[first_value[c] + s * width + l] = (t.*pinv)[from * width + l];
+                uint64_t h = (t.*pinv).size();
+                for (const uint16_t k : segments(t)) h = (h ^ k) * 0x9e3779b97f4a7c15ULL;
+                for (const rtype v : t.*pinv) h = ((h ^ std::bit_cast<Bits>(v)) * 0x9e3779b97f4a7c15ULL) ^ (h >> 29);
+                bits[c] = h;
+            });
+            auto same_bits = [&](const uint32_t a, const uint32_t b) {
+                const auto & x = tables[a].*pinv;
+                const auto & y = tables[b].*pinv;
+                return x.size() == y.size() && segments(tables[a]) == segments(tables[b]) &&
+                       std::memcmp(x.data(), y.data(), x.size() * sizeof(rtype)) == 0;
+            };
+            constexpr uint32_t NO_ROW = ~0u;
+            std::vector<uint32_t> row(n), first;  // (cell): its row; (row): its first cell
+            std::vector<uint64_t> ids;
+            std::unordered_multimap<uint64_t, uint32_t> seen;  // bits: row
+            for (uint32_t c = 0; c < n; c++) {
+                const uint64_t id = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
+                uint32_t r = NO_ROW;
+                const auto range = seen.equal_range(bits[c]);
+                for (auto it = range.first; it != range.second && r == NO_ROW; ++it) {
+                    if (same_bits(first[it->second], c)) r = it->second;
+                }
+                if (r == NO_ROW) {
+                    r = static_cast<uint32_t>(first.size());
+                    seen.emplace(bits[c], r);
+                    first.push_back(c);
+                    ids.push_back(id);
+                }
+                row[c] = r;
+                ids[r] = std::min(ids[r], id);
+            }
+            const uint32_t n_rows = static_cast<uint32_t>(first.size());
+            std::vector<teno::CanonicalTable> canonical(n_rows);
+            std::vector<uint64_t> first_value(n_rows + 1, 0);
+            for (uint32_t r = 0; r < n_rows; r++) first_value[r + 1] = first_value[r] + (tables[first[r]].*pinv).size();
+            std::vector<rtype> ordered(first_value[n_rows]);
+            gated::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_rows),
+                                 [&](const uint32_t r) {
+                const CellTables & t = tables[first[r]];
+                canonical[r] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
+                for (size_t s = 0; s < canonical[r].order.size(); s++) {
+                    const size_t from = canonical[r].order[s];
+                    for (uint32_t l = 0; l < width; l++) ordered[first_value[r] + s * width + l] = (t.*pinv)[from * width + l];
                 }
             });
-            std::vector<uint64_t> ids(n);
-            for (uint32_t c = 0; c < n; c++) ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
             const std::vector<uint32_t> shapes =
-                store.add(n, canonical.data(), [&](uint32_t c) { return ordered.data() + first_value[c]; }, ids.data());
+                store.add(n_rows, canonical.data(), [&](uint32_t r) { return ordered.data() + first_value[r]; }, ids.data());
             ordered = std::vector<rtype>();
-            cell_shape.insert(cell_shape.end(), shapes.begin(), shapes.end());
+            for (uint32_t c = 0; c < n; c++) cell_shape.push_back(shapes[row[c]]);
             std::vector<uint64_t> first_image(n + 1, images.size() / 2);
             for (uint32_t c = 0; c < n; c++) {
                 const auto & f = tables[c].*faces;
@@ -849,7 +887,7 @@ class PackedRows {
                 const uint32_t lane = (c0 + c) & (slice - 1);
                 uint64_t image = first_image[c];
                 for (size_t s = 0; s < (t.*cells).size(); s++) {
-                    const uint16_t from = canonical[c].order[s];
+                    const uint16_t from = canonical[row[c]].order[s];
                     const int32_t cell = (t.*cells)[from], face = (t.*faces)[from];
                     int32_t entry = cell;
                     if (face != -1) {
