@@ -35,7 +35,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
 | Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient`; `particles.temperature` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
 | Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
 | Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density` |
@@ -45,6 +45,7 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
+| Specific heat (J/(kg K)) | `particles.specific_heat` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
 | Mass flow (kg/s; per meter of depth in 2D, per radian in axisymmetric runs) | `boundaries.mdot` |
@@ -1569,14 +1570,17 @@ keys.
 
 | Key | Description |
 |---|---|
-| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag and gravity accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
 | `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
 | `density` | Material density (`"solid"`). Required for solid particles |
-| `drag` | `"stokes"` or `"schiller_naumann"` (`"solid"`), default `"schiller_naumann"` |
+| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (Singh et al., continuum to free-molecular, subsonic to hypersonic) (`"solid"`), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
+| `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, default none |
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
+| `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
+| `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, then the quantities, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.lattice]`
@@ -1607,7 +1611,7 @@ A value each particle follows along its path
 ([Per-particle quantities](guide/particles.md#per-particle-quantities)).
 Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
 `U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
-`V_Z`, the quantities before this one, and `in(name)` of a region of
+`V_Z` and temperature `T_P`, the quantities before this one, and `in(name)` of a region of
 `[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
 `winding`.
 
