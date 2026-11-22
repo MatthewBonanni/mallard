@@ -1295,7 +1295,7 @@ TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
 #ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(n_keyed, 1728);
     EXPECT_EQ(distinct.size(), 147u);
-    EXPECT_EQ(digest, 2977545027036466055ULL);
+    EXPECT_EQ(digest, 16533836760420377906ULL);
 #else
     EXPECT_EQ(n_keyed, 1557);
     EXPECT_EQ(distinct.size(), 1557u);

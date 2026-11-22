@@ -79,11 +79,16 @@ struct ShapeSearch {
 
     /**
      * @brief Search of cell c: the layers of the setup's central and sector
-     *        searches; on success, w.order holds the visits in key order
-     *        (by layer, then position) and the hash set maps each visited
-     *        cell to its position in that order. end: the layers' ends.
+     *        searches, or only the first max_layers of them; on success,
+     *        w.order holds the visits in key order (by layer, then position)
+     *        and the hash set maps each visited cell to its position in that
+     *        order. end: the layers' ends. A layer's order does not depend on
+     *        the layers after it. Without ordered, the visits stay in the
+     *        order of the walk, ties are not looked for and the hash set is
+     *        only for clear().
      */
-    KOKKOS_FUNCTION Result search(uint32_t c, const ShapeLanes & w, uint32_t * end) const;
+    KOKKOS_FUNCTION Result search(uint32_t c, const ShapeLanes & w, uint32_t * end, uint32_t max_layers = ~0u,
+                                  bool ordered = true) const;
 
     /** @brief Empties the hash set of a search that visited n cells. */
     KOKKOS_FUNCTION void clear(const ShapeLanes & w, uint32_t n) const;
@@ -134,6 +139,8 @@ class ShapeKeys {
          * @brief Keys of cells [0, n) (collective). No key for a cell whose
          *        nodes and boundary faces no other owned cell has, whose layers
          *        reach the outermost halo layer or hold two copies of a cell.
+         *        A key sums a hash of each visited cell, so it does not depend
+         *        on the order of the visits and needs no sort.
          */
         std::vector<ShapeKey> keys(uint32_t n) const;
 
@@ -142,21 +149,23 @@ class ShapeKeys {
          *        cells[0, n), as positions in the key order: an entry's cell's
          *        position, and its face's (-1: none) as its cell's position
          *        times 64 plus its rank among that cell's boundary faces.
-         *        size(j): the number of cells of slot j's neighborhood, or 0
-         *        if its tables failed or its key does not describe them.
+         *        size(j, 0): the number of cells of the layers of slot j's
+         *        neighborhood that its stencils reach, or 0 if its tables
+         *        failed or its key does not describe them; size(j, 1): those
+         *        layers.
          */
         void encode(const Kokkos::View<uint32_t *> & cells, uint32_t n, const teno_setup::TableBatch & batch,
-                    const Kokkos::View<uint32_t *> & size) const;
+                    const Kokkos::View<uint32_t *[2]> & size) const;
 
         /**
          * @brief The records of slots [0, n) of an encoded batch, on the host:
-         *        {1, neighborhood size, depth, left-out sectors, central size,
+         *        {1, cells and layers the stencils reach, depth, left-out sectors, central size,
          *        sector sizes, basis means, smoothness matrix, central cells
          *        and faces, pseudo-inverses, sector cells and faces,
          *        pseudo-inverses}, values as double bits; {0} without one.
          */
         static std::vector<std::vector<uint64_t>> records(const teno_setup::TableBatch & batch, uint32_t n,
-                                                          const Kokkos::View<uint32_t *> & size);
+                                                          const Kokkos::View<uint32_t *[2]> & size);
 
         /** @brief Records per group, on the device. */
         struct Records {
@@ -169,7 +178,9 @@ class ShapeKeys {
          * @brief Tables of the cells c0 + t, t < n, with a group (group(c) !=
          *        NONE) into slot t of out from their group's record: its
          *        stencils mapped to the cell's own neighborhood, and its own
-         *        scale. bad(t): the cell's neighborhood does not match it.
+         *        scale. bad(t): the cell's neighborhood does not match it. The
+         *        search grows only the layers the record's stencils reach: the
+         *        key proves the rest.
          */
         void decode(uint32_t c0, uint32_t n, const Kokkos::View<uint32_t *> & group, const Records & records,
                     const teno_setup::TableBatch & out, const Kokkos::View<uint8_t *> & bad) const;

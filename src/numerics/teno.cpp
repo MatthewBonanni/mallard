@@ -1496,7 +1496,7 @@ class KeyedSetup {
                 rep_group.push_back(uint32_t(k));
             }
             const uint32_t batch = static_cast<uint32_t>(cells.extent(0));
-            Kokkos::View<uint32_t *> size("teno_shape_sizes", batch);
+            Kokkos::View<uint32_t *[2]> size("teno_shape_sizes", batch);
             for (size_t r0 = 0; r0 < reps.size(); r0 += batch) {
                 const uint32_t nb = static_cast<uint32_t>(std::min<size_t>(batch, reps.size() - r0));
                 Kokkos::deep_copy(Kokkos::subview(cells, std::make_pair(0u, nb)),
