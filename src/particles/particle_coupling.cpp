@@ -154,9 +154,9 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
                          const ParticleView & positions, const uint32_t stride,
                          const std::function<void(const State &)> & exchange) {
     const Kokkos::DefaultExecutionSpace exec;
-    Kokkos::deep_copy(exec, largest, 0.0);
-    Kokkos::deep_copy(exec, fixed, int64_t(0));
-    Kokkos::deep_copy(exec, count, 0u);
+    gated::fill(exec, largest, 0.0);
+    gated::fill(exec, fixed, int64_t(0));
+    gated::fill(exec, count, 0u);
     const uint32_t n_slots = static_cast<uint32_t>(values.extent(0));
     const uint32_t n = n_columns, n_sums = static_cast<uint32_t>(largest.extent(1));
     const auto v = values;
