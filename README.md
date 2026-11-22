@@ -84,6 +84,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Two-way coupled particles, conserving momentum and energy to round-off, with sources spread over a width in physical units and dispersed-phase fields ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#two-way-coupling))
 - Statistics, spectra, phase averages, PDFs and conditional statistics (on the mixture fraction or progress variable)
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
+- A [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): run a case from your own program, step by step, with the same results as `mallard -i`, through an installed CMake package (`find_package(Mallard)`)
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
