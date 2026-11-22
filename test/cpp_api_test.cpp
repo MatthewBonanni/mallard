@@ -257,7 +257,9 @@ TEST(CppApiTest, FieldsViewTheSolversStateAndMatchItsRestartFile) {
     const mallard::Field host = solver.field("conservatives", mallard::Memory::host);
     EXPECT_EQ(host.device, mallard::Device::host);
     // CPU builds: the host's view is the solver's memory, not a copy
-    if (block.device == mallard::Device::host) EXPECT_EQ(host.data, block.data);
+    if (block.device == mallard::Device::host) {
+        EXPECT_EQ(host.data, block.data);
+    }
 
     const std::vector<rtype> state = values(host);
     const mallard::Field P = solver.field("P", mallard::Memory::host);
@@ -308,7 +310,9 @@ TEST(CppApiTest, AStateSetBetweenStepsIsWhereTheNextStepStartsFrom) {
         }
     }
     // Writes to the solver's memory are seen by its views before they are committed
-    if (state.device == second.field("RHO").device) EXPECT_EQ(second.field("RHO").data, state.data);
+    if (state.device == second.field("RHO").device) {
+        EXPECT_EQ(second.field("RHO").data, state.data);
+    }
     while (second.step()) {
     }
     while (first.step()) {
