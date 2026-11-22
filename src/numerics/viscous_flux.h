@@ -17,6 +17,7 @@
 #include "common.h"
 #include "boundary.h"
 #include "physics.h"
+#include "flux_functor.h"
 #include "view_entries.h"
 #include "wall_exchange.h"
 
@@ -100,6 +101,96 @@ rtype face_fraction(const Kokkos::View<rtype *[N_DIM]> & face_coords, const Kokk
 }
 
 /**
+ * @brief The cells' central reconstruction polynomials (TENO::polynomials):
+ *        gradients of the conservative variables at points, for viscous face
+ *        gradients of the polynomials' order.
+ */
+struct CellPolynomials {
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> coefficients;  // (c / 2, l, c % 2, var), unscaled frame
+    Kokkos::View<rtype *[N_DIM]> cell_coords;
+    uint8_t degree = 0;
+
+    KOKKOS_INLINE_FUNCTION
+    bool on() const { return coefficients.extent(0) > 0; }
+
+    /** @brief Whether cell c has a polynomial (it is not troubled). */
+    KOKKOS_INLINE_FUNCTION
+    bool smooth(const int32_t c) const {
+        return !Kokkos::isnan(coefficients(static_cast<uint32_t>(c) >> 1, 0, static_cast<uint32_t>(c) & 1u, 0));
+    }
+
+    /** @brief dU[v][d] = d U_v / d x_d of cell c's polynomial, of degree DEG, at x (in the cell's frame). */
+    template <uint8_t DEG>
+    KOKKOS_INLINE_FUNCTION void gradient(const int32_t c, const rtype * x, rtype dU[N_CONSERVATIVE][N_DIM]) const {
+        rtype p[N_DIM][DEG + 1];
+        FOR_I_DIM {
+            const rtype r = x[i] - cell_coords(c, i);
+            p[i][0] = 1.0_r;
+            for (uint8_t k = 1; k <= DEG; k++) p[i][k] = p[i][k - 1] * r;
+        }
+        FOR_I_CONSERVATIVE for (uint8_t j = 0; j < N_DIM; j++) dU[i][j] = 0.0_r;
+        const uint32_t row = static_cast<uint32_t>(c) >> 1, lane = static_cast<uint32_t>(c) & 1u;
+        uint8_t l = 0;
+        auto add = [&](const uint8_t * e) {
+            rtype dphi[N_DIM];
+            FOR_I_DIM {
+                rtype m = e[i] == 0 ? 0.0_r : static_cast<rtype>(e[i]) * p[i][e[i] - 1];
+                for (uint8_t j = 0; j < N_DIM; j++) {
+                    if (j != i) m *= p[j][e[j]];
+                }
+                dphi[i] = m;
+            }
+            FOR_I_CONSERVATIVE {
+                const rtype b = coefficients(row, l, lane, i);
+                for (uint8_t j = 0; j < N_DIM; j++) dU[i][j] += b * dphi[j];
+            }
+            l++;
+        };
+        for (uint8_t d = 1; d <= DEG; d++) {
+            if constexpr (N_DIM == 2) {
+                for (uint8_t b = 0; b <= d; b++) {
+                    const uint8_t e[3] = {static_cast<uint8_t>(d - b), b, 0};
+                    add(e);
+                }
+            } else {
+                for (int a = d; a >= 0; a--) {
+                    for (int b = d - a; b >= 0; b--) {
+                        const uint8_t e[3] = {static_cast<uint8_t>(a), static_cast<uint8_t>(b),
+                                              static_cast<uint8_t>(d - a - b)};
+                        add(e);
+                    }
+                }
+            }
+        }
+    }
+};
+
+/**
+ * @brief The face quadrature points of the reconstruction, at which the face
+ *        values are: on straight 2D faces the Gauss points between the face's
+ *        nodes, else the faces' own points (3D, curved 2D faces).
+ */
+struct FacePoints {
+    Kokkos::View<rtype **> gauss;                // 2D: (q, 0) on [-1, 1]
+    Kokkos::View<uint32_t *> offsets_nodes_of_face, nodes_of_face;
+    Kokkos::View<rtype *[N_DIM]> node_coords;
+    Kokkos::View<rtype *[N_DIM]> face_coords;
+    Kokkos::View<rtype ***> face_quad_points;    // (face, q, dim), or empty
+
+    /** @brief Point q of face f, in its cell 0's frame. */
+    KOKKOS_INLINE_FUNCTION
+    void point(const uint32_t f, const uint8_t q, rtype * x) const {
+        if (face_quad_points.extent(0) > 0) {
+            FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            return;
+        }
+        const uint32_t a = nodes_of_face(offsets_nodes_of_face(f)), b = nodes_of_face(offsets_nodes_of_face(f) + 1);
+        const rtype s = 0.5_r * gauss(q, 0);
+        FOR_I_DIM x[i] = face_coords(f, i) + s * (node_coords(b, i) - node_coords(a, i));
+    }
+};
+
+/**
  * @brief Integrates the viscous stress and heat flux over every face (one-point
  *        rule) and adds them to face_flux (see ConvectiveFluxFunctor).
  *
@@ -137,6 +228,16 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, -]), else empty
     bool sgs_only = false;                // LES budget: the SGS stress and heat flux alone
     WallModelFlux wall_model = {};        // wall-modeled LES: the modeled walls' flux, else empty
+    // viscous_gradients = "reconstruction": the cells' polynomials, and the face values and quadrature they
+    // are evaluated with (ConvectiveFluxFunctor's); interior faces between smooth cells then integrate
+    // the flux over the face points
+    CellPolynomials polynomials = {};
+    FacePoints points = {};
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution = {};
+    Kokkos::View<rtype *> quad_weights = {};
+    FaceWeights<> face_weights = {};
+    Kokkos::View<rtype ***> quad_normals = {};
+    rtype jump_damping = 4.0_r / 3.0_r;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -216,6 +317,103 @@ struct ViscousFluxFunctor {
         out[N_DIM + 1] = A * energy;
     }
 
+    /** @brief u, T and their gradients of face state W (face_solution) with conservative gradients dU. */
+    KOKKOS_INLINE_FUNCTION
+    void point_state(const rtype * W_q, const rtype dU[N_CONSERVATIVE][N_DIM], rtype * q, rtype g[NQ][N_DIM]) const {
+        const rtype rho = W_q[0];
+        const rtype * u = W_q + 1;
+        const rtype T = W_q[N_DIM + 1] / (rho * physics.R);
+        for (uint8_t k = 0; k < N_DIM; k++) q[k] = u[k];
+        q[N_DIM] = T;
+        const rtype u2 = dot<N_DIM>(u, u);
+        FOR_I_DIM {
+            rtype dp = dU[N_DIM + 1][i] - 0.5_r * u2 * dU[0][i];
+            for (uint8_t k = 0; k < N_DIM; k++) {
+                g[k][i] = (dU[1 + k][i] - u[k] * dU[0][i]) / rho;
+                dp -= rho * u[k] * g[k][i];
+            }
+            dp *= physics.gamma - 1.0_r;
+            g[N_DIM][i] = (dp - physics.R * T * dU[0][i]) / (rho * physics.R);
+        }
+    }
+
+    /**
+     * @brief Flux of interior face i_face between two cells with polynomials:
+     *        at each quadrature point the mean of the two polynomials'
+     *        gradients plus the jump of their values over the distance of the
+     *        cell centers along the normal, by jump_damping (Nishikawa 2010).
+     */
+    template <uint8_t DEG>
+    KOKKOS_INLINE_FUNCTION void polynomial_flux(const uint32_t i_face, rtype * out) const {
+        const int32_t c0 = cells_of_face(i_face, 0), c1 = cells_of_face(i_face, 1);
+        rtype n_face[N_DIM], n_vec[N_DIM];
+        FOR_I_DIM n_vec[i] = normals(i_face, i);
+        unit<N_DIM>(n_vec, n_face);
+        const uint8_t s = face_shift(i_face);
+        rtype x1[N_DIM], d[N_DIM];
+        FOR_I_DIM x1[i] = cell_coords(c1, i);
+        periodic.forward(s, x1, d);
+        FOR_I_DIM d[i] = d[i] - cell_coords(c0, i);
+        const rtype inv_d = jump_damping / Kokkos::fabs(dot<N_DIM>(d, n_face));
+        rtype mu_t = 0.0_r, kappa_t = 0.0_r;
+        const bool les = sgs.extent(0) > 0;
+        if (les) {
+            mu_t = 0.5_r * (sgs(c0, 0) + sgs(c1, 0));
+            kappa_t = 0.5_r * (sgs(c0, 1) + sgs(c1, 1));
+        }
+        uint8_t n_quad;
+        if constexpr (N_DIM == 2) {
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
+        } else {
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
+        }
+        rtype total[N_CONSERVATIVE] = {};
+        for (uint8_t q = 0; q < n_quad; q++) {
+            rtype w_q;
+            if constexpr (N_DIM == 2) {
+                w_q = face_weights.extent(0) ? face_weights(i_face, q) : quad_weights(q);
+            } else {
+                w_q = face_weights(i_face, q);
+                if (w_q == 0.0_r) continue;
+            }
+            rtype n_q[N_DIM];
+            const rtype * n = quad_normal(quad_normals, i_face, q, n_face, n_q);
+            rtype x[N_DIM], x_1[N_DIM];
+            points.point(i_face, q, x);
+            periodic.backward(s, x, x_1);
+            // One side at a time, so that a single set of conservative gradients is live
+            auto side = [&](const uint8_t k, rtype * q_k, rtype g_k[NQ][N_DIM]) {
+                rtype dU[N_CONSERVATIVE][N_DIM], W_k[N_CONSERVATIVE];
+                polynomials.gradient<DEG>(k ? c1 : c0, k ? x_1 : x, dU);
+                if (k && periodic.rotated()) periodic.rotate_gradients(s, dU, N_CONSERVATIVE, 1);
+                FOR_I_CONSERVATIVE W_k[i] = face_solution(i_face, q, k, i);
+                point_state(W_k, dU, q_k, g_k);
+            };
+            rtype qa[NQ], ga[NQ][N_DIM], qb[NQ], gb[NQ][N_DIM], q_f[NQ], g_f[NQ][N_DIM];
+            side(0, qa, ga);
+            side(1, qb, gb);
+            for (uint8_t k = 0; k < NQ; k++) {
+                q_f[k] = 0.5_r * (qa[k] + qb[k]);
+                const rtype jump = (qb[k] - qa[k]) * inv_d;
+                FOR_I_DIM g_f[k][i] = 0.5_r * (ga[k][i] + gb[k][i]) + jump * n[i];
+            }
+            rtype mu = physics.viscosity(q_f[N_DIM]);
+            rtype kappa = physics.conductivity(mu);
+            if (les) {
+                if (sgs_only) mu = kappa = 0.0_r;
+                mu += mu_t;
+                kappa += kappa_t;
+            }
+            rtype tau_n[N_DIM];
+            viscous_traction(mu, g_f, n, tau_n);
+            total[N_DIM + 1] += w_q * (dot<N_DIM>(q_f, tau_n) + kappa * dot<N_DIM>(g_f[N_DIM], n));
+            FOR_I_DIM total[1 + i] += w_q * tau_n[i];
+        }
+        // Weights sum to 2, on curved faces to twice their area over face_area
+        const rtype scale = 0.5_r * face_area(i_face);
+        FOR_I_CONSERVATIVE out[i] += scale * total[i];
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         rtype out[N_CONSERVATIVE] = {};
@@ -234,6 +432,14 @@ struct ViscousFluxFunctor {
                 modeled_flux(i_face, bc, out);
                 return;
             }
+        }
+        if (c1 >= 0 && polynomials.on() && polynomials.smooth(c0) && polynomials.smooth(c1)) {
+            switch (polynomials.degree) {
+                case 3: polynomial_flux<3>(i_face, out); break;
+                case 4: polynomial_flux<4>(i_face, out); break;
+                default: polynomial_flux<5>(i_face, out); break;
+            }
+            return;
         }
         rtype n[N_DIM];
         rtype n_vec[N_DIM];

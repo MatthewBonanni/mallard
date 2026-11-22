@@ -39,6 +39,8 @@ existing C++20 / Kokkos / CMake / TOML stack.
   with an assessment of multicomponent transport.
 - Turbulence-chemistry interaction models (LES closures such as thickened
   flame, flamelet tables, PaSR). Mallard resolves the flame or detonation.
+  (Later designed in [les.md](les.md#6-turbulence-chemistry-interaction) and,
+  for tabulated chemistry, [flamelet.md](flamelet.md).)
 - Implicit time stepping of the flow. The flow stays explicit (SSPRK3); only
   the chemistry is implicit.
 - A Chemkin parser. Chemkin input is converted once with Cantera's `ck2yaml`.
@@ -275,101 +277,137 @@ The design:
    conservative variables.
 2. **Scalars** `Y_1 .. Y_Ns`, `gamma`, `e0`: reconstructed **linearly with
    one stencil per cell and face, shared by all scalars**:
-   - smooth cells: the large central stencil (as for the flow block);
-   - troubled cells: the stencil TENO selected for the entropy/contact
-     characteristic field at that face (species and entropy waves share the
-     eigenvalue `u_n`), stored by the flow pass as one byte per face;
-   - MUSCL: least-squares gradients with one limiter value per cell, the
-     minimum of Barth-Jespersen (or Venkatakrishnan) over all scalars, with
-     the flow block's neighbors and ghost placement. The gradients are
-     stored (`N_DIM` words per scalar and cell; recomputing them in the
-     species-flux kernel instead is a milestone-10 memory option). Each
-     `Y_k` that leaves `[0, 1]` at a face by at most `OWN_CUT_MAX = 1e-4`
-     (an absolute change of `Y_k` at the face) then scales its own gradient
-     so that it stays in, and the cell's most abundant species takes the
-     gradient the others give up, so the gradients still sum to zero. The
-     gradients of `gamma` and `e0`, and the face density, change with that
-     composition by their derivatives with respect to `Y_k` at the cell's
-     `p` and `T`, so the face state stays the state of the face composition.
-     A larger cut reduces the shared limiter value instead, as do the most
-     abundant species' bounds and `gamma - 1` keeping at least half its cell
-     value at every face (the physical bounds of item 3). Barth-Jespersen
-     keeps each `Y_k` within its neighbors' range, so with it no gradient is
-     ever cut.
-   Least-squares reconstruction reproduces constants, so with shared weights
-   `sum_k Y_k = 1` at every face point to round-off.
-   A mass fraction within 16 machine epsilons of its cell value over the
-   whole stencil is reconstructed constant and left out of the limiter (MUSCL
-   and TENO alike). Its dropped slope goes to no other species, so the face
-   mass fractions sum to one within `n_species` times that spread: about
-   4e-15 per species in double precision, but 2e-6 in single, where 16
-   machine epsilons are 1.9e-6.
+    - smooth cells: the large central stencil (as for the flow block);
+    - troubled cells: the stencil TENO selected for the entropy/contact
+      characteristic field at that face (species and entropy waves share the
+      eigenvalue `u_n`), stored by the flow pass as one byte per face;
+    - MUSCL: least-squares gradients with one limiter value per cell, the
+      minimum of Barth-Jespersen (or Venkatakrishnan) over all scalars, with
+      the flow block's neighbors and ghost placement. The gradients are
+      stored (`N_DIM` words per scalar and cell; recomputing them in the
+      species-flux kernel instead is a milestone-10 memory option). Each
+      `Y_k` that leaves `[0, 1]` at a face by at most `OWN_CUT_LO = 3e-5`
+      (an absolute change of `Y_k` at the face) then scales its own gradient
+      so that it stays in, and the cell's most abundant species takes the
+      gradient the others give up, so the gradients still sum to zero. The
+      gradients of `gamma` and `e0`, and the face density, change with that
+      composition by their derivatives with respect to `Y_k` at the cell's
+      `p` and `T`, so the face state stays the state of the face composition.
+      A cut of `OWN_CUT_HI = 3e-4` or more reduces the shared limiter value
+      instead, one in between partly (the ramp below), as do the most
+      abundant species' bounds and `gamma - 1` keeping at least half its cell
+      value at every face (the physical bounds of item 3). Barth-Jespersen
+      keeps each `Y_k` within its neighbors' range, so with it no gradient is
+      ever cut.
+    Least-squares reconstruction reproduces constants, so with shared weights
+    `sum_k Y_k = 1` at every face point to round-off.
+    A mass fraction within 16 machine epsilons of its cell value over the
+    whole stencil is reconstructed constant and left out of the limiter (MUSCL
+    and TENO alike). Its dropped slope goes to no other species, so the face
+    mass fractions sum to one within `n_species` times that spread: about
+    4e-15 per species in double precision, but 2e-6 in single, where 16
+    machine epsilons are 1.9e-6.
 
-   As implemented (issue #1169): the bounds of item 3 were first applied to
-   the shared limiter value, so a species about to vanish in a cell put every
-   scalar of the cell at first order, mass fractions, `gamma` and `e0` alike:
-   a species absent from a cell next to round-off in a neighbor (`1e-34`
-   against `0`), the onset of `CO` at the frozen-chemistry boundary
-   (`1e-11` against `0`), or the fuel's tail in burnt gas (`1e-14` against
-   `1e-19`). On `flame_3d` (MUSCL without limiter) two thirds of the cells
-   were at first order, and which ones followed the chemistry's noise:
-   after 100 steps at `rtol` 1e-8 and `atol` 1e-12, `explicit_step` moved
-   the temperature by up to 0.87 K, `rtol` 1e-7 with `atol` 1e-11 by
-   0.26 K, and `atol` 1e-11 against 1e-12 at `rtol` 1e-7 by 0.55 K. With
-   cuts up to `OWN_CUT_MAX` kept to their species, the three fall to
-   1.5e-7, 8.0e-7 and 7.3e-7 K. Excluding only round-off species
-   (16 machine epsilons) or tolerating 16 machine epsilons below zero
-   leaves 8% of the cells at first order and 0.3 K between the two `atol`,
-   since the chemistry's noise in burnt gas reaches `1e-14`. TENO keeps one
-   `theta` per cell with the round-off exclusion; per-species factors would
-   need the most abundant species' face values to depend on every other
-   species' polynomial.
+    As implemented (issue #1169): the bounds of item 3 were first applied to
+    the shared limiter value, so a species about to vanish in a cell put every
+    scalar of the cell at first order, mass fractions, `gamma` and `e0` alike:
+    a species absent from a cell next to round-off in a neighbor (`1e-34`
+    against `0`), the onset of `CO` at the frozen-chemistry boundary
+    (`1e-11` against `0`), or the fuel's tail in burnt gas (`1e-14` against
+    `1e-19`). On `flame_3d` (MUSCL without limiter) two thirds of the cells
+    were at first order, and which ones followed the chemistry's noise:
+    after 100 steps at `rtol` 1e-8 and `atol` 1e-12, `explicit_step` moved
+    the temperature by up to 0.87 K, `rtol` 1e-7 with `atol` 1e-11 by
+    0.26 K, and `atol` 1e-11 against 1e-12 at `rtol` 1e-7 by 0.55 K. With
+    cuts up to `1e-4` kept to their species, the three fall to
+    1.5e-7, 8.0e-7 and 7.3e-7 K. Excluding only round-off species
+    (16 machine epsilons) or tolerating 16 machine epsilons below zero
+    leaves 8% of the cells at first order and 0.3 K between the two `atol`,
+    since the chemistry's noise in burnt gas reaches `1e-14`. TENO keeps one
+    `theta` per cell with the round-off exclusion; per-species factors would
+    need the most abundant species' face values to depend on every other
+    species' polynomial.
 
-   A cut slope moves the face composition between species of different
-   formation energy, heat capacity and molar mass, so the face state follows
-   it. Without that, with every cut kept to its species, an inert contact
-   of `O2` against `H2O` in `N2` with `Ar`, at uniform 300 K and 1e5 Pa
-   (MUSCL without limiter), drifted to 271-324 K and 0.97e5 Pa; `e0`
-   carried nearly all of it, through the formation energy of `H2O`, and the
-   density the rest where the cut species and the one taking its slope
-   differ in molar mass. With the threshold, a contact of `CO` against `N2`
-   in `O2` (`MixtureTest.InertContact...`) stays within 0.8 mK of 300 K;
-   without the derivatives of `gamma` and `e0` it moves by 0.33 K, and
-   without the face density by 3 mK.
+    A cut slope moves the face composition between species of different
+    formation energy, heat capacity and molar mass, so the face state follows
+    it. Without that, with every cut kept to its species, an inert contact
+    of `O2` against `H2O` in `N2` with `Ar`, at uniform 300 K and 1e5 Pa
+    (MUSCL without limiter), drifted to 271-324 K and 0.97e5 Pa; `e0`
+    carried nearly all of it, through the formation energy of `H2O`, and the
+    density the rest where the cut species and the one taking its slope
+    differ in molar mass. With the threshold, a contact of `CO` against `N2`
+    in `O2` (`MixtureTest.InertContact...`) stays within 0.8 mK of 300 K;
+    without the derivatives of `gamma` and `e0` it moves by 0.33 K, and
+    without the face density by 3 mK.
 
-   Cutting one species alone is numerical diffusion of that species only:
-   for a round-off trace it is negligible, but where a species vanishes over
-   a cell, as the fuel at a flame's burnout, it is a differential diffusion
-   of order `u dx` that no other species sees. A 1D thickened propane flame
-   at 2 mm cells drifted to -10% of `s_L` in consumption speed that way,
-   where shared bounds give -4.3%, whichever species took the slope given up
-   (the most abundant or all in proportion). Hence large cuts go to the
-   shared value, where every species gets the same diffusion. A 1D flame
-   front at 2 mm then has a temperature error of 3.3 K (shared bounds
-   10.7 K, per-species bounds throughout 3.4 K), and 5.7 K in 2D (36.9 K,
-   5.6 K). Blending the two over cuts from 0 to the threshold instead does
-   worse on both at `1e-4` (-4.44% and 4.4 K against -4.28% and 3.3 K), so
-   the switch is plain. Against the threshold (consumption speed over
-   0.16-0.20 s of the thickened flame, and the front's temperature error
-   against 0.125 mm cells, both 1D at 2 mm):
+    Cutting one species alone is numerical diffusion of that species only:
+    for a round-off trace it is negligible, but where a species vanishes over
+    a cell, as the fuel at a flame's burnout, it is a differential diffusion
+    of order `u dx` that no other species sees. A 1D thickened propane flame
+    at 2 mm cells drifted to -10% of `s_L` in consumption speed that way,
+    where shared bounds give -4.3%, whichever species took the slope given up
+    (the most abundant or all in proportion). Hence large cuts go to the
+    shared value, where every species gets the same diffusion. A 1D flame
+    front at 2 mm then has a temperature error of 3.3 K (shared bounds
+    10.7 K, per-species bounds throughout 3.4 K), and 5.7 K in 2D (36.9 K,
+    5.6 K). Blending the two over cuts from 0 to the threshold instead does
+    worse on both at `1e-4` (-4.44% and 4.4 K against -4.28% and 3.3 K), so
+    the switch is plain. Against the threshold (consumption speed over
+    0.16-0.20 s of the thickened flame, and the front's temperature error
+    against 0.125 mm cells, both 1D at 2 mm):
 
-   | Cuts kept to their species up to | `1e-5` | `1e-4` (used) | `1e-3` |
-   |---|---|---|---|
-   | Consumption speed against `s_L` | -4.43% | -4.28% | -5.12% |
-   | Front temperature error [K] | 6.3 | 3.3 | 3.4 |
+    | Cuts kept to their species up to | `1e-5` | `1e-4` | `1e-3` |
+    |---|---|---|---|
+    | Consumption speed against `s_L` | -4.43% | -4.28% | -5.12% |
+    | Front temperature error [K] | 6.3 | 3.3 | 3.4 |
 
-   Three things to know about the threshold:
-   - it is absolute, a change of `Y_k` at a face, not relative to `Y_k`:
-     whether a cut stays with its species depends on how steeply the species
-     vanishes across the cell, not on how abundant it is;
-   - detailed mechanisms are untested: their radicals (`H`, `O`, `OH`, `HO2`)
-     peak at `1e-5` to `1e-4`, so their cuts at a flame front sit on either
-     side of it, and the two-step propane flames above have no such species
-     (issue #1243);
-   - the limiter of the whole cell jumps where a cut crosses it: a cut just
-     below leaves the other scalars alone, one just above reduces all of
-     them, so cells near it can switch from step to step (a ramp between two
-     thresholds: issue #1242).
+    That switch made the limiter of the whole cell jump where a cut crossed
+    the threshold: a cut just below left the other scalars alone, one just
+    above reduced all of them, so cells near it could switch from step to
+    step, the noise sensitivity of issue #1169 in another form (issue #1242).
+    A cut `c` of species `k` (its own factor `s_k`) now gives the shared
+    value `sigma_k = 1 - (1 - s_k) w(c)` and the species' own gradient the
+    rest, `s_k / sigma_k`, with `w` a smoothstep in `log c` from 0 at
+    `OWN_CUT_LO = 3e-5` to 1 at `OWN_CUT_HI = 3e-4`, a decade centered on
+    the switch's `1e-4`: the face values are continuous in the data
+    (`AirScalars.FaceValuesAreContinuousAsACutCrossesFromOwnToShared`, red
+    with the switch). A ramp starting at `1e-5`, as first proposed, takes
+    cuts the switch kept to their species to the shared value and loses
+    accuracy, as the switch at `1e-5` does; ramps centered on `1e-4` keep the
+    switch's front errors, and their consumption speeds lie within that of
+    the switch moved by 10%. Measured as in the table (the switch again, on
+    the code of issue #1242), and the front error also in 2D (2 mm against
+    0.25 mm cells):
+
+    | | switch `1e-4` | switch `0.9e-4` | switch `1.1e-4` | ramp `1e-5`-`1e-4` | ramp `1e-4`-`1e-3` | ramp `5e-5`-`2e-4` | **ramp `3e-5`-`3e-4` (used)** |
+    |---|---|---|---|---|---|---|---|
+    | Consumption speed against `s_L` | -4.31% | -4.47% | -4.32% | -4.51% | -4.83% | -4.38% | **-4.43%** |
+    | Front temperature error, 1D [K] | 3.32 | 3.32 | 3.34 | 3.45 | 3.36 | 3.34 | **3.33** |
+    | Front temperature error, 2D [K] | 5.66 | 5.65 | 5.66 | 5.75 | - | 5.65 | **5.65** |
+
+    The consumption speed of this flame oscillates between about -4% and
+    -9% of `s_L` with a period near 0.15 s, so the 0.16-0.20 s fit catches
+    one phase of it. Over 0.2-0.4 s it is -6.57% with the switch at `1e-4`,
+    -6.64% and -6.57% at `0.9e-4` and `1.1e-4`, and -6.61% with the ramp.
+    The H2/air flames of `examples/flame_2d` and `examples/triple_flame`
+    (MUSCL with Venkatakrishnan) are unchanged to the last bit: their 1D
+    planar flames (4 and 3 flame times at 12 cells per thermal thickness)
+    and their 2D runs on the examples' meshes (1 and 0.25 flame times
+    from their initial states) give the same solution with the ramp as with
+    the switch, so no cut there falls in the ramp.
+
+    Three things to know about the thresholds:
+
+    - it is absolute, a change of `Y_k` at a face, not relative to `Y_k`:
+      whether a cut stays with its species depends on how steeply the species
+      vanishes across the cell, not on how abundant it is;
+    - detailed mechanisms are untested with limiter `none`: their radicals
+      (`H`, `O`, `OH`, `HO2`) peak at `1e-5` to `1e-4`, so their cuts at a
+      flame front fall in the ramp or on either side of it, and the two-step
+      propane flames above have no such species (issue #1243);
+    - the ramp is a smoothstep, so the limiter is continuous but varies
+      fastest in the middle of the decade, about 1.5 times its mean rate.
+
 3. **Bounds**: one scaling `theta` per cell
    ([Zhang & Shu 2010](https://doi.org/10.1016/j.jcp.2010.08.016)), the largest value
    in `[0, 1]` that keeps every `Y_k` at every face point in `[0, 1]` and
@@ -609,30 +647,31 @@ Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
   rise, which puts the whole table half a cell to a cell short) and the standard
   deviation over the outputs of the second half:
 
-  | `cfl` | 0.35 | 0.5 | 0.7 | 1.0 | 1.2 | 1.4 |
-  |---|---|---|---|---|---|---|
-  | Strang, 10 cells | -4.5% | -5.5% | -8.2% | -25.5% | -36.4% | |
-  | SIMPLER, 10 cells | -7.3% | -7.3% | 0.0% | -0.9% | -5.5% | -8.2% |
-  | Strang, 10 cells, sub-cell | -12.0 +- 0.3% | -12.6 +- 0.3% | -14.2 +- 0.2% | -30.9 +- 0.6% | -42.1 +- 0.5% | |
-  | SIMPLER, 10 cells, sub-cell | -10.8 +- 0.5% | -9.8 +- 0.2% | -5.5 +- 0.1% | -6.7 +- 5.5% | -9.4 +- 7.1% | -13.7 +- 9.6% |
-  | Strang, 20 cells | -1.4% | | | -11.4% | | |
-  | SIMPLER, 20 cells | -0.9% | | +2.3% | +3.2% | | |
-  | Strang, 20 cells, sub-cell | -4.0 +- 2.6% | | | -14.6 +- 1.6% | | |
-  | SIMPLER, 20 cells, sub-cell | -3.4 +- 2.2% | | -1.8 +- 3.6% | -0.5 +- 4.5% | | |
+    | `cfl` | 0.35 | 0.5 | 0.7 | 1.0 | 1.2 | 1.4 |
+    |---|---|---|---|---|---|---|
+    | Strang, 10 cells | -4.5% | -5.5% | -8.2% | -25.5% | -36.4% | |
+    | SIMPLER, 10 cells | -7.3% | -7.3% | 0.0% | -0.9% | -5.5% | -8.2% |
+    | Strang, 10 cells, sub-cell | -12.0 +- 0.3% | -12.6 +- 0.3% | -14.2 +- 0.2% | -30.9 +- 0.6% | -42.1 +- 0.5% | |
+    | SIMPLER, 10 cells, sub-cell | -10.8 +- 0.5% | -9.8 +- 0.2% | -5.5 +- 0.1% | -6.7 +- 5.5% | -9.4 +- 7.1% | -13.7 +- 9.6% |
+    | Strang, 20 cells | -1.4% | | | -11.4% | | |
+    | SIMPLER, 20 cells | -0.9% | | +2.3% | +3.2% | | |
+    | Strang, 20 cells, sub-cell | -4.0 +- 2.6% | | | -14.6 +- 1.6% | | |
+    | SIMPLER, 20 cells, sub-cell | -3.4 +- 2.2% | | -1.8 +- 3.6% | -0.5 +- 4.5% | | |
 
-  The front speed is within 0.16% of `D_CJ` in every run. SIMPLER removes
-  the shortening of the induction zone with `dt`: at `cfl` = 1.0 its mean is
-  -0.9% (10 cells) and +3.2% (20 cells) off the ZND value, against -25.5%
-  and -11.4% for Strang splitting, so the 5% criterion on the mean holds up
-  to `cfl` 1.0 instead of 0.35. What it does not remove: from `cfl` = 1.0
-  the induction length oscillates from output to output (a sawtooth of
-  period about 70 us at 10 cells, standard deviation 5.5% of `L_ZND`,
-  against 0.3% for Strang splitting at 0.35); at 20 cells both schemes
-  pulsate (2-3%) and SIMPLER's amplitude grows with `cfl` (4.5% at 1.0).
-  Cost (one 8-thread CPU, 3934 cells): Strang 19.9 ms per step (chemistry
-  71%), SIMPLER 15.6 ms (52%: half the chemistry calls, one more right-hand
-  side), so SIMPLER at `cfl` 1.0 takes 60 s where Strang at 0.35 takes 222 s
-  (3.7x).
+    The front speed is within 0.16% of `D_CJ` in every run. SIMPLER removes
+    the shortening of the induction zone with `dt`: at `cfl` = 1.0 its mean is
+    -0.9% (10 cells) and +3.2% (20 cells) off the ZND value, against -25.5%
+    and -11.4% for Strang splitting, so the 5% criterion on the mean holds up
+    to `cfl` 1.0 instead of 0.35. What it does not remove: from `cfl` = 1.0
+    the induction length oscillates from output to output (a sawtooth of
+    period about 70 us at 10 cells, standard deviation 5.5% of `L_ZND`,
+    against 0.3% for Strang splitting at 0.35); at 20 cells both schemes
+    pulsate (2-3%) and SIMPLER's amplitude grows with `cfl` (4.5% at 1.0).
+    Cost (one 8-thread CPU, 3934 cells): Strang 19.9 ms per step (chemistry
+    71%), SIMPLER 15.6 ms (52%: half the chemistry calls, one more right-hand
+    side), so SIMPLER at `cfl` 1.0 takes 60 s where Strang at 0.35 takes 222 s
+    (3.7x).
+
 - **V8 premixed flames** (H2/air, mixture-averaged, $\phi$ 0.6, 1.0, 1.4, 20
   cells per thermal thickness, two flame times): consumption speeds at
   `cfl` 1.0 / 2.0 differ from those at 0.2 by -0.07 / -0.10%, 0.00 /
@@ -646,22 +685,22 @@ Validation against Strang splitting (h2o2, MUSCL, HLLC, SSPRK3):
   stoichiometric H2/air at 300 K, residence time `tau = 1/s`, started burnt,
   steady temperature after `max(300, 30 tau / dt)` steps):
 
-  | `tau` | `dt / tau` | SIMPLER | Strang | Strang sub-steps per step |
-  |---|---|---|---|---|
-  | 1 ms | 0.01 / 0.1 / 0.3 / 1 | 2752.6 K at all four | 2754.4 / 2763.6 / 2763.6 K / extinct | 51 / 114 / 153 / - |
-  | 100 us | 0.01 / 0.1 / 0.3 / 1 | 2671.9 K at all four | 2672.0 / 2695.8 K / extinct / extinct | 37 / 91 / - / - |
-  | 67 us | 0.01 / 0.1 / 0.3 | 2636.2 K at all three | 2636.2 / 2655.9 K / extinct | |
-  | 50 us | 0.01 / 0.1 / 0.3 | 2604.7 K at all three | 2604.7 K / extinct / extinct | |
-  | 40 us | 0.01 / 0.1 / 0.3 | extinct | extinct | |
+    | `tau` | `dt / tau` | SIMPLER | Strang | Strang sub-steps per step |
+    |---|---|---|---|---|
+    | 1 ms | 0.01 / 0.1 / 0.3 / 1 | 2752.6 K at all four | 2754.4 / 2763.6 / 2763.6 K / extinct | 51 / 114 / 153 / - |
+    | 100 us | 0.01 / 0.1 / 0.3 / 1 | 2671.9 K at all four | 2672.0 / 2695.8 K / extinct / extinct | 37 / 91 / - / - |
+    | 67 us | 0.01 / 0.1 / 0.3 | 2636.2 K at all three | 2636.2 / 2655.9 K / extinct | |
+    | 50 us | 0.01 / 0.1 / 0.3 | 2604.7 K at all three | 2604.7 K / extinct / extinct | |
+    | 40 us | 0.01 / 0.1 / 0.3 | extinct | extinct | |
 
-  SIMPLER's reactor is the same at every step (the ODE's steady state) and
-  takes one sub-step per step once steady (the exact extinction residence
-  time lies between 40 and 50 us). Strang splitting runs up to 24 K hot and
-  goes out early: at 50 us with `dt = 0.1 tau`, at 100 us (twice the exact
-  limit) with `dt = 0.3 tau`, and at any residence time with `dt = tau`,
-  where its transport step replaces most of the reactor with fresh gas
-  before the chemistry sees it. A cell whose transport time is a few time
-  steps is in the same position.
+    SIMPLER's reactor is the same at every step (the ODE's steady state) and
+    takes one sub-step per step once steady (the exact extinction residence
+    time lies between 40 and 50 us). Strang splitting runs up to 24 K hot and
+    goes out early: at 50 us with `dt = 0.1 tau`, at 100 us (twice the exact
+    limit) with `dt = 0.3 tau`, and at any residence time with `dt = tau`,
+    where its transport step replaces most of the reactor with fresh gas
+    before the chemistry sees it. A cell whose transport time is a few time
+    steps is in the same position.
 
 ### Stiffness, load imbalance and skipped cells
 
@@ -720,6 +759,7 @@ Chebyshev reactions use `p = C_total R T`, so their Jacobian gains
 `d q / dT` a `(d ln k / d ln p) / T` term.
 
 Validation (MUSCL, HLLC, SSPRK3, h2o2 mechanism, default tolerances):
+
 - V7 (`examples/detonation_1d`): with this mechanism the recombination zone
   of 2H2-O2-7Ar at 6.67 kPa is about 0.8 m (ZND), so a detonation started by
   a driver at a closed end stays under-supported over practical tubes (it
@@ -769,10 +809,10 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
   `species = ["H2O", "CO2"]` with `T_ambient = 0` reproduces it, to 1e-9 in
   the unit test.
 - **Limits.**
-  - No absorption: the model holds where the gas is optically thin, such as
-    laboratory-scale flames at 1 atm. With reabsorption, the limits and the
-    limit speeds move ([Ju, Masuya & Ronney 1998](https://doi.org/10.1016/S0082-0784(98)80116-1)).
-  - The fits cover 300-2500 K.
+    - No absorption: the model holds where the gas is optically thin, such as
+      laboratory-scale flames at 1 atm. With reabsorption, the limits and the
+      limit speeds move ([Ju, Masuya & Ronney 1998](https://doi.org/10.1016/S0082-0784(98)80116-1)).
+    - The fits cover 300-2500 K.
 
 #### Validation
 
@@ -781,35 +821,36 @@ as two quartics joined at 750 K (`src/chemistry/radiation.h`).
   chemistry. After 0.2 s, by which `T` has fallen by more than 100 K, it
   matches RK4 on `de/dt = -q / rho` to 1e-6.
 - **1D flames against Cantera with the same model.**
-  - Setup: `tools/setup/flame_restart.py --radiation cantera`, 12 cells per
-    thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
-  - $S_c$ is the consumption speed averaged over the last third of each run.
-  - The runs last 3.5 ($\phi = 0.6$), 5 ($\phi = 0.5$) or 3 ($\phi = 0.44$) flame
-    times. Started from Cantera's profile, the GRI-3.0 flames relax for about
-    3 flame times, and shorter runs overestimate their speed by 1-2%.
-  - Cantera's flames are on 5-10 cm domains. The radiating speed is the same
-    at 5 and 10 cm, so the burnt gas cooling far downstream does not matter.
+    - Setup: `tools/setup/flame_restart.py --radiation cantera`, 12 cells per
+      thermal thickness of the adiabatic flame, MUSCL, HLLC, SSPRK3, CFL 1.2.
+    - $S_c$ is the consumption speed averaged over the last third of each run.
+    - The runs last 3.5 ($\phi = 0.6$), 5 ($\phi = 0.5$) or 3 ($\phi = 0.44$) flame
+      times. Started from Cantera's profile, the GRI-3.0 flames relax for about
+      3 flame times, and shorter runs overestimate their speed by 1-2%.
+    - Cantera's flames are on 5-10 cm domains. The radiating speed is the same
+      at 5 and 10 cm, so the burnt gas cooling far downstream does not matter.
 
-  | Mixture | Cantera S_L adiabatic / radiating [cm/s] | Mallard S_c adiabatic / radiating | S_rad / S_ad: Cantera, Mallard |
-  |---|---|---|---|
-  | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | 11.263 / 10.964 | 0.9738 / 0.9735 |
-  | CH4/air phi = 0.5, GRI-3.0 | 4.880 / 3.958 | 4.772 / 3.855 | 0.811 / 0.808 |
-  | CH4/air phi = 0.44, two-step (`ch4_bfer.yaml`) | 4.231 / 3.600 | 4.194 / 3.568 | 0.8509 / 0.8507 |
+    | Mixture | Cantera S_L adiabatic / radiating [cm/s] | Mallard S_c adiabatic / radiating | S_rad / S_ad: Cantera, Mallard |
+    |---|---|---|---|
+    | CH4/air phi = 0.6, GRI-3.0 | 11.436 / 11.136 | 11.263 / 10.964 | 0.9738 / 0.9735 |
+    | CH4/air phi = 0.5, GRI-3.0 | 4.880 / 3.958 | 4.772 / 3.855 | 0.811 / 0.808 |
+    | CH4/air phi = 0.44, two-step (`ch4_bfer.yaml`) | 4.231 / 3.600 | 4.194 / 3.568 | 0.8509 / 0.8507 |
 
-  The TNF model (all four species, 300 K background) gives 3.563 cm/s for
-  the two-step flame at $\phi = 0.44$, against 3.568 with Cantera's model.
-  CFL 0.8 gives the same speed to four digits.
+    The TNF model (all four species, 300 K background) gives 3.563 cm/s for
+    the two-step flame at $\phi = 0.44$, against 3.568 with Cantera's model.
+    CFL 0.8 gives the same speed to four digits.
+
 - **Radiative flammability limit.**
-  - Two-step mechanism: Cantera finds a radiating flame at $\phi = 0.41$ and
-    none at 0.405. Mallard's flame at 0.41 burns at 2.152 cm/s (Cantera
-    2.181). At 0.40, started from the adiabatic profile, its speed falls from
-    2.0 to 0.2 cm/s within 17 flame times and the flame dies.
-  - GRI-3.0: Cantera's limit lies between $\phi = 0.48$ and 0.49. At 0.49,
-    $S_\mathrm{rad}/S_\mathrm{ad} = 0.73$, near the theoretical $e^{-1/2} = 0.61$ at the turning
-    point that Ju, Masuya & Ronney report for optically thin CH4/air.
-    Mallard's flame at 0.47, started from the adiabatic profile, slows
-    steadily from 3.2 to 1.8 cm/s in 2.7 flame times. That is below Cantera's
-    slowest steady flame (3.19 cm/s at 0.49) and still falling.
+    - Two-step mechanism: Cantera finds a radiating flame at $\phi = 0.41$ and
+      none at 0.405. Mallard's flame at 0.41 burns at 2.152 cm/s (Cantera
+      2.181). At 0.40, started from the adiabatic profile, its speed falls from
+      2.0 to 0.2 cm/s within 17 flame times and the flame dies.
+    - GRI-3.0: Cantera's limit lies between $\phi = 0.48$ and 0.49. At 0.49,
+      $S_\mathrm{rad}/S_\mathrm{ad} = 0.73$, near the theoretical $e^{-1/2} = 0.61$ at the turning
+      point that Ju, Masuya & Ronney report for optically thin CH4/air.
+      Mallard's flame at 0.47, started from the adiabatic profile, slows
+      steadily from 3.2 to 1.8 cm/s in 2.7 flame times. That is below Cantera's
+      slowest steady flame (3.19 cm/s at 0.49) and still falling.
 - **Flame-vortex quenching.** `examples/flame_vortex_quenching` reproduces
   the quenching zone of the spectral diagram of Poinsot, Veynante & Candel
   (1991) with this model.

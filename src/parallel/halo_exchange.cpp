@@ -10,6 +10,7 @@
  */
 
 #include "halo_exchange.h"
+#include "gated.h"
 
 #include <stdexcept>
 
@@ -75,7 +76,7 @@ void HaloExchange::start(const State & U, const Kokkos::DefaultExecutionSpace & 
     Kokkos::View<rtype *> s_buf = send_buffer;
     StateView flow = U.flow;
     SpeciesView species = U.species;
-    Kokkos::parallel_for("halo_pack", Kokkos::RangePolicy<>(exec, 0, s_cells.extent(0)), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("halo_pack", Kokkos::RangePolicy<>(exec, 0, s_cells.extent(0)), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t c = s_cells(k);
         FOR_I_CONSERVATIVE s_buf(k * stride + i) = flow(c, i);
         for (uint32_t j = 0; j < n_species; j++) s_buf(k * stride + N_CONSERVATIVE + j) = species(c, j);
@@ -136,7 +137,7 @@ void HaloExchange::finish(const State & U, const Kokkos::DefaultExecutionSpace &
     StateView flow = U.flow;
     SpeciesView species = U.species;
     if (stage_through_host && !nccl) Kokkos::deep_copy(exec, r_buf, h_recv_buffer);
-    Kokkos::parallel_for("halo_unpack", Kokkos::RangePolicy<>(exec, 0, r_cells.extent(0)), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("halo_unpack", Kokkos::RangePolicy<>(exec, 0, r_cells.extent(0)), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t c = r_cells(k);
         FOR_I_CONSERVATIVE flow(c, i) = r_buf(k * stride + i);
         for (uint32_t j = 0; j < n_species; j++) species(c, j) = r_buf(k * stride + N_CONSERVATIVE + j);
