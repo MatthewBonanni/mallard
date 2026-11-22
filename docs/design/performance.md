@@ -541,7 +541,16 @@ staged sample instead). Confidence intervals `CI_<average>` are computed at each
 device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
 Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
 half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
-Probes reading cell data are left to the host:
+Probes of moving and `where` regions reduce the cells covered at the write, the first `count()` of the
+selection, weighed by their `f V`; the fixed point's unit depends on the number of terms summed over the ranks,
+which only the device knows, so `ExactSums::sum(terms, count)` sums that count over the ranks and takes the unit
+from it in a kernel, as `exact_sums_unit` (integer arithmetic, the same on the host) gives it. Their time
+averages are kept per owned cell, as the host's per global cell (`accumulate_cells`): each cell held or covered
+takes `mean += a (x - mean)` of `f V` and of `f V q`, `x` zero where the sample does not cover it, and the
+reduction compacts the cells held and divides as `Probe::mean_fields` does. The sums do not depend on the order
+of the terms, so the per-cell layout gives the host's values on any number of ranks. Isosurfaces (the weights of
+those sampled per cell come from the host's extraction, and their averages sum each cell's points in the host's
+order) and probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
 
