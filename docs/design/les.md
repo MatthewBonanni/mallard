@@ -37,10 +37,10 @@ closure for the filtered reaction rates.
   [wall_model.md](wall_model.md).
 - RANS and hybrid RANS/LES (DES, DDES, WMLES).
 - Synthetic inflow turbulence: that is #159. Cases that need it depend on it.
-- Flamelet / FPV / FGM tabulated chemistry, transported or presumed PDFs,
-  CMC, linear-eddy models, and other closures built on reduced chemistry
-  manifolds: Mallard's chemistry is finite-rate with mechanisms read at run
-  time, and the closure must keep it.
+- Transported PDFs, CMC, linear-eddy models. Flamelet / FPV / FGM
+  tabulated chemistry is designed separately in [flamelet.md](flamelet.md);
+  the closure designed here keeps finite-rate chemistry with mechanisms read
+  at run time.
 - SGS models for the isotropic part of the SGS stress, the SGS viscous
   diffusion, the SGS pressure-dilatation and the triple correlation of the
   energy equation (section 1).
