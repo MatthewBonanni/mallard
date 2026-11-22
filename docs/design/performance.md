@@ -976,19 +976,19 @@ row below.
   column maxima per call to the one of the sums. Over NCCL on A100s (main 9da4ab1e7, 221k cells, median ms per
   step of two runs, exact / plain):
 
-  | GPUs | `air_3d` with `les.dynamic` | `flame_3d` with `efficiency = "dynamic"` |
-  |---|---|---|
-  | 1 | 5.27 / 5.23 (+0.7%) | 27.16 / 27.12 (+0.1%) |
-  | 2 | 3.25 / 3.23 (+0.8%) | 20.57 / 20.56 (+0.1%) |
-  | 4 | 2.36 / 2.30 (+2.3%) | 17.12 / 17.11 (+0.1%) |
-  | 8 | 1.65 / 1.60 (+3.2%) | 15.32 / 15.24 (+0.5%) |
-  | 7 + 7, two nodes | 1.81 / 1.71 (+6.0%) | 15.75 / 15.61 (+0.9%) |
+    | GPUs | `air_3d` with `les.dynamic` | `flame_3d` with `efficiency = "dynamic"` |
+    |---|---|---|
+    | 1 | 5.27 / 5.23 (+0.7%) | 27.16 / 27.12 (+0.1%) |
+    | 2 | 3.25 / 3.23 (+0.8%) | 20.57 / 20.56 (+0.1%) |
+    | 4 | 2.36 / 2.30 (+2.3%) | 17.12 / 17.11 (+0.1%) |
+    | 8 | 1.65 / 1.60 (+3.2%) | 15.32 / 15.24 (+0.5%) |
+    | 7 + 7, two nodes | 1.81 / 1.71 (+6.0%) | 15.75 / 15.61 (+0.9%) |
 
-  On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
-  us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
-  The flame shows what the plain sums would cost: last
-  bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
-  or a restart on another partition, could no longer be checked against the original.
+    On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
+    us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+    The flame shows what the plain sums would cost: last
+    bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
+    or a restart on another partition, could no longer be checked against the original.
 
 **Contract.** Within one build and version, results stay bitwise independent of the rank count, partition,
 thread count, step queue depth, CUDA graphs and restarts: it costs at most 0.5% per step here, and it is what
