@@ -1,0 +1,1 @@
+- `mallard check` warns when `run.cfl` exceeds the stability limit of `FE` (1.0), `SSPRK54`, `CK45` or `RDPK3Sp35` (2.2), as the divergence report already did; both now read one table of the integrators' limits.

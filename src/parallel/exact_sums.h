@@ -23,10 +23,13 @@
 #include "device_comm.h"
 
 /**
- * @brief 2^b for terms summed over n_global rows, b leaving room for every row in 63 bits.
+ * @brief 2^b for terms summed over n_global rows, b leaving room for every row in 63 bits: b = 62 - ceil(log2(n_global
+ *        + 1)), the bits of n_global.
  */
-inline double exact_sums_unit(const uint64_t n_global) {
-    return std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0))));
+KOKKOS_INLINE_FUNCTION double exact_sums_unit(const uint64_t n_global) {
+    int bits = 0;
+    while (bits < 64 && (n_global >> bits) != 0) bits++;
+    return Kokkos::bit_cast<double>(static_cast<uint64_t>(1023 + 62 - bits) << 52);
 }
 
 /** @brief A term's magnitude for the largest of its column: a non-finite term makes the column's sum NaN. */
@@ -116,33 +119,60 @@ class ExactSums {
         ExactSums(const uint32_t n_columns, const uint32_t n_rows, const bool distributed_, const bool use_nccl_)
             : largest("exact_sums_largest", n_columns), fixed("exact_sums_fixed", n_columns),
               totals("exact_sums", n_columns), distributed(distributed_), use_nccl(use_nccl_),
-              unit(exact_sums_unit(distributed_ ? comm::allreduce(static_cast<uint64_t>(n_rows), comm::Op::SUM)
-                                               : static_cast<uint64_t>(n_rows))) {}
+              unit("exact_sums_unit"), counted_unit("exact_sums_counted_unit"), rows("exact_sums_rows", 1) {
+            const double u = exact_sums_unit(distributed_ ? comm::allreduce(static_cast<uint64_t>(n_rows), comm::Op::SUM)
+                                                         : static_cast<uint64_t>(n_rows));
+            Kokkos::deep_copy(unit, u);
+        }
 
         /** @brief Sum the columns of terms (row, column) into sums(), enqueued on the default execution space. */
         template <typename Terms>
         void sum(const Terms & terms) const {
+            sum_rows(terms, Kokkos::View<const uint32_t>(), unit);
+        }
+
+        /**
+         * @brief As sum, of the first count() rows of terms on each rank, a number known only on the device: the
+         *        unit is that of their total over the ranks, as exact_sums of those rows alone has it.
+         */
+        template <typename Terms>
+        void sum(const Terms & terms, const Kokkos::View<const uint32_t> & count) const {
+            const Kokkos::View<int64_t *> n = rows;
+            Kokkos::parallel_for("exact_sums_rows", 1, KOKKOS_LAMBDA(const int) { n(0) = count(); });
+            if (distributed) comm::allreduce_device(n, comm::Op::SUM, use_nccl);
+            const Kokkos::View<double> u = counted_unit;
+            Kokkos::parallel_for("exact_sums_unit", 1, KOKKOS_LAMBDA(const int) {
+                u() = exact_sums_unit(static_cast<uint64_t>(n(0)));
+            });
+            sum_rows(terms, count, counted_unit);
+        }
+
+        /** @brief The sums of the rows of terms (the first count() if counted), in fixed point of unit_() (public: nvcc
+         *         rejects device lambdas in private members). */
+        template <typename Terms>
+        void sum_rows(const Terms & terms, const Kokkos::View<const uint32_t> & count,
+                      const Kokkos::View<const double> & unit_) const {
             using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
             const uint32_t n_rows = static_cast<uint32_t>(terms.extent(0));
             const uint32_t n_columns = static_cast<uint32_t>(totals.extent(0));
+            const bool counted = count.is_allocated();
             const Kokkos::View<double *> m = largest;
             for (uint32_t k = 0; k < n_columns; k++) {
                 Kokkos::parallel_reduce("exact_sums_largest", n_rows, KOKKOS_LAMBDA(const uint32_t c, double & x) {
-                    x = Kokkos::fmax(x, exact_sums_magnitude(terms(c, k)));
+                    if (!counted || c < count()) x = Kokkos::fmax(x, exact_sums_magnitude(terms(c, k)));
                 }, Kokkos::Max<double, DeviceMemory>(Kokkos::View<double, DeviceMemory>(m.data() + k)));
             }
             if (distributed) comm::allreduce_device(m, comm::Op::MAX, use_nccl);
             const Kokkos::View<int64_t *> f = fixed;
-            const double unit_ = unit;
             for (uint32_t k = 0; k < n_columns; k++) {
                 Kokkos::parallel_reduce("exact_sums", n_rows, KOKKOS_LAMBDA(const uint32_t c, int64_t & sum) {
-                    sum += exact_sums_fixed(terms(c, k), unit_, m(k));
+                    if (!counted || c < count()) sum += exact_sums_fixed(terms(c, k), unit_(), m(k));
                 }, Kokkos::Sum<int64_t, DeviceMemory>(Kokkos::View<int64_t, DeviceMemory>(f.data() + k)));
             }
             if (distributed) comm::allreduce_device(f, comm::Op::SUM, use_nccl);
             const Kokkos::View<double *> out = totals;
             Kokkos::parallel_for("exact_sums_totals", n_columns, KOKKOS_LAMBDA(const uint32_t k) {
-                out(k) = exact_sums_total(f(k), unit_, m(k));
+                out(k) = exact_sums_total(f(k), unit_(), m(k));
             });
         }
 
@@ -154,7 +184,9 @@ class ExactSums {
         Kokkos::View<int64_t *> fixed;
         Kokkos::View<double *> totals;
         bool distributed = false, use_nccl = false;
-        double unit = 0.0;
+        Kokkos::View<double> unit, counted_unit;
+        Kokkos::View<int64_t *> rows;
+
 };
 
 #endif // EXACT_SUMS_H
