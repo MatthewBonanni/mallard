@@ -33,10 +33,35 @@ with one coefficient set per range. NASA-7 data $(b_0,\dots,b_6)$ are stored
 as $(0, 0, b_0, \dots, b_6)$, and a constant-$c_p$ species
 $(T_0, h_0, s_0, c_{p0})$ as $a_2 = c_{p0}/R_u$,
 $a_7 = (h_0 - c_{p0}T_0)/R_u$, $a_8 = (s_0 - c_{p0}\ln T_0)/R_u$ (molar
-quantities). As in Cantera, a NASA-7 range boundary belongs to the range
-below it and a NASA-9 boundary to the range above, and the outermost
-polynomials are extrapolated beyond the data. $h_k$ includes the enthalpy of
-formation. $R_u = N_A k_B$ with the exact SI values of $N_A$ and $k_B$.
+quantities). The outermost polynomials are extrapolated beyond the data.
+$h_k$ includes the enthalpy of formation. $R_u = N_A k_B$ with the exact SI values of $N_A$ and $k_B$.
+
+The fits on either side of a bound $T_b$ need not meet there: in the shipped
+mechanisms $h_k$ jumps by up to 0.16 J/mol at 1000 K (C$_3$H$_7$ in GRI-Mech
+3.0), $c_{p,k}$ by up to $0.15\,R_u$ and $s_k^\circ$ by up to 0.9 J/(mol K)
+(A3- in the n-dodecane mechanism). An internal energy inside such a jump would
+have no temperature, so the two polynomials are blended over the band
+$T_b - \Delta < T < T_b$, $\Delta = 1$ K. With $x = 1 - (T_b - T)/\Delta$ and the
+smoothstep $w = x^2(3 - 2x)$,
+
+$$
+\begin{equation}
+h_k = (1 - w)\,h_k^- + w\,h_k^+, \qquad
+s_k^\circ = (1 - w)\,s_k^{\circ -} + w\,s_k^{\circ +}, \qquad
+c_{p,k} = \frac{\mathrm{d}h_k}{\mathrm{d}T} = (1 - w)\,c_{p,k}^- + w\,c_{p,k}^+ + \frac{\mathrm{d}w}{\mathrm{d}T}\left(h_k^+ - h_k^-\right),
+\label{eq:species-thermodynamics-blend}
+\end{equation}
+$$
+
+where $^-$ and $^+$ are the polynomials of the ranges below and above $T_b$. So
+$h_k$, $s_k^\circ$, $g_k$ and $c_{p,k}$ are continuous in $T$ (also at the band's
+edges, where $\mathrm{d}w/\mathrm{d}T = 0$), and $e(T)$ is continuous and
+increasing. Outside the bands every value is Cantera's, except at a NASA-7
+bound itself, which Cantera evaluates with the lower polynomial and Mallard
+with the upper one: a reactor heating from a bound (1000 K is common) then
+uses the polynomial Cantera's does from its first step. A mechanism whose
+jump would lower $c_{p,k}$ by half in the band, or with a range narrower than
+the band, is refused when it is loaded.
 
 ## Mixture properties and equation of state
 
