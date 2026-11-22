@@ -2398,10 +2398,10 @@ struct TENOFunctor {
             Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(NK) * N_CONSERVATIVE),
                                  [&](const uint32_t j) { aK[j] = 0.0_r; });
             rtype g_mean = 0.0, g_m2 = 0.0, m_mean = 0.0, m_m2 = 0.0;
-            for (uint16_t s0 = 0; s0 < ns; s0 += POINT_STAGE) {
-                const uint16_t n_s = static_cast<uint16_t>(Kokkos::min(POINT_STAGE, static_cast<uint32_t>(ns - s0)));
+            for (uint32_t s0 = 0; s0 < ns; s0 += POINT_STAGE) {
+                const uint32_t n_s = Kokkos::min(uint32_t(POINT_STAGE), ns - s0);
                 team.team_barrier();
-                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(n_s)), [&](const uint32_t e) {
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n_s), [&](const uint32_t e) {
                     rtype U[N_CONSERVATIVE];
                     entry_conservatives(stencil.cell(s0 + e), stencil.face(s0 + e), U);
                     FOR_I_CONSERVATIVE dU[e * N_CONSERVATIVE + i] = U[i] - U0[i];
@@ -2410,14 +2410,14 @@ struct TENOFunctor {
                 Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(NK) * N_CONSERVATIVE), [&](const uint32_t j) {
                     const uint8_t l = static_cast<uint8_t>(j / N_CONSERVATIVE), i = static_cast<uint8_t>(j % N_CONSERVATIVE);
                     rtype a_li = aK[j];
-                    for (uint16_t e = 0; e < n_s; e++) {
+                    for (uint32_t e = 0; e < n_s; e++) {
                         a_li = fmadd(stencil.template pinv<NK>(s0 + e, l), dU[e * N_CONSERVATIVE + i], a_li);
                     }
                     aK[j] = a_li;
                 });
                 // SmoothPass's measure, the entries in order (U[0] - rho0 is dU, U0[0] being rho0)
                 Kokkos::single(Kokkos::PerTeam(team), [&]() {
-                    for (uint16_t e = 0; e < n_s; e++) {
+                    for (uint32_t e = 0; e < n_s; e++) {
                         const uint16_t s = static_cast<uint16_t>(s0 + e);
                         const rtype g = Kokkos::fabs(dU[e * N_CONSERVATIVE]) / rho0;
                         const rtype delta = g - g_mean;
