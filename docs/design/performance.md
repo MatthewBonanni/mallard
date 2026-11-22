@@ -546,7 +546,7 @@ launches of the code a capture records gate every body.
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
 graph reduces them into the trigger variables with the host's arithmetic (`probe_reduction.h`): every sum's
-per-sample terms, each product rounded on its own, are summed exactly in fixed point (`ExactSums`, reduced
+per-sample terms, each product rounded on its own, are summed exactly and rounded once (`ExactSums`, reduced
 over the ranks with `comm::allreduce_device`, on NCCL in the graph), the extrema are reduced with `MIN` and
 `MAX`, and a one-point probe's values go to every rank as bit patterns summed with zeros, so the values equal
 the host's `Probe::reduce` bit for bit on any number of ranks. The host still writes the files from the staged
@@ -563,9 +563,7 @@ device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`ba
 Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
 half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
 Probes of moving and `where` regions reduce the cells covered at the write, the first `count()` of the
-selection, weighed by their `f V`; the fixed point's unit depends on the number of terms summed over the ranks,
-which only the device knows, so `ExactSums::sum(terms, count)` sums that count over the ranks and takes the unit
-from it in a kernel, as `exact_sums_unit` (integer arithmetic, the same on the host) gives it. Their time
+selection, weighed by their `f V` (`ExactSums::sum(terms, count)`, a count only the device knows). Their time
 averages are kept per owned cell, as the host's per global cell (`accumulate_cells`): each cell held or covered
 takes `mean += a (x - mean)` of `f V` and of `f V q`, `x` zero where the sample does not cover it, and the
 reduction compacts the cells held and divides as `Probe::mean_fields` does. The sums do not depend on the order
