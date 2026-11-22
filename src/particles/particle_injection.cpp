@@ -20,6 +20,7 @@
 #include <tuple>
 
 #include "comm.h"
+#include "gated.h"
 #include "log.h"
 #include "mesh.h"
 #include "region_input.h"
