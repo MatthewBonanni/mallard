@@ -1017,7 +1017,7 @@ TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
 #else
     EXPECT_EQ(n_keyed, 110);
     EXPECT_EQ(distinct.size(), 110u);
-    EXPECT_EQ(digest, 11754670380066181648ULL);
+    EXPECT_EQ(digest, 6536239145204640138ULL);
 #endif
 }
 

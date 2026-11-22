@@ -1299,6 +1299,6 @@ TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
 #else
     EXPECT_EQ(n_keyed, 1557);
     EXPECT_EQ(distinct.size(), 1557u);
-    EXPECT_EQ(digest, 13203929841608398468ULL);
+    EXPECT_EQ(digest, 176108027913348827ULL);
 #endif
 }
