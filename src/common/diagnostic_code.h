@@ -95,7 +95,7 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 63> ALL = {{
+inline constexpr auto ALL = std::to_array<Entry>({
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {INITIAL_WRITE, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
@@ -115,7 +115,7 @@ inline constexpr std::array<Entry, 63> ALL = {{
     {USAGE, RUN_PAGE}, {DIMENSION, RUN_PAGE}, {EXECUTABLE, RUN_PAGE}, {ONE_RANK, RUN_PAGE}, {INFO, RUN_PAGE},
     {LIST, RUN_PAGE}, {DIFF, RUN_PAGE}, {MESH_CONVERT, RUN_PAGE}, {INPUT_UPGRADE, RUN_PAGE}, {EXTRACT, RUN_PAGE},
     {CONVERGENCE, RUN_PAGE}, {PACK, RUN_PAGE}, {OPTION_DEPRECATED, RUN_PAGE},
-}};
+});
 
 /** @brief The warning of each mesh-quality metric, in MeshQuality's order. */
 inline constexpr std::array<const char *, 4> QUALITY = {QUALITY_NON_ORTHOGONALITY, QUALITY_SKEWNESS,
