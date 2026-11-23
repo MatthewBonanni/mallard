@@ -8,7 +8,8 @@ With --mallard (a 2D build; an MPI build for the partitions) the figures from
 short runs and the sample run report are redrawn too (the Python package's with a
 build that has its library, the default).
 With --mallard3d the 3D region, probe and mesh-field figures are drawn too.
-With either, the local coordinates of boundary faces are checked against Mallard's.
+With either, the local coordinates of boundary faces are checked against Mallard's, and with
+--mallard the structured blocks of the cell numbering figure too.
 MALLARD_FIGURE_PREVIEW=dir also writes PNGs on the site's backgrounds there, for
 review.
 
@@ -35,6 +36,7 @@ import regions
 import run_report
 import runs
 import schematics
+import structured_blocks
 import teno
 import theory
 import time_integrators
@@ -59,6 +61,7 @@ def main():
     limiters.figures()
     particles.figures(args.mallard)
     schematics.figures()
+    structured_blocks.figures(args.mallard)
     teno.figures()
     theory.figures()
     time_integrators.figures()
