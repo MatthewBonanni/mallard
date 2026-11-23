@@ -237,9 +237,11 @@ def probe_rows(path, d0, T0):
     """(t, d, T_p) of a probe's samples while its droplet lives, from the release."""
     with open(path) as f:
         rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    col = {name: k for k, name in enumerate(rows[0])}
-    live = [r for r in rows[1:] if int(r[col["count"]]) > 0]
-    out = np.array([[float(r[col["t"]]), float(r[col["D_P mean"]]), float(r[col["T_P mean"]])] for r in live])
+    names = {name: k for k, name in enumerate(rows[0])}
+    col = lambda *keys: next(names[k] for k in keys if k in names)  # noqa: E731 (COUNT, MEAN_<field> since #1466)
+    n, d, T = col("COUNT", "count"), col("MEAN_D_P", "D_P mean"), col("MEAN_T_P", "T_P mean")
+    live = [r for r in rows[1:] if int(r[n]) > 0]
+    out = np.array([[float(r[names["t"]]), float(r[d]), float(r[T])] for r in live])
     return np.vstack([[0.0, d0, T0], out]).T
 
 

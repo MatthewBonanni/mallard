@@ -21,16 +21,18 @@ in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291))
 - [Per-particle quantities](#per-particle-quantities) and [particle probes](#particle-probes)
 - [Accuracy](#accuracy), [performance](#performance) and a [checklist](#checklist)
 
-The equations and methods are in the theory manual's
-[Lagrangian particles](../theory/particles.md); the measured orders of
-accuracy in the [verification manual](../verification/index.md#lagrangian-particles).
+The models are in the theory manual's
+[Lagrangian particles](../theory/particles.md), their discretization and its
+accuracy in [Numerical methods for particles](../numerics/particles.md); the
+measured orders of accuracy in the
+[verification manual](../verification/index.md#lagrangian-particles).
 
 ## Which particles?
 
 The particles are *point particles*: each is much smaller than the cells and
 the smallest eddies around it, sees the gas as undisturbed at its center, and
-moves on its own, without collisions with other particles and without acting
-on the gas (one-way coupling). That describes dilute suspensions, with a
+moves on its own, without collisions with other particles and, unless coupled
+[two-way](#two-way-coupling), without acting on the gas (one-way coupling). That describes dilute suspensions, with a
 volume fraction of particles below about 10⁻⁶ (a mass loading of 0.2% for
 glass beads in air), and every tracer study.
 
@@ -594,9 +596,9 @@ with those that left the domain, were lost or stuck (`PARTICLE_REMOVED`).
 | `antoine` | Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
 
 Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`
-and the gas temperature `T`; the CSV `file` adds the diameter `d` and mass `m`
-of each droplet. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>` writes
-the vapor source per volume and time.
+and the gas temperature `T`; the CSV `file` has the columns `T_P`, `D_P` and
+the droplet's mass `M_P`. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>`
+writes the vapor source per volume and time.
 
 ![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
 ![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-dark.svg#gh-dark-mode-only)

@@ -228,9 +228,9 @@ TEST(DropletTest, DiameterSquaredFallsLinearlyAtTheD2LawRate) {
     const double K = 8.0 * f.rho * f.D * std::log1p(f.B_M) / RHO_L;
     const double d0 = 50e-6, t_life = d0 * d0 / K, dt = t_life / 400.0;
     const std::string quantities =
-        "[[particles.quantities]]\nname = \"t75\"\nfirst_time = \"D_P^2 < " + number(0.75 * d0 * d0) + "\"\n"
-        "[[particles.quantities]]\nname = \"t25\"\nfirst_time = \"D_P^2 < " + number(0.25 * d0 * d0) + "\"\n"
-        "[[particles.quantities]]\nname = \"T_lo\"\nmin = \"T_P\"\n[[particles.quantities]]\nname = \"T_hi\"\nmax = \"T_P\"\n";
+        "[[particles.quantities]]\nname = \"T75\"\nfirst_time = \"D_P^2 < " + number(0.75 * d0 * d0) + "\"\n"
+        "[[particles.quantities]]\nname = \"T25\"\nfirst_time = \"D_P^2 < " + number(0.25 * d0 * d0) + "\"\n"
+        "[[particles.quantities]]\nname = \"T_LO\"\nmin = \"T_P\"\n[[particles.quantities]]\nname = \"T_HI\"\nmax = \"T_P\"\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(quiescent(d0, T_wb, "d2_law", run(320, dt), quantities)));
@@ -294,7 +294,7 @@ TEST(DropletTest, SuperheatedDropletBoilsDownTowardTheBoilingTemperature) {
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(quiescent(100e-6, 450.0, model, run(100, 2e-4),
-                                         "[[particles.quantities]]\nname = \"T_hi\"\nmax = \"T_P\"\n")));
+                                         "[[particles.quantities]]\nname = \"T_HI\"\nmax = \"T_P\"\n")));
         solver.run();
         const auto records = solver.get_particles()->gather();
         ASSERT_EQ(records.size(), 1u);

@@ -267,7 +267,8 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)), also in
+[axisymmetric runs](#axisymmetric-flows).
 
 | Key | Description |
 |---|---|
@@ -416,8 +417,10 @@ averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
 and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
-mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
+mixture model, chemistry and MPI work as in planar runs, and so do
+[curved boundaries](#curved-boundaries), revolved with the cells next to
+them; meshes cannot be periodic in y. Guide:
+[axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 
@@ -1587,7 +1590,7 @@ keys.
 | `weight` | Particles per parcel (`"solid"`, `"droplet"`; per meter of depth in 2D), default 1 |
 | `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`, `"droplet"`), default 0 (each particle's own cell) |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_p`, diameter `d` and mass `m`, then the quantities, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_P`, diameter `D_P` and mass `M_P`, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.liquid]`
