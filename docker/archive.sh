@@ -66,10 +66,12 @@ if [ "$mpi_family" = openmpi ]; then
     curl -fsSL -o "$out/$ompi.tar.bz2" "https://download.open-mpi.org/release/open-mpi/v5.0/$ompi.tar.bz2"
     echo "$ompi_sha256  $out/$ompi.tar.bz2" | sha256sum -c -
     tar -C "$out" -xjf "$out/$ompi.tar.bz2"
-    # One node's transports (shared memory, TCP); a site's Open MPI brings its network's
+    # One node's transports (shared memory, TCP), as a site's Open MPI brings its network's; no partitioned
+    # communication (part-persist), which Mallard does not use and GCC 16 does not compile
     (cd "$out/$ompi" && ./configure --prefix="$out/openmpi" --disable-dlopen --disable-mpi-fortran --disable-oshmem \
-        --without-ofi --without-ucx --without-psm2 --without-cuda --with-hwloc=internal \
-        --with-libevent=internal --with-pmix=internal --with-prrte=internal > "$out/$ompi.configure.log" &&
+        --without-ofi --without-ucx --without-psm2 --without-cuda --enable-mca-no-build=part-persist \
+        --with-hwloc=internal --with-libevent=internal --with-pmix=internal --with-prrte=internal \
+        > "$out/$ompi.configure.log" &&
         make -j "${JOBS:-$(nproc)}" > "$out/$ompi.make.log" && make install > /dev/null) ||
         { tail -n 50 "$out/$ompi".*.log >&2; exit 1; }
     carried_lib=$out/openmpi/lib
