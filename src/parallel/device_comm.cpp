@@ -42,9 +42,10 @@ ncclComm_t nccl() {
     // queue before it calls NCCL outside a step graph.
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
     // NCCL's kernels run beside the reconstruction and the fluxes, waiting for their peers: with its default of up
-    // to 16 CTAs per kernel, each holds whole SMs and makes the scheduler drain more of them for it (#305)
+    // to 16 CTAs per kernel, each holds whole SMs and makes the scheduler drain more of them for it. With two ranks
+    // every exchange goes to the one peer, and the default is faster (#305).
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
-    config.maxCTAs = MAX_CTAS;
+    if (size() > 2) config.maxCTAs = MAX_CTAS;
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
     config.graphUsageMode = 1;
