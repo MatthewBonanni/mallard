@@ -1,0 +1,1 @@
+- The unused stencil-shape classification (`src/mesh/stencil_shapes`); the structured blocks' shapes (#1034) replaced its only use. No change to results or input.

@@ -20,9 +20,11 @@ in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291))
 - [Per-particle quantities](#per-particle-quantities) and [particle probes](#particle-probes)
 - [Accuracy](#accuracy), [performance](#performance) and a [checklist](#checklist)
 
-The equations and methods are in the theory manual's
-[Lagrangian particles](../theory/particles.md); the measured orders of
-accuracy in the [verification manual](../verification/index.md#lagrangian-particles).
+The models are in the theory manual's
+[Lagrangian particles](../theory/particles.md), their discretization and its
+accuracy in [Numerical methods for particles](../numerics/particles.md); the
+measured orders of accuracy in the
+[verification manual](../verification/index.md#lagrangian-particles).
 
 ## Which particles?
 
