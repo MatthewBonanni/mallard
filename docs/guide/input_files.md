@@ -479,7 +479,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 | Time step | At the initial state (its time `t`): the time step and what sets it (`run.cfl`, `run.dt`, or the sponges), its CFL number against the integrator's limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4), the time step at CFL 1, the cell that sets it, and the box of the cells within 10% of its time step |
 | Resolution | Cell sizes, and the physical scales the case sets against them. Kolmogorov and Taylor lengths, wall units, cells across the flame, and TFLES's thickening, each with its basis and its regime's target ([Resolution](#resolution)) |
 | Memory | Kokkos allocations per rank (device memory on GPUs) of the rank with the largest peak: after setup, once the data only the setup reads is freed (what the time steps hold), and at the peak (the setup's, and the timed steps' with `--steps`), with that rank's owned and halo cells. With `--ranks N` in a serial check, a second row is scaled to the owned and halo cells of the largest part the run's partitioner would make. On a GPU, the peak as a share of the device's memory. Then the same rank by category, at the setup's peak and after setup (at the steps' peak with `--steps`), in total and per owned and halo cell; the setup's workspace and work memory sized by the device are not proportional to the cells. On GPUs, also the device memory outside Kokkos: CUDA's context and the local memory of kernels with large stacks, 1.5 GB (2D) to 2.1 GB (3D) on an A100 |
-| GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU (the fewer of those that fit in the memory and those that fit in the most entries a Kokkos View of rank 2 or more addresses, from its most entries per cell; the basis says which limits them), the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's. The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
+| GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU (the fewer of those that fit in the memory and those that fit in the most entries a Kokkos View of rank 2 or more addresses, from its most entries per cell; the basis says which limits them), the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's; a CPU build sizing a GPU leaves out of the steady state the mesh's node lists, which GPU runs free after setup and CPU builds keep (`freed after setup on GPUs`). The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
 | Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): simulated time, steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude), to `run.t_stop` and for `run.n_steps`. It assumes the throughput per rank and the initial time step hold on N ranks |
 | Environment | What the run runs on, with or without an input: the build (dimension, precision, build type, compiler, from the same `build` block as every output file's [run block](output.md#run-block)) and the solvers installed with it; Kokkos and its execution spaces; MPI (the library, ranks, hosts, the most ranks on one host); GPU-aware MPI (built or not, whether the MPI library says it reads device memory, whether this run uses it); NCCL (built or not, whether halo exchanges use it: `[parallel] halo_exchange`, on several ranks); HDF5 (serial or parallel), CGNS, zlib and KaMinPar. Then a row per rank: host, device (GPU and memory, else the CPU), the GPU's index among those it sees, its CPUs, threads and whether OpenMP binds them. The placement checks are the run's own (`Ranks` at the start of a run on several ranks) |
 | Diagnostics | Every error, then every warning: its code, what is wrong with its numbers and the fix, then the anchor below that explains it |
@@ -509,6 +509,7 @@ An input still being written fails on what it does not have yet: a required key 
 | <a id="w-probe-outside"></a>`W-PROBE-OUTSIDE` | Part of a probe lies outside the domain: samples of a line or surface outside the mesh, or part of a filled region, which it leaves out. The message gives how much and where | Move the probe inside the domain, or accept the part it samples ([Probes](probes.md#probes-probes)) |
 | <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--mesh-fields PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
 | <a id="e-mesh-fields"></a>`E-MESH-FIELDS` | `--mesh-fields` could not write its files, or `--cells` or `--region` selects no cell: an id beyond the mesh's cells, a region that touches none | Check the path, the ids (global, from 0) and the region ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)) |
+| <a id="e-initial-write"></a>`E-INITIAL-WRITE` | `--initial PREFIX` could not write the initial state | Check the path and its permissions ([The initial state](#the-initial-state-before-a-run)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
 | <a id="w-trigger-never"></a>`W-TRIGGER-NEVER` | A `[[triggers]]` entry cannot fire before `t_stop`: its `for` is longer than the run, or its condition reads only `t`, compared with numbers, and is false at every time to `t_stop` | Check the condition's numbers and their units (seconds), or `for`; raise `run.t_stop` if the run is too short ([Triggers](running.md#triggers)) |
 | <a id="w-tfles-thickening"></a>`W-TFLES-THICKENING` | TFLES thickens the flame by more than 5 (`F = n_res Delta / delta_L`). Beyond that the flame's response to turbulence is unreliable | Refine the mesh where the flame goes, or lower `les.combustion.n_res` ([LES](les.md#thickened-flames-lescombustion)) |
@@ -534,12 +535,14 @@ An input still being written fails on what it does not have yet: a required key 
 | `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `regions`, `case_view`, `case_view_images`, `view` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, its images, and with `--view` its files, blocks and boundary frames (`mallard-case-view`; [The case view](#the-case-view)) |
+| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
+| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
+| `regions`, `case_view`, `case_view_images`, `view`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, its images, and with `--view` its files, blocks and boundary frames (`mallard-case-view`; [The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
 | `boundary_values` | With `--boundary-values`: each entry's file and the range of each column (`mallard-boundary-values`; [Boundary values](#boundary-values)), else `null` |
-| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
+| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
-| `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak` and `steady` |
+| `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak`, `steady` and `released_on_devices` (of `steady`, what GPU runs free after setup and this CPU build keeps) |
 | `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `limit` (`memory` or `view_entries`: what limits `max_local_cells`), `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
 | `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
 | `cost` | `cells`, `ranks`, `throughput` (cells/s per rank), `wall_per_time` (wall seconds per unit simulated time), `flow_through_time`, `t_stop`, `n_steps` |
@@ -719,7 +722,15 @@ at a glance. It writes, without running the case:
   (`domain`), every boundary zone and cell zone, every region the case uses
   (as [Checking regions](geometry.md#checking-regions) describes), every probe
   on points, lines or surfaces of its own, and every periodic pair (each face
-  with `side` 0, its image on the partner zone with `side` 1).
+  with `side` 0, its image on the partner zone with `side` 1). Boundary zones
+  carry each face's `normal` and `area`; walls also carry `y_plus`, the first
+  cell's y+ of each face as the [resolution](#resolution) report estimates it,
+  once it estimates one (a viscous case with a friction velocity).
+
+A setup that stops (a boundary zone without a condition, a missing key) still
+draws the mesh alone, its zones and periodic pairs, so that what it stopped on
+can be seen; the JSON report's `unassigned` lists the zones without a
+condition.
 
 ```bash
 mallard check input.toml --view view
@@ -784,6 +795,19 @@ supersonically through a stagnation inlet keeps the state the flux makes of it. 
 `mallard-boundary-values`, the result of the [session](session.md)'s
 `case.boundary_values`) names each file and gives each column's `units`,
 `estimated`, `min`, area-weighted `mean` and `max`.
+
+### The initial state before a run
+
+`--initial PREFIX` writes the initial state, as the run would start from it
+(`[initialize]` with its `regions` and `data`, or the restart of `--restart`),
+to `PREFIX_000000.vtkhdf` (`PREFIX_000000.vtu` in builds without HDF5): `RHO`,
+`U`, `P`, `T` and, for mixtures, `Y_*`, in the units of the run's snapshots.
+Open it with the case view to see that a region's override lands where it
+should before the run starts.
+
+```bash
+mallard check input.toml --initial initial --view view
+```
 
 ## The resolved input
 

@@ -899,7 +899,7 @@ void Solver::init_physics() {
     init_radiation();
 }
 
-std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc) const {
+std::vector<CheckUnassigned> Solver::zones_without_condition(const std::vector<int32_t> & face_bc) const {
     std::vector<int32_t> local;  // "zone=faces;" of this rank's owned boundary faces, as characters
     for (const FaceZone & zone : *mesh->face_zones()) {
         if (zone.get_type() != FaceZoneType::BOUNDARY) continue;
@@ -923,11 +923,9 @@ std::string Solver::zones_without_condition(const std::vector<int32_t> & face_bc
         faces[entry.substr(0, eq)] += std::stoull(entry.substr(eq + 1));
         entry.clear();
     }
-    std::string text;
-    for (const auto & [zone, n] : faces) {
-        text += (text.empty() ? "zone " : ", zone ") + zone + " (" + logging::count(n, "face") + ")";
-    }
-    return text;
+    std::vector<CheckUnassigned> out;
+    for (const auto & [zone, n] : faces) out.push_back({zone, n});
+    return out;
 }
 
 void Solver::check_frames(CheckReport & r) const {
@@ -1337,8 +1335,12 @@ void Solver::init_boundaries() {
         bcs.push_back(bc);
         for (uint32_t i = 0; i < partition->n_faces(); i++) face_bc[partition->h_faces(i)] = static_cast<int>(bcs.size() - 1);
     }
-    const std::string uncovered = zones_without_condition(face_bc);
-    if (!uncovered.empty()) {
+    unassigned_zones = zones_without_condition(face_bc);
+    if (!unassigned_zones.empty()) {
+        std::string uncovered;
+        for (const CheckUnassigned & z : unassigned_zones) {
+            uncovered += (uncovered.empty() ? "zone " : ", zone ") + z.zone + " (" + logging::count(z.faces, "face") + ")";
+        }
         throw InputError({.key = "boundaries",
                           .message = "no condition for " + uncovered + "; every boundary face needs one",
                           .fix = "Add a [[boundaries]] entry with this name and a type (e.g. \"wall_adiabatic\", "
