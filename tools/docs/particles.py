@@ -270,7 +270,7 @@ def settling_velocity(binary, d, rho_p, drag="schiller_naumann", periods=6):
     cfg = cfg.replace("t_stop = 0.25", f"t_stop = {periods * tau!r}").replace("Lx = 0.04", "Lx = 0.16").replace(
         "Ly = 0.04", "Ly = 0.16")
     run(binary, cfg, work)
-    return -read_particles(Path(work) / "droplets")[0]["v_y"], v_t
+    return -read_particles(Path(work) / "droplets")[0]["V_Y"], v_t
 
 
 def singh_terminal_velocity(d, rho_p, rho, mu, g, c, gamma=1.4):

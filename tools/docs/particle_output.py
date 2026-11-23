@@ -65,7 +65,7 @@ def snapshot_run(binary):
     """The gas speed and the particles at each snapshot time of examples/particle_vortex."""
     work = Path(tempfile.mkdtemp())
     run(binary, vortex_input('[[write_data]]\nprefix = "gas"\nformat = "vtu"\nfields = ["U"]\ntime_interval = 1.0\n'
-                             '[[write_data]]\nprefix = "drops"\nparticle_fields = ["T_P", "slip_max"]\n'
+                             '[[write_data]]\nprefix = "drops"\nparticle_fields = ["T_P", "SLIP_MAX"]\n'
                              'time_interval = 1.0\n'), work)
     out = []
     for k in SNAPSHOT_TIMES:

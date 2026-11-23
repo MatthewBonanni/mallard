@@ -60,24 +60,24 @@ n = [9, 9]
 
 # Turns of each tracer about the center of its vortex, and its largest speed
 [[particles.quantities]]
-name = "turns"
+name = "TURNS"
 winding = {point = [0.25, 0.25]}
 
 [[particles.quantities]]
-name = "speed_max"
+name = "SPEED_MAX"
 max = "hypot(U_X, U_Y)"
 
 # Statistics of the tracers near the vortex's center, every 100 steps
 [[particles.probes]]
 name = "core"
 region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
-fields = ["turns", "hypot(U_X, U_Y)"]
+fields = ["TURNS", "hypot(U_X, U_Y)"]
 interval = 100
 
 # Every tracer, its turns and largest speed, every unit of time and at the end
 [[write_data]]
 prefix = "tracers"
-particle_fields = ["turns", "speed_max"]
+particle_fields = ["TURNS", "SPEED_MAX"]
 time_interval = 1.0
 
 [output]
