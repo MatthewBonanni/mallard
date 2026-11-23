@@ -28,6 +28,7 @@ import inlets
 import les_models
 import limiters
 import mesh_fields
+import particle_coupling
 import particle_injection
 import particles
 import probes
@@ -58,6 +59,7 @@ def main():
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    particle_coupling.figures(args.mallard)
     particle_injection.figures(args.mallard)
     particles.figures(args.mallard)
     schematics.figures()
