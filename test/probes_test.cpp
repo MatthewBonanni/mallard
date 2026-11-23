@@ -502,8 +502,10 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
 #endif
 
 TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
-    // A sphere's surface (2D: a circle) and, in 3D, a circle: their area or length, on any number of ranks
+    // A sphere's surface (2D: a circle) and, in 3D, a circle: their area or length, on any number of ranks; in 3D on
+    // hexahedra with warped faces, whose cells must hold every sample near them
     const std::string dir = fresh_dir("surface_region_ranks");
+    const std::string warped = N_DIM == 3 ? write_temp_shared("mallard_probe_warped.msh", jittered_periodic_mesh_3d(6, 0.2)) : "";
     const std::string shell = std::string("{type = \"sphere\", center = ") + numbers3("0.45", "0.55", "0.5") +
                               ", radius = 0.3, filled = false}";
     const std::string ring = "{type = \"circle\", center = [0.45, 0.55, 0.5], normal = [1, 1, 0], radius = 0.25}";
@@ -514,7 +516,16 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
             probes += "[[probes]]\nname = \"" + name + "\"\nfields = [\"RHO\", \"P\"]\nregion = " + region +
                       "\nreductions_file = \"" + dir + "/" + name + "_" + suffix + ".csv\"\n";
         }
-        return box_case(10, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+        std::string s = box_case(10, SINE_RHO, "type = \"MUSCL\"\n", probes, "n_steps = 2\ncfl = 0.4\n");
+        if (N_DIM == 3) {
+            const size_t at = s.find("type = \"cartesian\"");
+            s.replace(at, s.find("[initialize]") - at,
+                      "type = \"file\"\nfilename = \"" + warped + "\"\n"
+                      "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1, 0, 0]\n"
+                      "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0, 1, 0]\n"
+                      "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0, 0, 1]\n");
+        }
+        return s;
     };
     Solver distributed;
     distributed.init(parse_toml(input("distributed")));

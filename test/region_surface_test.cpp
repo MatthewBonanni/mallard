@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
@@ -367,24 +368,29 @@ TEST(RegionSurfaceTest, CellFractionsAreTheBoxes) {
 }
 
 TEST(RegionSurfaceTest, ItsSurfaceIsExactAndFacesOut) {
-    auto mesh = std::make_shared<Mesh>();
+    std::vector<std::shared_ptr<Mesh>> meshes = {std::make_shared<Mesh>()};
 #if N_DIM == 2
-    mesh->init_file(write_temp_shared("mallard_region_surface_elements.msh", jittered_mixed_mesh(10)));
+    meshes[0]->init_file(write_temp_shared("mallard_region_surface_elements.msh", jittered_mixed_mesh(10)));
 #else
-    mesh->init_cart_3d(6, 6, 6, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
+    meshes[0]->init_cart_3d(6, 6, 6, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
+    // Hexahedra with warped faces, whose cells must still hold every point near them
+    meshes.push_back(std::make_shared<Mesh>());
+    meshes[1]->init_file(write_temp_shared("mallard_region_surface_hex.msh", jittered_periodic_mesh_3d(5, 0.2)));
 #endif
     const region::Region r = read(stl_region(file("elements.stl", stl_ascii(cube(LO, HI))), ", filled = false"));
-    const region::Elements e = region::elements(*mesh, r);
-    EXPECT_TRUE(e.exact);
     const double a = HI[0] - LO[0], b = HI[1] - LO[1], c = HI[2] - LO[2];
-    double measure = 0.0, flux = 0.0;
-    for (size_t k = 0; k < e.size(); k++) {
-        measure += e.measure[k];
-        for (size_t i = 0; i < 3; i++) flux += (e.center[k][i] - 0.5) * e.direction[k][i] * e.measure[k];
+    for (const auto & mesh : meshes) {
+        const region::Elements e = region::elements(*mesh, r);
+        EXPECT_TRUE(e.exact);
+        double measure = 0.0, flux = 0.0;
+        for (size_t k = 0; k < e.size(); k++) {
+            measure += e.measure[k];
+            for (size_t i = 0; i < 3; i++) flux += (e.center[k][i] - 0.5) * e.direction[k][i] * e.measure[k];
+        }
+        // Facing out: the flux of x - x0 is N_DIM times the enclosed measure
+        EXPECT_NEAR(measure, N_DIM == 3 ? 2.0 * (a * b + b * c + c * a) : 2.0 * (a + b), 1e-12);
+        EXPECT_NEAR(flux, N_DIM == 3 ? 3.0 * a * b * c : 2.0 * a * b, 1e-12);
     }
-    // Facing out: the flux of x - x0 is N_DIM times the enclosed measure
-    EXPECT_NEAR(measure, N_DIM == 3 ? 2.0 * (a * b + b * c + c * a) : 2.0 * (a + b), 1e-12);
-    EXPECT_NEAR(flux, N_DIM == 3 ? 3.0 * a * b * c : 2.0 * a * b, 1e-12);
 }
 
 TEST(RegionSurfaceTest, BrokenFilesAndKeysAreErrorsThatSayWhatToFix) {
