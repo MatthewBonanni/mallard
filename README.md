@@ -11,7 +11,11 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 *A 2D Riemann problem on 16.8M quadrilaterals; a cellular detonation in 2H2-O2-7Ar on 19.2M hexahedra, front speed within 0.2% of Chapman-Jouguet; the Taylor-Green vortex at Re = 1600 on 256³ hexahedra, peak dissipation within 0.3% of the spectral DNS; autoignition of stratified lean H2/air at 41 atm ([`examples/`](https://matthewbonanni.github.io/mallard/docs/examples/)).*
 
-> **NOTE:** Mallard is under active development.
+## What's new
+
+- **0.11.0: automatic structured fast path** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/#structured-fast-path)): Mallard finds the structured blocks in any mesh, uniform, stretched or warped, reads their stencils by index and shares TENO tables between cells of the same shape; one A100-80GB holds 13.7M TENO5 cells instead of 2.1M
+- **[C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/)** to run cases from your own program, and a **[Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/)** for output files and post-processing
+- **[Desktop GUI](https://github.com/MatthewBonanni/mallard-gui)**, in progress: case setup, runs and results
 
 ## Features
 
@@ -86,7 +90,6 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - The end of the initial transient and confidence intervals of monitored values (MSER-5, batch means), to start the statistics and stop the run when they have converged
 - A [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): run a case from your own program, step by step, with the same results as `mallard -i`, through an installed CMake package (`find_package(Mallard)`)
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
-- A [desktop GUI](https://github.com/MatthewBonanni/mallard-gui), in progress: case setup, runs and results
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 
