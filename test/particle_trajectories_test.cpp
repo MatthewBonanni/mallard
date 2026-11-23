@@ -125,8 +125,8 @@ TEST(ParticleTrajectoriesTest, EveryRecordIsAParticleAtItsOutputWithItsFields) {
     for (const bool graphs : {true, false}) {
         const std::string out = (dir / (graphs ? "graphs" : "plain")).string();
         const std::string entries =
-            "[[particles.quantities]]\nname = \"age\"\nintegral = \"1\"\n"
-            "[[particles.trajectories]]\nname = \"steps\"\ninterval = 5\nfields = [\"U\", \"age\"]\nfile = \"" + out +
+            "[[particles.quantities]]\nname = \"AGE\"\nintegral = \"1\"\n"
+            "[[particles.trajectories]]\nname = \"steps\"\ninterval = 5\nfields = [\"U\", \"AGE\"]\nfile = \"" + out +
             "_steps.csv\"\n[[particles.trajectories]]\nname = \"time\"\ntime_interval = 0.07\nfile = \"" + out +
             "_time.csv\"\n";
         std::string input = box(u, 20, 4, 0.1, 0.9, entries);
@@ -139,7 +139,7 @@ TEST(ParticleTrajectoriesTest, EveryRecordIsAParticleAtItsOutputWithItsFields) {
     const std::string out = (dir / "graphs").string();
     const double tol = roundoff(1e-12);
     EXPECT_EQ(header(out + "_steps.csv"),
-              std::string("step,t,id,x,y") + (N_DIM == 3 ? ",z,U_X,U_Y,U_Z" : ",U_X,U_Y") + ",age");
+              std::string("step,t,id,x,y") + (N_DIM == 3 ? ",z,U_X,U_Y,U_Z" : ",U_X,U_Y") + ",AGE");
     const auto steps = rows(out + "_steps.csv");
     ASSERT_EQ(steps.size(), 5u * 16u);
     for (size_t k = 0; k < steps.size(); k++) {
@@ -153,7 +153,7 @@ TEST(ParticleTrajectoriesTest, EveryRecordIsAParticleAtItsOutputWithItsFields) {
         EXPECT_NEAR(r[3], wrap(x0[0] + u[0] * t), tol) << "particle " << id << " at step " << r[0];
         EXPECT_NEAR(r[4], wrap(x0[1] + u[1] * t), tol) << "particle " << id << " at step " << r[0];
         for (size_t i = 0; i < N_DIM; i++) EXPECT_NEAR(r[3 + N_DIM + i], u[i], tol) << "U";
-        EXPECT_NEAR(r[3 + 2 * N_DIM], t, tol) << "age";
+        EXPECT_NEAR(r[3 + 2 * N_DIM], t, tol) << "AGE";
     }
     const auto time = rows(out + "_time.csv");
     ASSERT_EQ(time.size(), 3u * 16u);
