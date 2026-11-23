@@ -237,6 +237,7 @@ transport = "mixture_averaged"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
+explicit_step = true
 
 [output]
 check_interval = 2000
