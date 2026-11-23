@@ -1,0 +1,118 @@
+# Solid particles over a backward-facing step (after Fessler & Eaton 1999):
+# the flow of flow.toml, from its developed shedding, with particles seeded in
+# the inlet channel. Their Stokes number St = tau / tau_f, with
+# tau = rho_p d^2 / (18 mu) and the large-eddy time tau_f = 5 H / U0 (one
+# period of the shear layer's vortices), sets what the step does to them:
+# tracers roll up into the vortices and fill the recirculation zone, particles
+# of St near 1 are flung out of the vortex cores onto the braids between them,
+# and heavy particles fly across the shear layer and reach the floor beyond
+# the recirculation zone without entering it. This input has St = 1;
+# run_particle_step.py runs it at St = 0 (tracers), 1 and 4.
+
+[run]
+t_stop = 400.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "step.msh"
+
+[initialize]
+# The developed flow of flow.toml (run_particle_step.py passes its restart
+# file with --restart)
+type = "restart"
+file = "flow.restart"
+
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = ["0.5333333333333333 * (y - 1) * (2.5 - y)", "0"]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[boundaries.nscbc]
+L = 50.0
+
+[[boundaries]]
+name = "outlet"
+type = "outlet_pressure"
+p = 0.7142857142857143
+
+[boundaries.nscbc]
+L = 50.0
+
+[[boundaries]]
+name = "wall"
+type = "wall_adiabatic"
+
+# A weak transverse forcing at the lip of the step, at the frequency of the
+# shear layer's vortices (f H / U0 = 0.16), locks their roll-up in place of
+# the experiment's turbulent inflow
+[[sources]]
+name = "lip_forcing"
+rhou = ["0", "0.003 * sin(0.30159289474462014 * t) * exp(-((x + 0.3)^2 + (y - 1.15)^2) / 0.02)"]
+
+[[sponges]]
+strength = "x > 22 ? 0.2 * ((x - 22) / 8)^2 : 0"
+u = ["0.1152 * y * (2.5 - y)", "0"]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 1.0e-4
+Pr = 0.72
+
+[particles]
+type = "solid"
+file = "particles.csv"
+# St = 1: tau = 5 H / U0 = 16.67, d = sqrt(18 mu tau / rho_p)
+density = 2000.0
+diameter = 3.872983346207417e-3
+
+[particles.lattice]
+lo = [-19.5, 1.02]
+hi = [-0.5, 2.48]
+n = [760, 60]
+
+# Peak particle Reynolds number along each path
+[[particles.quantities]]
+name = "RE_P_MAX"
+max = "hypot(U_X - V_X, U_Y - V_Y) * RHO * 3.872983346207417e-3 / 1.0e-4"
+
+# Particles in the recirculation zone, every 50 steps
+[[particles.probes]]
+name = "recirculation"
+region = {type = "rectangle", center = [3.0, 0.5], size = [6.0, 1.0]}
+fields = ["V_X"]
+interval = 50
+
+[output]
+check_interval = 1000
+
+# The frames of the animation and the statistics: restart files carry the
+# particles
+[[write_data]]
+prefix = "./frames/frame"
+format = "restart"
+time_interval = 0.5
+
+[[write_data]]
+prefix = "./frames/step"
+format = "vtu"
+region = {type = "rectangle", center = [9.0, 1.25], size = [22.0, 2.5]}
+time_interval = 0.5
+fields = ["VORTICITY", "U"]
