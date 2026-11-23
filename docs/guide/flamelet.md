@@ -12,7 +12,8 @@ format: [table_format.md](../design/table_format.md).
 Mallard does not generate tables: they come from a separate generator library
 that writes [Mallard's format](../design/table_format.md). Laminar runs look
 the table up at zero subgrid variance of `Z`; with `[les]` the variance comes
-from the resolved gradient of `Z` ([LES](#les)).
+from the resolved gradient of `Z` ([LES](#les)), or is zero with
+`variance = "none"` and with thickened flames ([thickened flames](#thickened-flames)).
 
 ```toml
 [physics]
@@ -72,7 +73,7 @@ mass fractions that sum to one).
 |---|---|---|
 | `gas = "flamelet"`, `table` | `[physics]` | The table file, an FPV table with `saghafian2015` thermodynamics |
 | `Z`, `C` | `[initialize]`, `[[initialize.regions]]`, `inlet_state` | Mixture fraction in [0, 1] (default 0) and progress variable in the table's range at `Z` (default 0); numbers, expressions, or `C = "burnt"` |
-| `variance` | `[physics]`, with `[les]` | Closure of the subgrid variance of `Z`: `algebraic` (default) or `transported` |
+| `variance` | `[physics]`, with `[les]` | Closure of the subgrid variance of `Z`: `algebraic` (default), `transported`, or `none` (zero variance; the default, and the only choice, with `[les.combustion]`) |
 | `C_Z` | `[physics]`, `variance = "algebraic"` | Constant of the algebraic variance, default 0.1, non-negative |
 | `C_chi` | `[physics]`, `variance = "transported"` | Constant of the subgrid dissipation rate, default 2, positive |
 
@@ -88,10 +89,10 @@ table's fields at each cell's `Z` and `C` ([[write_data]] only):
 |---|---|
 | `Y_<species>` | Mass fraction of each species of the table's species block (`Y_*` selects them with `Y_Z` and `Y_C`); a species named `Z` or `C` is not written |
 | `T_TABLE` | Temperature of the tabulated flamelet state, `T0`. `T` is the temperature of the energy equation, which compression and heat loss move away from it |
-| `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` |
+| `HRR` | Heat release rate, if the table has the optional field `HRR` (W m-3), scaled from the table's density by `(rho / rho0)^2` as the source of `C` (and by `E / F` in a thickened flame) |
 | `MIXTURE_FRACTION` | `Z` |
 | `C_NORM` | The table's normalized progress variable `Lambda = (C - C_min) / (C_max - C_min)` at `(Z, Sz)`, in [0, 1] (FPVgen's Λ). `PROGRESS_VARIABLE` is the mixtures' own, defined by `[output.mixture]`, and not a field of flamelet runs |
-| `MIXTURE_FRACTION_VARIANCE` | (`[les]`) The subgrid variance of `Z` of each cell's lookups |
+| `MIXTURE_FRACTION_VARIANCE` | (`[les]`, `variance` other than `none`) The subgrid variance of `Z` of each cell's lookups |
 
 With `[les]` the table fields are those at the cell's variance.
 
@@ -196,17 +197,63 @@ variance = "transported"
 C_chi = 2.0
 ```
 
+With `variance = "none"` every lookup is at zero variance, the table's
+`Sz = 0` slice (the laminar flamelets), as in laminar runs; `Z` and `C` still
+take the eddy diffusivity.
+
 Inlets and the boundary states are laminar (zero variance; with the transported
 variance, inlets carry `Z2 = Z^2`). The initial state
 is converted at its variance: `p`, `T`, `u`, `Z` and `C` are those given, the
 density and energy those of the table at the cell's variance. A transported
-`Z2` starts at zero variance. `[les.combustion]`
-(thickened flames) is an input error with the flamelet gas: the table already
-represents the subgrid flame.
+`Z2` starts at zero variance.
+
+## Thickened flames
+
+`[les.combustion]` with `model = "tfles"` thickens the flame of the table so
+that the mesh resolves it, as for finite-rate chemistry
+([thickened flames](les.md#thickened-flames-lescombustion)): where the flame
+sensor `Omega` is 1, the diffusivity of `Z` and `C` and the conductivity of the
+enthalpy are multiplied by `E F`, the source of `C` (and the `HRR` output) by
+`E / F`, and the eddy diffusivities by `1 - Omega`. The thickened flame keeps
+the laminar flame speed times the efficiency `E` and spans `n_res` cells.
+
+- **Sensor**: the table's normalized progress variable `Lambda` (`C_NORM`)
+  in place of the temperature, `Omega = min(1, Lambda (1 - Lambda) / 0.0475)`:
+  1 across the flame (`0.05 <= Lambda <= 0.95`), 0 in fresh and burnt gas
+  and where the table has no flame at the cell's `Z`. The dynamic efficiency
+  filters `Lambda` too. `sensor = "progress"` is the default and the only
+  sensor with `gas = "flamelet"`; `T_unburnt` and `T_burnt` are not used.
+- **Variance**: none. The thickened flame is resolved on the mesh, so the
+  table is looked up at zero subgrid variance of `Z` (`Sz = 0`, the laminar
+  flamelets): `variance = "none"` is the default, and `algebraic` or
+  `transported` is an input error with `[les.combustion]`, as are `C_Z` and
+  `C_chi`. The table keeps its `Sz` axis; only its first slice is read.
+- `delta_L` and `s_L`, the thickness and speed of the laminar flame that `F`
+  and the efficiency scale with, are required, as with `sensor =
+  "temperature"`.
+
+```toml
+[physics]
+type = "navier_stokes"
+gas = "flamelet"
+table = "ch4_fpv.h5"        # variance = "none" is implied
+
+[les]
+model = "sigma"
+
+[les.combustion]
+model = "tfles"
+delta_L = 4.5e-4            # m, of the laminar flame
+s_L = 0.38                  # m/s
+n_res = 5
+```
+
+The partially stirred reactor (`model = "pasr"`) scales finite-rate rates and
+is an input error with the flamelet gas.
 
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:
-`[les.combustion]`, `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
+`[les.combustion]` `model = "pasr"`, `[chemistry]`, `[radiation]`, `[output.mixture]`, the fields `ENTROPY` and the
 mixture's other derived fields, and nondimensional units. Probes and statistics
 do not sample the table fields (`T_TABLE`, `HRR`, the table's `Y_<species>`).

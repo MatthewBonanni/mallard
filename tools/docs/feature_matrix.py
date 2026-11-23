@@ -81,6 +81,7 @@ FEATURES = [
     Feature("les", "LES", "Physics", lambda t: "les" in t),
     Feature("wall_model", "Wall model", "Physics", lambda t: any("wall_model" in b for b in t.get("boundaries", []))),
     Feature("axisymmetric", "Axisymmetric", "Physics", lambda t: physics(t).get("axisymmetric", False)),
+    Feature("particles", "Lagrangian particles", "Physics", lambda t: "particles" in t),
     Feature("fo", "FO", "Reconstruction", lambda t: recon(t).get("type", "FO") == "FO"),
     Feature("muscl", "MUSCL", "Reconstruction", lambda t: recon(t).get("type") == "MUSCL"),
     Feature("teno3", "TENO3", "Reconstruction", teno(3)),
@@ -141,7 +142,6 @@ TABLES = [
 
 # Input guards that reject a pair of features: (file, part of the message, feature, feature)
 GUARDS = [
-    ("src/solver/solver.cpp", "curved boundaries are not supported in axisymmetric runs", "axisymmetric", "curved"),
     ("src/solver/solver.cpp", "rotational periodicity is not supported in axisymmetric runs",
      "axisymmetric", "rotational"),
     ("src/solver/solver.cpp", "its thermodynamics are frozen over a step", "double_flux", "simpler"),
@@ -200,6 +200,7 @@ VERIFICATION_ANCHORS = {
     "curved": "curved-boundaries",
     "remap": "remapping",
     "mixtures": "gas-mixtures",
+    "particles": "lagrangian-particles",
 }
 METHOD_TOKENS = {"FO": "fo", "MUSCL": "muscl", "TENO3": "teno3", "TENO4": "teno4", "TENO5": "teno5",
                  "TENO6": "teno6", "FE": "fe", "SSPRK3": "ssprk3", "RK4": "rk4", "SSPRK54": "ssprk54",

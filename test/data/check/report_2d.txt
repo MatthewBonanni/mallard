@@ -88,6 +88,9 @@
                                                                                    the run
           outside Kokkos per GPU                       1.60  GB                    typical: CUDA's context and kernels'
                                                                                    local memory on an A100
+          freed after setup on GPUs                    4.20  kB                    the mesh's node lists, which this CPU
+                                                                                   build keeps: left out of the steady
+                                                                                   state
   ok      most cells per GPU                 128,683,729     owned and halo cells  547 B per cell + 58.1 kB, at the
                                                                                    setup's peak
   ok      fewest GPUs                                  1     GPUs                  largest part 128 owned + 0 halo
