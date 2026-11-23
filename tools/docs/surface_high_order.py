@@ -22,14 +22,17 @@ POINT = np.array([0.5, 0.3])
 NORMAL = np.array([0.3, 1.0])
 CENTER = (0.45, 0.0)
 WIDTH = 0.08
+# Small enough that no cell is troubled (TENO_SIGMA < troubled_threshold) on this mesh: troubled cells take the
+# linear least-squares values, and their elements would be straight
+AMPLITUDE = 0.1
 
 
 def exact(x, y):
-    return 1.0 + 0.3 * np.exp(-((x - CENTER[0]) ** 2 + (y - CENTER[1]) ** 2) / WIDTH)
+    return 1.0 + AMPLITUDE * np.exp(-((x - CENTER[0]) ** 2 + (y - CENTER[1]) ** 2) / WIDTH)
 
 
 def run(mallard, work):
-    rho = f"1.0 + 0.3 * exp(-((x - {CENTER[0]})^2 + (y - {CENTER[1]})^2) / {WIDTH})"
+    rho = f"1.0 + {AMPLITUDE} * exp(-((x - {CENTER[0]})^2 + (y - {CENTER[1]})^2) / {WIDTH})"
     sides = "".join(f'[[boundaries]]\nname = "{b}"\ntype = "outlet_extrapolation"\n' for b in ("left", "right", "top"))
     writers = "".join(f'[[write_data]]\nprefix = "out/{name}"\nformat = "vtu"\ninterval = 1\n{keys}'
                       'regions = ["cut", "bottom"]\nfields = ["RHO"]\n'

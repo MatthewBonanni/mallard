@@ -590,8 +590,13 @@ fields = ["U", "P", "Q_CRITERION", "TAU_W"]
 At the nodes:
 
 - `RHO`, `RHOU`, `RHOE`, the primitives, `T`, `H`, `MACH`, `SOUND_SPEED` and
-  `Y_<s>` are the polynomial's point values. Troubled cells, and cells whose
-  polynomial leaves the admissible states, hold their averages at every node.
+  `Y_<s>` are the polynomial's point values. Troubled cells (`TENO_SIGMA` at
+  or above `troubled_threshold`), where the flux chooses among candidate
+  stencils face by face and the cell has no one polynomial, and cells whose
+  polynomial leaves the admissible states, take the linear least-squares
+  values instead, as [probes](probes.md) with `sampling = "point"` do: their
+  elements are straight. On a coarse mesh a smooth feature can be troubled,
+  since the sensor measures the spread of the density over the stencil.
 - `VORTICITY` (`VORTICITY_X`, `_Y`, `_Z` and `HELICITY` in 3D),
   `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN`, `DILATATION`, `ENSTROPHY` and
   `STRAIN_RATE` come from the polynomial's derivatives there, in place of the
