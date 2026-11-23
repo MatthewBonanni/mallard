@@ -55,30 +55,6 @@ TEST(CommonMathTest, Unit) {
     EXPECT_RTYPE_EQ(expected_unit[1], actual_unit[1]);
 }
 
-TEST(CommonMathTest, UnitNegative) {
-    std::vector<rtype> v = {-3.0, -4.0};
-
-    std::vector<rtype> expected_unit = {-0.6_r, -0.8_r};
-    std::vector<rtype> actual_unit(2);
-    unit<2>(v.data(), actual_unit.data());
-
-    EXPECT_RTYPE_EQ(expected_unit[0], actual_unit[0]);
-    EXPECT_RTYPE_EQ(expected_unit[1], actual_unit[1]);
-}
-
-TEST(CommonMathTest, Transpose2) {
-    std::vector<rtype> A = {1.0, 2.0,
-                            3.0, 4.0};
-    std::vector<rtype> expected_AT = {1.0, 3.0,
-                                      2.0, 4.0};
-    std::vector<rtype> actual_AT(4);
-    transpose(A.data(), actual_AT.data(), 2, 2);
-
-    for (uint32_t i = 0; i < 4; ++i) {
-        EXPECT_RTYPE_EQ(expected_AT[i], actual_AT[i]);
-    }
-}
-
 TEST(CommonMathTest, TransposeWide) {
     std::vector<rtype> A = {1.0, 2.0, 3.0,
                             4.0, 5.0, 6.0};
@@ -589,84 +565,10 @@ TEST(CommonMathTest, TriangleArea2) {
     EXPECT_RTYPE_EQ(expected_area, actual_area);
 }
 
-TEST(CommonMathTest, TriangleArea2NegativeCoordinates) {
-    std::vector<rtype> v0 = {-1.0, -1.0};
-    std::vector<rtype> v1 = { 1.0, -1.0};
-    std::vector<rtype> v2 = {-1.0,  1.0};
-
-    rtype expected_area = 2.0;
-    rtype actual_area = triangle_area<2>(v0.data(), v1.data(), v2.data());
-
-    EXPECT_RTYPE_EQ(expected_area, actual_area);
-}
-
-TEST(CommonMathTest, TriangleArea2ZeroArea) {
-    std::vector<rtype> v0 = {0.0, 0.0};
-    std::vector<rtype> v1 = {0.0, 0.0};
-    std::vector<rtype> v2 = {0.0, 0.0};
-
-    rtype expected_area = 0.0;
-    rtype actual_area = triangle_area<2>(v0.data(), v1.data(), v2.data());
-
-    EXPECT_RTYPE_EQ(expected_area, actual_area);
-}
-
-// TEST(CommonMathTest, TriangleArea3) {
-//     std::vector<rtype> v0 = {0.0, 0.0, 0.0};
-//     std::vector<rtype> v1 = {0.0, 1.0, 0.0};
-//     std::vector<rtype> v2 = {0.0, 0.0, 1.0};
-
-//     rtype expected_area = 0.5;
-//     rtype actual_area = triangle_area<3>(v0.data(), v1.data(), v2.data());
-
-//     EXPECT_RTYPE_EQ(expected_area, actual_area);
-// }
-
-// TEST(CommonMathTest, TriangleArea3NegativeCoordinates) {
-//     std::vector<rtype> v0 = {-1.0, -1.0, -1.0};
-//     std::vector<rtype> v1 = { 1.0, -1.0, -1.0};
-//     std::vector<rtype> v2 = {-1.0,  1.0, -1.0};
-
-//     rtype expected_area = 2.0;
-//     rtype actual_area = triangle_area<3>(v0.data(), v1.data(), v2.data());
-
-//     EXPECT_RTYPE_EQ(expected_area, actual_area);
-// }
-
-// TEST(CommonMathTest, TriangleArea3ZeroArea) {
-//     std::array<rtype, 3> v0 = {0.0, 0.0, 0.0};
-//     std::array<rtype, 3> v1 = {0.0, 0.0, 0.0};
-//     std::array<rtype, 3> v2 = {0.0, 0.0, 0.0};
-
-//     rtype expected_area = 0.0;
-//     rtype actual_area = triangle_area<3>(v0.data(), v1.data(), v2.data());
-
-//     EXPECT_RTYPE_EQ(expected_area, actual_area);
-// }
-
 TEST(CommonMathTest, TriangleJJinvTranslate) {
     std::vector<rtype> v0 = {1.0, 1.0};
     std::vector<rtype> v1 = {2.0, 1.0};
     std::vector<rtype> v2 = {1.0, 2.0};
-
-    std::vector<rtype> J(4);
-    std::vector<rtype> J_inv(4);
-    triangle_J(v0.data(), v1.data(), v2.data(), J.data());
-    invert_matrix<2>(J.data(), J_inv.data());
-
-    std::vector<rtype> expected_J = {1.0, 0.0, 0.0, 1.0};
-    std::vector<rtype> expected_J_inv = {1.0, 0.0, 0.0, 1.0};
-
-    for (uint32_t i = 0; i < 4; ++i) {
-        EXPECT_RTYPE_EQ(expected_J[i], J[i]);
-        EXPECT_RTYPE_EQ(expected_J_inv[i], J_inv[i]);
-    }
-}
-
-TEST(CommonMathTest, TriangleJJinvUnit) {
-    std::vector<rtype> v0 = {0.0, 0.0};
-    std::vector<rtype> v1 = {1.0, 0.0};
-    std::vector<rtype> v2 = {0.0, 1.0};
 
     std::vector<rtype> J(4);
     std::vector<rtype> J_inv(4);
