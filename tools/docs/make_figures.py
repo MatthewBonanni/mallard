@@ -18,6 +18,7 @@ import argparse
 import sys
 
 import boundary_coordinates
+import boundary_data
 import case_view
 import check_resolution
 import domains
@@ -50,6 +51,7 @@ def main():
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
     boundary_coordinates.figures(args.mallard, args.mallard3d)
+    boundary_data.figures()
     check_resolution.figures()
     domains.figures()
     effective_resolution.figures()
