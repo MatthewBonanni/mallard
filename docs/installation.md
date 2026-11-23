@@ -5,7 +5,7 @@ Four ways to install Mallard, quickest first:
 | | Best for | Compiling |
 |---|---|---|
 | [Container](#container) (Docker, Apptainer, Kubernetes) | Trying Mallard; workstations; GPU nodes; Kubernetes clusters | None |
-| [Portable binaries](#portable-binaries) | Linux clusters with an MPICH-based MPI or Open MPI; no container runtime | None |
+| [Portable binaries](#portable-binaries) (CPU only) | Linux CPU clusters with an MPICH-based MPI or Open MPI; no container runtime | None |
 | [Spack](#spack) | Clusters: your compilers, MPI and GPUs | Automatic |
 | [From source](#from-source) | Development: tests, fuzzing, sanitizers, warnings as errors | CMake |
 
@@ -107,7 +107,7 @@ On Kubernetes, a `Job` runs a case on one GPU node with its files on a volume, a
 
 ## Portable binaries
 
-From 0.11.0, each release attaches portable binaries of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, one archive per MPI family, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer). Pick the archive of the cluster's MPI:
+The portable binaries are **CPU only**: for NVIDIA or AMD GPUs, use the [`:cuda` container](#container), [Spack](#spack) or a [source build](#from-source). From 0.11.0, each release attaches portable binaries of Mallard for Linux CPUs (OpenMP and MPI, HDF5, CGNS, zlib; 2D and 3D) for x86-64 and ARM, one archive per MPI family, which unpacks anywhere and runs without installing anything, on glibc 2.28 or newer (RHEL 8, Ubuntu 20.04 and newer). Pick the archive of the cluster's MPI:
 
 | Cluster's MPI | `mpirun --version` (or `mpiexec --version`) prints | Archive |
 |---|---|---|

@@ -108,7 +108,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 | | Best for |
 |---|---|
 | Container: `ghcr.io/matthewbonanni/mallard` (CPU) or `:cuda` (NVIDIA); Docker, Apptainer, Kubernetes | Trying Mallard; workstations; GPU nodes; Kubernetes |
-| Portable Linux CPU binaries (MPICH or Open MPI), each release since 0.11.0 | Linux clusters; no container runtime |
+| Portable Linux binaries, **CPU only** (MPICH or Open MPI), each release since 0.11.0 | Linux CPU clusters; no container runtime (GPUs: container or Spack) |
 | [Spack](https://spack.io): `spack install mallard` (this repository's package) | Clusters: your compilers, MPI, GPUs |
 | From source with CMake | Development: tests, fuzzing, sanitizers, warnings as errors |
 
