@@ -83,7 +83,7 @@ interval = 2
 t_start = 0.1
 
 [statistics.convergence]
-signals = ["integrals_enstrophy"]
+signals = ["integrals_ENSTROPHY"]
 confidence = 0.9
 batches = 10
 tolerance = 0.02

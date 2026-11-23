@@ -9,7 +9,7 @@
 # turbulence: k stays between 0.1234 and 0.1248 through t = 20 (it starts at
 # 0.1238, the cell averages of the initial field); unforced it falls to 0.012.
 # integrals.csv logs the kinetic energy integrated over the box (divide
-# kinetic_energy by (2 pi)^3). 20 s on one A100.
+# KINETIC_ENERGY by (2 pi)^3). 20 s on one A100.
 #
 # [statistics.convergence] follows the enstrophy (convergence.csv) and the
 # "converged" trigger stops the run once its mean is known to +-2%; through
@@ -82,12 +82,12 @@ interval = 10
 
 # Stop once the enstrophy is statistically stationary and its mean known to +-2%
 [statistics.convergence]
-signals = ["integrals_enstrophy"]
+signals = ["integrals_ENSTROPHY"]
 tolerance = 0.02
 
 [[triggers]]
 name = "converged"
-when = "convergence_converged"
+when = "convergence_CONVERGED"
 do = "stop"
 
 [[write_data]]

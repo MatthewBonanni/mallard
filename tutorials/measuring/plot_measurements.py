@@ -78,28 +78,28 @@ def main():
 
     forces = table(run, "forces_cylinder.csv")
     t = forces["t"]
-    cd = (forces["Fx_pressure"] + forces["Fx_viscous"]) / Q
-    cl = (forces["Fy_pressure"] + forces["Fy_viscous"]) / Q
+    cd = (forces["F_X_PRESSURE"] + forces["F_X_VISCOUS"]) / Q
+    cl = (forces["F_Y_PRESSURE"] + forces["F_Y_VISCOUS"]) / Q
     wall = table(run, "probe_wall_reductions.csv")
     wall = wall[np.isin(wall["step"], forces["step"])]
-    cd_wall = (wall["integral_TRACTION_PRESSURE_X"] + wall["integral_TRACTION_VISCOUS_X"]) / Q
-    cl_wall = (wall["integral_TRACTION_PRESSURE_Y"] + wall["integral_TRACTION_VISCOUS_Y"]) / Q
+    cd_wall = (wall["INTEGRAL_TRACTION_PRESSURE_X"] + wall["INTEGRAL_TRACTION_VISCOUS_X"]) / Q
+    cl_wall = (wall["INTEGRAL_TRACTION_PRESSURE_Y"] + wall["INTEGRAL_TRACTION_VISCOUS_Y"]) / Q
 
     box = table(run, "probe_box_reductions.csv")
     tb = box["t"]
     sides = {s: table(run, f"probe_{s}_reductions.csv") for s in SIDES}
     flux = {q: sum(sides[s][f"integral_{q}"] for s in SIDES)
             for q in ("MASS_FLUX", "MOMENTUM_FLUX_X", "MOMENTUM_FLUX_Y", "ENTHALPY_FLUX")}
-    mass = box["integral_RHO"]
+    mass = box["INTEGRAL_RHO"]
     residual = ddt(tb, mass) + flux["MASS_FLUX"]
-    inflow = -sides["west"]["integral_MASS_FLUX"]
+    inflow = -sides["west"]["INTEGRAL_MASS_FLUX"]
     # The force on the cylinder is minus the rate of change of the box's
     # momentum and its flux out (viscous stresses on the sides neglected)
-    cd_box = -(ddt(tb, box["integral_RHOU_X"]) + flux["MOMENTUM_FLUX_X"]) / Q
-    cl_box = -(ddt(tb, box["integral_RHOU_Y"]) + flux["MOMENTUM_FLUX_Y"]) / Q
+    cd_box = -(ddt(tb, box["INTEGRAL_RHOU_X"]) + flux["MOMENTUM_FLUX_X"]) / Q
+    cl_box = -(ddt(tb, box["INTEGRAL_RHOU_Y"]) + flux["MOMENTUM_FLUX_Y"]) / Q
     # Adiabatic wall: no source of energy (heat conduction and viscous work on the sides neglected)
-    energy = ddt(tb, box["integral_RHOE"]) + flux["ENTHALPY_FLUX"]
-    enthalpy_in = -sides["west"]["integral_ENTHALPY_FLUX"]
+    energy = ddt(tb, box["INTEGRAL_RHOE"]) + flux["ENTHALPY_FLUX"]
+    enthalpy_in = -sides["west"]["INTEGRAL_ENTHALPY_FLUX"]
 
     sel = t >= args.t_start
     selb = tb >= args.t_start

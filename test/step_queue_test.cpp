@@ -595,7 +595,7 @@ TEST(StepQueueTest, KineticEnergyBudgetIsStagedWithoutStoppingTheDevice) {
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("budget", c);
     if (comm::is_root()) {
-        EXPECT_NE(o.files.at("integrals.csv").find("eps_numerical"), std::string::npos);
+        EXPECT_NE(o.files.at("integrals.csv").find("EPS_NUMERICAL"), std::string::npos);
     }
     Case bare = c;
     bare.extra = "check_interval = 1000\n";
@@ -1075,7 +1075,7 @@ TEST(StepQueueTest, ConvergenceSamplesEveryMonitorRow) {
               "point = " + point_of("0.6", "0.5", "0.2") + "\n"
               "[[forces]]\nzone = \"bottom\"\nfile = \"{dir}/forces.csv\"\ninterval = 5\n"
               "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
-              "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"forces_bottom_Fy_pressure\", "
+              "[statistics.convergence]\nsignals = [\"integrals_KINETIC_ENERGY\", \"forces_bottom_F_Y_PRESSURE\", "
               "\"pt_P\"]\nmin_samples = 10\nbatches = 4\nfile = \"{dir}/convergence.csv\"\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("convergence", c);
@@ -1102,7 +1102,7 @@ TEST(StepQueueTest, TriggersOnConvergenceAreEvaluatedOnTheDevice) {
         "point = " + point_of("0.6", "0.5", "0.2") + "\n"
         "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
         "[statistics]\ninterval = 2\nt_start = 1.5\nfields = [\"P\"]\n"
-        "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\nmin_samples = 10\n"
+        "[statistics.convergence]\nsignals = [\"integrals_KINETIC_ENERGY\", \"pt_P\"]\nmin_samples = 10\n"
         "batches = 4\ntolerance = 0.5\nfile = \"{dir}/convergence.csv\"\n";
     c.extra = convergence;
     c.distributed = comm::size() > 1;
@@ -1169,7 +1169,7 @@ TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueO
                                     "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
                                     "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 7\nfields = [\"P\"]\n"
                                     "point = " + point_of("0.6", "0.5", "0.2") + "\n"
-                                    "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"pt_P\"]\n"
+                                    "[statistics.convergence]\nsignals = [\"integrals_KINETIC_ENERGY\", \"pt_P\"]\n"
                                     "file = \"{dir}/convergence.csv\"\n";
     c.extra = convergence;
     c.distributed = comm::size() > 1;
@@ -1178,7 +1178,7 @@ TEST(StepQueueTest, ConvergenceHistoriesOutgrowingTheirDeviceMemoryStopTheQueueO
     ASSERT_GT(at, 0u);
     // Sokal's window (5 tau) spans more than one device chunk of 256 lags
     if (comm::is_root()) {
-        EXPECT_GT(5.0 * value_at(reference, "convergence.csv", "integrals_kinetic_energy_tau", at), 256.0);
+        EXPECT_GT(5.0 * value_at(reference, "convergence.csv", "integrals_KINETIC_ENERGY_TAU", at), 256.0);
     }
     c.extra = convergence + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("convergence_room", c);
@@ -1201,9 +1201,9 @@ TEST(StepQueueTest, ConvergenceHistoryStopsTheQueueAtTheSampleItsDeviceMemoryHas
         Case c;
         c.run = "n_steps = " + std::to_string(n_steps) + "\ncfl = 0.5\n";
         c.extra = "check_interval = 100000\n[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 1\n"
-                  "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\"]\nfile = \"{dir}/convergence.csv\"\n"
+                  "[statistics.convergence]\nsignals = [\"integrals_KINETIC_ENERGY\"]\nfile = \"{dir}/convergence.csv\"\n"
                   "[[triggers]]\nname = \"never\"\ndo = \"stop\"\nwhen = \"" +
-                  std::string(convergence ? "convergence_integrals_kinetic_energy_samples < 0" : "step < 0") + "\"\n";
+                  std::string(convergence ? "convergence_integrals_KINETIC_ENERGY_SAMPLES < 0" : "step < 0") + "\"\n";
         c.distributed = comm::size() > 1;
         const std::string name = "convergence_capacity_" + std::to_string(n_steps) + (convergence ? "" : "_host");
         return run_case(name, c, 3).queued;
@@ -1224,7 +1224,7 @@ TEST(StepQueueTest, ConvergenceRestartedFromACheckpointGoesOnOnTheDevice) {
         "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
         "point = " + point_of("0.6", "0.5", "0.2") + "\n"
         "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
-        "[statistics.convergence]\nsignals = [\"integrals_kinetic_energy\", \"forces_bottom_Fy_pressure\", \"pt_P\"]\n"
+        "[statistics.convergence]\nsignals = [\"integrals_KINETIC_ENERGY\", \"forces_bottom_F_Y_PRESSURE\", \"pt_P\"]\n"
         "min_samples = 10\nbatches = 4\nfile = \"{dir}/convergence.csv\"\n";
     c.extra = convergence;
     c.distributed = comm::size() > 1;
@@ -1554,7 +1554,7 @@ TEST(StepQueueTest, TriggersAreEvaluatedWithoutStoppingTheDevice) {
     c.run = "n_steps = 40\ncfl = 0.5\n";
     c.extra = RESTARTS + "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 2\n"
               "[[triggers]]\nname = \"held\"\nwhen = \"t > 0.05\"\nfor = 0.04\ndo = \"checkpoint\"\n"
-              "[[triggers]]\nname = \"energy\"\nwhen = \"integrals_kinetic_energy > 0 and step % 6 < 3\"\nrepeat = true\n"
+              "[[triggers]]\nname = \"energy\"\nwhen = \"integrals_KINETIC_ENERGY > 0 and step % 6 < 3\"\nrepeat = true\n"
               "do = \"checkpoint\"\n"
               "[[triggers]]\nname = \"late\"\nwhen = \"step >= 31\"\ndo = \"stop\"\n";
     c.distributed = comm::size() > 1;
@@ -1622,7 +1622,7 @@ TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
     c.distributed = comm::size() > 1;
     const Outcome reference = run_case("probe_reductions_reference", c, 0);
     const std::string when =
-        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        written_at(reference, "line", {"INTEGRAL_P", "MEAN_P", "FAVRE_P", "RMS_P", "MIN_P", "MAX_RHO"}, "pt", "P", 18) +
         " and step % 3 == 1";
     c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
     const Outcome o = expect_queue_invariant("probe_reductions", c);
@@ -1653,17 +1653,17 @@ TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) 
         "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
         "reductions = [\"min\", \"max\"]\nreductions_file = \"{dir}/ci_reductions.csv\"\n";
     // Beyond +-DBL_MAX: the extrema of no interval
-    const std::string no_interval = "[[triggers]]\nname = \"no_interval\"\nwhen = \"ci_min_CI_MEAN_P > "
-                                    "1.7976931348623157e308 and ci_max_CI_MEAN_P < -1.7976931348623157e308 and "
+    const std::string no_interval = "[[triggers]]\nname = \"no_interval\"\nwhen = \"ci_MIN_CI_MEAN_P > "
+                                    "1.7976931348623157e308 and ci_MAX_CI_MEAN_P < -1.7976931348623157e308 and "
                                     "step == 3\"\ndo = \"checkpoint\"\n";
     c.extra = probes;
     c.distributed = comm::size() > 1;
     const Outcome reference = run_case("averaged_reductions_reference", c, 0);
     const std::string when = written_at(reference, "line",
-                                        {"integral_MEAN_P", "mean_MEAN_P", "favre_MEAN_P", "rms_MEAN_P", "min_MEAN_P",
-                                         "max_MEAN_RHO"},
+                                        {"INTEGRAL_MEAN_P", "MEAN_MEAN_P", "FAVRE_MEAN_P", "RMS_MEAN_P", "MIN_MEAN_P",
+                                         "MAX_MEAN_RHO"},
                                         "pt", "MEAN_P", 18) +
-                             " and " + written_at(reference, "ci", {"min_CI_MEAN_P"}, "pt", "MEAN_P", 18) +
+                             " and " + written_at(reference, "ci", {"MIN_CI_MEAN_P"}, "pt", "MEAN_P", 18) +
                              " and step % 3 == 2";
     c.extra = probes + no_interval + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     const Outcome o = expect_queue_invariant("averaged_reductions", c);
@@ -1707,7 +1707,7 @@ TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
     std::vector<double> measures;
     if (comm::is_root()) {
         for (uint64_t step = 0; step <= 60; step += 3) {
-            measures.push_back(value_at(reference, "disk_reductions.csv", N_DIM == 2 ? "area" : "volume", step));
+            measures.push_back(value_at(reference, "disk_reductions.csv", N_DIM == 2 ? "AREA" : "VOLUME", step));
         }
     }
     measures = comm::allgatherv(measures);
@@ -1717,13 +1717,13 @@ TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
         if (out != 0 && measures[k] > 0.0 && measures[k - 1] > 0.0) back = 3 * k;
     }
     ASSERT_NE(back, 0u) << "the disk does not leave the box and come back";
-    const std::vector<std::string> names = {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"};
+    const std::vector<std::string> names = {"INTEGRAL_P", "MEAN_P", "FAVRE_P", "RMS_P", "MIN_P", "MAX_RHO"};
     const std::string when = written_at(reference, "disk", names, "pt", "P", 6) + " and " +
                              written_at(reference, "mean_disk",
-                                        {"integral_MEAN_P", "mean_MEAN_P", "favre_MEAN_P", "rms_MEAN_P", "min_MEAN_P",
-                                         "max_MEAN_RHO"},
+                                        {"INTEGRAL_MEAN_P", "MEAN_MEAN_P", "FAVRE_MEAN_P", "RMS_MEAN_P", "MIN_MEAN_P",
+                                         "MAX_MEAN_RHO"},
                                         "pt", "P", 6) +
-                             " and " + written_at(reference, "hot", {"integral_P", "max_P"}, "pt", "P", 6) +
+                             " and " + written_at(reference, "hot", {"INTEGRAL_P", "MAX_P"}, "pt", "P", 6) +
                              " and step % 3 == 2";
     const std::string when_back = written_at(reference, "disk", names, "pt", "P", back) + " and step % 3 == 2";
     const auto triggers = [&](const std::string & values, const std::string & again) {
@@ -1739,7 +1739,7 @@ TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
             file << "restart_" << std::setw(6) << std::setfill('0') << step << ".restart";
             EXPECT_TRUE(o.files.count(file.str())) << file.str();
         }
-        EXPECT_NE(value_at(o, "disk_reductions.csv", "integral_RHO", 3), value_at(o, "disk_reductions.csv", "integral_RHO", 6));
+        EXPECT_NE(value_at(o, "disk_reductions.csv", "INTEGRAL_RHO", 3), value_at(o, "disk_reductions.csv", "INTEGRAL_RHO", 6));
     }
     Case at_step = c;
     at_step.extra = probes + triggers("step == 8", "step == " + std::to_string(back + 2));
@@ -1771,7 +1771,7 @@ TEST(StepQueueTest, TriggersOfMovingRegionsStagedWhileTheyCoverNoCellAreReducedO
     std::vector<double> measures;
     if (comm::is_root()) {
         for (uint64_t step = 0; step <= 60; step += 2) {
-            measures.push_back(value_at(reference, "dot_reductions.csv", N_DIM == 2 ? "area" : "volume", step));
+            measures.push_back(value_at(reference, "dot_reductions.csv", N_DIM == 2 ? "AREA" : "VOLUME", step));
         }
     }
     measures = comm::allgatherv(measures);
@@ -1783,7 +1783,7 @@ TEST(StepQueueTest, TriggersOfMovingRegionsStagedWhileTheyCoverNoCellAreReducedO
     ASSERT_EQ(measures[0], 0.0) << "the dot is in the box at the start";
     ASSERT_NE(in, 0u) << "the dot does not enter the box";
     const std::string when =
-        written_at(reference, "dot", {"integral_P", "mean_P", "max_RHO"}, "pt", "P", in) + " and step % 2 == 1";
+        written_at(reference, "dot", {"INTEGRAL_P", "MEAN_P", "MAX_RHO"}, "pt", "P", in) + " and step % 2 == 1";
     c.extra = probes + "[[triggers]]\nname = \"entered\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
     const Outcome o = expect_queue_invariant("dot_reductions", c);
     EXPECT_EQ(o.step, in + 1);
@@ -1893,7 +1893,7 @@ TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
     c.distributed = true;
     const Outcome reference = run_case("gated_reference", c, 0);
     const std::string when =
-        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        written_at(reference, "line", {"INTEGRAL_P", "MEAN_P", "FAVRE_P", "RMS_P", "MIN_P", "MAX_RHO"}, "pt", "P", 18) +
         " and step % 3 == 1";
     c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
     // Names of one length: restarts carry their run's record, with its length, in binary

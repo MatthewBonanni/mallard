@@ -98,7 +98,7 @@ def analyze(case_dir, scale, geometry):
 
     forces = np.genfromtxt(os.path.join(solut, "forces_ellipsoid.csv"), delimiter=",", names=True)
     late = forces["t"] >= 0.75 * forces["t"][-1]
-    cd = 4.0 * forces["Fx_pressure"][late].mean() / (0.5 * U * U * np.pi * B * B)
+    cd = 4.0 * forces["F_X_PRESSURE"][late].mean() / (0.5 * U * U * np.pi * B * B)
 
     points, conn, offsets, _, fields = read_vtu_cells(last_file(solut, "ellipsoid"))
     volume = tet_volumes(points, conn, offsets)

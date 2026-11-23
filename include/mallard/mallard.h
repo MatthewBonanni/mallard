@@ -102,7 +102,7 @@ class Case {
  *        [[probes]] value, under the name triggers give it (docs/guide/running.md#triggers).
  */
 struct Monitor {
-    std::string name;   ///< "integrals_rho", "forces_cylinder_Fx_pressure", a probe's value name
+    std::string name;   ///< "integrals_KINETIC_ENERGY", "forces_cylinder_F_X_PRESSURE", a probe's value name
     std::string unit;   ///< UDUNITS ("kg m-3", "1" if dimensionless or nondimensional)
     double value;       ///< NaN before the first write
     std::optional<uint64_t> step;  ///< step of the latest write, none before it

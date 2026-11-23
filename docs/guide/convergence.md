@@ -53,7 +53,7 @@ report gives a warning: a convergence study should change only the resolution.
 
 The quantities are the columns of every CSV table in the run directories with one
 row per time: forces, integrals, probe reductions and single-point probes, each
-named `TABLE:COLUMN` (for example `integrals:kinetic_energy` or
+named `TABLE:COLUMN` (for example `integrals:KINETIC_ENERGY` or
 `forces_cylinder:F_x`). By default each run's last value is taken. That's right for
 a steady case even when the runs stopped at different times; the report notes when
 they did. For an unsteady case, pick one time with `--time T` or average over a
@@ -256,7 +256,7 @@ time_interval = 0.05
 ```
 
 ```text
-$ mallard post convergence n16 n32 n64 --quantity density_squared,kinetic_energy,enstrophy
+$ mallard post convergence n16 n32 n64 --quantity DENSITY_SQUARED,KINETIC_ENERGY,ENSTROPHY
 == Runs ===================================================================================
   run  cells  h / h_fine  run id
   n16    256  4           9bc1ba6b-7635-4738-8b28-adabd49875cb
@@ -266,15 +266,15 @@ $ mallard post convergence n16 n32 n64 --quantity density_squared,kinetic_energy
 
 == Grid convergence ==================================================================== ok
   status  quantity                   fine           extrapolated  units       order  GCI       behavior
-  ok      integrals:density_squared  1.0099828      1.0099989     kg2 m-4     2.16   0.00199%  monotonic
-  ok      integrals:enstrophy        4.6460009e-29  -             kg m-1 s-2  -      -         zero
-  ok      integrals:kinetic_energy   0.625          0.625         kg m s-2    -      0%        unchanged
+  ok      integrals:DENSITY_SQUARED  1.0099828      1.0099989     kg2 m-4     2.16   0.00199%  monotonic
+  ok      integrals:ENSTROPHY        4.6460009e-29  -             kg m-1 s-2  -      -         zero
+  ok      integrals:KINETIC_ENERGY   0.625          0.625         kg m s-2    -      0%        unchanged
 
-  integrals:density_squared: converging monotonically, order 2.16 (design 2), extrapolated
+  integrals:DENSITY_SQUARED: converging monotonically, order 2.16 (design 2), extrapolated
   1.0099989; fine-grid value 1.0099828 +/- 0.00199% (GCI, Fs = 1.25)
-  integrals:enstrophy: zero to round-off: below 1e-12 of the largest column of its table on
+  integrals:ENSTROPHY: zero to round-off: below 1e-12 of the largest column of its table on
   every run
-  integrals:kinetic_energy: the same on every grid, to round-off: grid independent
+  integrals:KINETIC_ENERGY: the same on every grid, to round-off: grid independent
 ```
 
 The kinetic energy is conserved exactly, so it's `unchanged`. The enstrophy of
@@ -308,8 +308,8 @@ $ mallard post convergence n16 n32 n64 --field RHO \
   n64: RHO of n64/restart_000027.restart at t = 0.05 s
 ```
 
-![The density_squared integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-light.svg#gh-light-mode-only)
-![The density_squared integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-dark.svg#gh-dark-mode-only)
+![The DENSITY_SQUARED integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-light.svg#gh-light-mode-only)
+![The DENSITY_SQUARED integral of the three runs against h to the observed order with its extrapolated value and GCI band, and the L1, L2 and Linf errors of RHO against the cell count](../images/guide/grid_convergence-dark.svg#gh-dark-mode-only)
 
 *The same runs, through `--format json` (`tools/docs/runs.py`). Left: plotted
 against $(h/h_1)^p$ with the observed order, the three values lie on a line

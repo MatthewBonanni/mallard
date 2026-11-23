@@ -44,7 +44,7 @@
 # Convective flux: the kinetic-energy-preserving central flux
 # (convective_flux = "hybrid"; the Riemann solver only where the compression
 # sensor fires) on unlimited MUSCL states. [integrals] budget = true
-# measures the scheme's dissipation of kinetic energy (eps_numerical in
+# measures the scheme's dissipation of kinetic energy (EPS_NUMERICAL in
 # integrals.csv): 0.9% of the total, the rest molecular. With the Riemann
 # solver (HLLC) at every face instead, the scheme removes about 7% of the
 # dissipation, and the wall shear comes out 7% low (Re_tau 172.9) with the

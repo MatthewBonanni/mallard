@@ -245,7 +245,7 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
             EXPECT_EQ(key_set(r["monitors"]), (std::set<std::string>{"min_rho", "min_p", "max_mach"}));
             EXPECT_NEAR(r["monitors"]["min_rho"].number, 1.0, 1e-6);
             EXPECT_EQ(r["integrals"]["step"].number, r["step"].number);
-            EXPECT_TRUE(r["integrals"].has("kinetic_energy"));
+            EXPECT_TRUE(r["integrals"].has("KINETIC_ENERGY"));
             // Throughput and ETA from the second report on, once steps were timed
             const bool timed = r["step"].number > 0;
             EXPECT_EQ(r["wall_per_step"].type == Value::Type::NUMBER, timed);

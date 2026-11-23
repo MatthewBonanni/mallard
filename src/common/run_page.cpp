@@ -8,6 +8,7 @@
 #include "run_page.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <utility>
@@ -156,6 +157,11 @@ std::string status_span(const char * status, const std::string & word) {
 /** @brief A unit as the page shows it: "-" for a dimensionless quantity ("1"). */
 std::string shown(const std::string & unit) { return unit == "1" ? "-" : unit; }
 
+std::string uppercase(std::string s) {
+    for (char & c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
 /** @brief What a quantity of the progress record is, in words; empty if it has no description here. */
 std::string description(const std::string & name) {
     static const std::map<std::string, std::string> TEXT = {
@@ -174,30 +180,37 @@ std::string description(const std::string & name) {
         {"cells_per_second", "throughput: cell updates per second of time stepping"},
         {"memory_host", "host memory of the largest rank"},
         {"memory_device", "GPU memory in use on the fullest device"},
-        {"kinetic_energy", "kinetic energy, integral of rho |u|^2 / 2"},
-        {"enstrophy", "enstrophy, integral of rho |omega|^2 / 2"},
-        {"dilatation_squared", "integral of (div u)^2"},
-        {"pressure_dilatation", "pressure-dilatation work, integral of p div u"},
-        {"velocity_squared", "integral of |u|^2"},
-        {"vorticity_squared", "integral of |omega|^2"},
-        {"density_squared", "integral of rho^2"},
-        {"temperature", "integral of T"},
-        {"temperature_squared", "integral of T^2"},
-        {"ke_rate_convective", "kinetic energy rate of the convective fluxes"},
-        {"ke_rate_viscous", "kinetic energy rate of the viscous fluxes"},
-        {"ke_rate_sgs", "kinetic energy rate of the subgrid model"},
-        {"eps_numerical", "numerical dissipation of kinetic energy"},
-        {"pressure_work", "kinetic energy rate of the pressure work"},
-        {"les_C", "dynamic LES model coefficient"},
-        {"tf_beta", "dynamic flame efficiency coefficient"},
+        {"KINETIC_ENERGY", "kinetic energy, integral of rho |u|^2 / 2"},
+        {"ENSTROPHY", "enstrophy, integral of rho |omega|^2 / 2"},
+        {"DILATATION_SQUARED", "integral of (div u)^2"},
+        {"PRESSURE_DILATATION", "pressure-dilatation work, integral of p div u"},
+        {"VELOCITY_SQUARED", "integral of |u|^2"},
+        {"VORTICITY_SQUARED", "integral of |omega|^2"},
+        {"DENSITY_SQUARED", "integral of rho^2"},
+        {"TEMPERATURE", "integral of T"},
+        {"TEMPERATURE_SQUARED", "integral of T^2"},
+        {"KE_RATE_CONVECTIVE", "kinetic energy rate of the convective fluxes"},
+        {"KE_RATE_VISCOUS", "kinetic energy rate of the viscous fluxes"},
+        {"KE_RATE_SGS", "kinetic energy rate of the subgrid model"},
+        {"EPS_NUMERICAL", "numerical dissipation of kinetic energy"},
+        {"PRESSURE_WORK", "kinetic energy rate of the pressure work"},
+        {"LES_C", "dynamic LES model coefficient"},
+        {"TF_BETA", "dynamic flame efficiency coefficient"},
         {"Q", "heat flux of the modeled walls into the fluid"},
         {"mass", "total mass"},
         {"energy", "total energy"},
     };
+    // Run logs of releases before 0.11.0 name the integrals and forces in lowercase (Fx_pressure)
+    const std::string upper = uppercase(name);
     if (const auto it = TEXT.find(name); it != TEXT.end()) return it->second;
-    if (name.size() > 2 && name[0] == 'F' && name.find('_') == 2) {
-        return (name.ends_with("_pressure") ? std::string("pressure") : std::string("viscous")) + " force along " +
-               name[1];
+    if (const auto it = TEXT.find(upper); it != TEXT.end()) return it->second;
+    for (const char * kind : {"_PRESSURE", "_VISCOUS"}) {
+        if (!upper.ends_with(kind) || upper[0] != 'F') continue;
+        const std::string axis = upper.substr(1, upper.size() - 1 - std::string(kind).size());
+        if (axis == "X" || axis == "Y" || axis == "Z" || axis == "_X" || axis == "_Y" || axis == "_Z") {
+            return std::string(kind == std::string("_PRESSURE") ? "pressure" : "viscous") + " force along " +
+                   static_cast<char>(std::tolower(static_cast<unsigned char>(axis.back())));
+        }
     }
     if (name.starts_with("momentum_")) return "total momentum along " + name.substr(9);
     return "";
@@ -240,12 +253,14 @@ std::string caption(const Series & s) {
     if (s.group == "Numerical repairs") return "times the repair " + s.name + " has acted";
     if (s.group.starts_with("Probe ")) {
         static const std::vector<std::pair<std::string, std::string>> REDUCTIONS = {
-            {"integral_", "integral"}, {"mean_", "mean"},          {"favre_", "density-weighted (Favre) mean"},
-            {"min_", "lowest value"},  {"max_", "highest value"}, {"rms_", "root mean square"}};
+            {"INTEGRAL_", "integral"}, {"MEAN_", "mean"},          {"FAVRE_", "density-weighted (Favre) mean"},
+            {"MIN_", "lowest value"},  {"MAX_", "highest value"}, {"RMS_", "root mean square"}};
+        // Lowercase before 0.11.0 (mean_P)
+        const std::string upper = uppercase(s.name);
         for (const auto & [prefix, words] : REDUCTIONS) {
-            if (s.name.starts_with(prefix)) return words + " of " + s.name.substr(prefix.size()) + " over the probe";
+            if (upper.starts_with(prefix)) return words + " of " + s.name.substr(prefix.size()) + " over the probe";
         }
-        if (s.name.starts_with("moment_")) return "moment of " + s.name.substr(7) + " about moment_center";
+        if (upper.starts_with("MOMENT_")) return "moment of " + s.name.substr(7) + " about moment_center";
         return s.name + " at the probe's point";
     }
     const std::string d = description(s.name);

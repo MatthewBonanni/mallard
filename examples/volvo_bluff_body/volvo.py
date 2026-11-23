@@ -247,7 +247,7 @@ def cmd_budget(a):
 def budget_window(rows, t, t0, t1, name):
     sel = (t >= t0) & (t <= t1)
     get = lambda k: np.array([float(r[k]) for r in rows])[sel]
-    eps_sgs, eps_mol, eps_num = -get("ke_rate_sgs"), -get("ke_rate_viscous"), get("eps_numerical")
+    eps_sgs, eps_mol, eps_num = -get("KE_RATE_SGS"), -get("KE_RATE_VISCOUS"), get("EPS_NUMERICAL")
     ts = t[sel]
     avg = lambda f: np.trapezoid(f, ts) / (ts[-1] - ts[0])
     s, m, n = avg(eps_sgs), avg(eps_mol), avg(eps_num)

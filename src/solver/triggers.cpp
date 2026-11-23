@@ -22,6 +22,10 @@
 
 namespace {
 
+const char * const UPPERCASE_FIX = "Monitored values became uppercase, like field names "
+                                   "(integrals_KINETIC_ENERGY, forces_<zone>_F_X_PRESSURE, <probe>_MEAN_P): "
+                                   "mallard input upgrade rewrites the old names";
+
 const std::vector<std::string> ACTIONS = {"stop",           "checkpoint",      "write <prefix>",       "start statistics",
                                           "stop statistics", "log <message>", "set <key>=<value> ..."};
 
@@ -138,9 +142,15 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
             const size_t at = what.find("unknown symbol '");
             if (at != std::string::npos) {
                 const size_t begin = at + 16, end = what.find('\'', begin);
-                d.message = "unknown name '" + what.substr(begin, end - begin) + "' in \"" + when + "\"";
+                const std::string unknown = what.substr(begin, end - begin);
+                d.message = "unknown name '" + unknown + "' in \"" + when + "\"";
                 d.valid = names;
-                d.suggestion = suggest_value(what.substr(begin, end - begin), names);
+                d.suggestion = suggest_value(unknown, names);
+                const std::string renamed = uppercase_name(unknown, names);
+                if (!renamed.empty()) {
+                    d.suggestion = "\"" + renamed + "\"";
+                    d.fix = UPPERCASE_FIX;
+                }
             }
             throw InputError(d);
         }
@@ -183,12 +193,15 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
                 act.message = trimmed(text.substr(4));
                 const std::string unknown = unknown_placeholder(act.message, names);
                 if (!unknown.empty()) {
+                    const std::string renamed = uppercase_name(unknown, names);
                     throw InputError({.key = where + ".do",
                                       .line = line_of(entry, "do"),
                                       .message = "\"" + text + "\": {" + unknown + "} is not a name conditions read",
                                       .valid = names,
-                                      .suggestion = suggest_value(unknown, names),
-                                      .fix = "Write {<name>} with a name of t, step, dt, wall or a monitored value",
+                                      .suggestion = renamed.empty() ? suggest_value(unknown, names) : "\"" + renamed + "\"",
+                                      .fix = renamed.empty() ? "Write {<name>} with a name of t, step, dt, wall or a "
+                                                               "monitored value"
+                                                             : UPPERCASE_FIX,
                                       .docs = "docs/guide/running.md#triggers"});
                 }
             } else if (text.rfind("set ", 0) == 0) {

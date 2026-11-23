@@ -123,5 +123,5 @@ fields = ["RHO", "U", "P", "SOURCE_RHOE", "SOURCE_RHOU_X", "SOURCE_RHOU_Y"]
 
 [[triggers]]
 name = "ring_cooled"
-when = "t > 0.1 and ring_mean_T < 3.5"
+when = "t > 0.1 and ring_MEAN_T < 3.5"
 do = ["write solut/sources", "checkpoint"]

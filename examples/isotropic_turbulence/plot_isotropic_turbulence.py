@@ -56,12 +56,12 @@ def load_integrals(path, par):
     T_mean = d["temperature"] / BOX
     return {
         "t": d["t"] / par["tau"],
-        "kinetic_energy": d["velocity_squared"] / BOX / (3 * u0 ** 2),
-        "enstrophy": d["vorticity_squared"] / BOX / (u0 ** 2 / lam0 ** 2),
-        "dilatation_variance": d["dilatation_squared"] / BOX / (u0 ** 2 / lam0 ** 2),
-        "temperature_variance": (d["temperature_squared"] / BOX - T_mean ** 2)
+        "kinetic_energy": d["VELOCITY_SQUARED"] / BOX / (3 * u0 ** 2),
+        "enstrophy": d["VORTICITY_SQUARED"] / BOX / (u0 ** 2 / lam0 ** 2),
+        "dilatation_variance": d["DILATATION_SQUARED"] / BOX / (u0 ** 2 / lam0 ** 2),
+        "temperature_variance": (d["TEMPERATURE_SQUARED"] / BOX - T_mean ** 2)
         / ((par["gamma"] - 1) * par["T0"] * mt ** 2) ** 2,
-        "density_variance": (d["density_squared"] / BOX - 1.0) / mt ** 4,
+        "density_variance": (d["DENSITY_SQUARED"] / BOX - 1.0) / mt ** 4,
     }
 
 

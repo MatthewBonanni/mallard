@@ -441,7 +441,7 @@ the [LES guide](guide/les.md) ([design notes](design/les.md)).
 | `Sc_t` | Turbulent Schmidt number, default 0.9 |
 | `filter_width` | `scotti` (default in 3D): `V^(1/3) f(a_1, a_2)`, Scotti, Meneveau & Lilly's correction for anisotropic cells, `f = cosh(sqrt(4/27 ((ln a_1)^2 - ln a_1 ln a_2 + (ln a_2)^2)))` of the ratios `a_1 = h_1 / h_3`, `a_2 = h_2 / h_3` of the cell's extents (`V` over the eigenvalues of its projected-area tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity and the flamelet gas's subgrid variance only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume` |
 | `gradients` | The models' velocity gradients: `least_squares` (the least-squares gradients on the face neighbors, as the viscous fluxes'), or `reconstruction` (`TENO` only): in the cells TENO finds smooth (`TENO_SIGMA` below `troubled_threshold`), the gradient at the centroid of the central polynomial, which the reconstruction computes with it; troubled cells keep the least-squares gradients. Decaying isotropic turbulence with TENO5 and HLLC at $32^3$: spectral error 0.091 / 0.094 against 0.112 / 0.113 with `least_squares` at $32^3$, but 0.120 / 0.156 against 0.117 / 0.140 at $64^3$: experimental, for under-resolved meshes. See the [LES guide](guide/les.md#gradients-of-the-reconstruction). Default `least_squares` |
-| `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `les_C`. Default `false` |
+| `dynamic` | `true`: the constant from the global dynamic procedure (Germano et al. 1991; Lilly 1992), once per step from the state: `C^2 = <L^d : M> / <M : M>` (Vreman's `c` without the square) summed over the domain, `L = (rho u u)^ - (rho u)^ (rho u)^ / rho^`, `M = 2 ((rho Delta^2 D(g) S^d)^ - rho^ Delta_hat^2 D(g^) S^d(g^))`, with `^` the volume-weighted average over a cell and its vertex neighbors, of width `Delta_hat^2 = Delta^2 + 12 / d tr(cov)` from the covariance of the neighbors' centroids (`3 Delta` on uniform hexahedra), and filtered gradients for the gradients of the filtered field. Clipped at zero; `C` is the value until the first step. The sums are exact (fixed point), so the constant is independent of the rank count. `integrals.csv` gets the column `LES_C`. Default `false` |
 
 | `model` | `nu_t` | Zero for |
 |---|---|---|
@@ -466,7 +466,7 @@ subgrid scales at the filter width $F\delta_L$: by default $E = F^\beta$
 (Charlette, Meneveau & Veynante 2002) with $\beta$ from the dynamic procedure
 of Wang, Boileau & Veynante (2011), which compares the resolved flame surface
 $\lvert\nabla c\rvert$ before and after a test filter (global, exact sums; written to the
-integrals file as `tf_beta`).
+integrals file as `TF_BETA`).
 
 $$
 F = 1 + \left(\max\left(1, \frac{n_\mathrm{res}\Delta}{\delta_L}\right) - 1\right)\Omega, \qquad
@@ -983,9 +983,9 @@ background term: `species = ["H2O", "CO2"]` and `T_ambient = 0` reproduce it.
 ## `[[forces]]`
 
 Write the force of the fluid on a boundary zone to a CSV file
-(`step, t, Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth, or per radian for
+(`step, t, F_X_PRESSURE, F_Y_PRESSURE, F_X_VISCOUS, F_Y_VISCOUS`, per unit depth, or per radian for
 axisymmetric flows; in
-3D `step, t, Fx_pressure, Fy_pressure, Fz_pressure, Fx_viscous, Fy_viscous, Fz_viscous`).
+3D `step, t, F_X_PRESSURE, F_Y_PRESSURE, F_Z_PRESSURE, F_X_VISCOUS, F_Y_VISCOUS, F_Z_VISCOUS`).
 Zones with a wall model report the modeled shear stress as the viscous force
 and add a column `Q`, the modeled heat flux into the fluid over the zone.
 
@@ -997,9 +997,9 @@ and add a column `Q`, the modeled heat flux into the fluid over the zone.
 
 ## `[integrals]`
 
-Write domain integrals to a CSV file (`step, t, kinetic_energy, enstrophy,
-dilatation_squared, pressure_dilatation, velocity_squared, vorticity_squared,
-density_squared, temperature, temperature_squared`): the integrals of
+Write domain integrals to a CSV file (`step, t, KINETIC_ENERGY, ENSTROPHY,
+DILATATION_SQUARED, PRESSURE_DILATATION, VELOCITY_SQUARED, VORTICITY_SQUARED,
+DENSITY_SQUARED, TEMPERATURE, TEMPERATURE_SQUARED`): the integrals of
 `rho |u|^2 / 2`, `rho |omega|^2 / 2`, `(div u)^2`, `p div u`, `|u|^2`,
 `|omega|^2`, `rho^2`, `T` and `T^2` (divided by the volume, the last ones give
 the mean squared velocity and vorticity and the density and temperature
@@ -1011,13 +1011,13 @@ second-order least-squares gradients of the viscous fluxes, which
 underestimate the enstrophy of under-resolved turbulence (by about 15% in
 that case). For decaying
 turbulence such as the Taylor-Green vortex, the kinetic energy dissipation
-rate is `-dE/dt` and its viscous part `2 mu * enstrophy / rho0`.
+rate is `-dE/dt` and its viscous part `2 mu * ENSTROPHY / rho0`.
 
 | Key | Description |
 |---|---|
 | `interval` | Every this many steps, default 1 |
 | `file` | Output file, default `integrals.csv` |
-| `budget` | `true` adds the kinetic-energy budget (planar runs): `ke_rate_convective`, `ke_rate_viscous` and `ke_rate_sgs`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), `pressure_work`, the rate a scheme without numerical dissipation would give (the two-point pressure flux `mean(p) n` of the cell values on interior faces, so `sum over faces mean(p) (u_1 - u_0) . n A`, plus the boundary faces' own fluxes), and `eps_numerical = pressure_work - ke_rate_convective`, the scheme's dissipation of kinetic energy on interior faces (the convective terms of the exact equations change the kinetic energy only by the pressure work and the boundary fluxes). `pressure_work` is the discrete counterpart of `pressure_dilatation`; unlike the latter it does not carry the gradients' discretization error, which matters where `p div u` is large (flames: thermal expansion at atmospheric pressure, several orders above the dissipation). `-ke_rate_viscous` and `-ke_rate_sgs` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
+| `budget` | `true` adds the kinetic-energy budget (planar runs): `KE_RATE_CONVECTIVE`, `KE_RATE_VISCOUS` and `KE_RATE_SGS`, the rates of change of the resolved kinetic energy `sum V rho |u|^2 / 2` caused by the convective, molecular viscous and SGS fluxes of the current state (each `sum V (u . R_m - |u|^2 / 2 R_rho)` over that part `R` of the right-hand side), `PRESSURE_WORK`, the rate a scheme without numerical dissipation would give (the two-point pressure flux `mean(p) n` of the cell values on interior faces, so `sum over faces mean(p) (u_1 - u_0) . n A`, plus the boundary faces' own fluxes), and `EPS_NUMERICAL = PRESSURE_WORK - KE_RATE_CONVECTIVE`, the scheme's dissipation of kinetic energy on interior faces (the convective terms of the exact equations change the kinetic energy only by the pressure work and the boundary fluxes). `PRESSURE_WORK` is the discrete counterpart of `PRESSURE_DILATATION`; unlike the latter it does not carry the gradients' discretization error, which matters where `p div u` is large (flames: thermal expansion at atmospheric pressure, several orders above the dissipation). `-KE_RATE_VISCOUS` and `-KE_RATE_SGS` are the molecular and SGS dissipation. Costs one extra right-hand side per row and leaves the solution unchanged. Default `false` |
 
 ## `[statistics]`
 
@@ -1187,25 +1187,25 @@ value gets a sample each time its monitor writes it. MSER-5 on each signal
 finds where its transient ends, again each time its series has grown by 5%;
 the run is stationary once an end in the first half of the series has been
 accepted for every signal, from the latest of the latest accepted ends
-(`t_stationary`, which can move later as the series grow). From then on, the samples after `t_stationary` and after
+(`T_STATIONARY`, which can move later as the series grow). From then on, the samples after `T_STATIONARY` and after
 the start of the `[statistics]` averages give the mean and the variance
 (of `(x - mean)^2`) with confidence intervals by non-overlapping batch means
 and Student's t, the integrated autocorrelation time `tau` (samples, Sokal's
-window `M >= 5 tau`) and `n_eff = samples / tau`. Converged: stationary, every
+window `M >= 5 tau`) and `N_EFF = samples / tau`. Converged: stationary, every
 half width within `tolerance` of the mean (and `variance_tolerance` of the
 variance) and every batch at least `10 tau` long. Triggers read the values as
-`convergence_stationary`, `convergence_t_stationary`, `convergence_converged`
-and `convergence_<signal>_{mean, ci, variance, variance_ci, tau, n_eff,
-samples}` (NaN before the run is stationary); restart files carry the
+`convergence_STATIONARY`, `convergence_T_STATIONARY`, `convergence_CONVERGED`
+and `convergence_<signal>_{MEAN, CI, VARIANCE, VARIANCE_CI, TAU, N_EFF,
+SAMPLES}` (NaN before the run is stationary); restart files carry the
 histories (reset with `statistics.reset`). Runs on the host, on every rank,
 only when a signal has a new sample.
 
 | Key | Description |
 |---|---|
-| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, `<probe>_<variable>`. Required |
+| `signals` | Monitored values, named as in `[[triggers]]`: `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<REDUCTION>_<variable>`, `<probe>_<variable>`. Required |
 | `confidence` | Confidence of the intervals, default 0.95 |
 | `batches` | Batches of the batch means (at least 2), default 20 |
-| `tolerance` | Relative half width of every mean at which the run is converged (adds `converged`), default none |
+| `tolerance` | Relative half width of every mean at which the run is converged (adds `CONVERGED`), default none |
 | `variance_tolerance` | Also of every variance (needs `tolerance`), default none |
 | `min_samples` | Samples of a signal before MSER-5 is tried (at least 10), default 100 |
 | `file` | Output CSV (`step, t` and the values, with units), default `convergence.csv` |
@@ -1293,7 +1293,7 @@ area exact); a plane through mesh faces takes each face once. Its normal is
 crosses (straight pieces at the cells' faces, others at the roots of the
 faces' distance along the curve; curved cells by their curved shapes): one
 sample per cell and crossing, at the middle of its length in the cell and
-weighing that length (the `area` column), written as segments with their
+weighing that length (the `AREA` column), written as segments with their
 values as cell data, and three Gauss points on each crossing, so its
 integrals are exact for the reconstruction polynomials up to degree 5 along
 straight pieces. A curve along a face between two cells is sampled once, in one
@@ -1305,7 +1305,7 @@ normal; the wall variables are for boundaries only. With
 `physics.axisymmetric`, where only boundary probes integrate over the
 revolved surface (per radian), cut planes and curves take no flux variables
 and cut planes no `reductions`. CSV rows of cut planes are
-`step, t, cell, x, y(, z), nx, ny(, nz), area, <variables>`; VTP and VTKHDF files are
+`step, t, cell, x, y(, z), N_X, N_Y(, N_Z), AREA, <variables>`; VTP and VTKHDF files are
 their polygons (segments in 2D) with cell data, and grids of resampled
 surfaces with point data.
 
@@ -1317,7 +1317,7 @@ means are: rank 0 updates them in double precision in the samples' global
 order, so they are the same bit for bit on any number of ranks. Every
 `interval` (or `time_interval`) of the probe, it writes the means so far, as
 `MEAN_<variable>` (the first row once a sample is taken), and its reductions
-are those of the averaged samples (`integral_MEAN_<variable>`, ...): the time
+are those of the averaged samples (`INTEGRAL_MEAN_<variable>`, ...): the time
 average of an `integral` or `mean`, while `min`, `max` and `rms` are those of
 the averaged samples, not time averages of the extrema. This averages what
 `[statistics]` cannot keep per cell: point values, fluxes and wall
@@ -1366,7 +1366,7 @@ cannot be changed during the run.
 
 | `spectra` key | Description |
 |---|---|
-| `fields` | Fields of the probe (`U` for its components) and columns of its reductions file (`<reduction>_<field>`); required |
+| `fields` | Fields of the probe (`U` for its components) and columns of its reductions file (`<REDUCTION>_<field>`, e.g. `MEAN_P`); required |
 | `length` | Time spanned by the history, at least 4 samples per segment; required |
 | `t_start` | Time of the first sample, default 0 |
 | `segments` | Welch segments, overlapping by half, default 1 |
@@ -1448,12 +1448,12 @@ boundary treatment: walls and symmetry planes carry no species flux,
 transmissive faces their image face's, `inlet_state` faces the cell's
 gradients, and outflow faces without an image none; they are molecular (no
 SGS part with LES). In axisymmetric runs a
-face's `area` and the `integral` reductions are per radian of the revolved
-wall (`area` is `r` times the face length, the reductions' column `area`), as
+face's `AREA` and the `integral` reductions are per radian of the revolved
+wall (`AREA` is `r` times the face length, the reductions' column `AREA`), as
 `[[forces]]` is. `TAU_W`, `Q_W` and the
 wall-friction quantities need `navier_stokes`. CSV rows of boundary probes are
-`step, t, face, x, y(, z), s (2D), nx, ny(, nz), area, <variables>`; HDF5
-files add `normals` and `area` (and in 3D `vertices` and `polygons/vertices`,
+`step, t, face, x, y(, z), s (2D), N_X, N_Y(, N_Z), AREA, <variables>`; HDF5
+files add `NORMAL` and `AREA` (and in 3D `vertices` and `polygons/vertices`,
 `polygons/offsets`); VTP and VTKHDF files are polylines of the face centers (2D) or the
 faces as polygons with cell data (3D).
 
@@ -1487,15 +1487,15 @@ HDF5 rows, the VTKHDF outputs and the `.pvd` entries after the restart back and
 continues them; a rewind first copies the HDF5 or VTKHDF file to
 `.rewound/<run_id>/` in its directory.
 
-**Reductions.** Rows `step, t, length` (curves, 2D boundaries), `area` (3D boundaries) or `count` (points), then
-`<reduction>_<variable>` for each reduction and variable: `integral` is
+**Reductions.** Rows `step, t, LENGTH` (curves, 2D boundaries), `AREA` (3D boundaries) or `COUNT` (points), then
+`<REDUCTION>_<variable>` (`INTEGRAL_P`, `MEAN_P`, ...) for each reduction and variable: `integral` is
 `int q ds`, `mean` `int q ds / int ds`, `favre` the density-weighted mean
 `int rho q ds / int rho ds`, `rms` `sqrt(int q^2 ds / int ds)`, and `min`, `max`
 the extrema over the samples and the integration points. `moment` (boundary
 probes) gives, for each vector variable listed with all its components
 (`TRACTION_PRESSURE`, `TRACTION_VISCOUS`, `MOMENTUM_FLUX`, `TAU_W_*`), its moment
 `int (x - moment_center) x q ds` over the faces with their one-point rule, in
-columns `moment_<variable>_<X,Y,Z>` (2D: `_Z` only), so that the moments of
+columns `MOMENT_<variable>_<X,Y,Z>` (2D: `_Z` only), so that the moments of
 the tractions are those of the `[[forces]]` forces. Curves integrate
 with three Gauss points on each element between consecutive samples (exact for
 polynomials of degree 5 along straight elements), boundaries with one point
@@ -1508,8 +1508,8 @@ cells the region covers, each weighted by its volume `V` times its volume
 fraction `f`: `integral` is `sum f V q`, `mean` `sum f V q / sum f V`, `favre`
 `sum f V rho q / sum f V rho`, `rms` `sqrt(sum f V q^2 / sum f V)`, and `min`,
 `max` the extrema over the cells with `f > 0`. They go to `reductions_file`, in
-rows `step, t, volume` (`area` in planar 2D runs: `sum f V`, per unit depth; per
-radian in axisymmetric runs), then `<reduction>_<variable>`. Rank 0 sums them
+rows `step, t, VOLUME` (`AREA` in planar 2D runs: `sum f V`, per unit depth; per
+radian in axisymmetric runs), then `<REDUCTION>_<variable>`. Rank 0 sums them
 in global cell order, so they are the same bit for bit on any number of ranks.
 With `sampling = "point"` (static filled regions), each sum is over the
 reconstruction instead: a cell entirely inside is one sample of its cell
@@ -1647,7 +1647,7 @@ step ([Triggers](guide/running.md#triggers)). Each number a condition compares
 
 | Key | Description |
 |---|---|
-| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<reduction>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
+| `when` | Condition: a kexpr expression of `t`, `step`, `dt`, `wall` (seconds since the solver started) and the latest monitored values, `integrals_<column>`, `forces_<zone>_<column>`, `<probe>_<REDUCTION>_<variable>`, for probes of one point `<probe>_<variable>`, and the values of `[statistics.convergence]`, `convergence_<column>`; true when not 0. Required |
 | `do` | An action or a list of them: `"stop"` (restart and final output, exit status 0), `"checkpoint"` (a restart), `"write <prefix>"` (that `[[write_data]]` entry now), `"start statistics"` (the `[statistics]` averages start then; `t_start` must not be set), `"stop statistics"` (they keep their values from then on), `"log <message>"` (a line of the log, `{<name>}` replaced by that value), `"set <key>=<value> ..."` (as `mallard ctl set`). Required |
 | `name` | Name in the log, the run record and restart files (letters, digits, `_`), default `trigger_<index>` |
 | `for` | Simulated time the condition must hold before it fires, default 0 |
@@ -1656,7 +1656,7 @@ step ([Triggers](guide/running.md#triggers)). Each number a condition compares
 ```toml
 [[triggers]]
 name = "hot"
-when = "combustor_max_T > 2500"
+when = "combustor_MAX_T > 2500"
 do = ["checkpoint", "stop"]
 ```
 

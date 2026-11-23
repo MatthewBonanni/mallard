@@ -15,6 +15,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -855,13 +856,12 @@ std::string rename_in_strings(const std::string & line, const std::map<std::stri
     return out;
 }
 
-/**
- * @brief The lines of the tables [[particles.quantities]] and
- *        [[particles.probes]] (and of [particles], for inline arrays) with
- *        rename applied to the strings of the keys that name or read quantities.
- */
-std::vector<std::string> rename_quantity_lines(std::vector<std::string> lines,
-                                               const std::map<std::string, std::string> & renames) {
+/** @brief The renames that apply to the strings of a key of a table (dotted, of its header), or nullptr. */
+using RenamesOf = std::function<const std::map<std::string, std::string> *(const std::string & table,
+                                                                           const std::string & key)>;
+
+/** @brief The lines with renames_of's renames applied to the strings of the keys it names. */
+std::vector<std::string> rename_lines(std::vector<std::string> lines, const RenamesOf & renames_of) {
     static const std::regex header(R"(^\s*\[\[?\s*([^\[\]#]+?)\s*\]\]?\s*(#.*)?$)");
     static const std::regex assignment(R"(^\s*([A-Za-z0-9_]+)\s*=)");
     std::string table, key;
@@ -873,14 +873,26 @@ std::vector<std::string> rename_quantity_lines(std::vector<std::string> lines,
             continue;
         }
         if (std::regex_search(line, m, assignment)) key = m[1].str();
+        if (const auto * renames = renames_of(table, key)) line = rename_in_strings(line, *renames);
+    }
+    return lines;
+}
+
+/**
+ * @brief The lines of the tables [[particles.quantities]] and
+ *        [[particles.probes]] (and of [particles], for inline arrays) with
+ *        rename applied to the strings of the keys that name or read quantities.
+ */
+std::vector<std::string> rename_quantity_lines(const std::vector<std::string> & lines,
+                                               const std::map<std::string, std::string> & renames) {
+    return rename_lines(lines, [&](const std::string & table, const std::string & key) {
         const bool quantity = table == "particles.quantities" &&
                               (key == "name" || std::find(std::begin(QUANTITY_EXPRESSIONS), std::end(QUANTITY_EXPRESSIONS),
                                                           key) != std::end(QUANTITY_EXPRESSIONS));
         const bool probe = table == "particles.probes" && key == "fields";
         const bool inline_array = table == "particles" && (key == "quantities" || key == "probes");
-        if (quantity || probe || inline_array) line = rename_in_strings(line, renames);
-    }
-    return lines;
+        return quantity || probe || inline_array ? &renames : nullptr;
+    });
 }
 
 /** @brief upgrade_text's step for quantity names: text with them uppercase, or reformatted if that cannot be kept in place. */
@@ -890,6 +902,150 @@ std::string uppercase_quantities(const std::string & text, std::vector<Finding> 
     if (renames.empty()) return text;
     rename_quantities(expected, renames);
     const std::string rewritten = join_lines(rename_quantity_lines(split_lines(text), renames));
+    try {
+        if (same(parse_toml<toml::ordered_type_config>(rewritten), expected)) return rewritten;
+    } catch (const std::exception &) {
+    }
+    reformatted = true;
+    return toml::format(expected);
+}
+
+// ---------------------------------------------------------------- uppercase monitored values and columns
+
+const std::vector<std::string> INTEGRAL_COLUMNS = {
+    "kinetic_energy",      "enstrophy",       "dilatation_squared", "pressure_dilatation", "velocity_squared",
+    "vorticity_squared",   "density_squared", "temperature",        "temperature_squared", "ke_rate_convective",
+    "ke_rate_viscous",     "ke_rate_sgs",     "eps_numerical",      "pressure_work",       "les_C",
+    "tf_beta"};
+
+/** @brief The reduction column a lowercase one became (mean_P: MEAN_P), or empty. */
+std::string uppercase_column(const std::string & name) {
+    static const std::regex reduction("(integral|mean|favre|min|max|rms|moment)_(\\w+)");
+    std::smatch m;
+    return std::regex_match(name, m, reduction) ? upper(m[1].str()) + "_" + m[2].str() : "";
+}
+
+/**
+ * @brief The monitored value a lowercase one became, or empty: integrals_<column>,
+ *        forces_<zone>_F<axis>_<kind>, convergence_<column> and the reductions of
+ *        the probes named.
+ */
+std::string uppercase_monitor(const std::string & name, const std::vector<std::string> & probes) {
+    static const std::regex integral("integrals_(\\w+)"), force("forces_(\\w+)_F([xyz])_(pressure|viscous)"),
+        convergence("convergence_(stationary|t_stationary|converged)"), copy("(copy[0-9]+_)?(\\w+)");
+    std::smatch m;
+    if (std::regex_match(name, m, integral) &&
+        std::find(INTEGRAL_COLUMNS.begin(), INTEGRAL_COLUMNS.end(), m[1].str()) != INTEGRAL_COLUMNS.end()) {
+        return "integrals_" + upper(m[1].str());
+    }
+    if (std::regex_match(name, m, force)) {
+        return "forces_" + m[1].str() + "_F_" + upper(m[2].str()) + "_" + upper(m[3].str());
+    }
+    if (std::regex_match(name, m, convergence)) return "convergence_" + upper(m[1].str());
+    const std::string prefix = "convergence_";
+    if (name.starts_with(prefix)) {
+        for (const std::string suffix : {"variance_ci", "mean", "ci", "variance", "tau", "n_eff", "samples"}) {
+            if (!name.ends_with("_" + suffix) || name.size() <= prefix.size() + suffix.size() + 1) continue;
+            const std::string signal = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size() - 1);
+            const std::string renamed = uppercase_monitor(signal, probes);
+            return prefix + (renamed.empty() ? signal : renamed) + "_" + upper(suffix);
+        }
+    }
+    for (const std::string & probe : probes) {
+        if (!name.starts_with(probe + "_")) continue;
+        const std::string rest = name.substr(probe.size() + 1);
+        if (!std::regex_match(rest, m, copy)) continue;
+        const std::string column = uppercase_column(m[2].str());
+        if (!column.empty()) return probe + "_" + m[1].str() + column;
+    }
+    return "";
+}
+
+/** @brief The identifiers of an expression or message. */
+std::vector<std::string> identifiers(const std::string & text) {
+    static const std::regex word("[A-Za-z_][A-Za-z0-9_]*");
+    std::vector<std::string> out;
+    for (auto it = std::sregex_iterator(text.begin(), text.end(), word); it != std::sregex_iterator(); ++it) {
+        out.push_back(it->str());
+    }
+    return out;
+}
+
+/** @brief The strings of a value: itself, or the strings of an array. */
+std::vector<OrderedValue *> strings_of(OrderedValue & v) {
+    std::vector<OrderedValue *> out;
+    if (v.is_string()) out.push_back(&v);
+    if (v.is_array()) {
+        for (size_t i = 0; i < v.size(); i++) {
+            if (v.at(i).is_string()) out.push_back(&v.at(i));
+        }
+    }
+    return out;
+}
+
+/**
+ * @brief upgrade_text's step for the names of monitored values and of probe
+ *        reduction columns that became uppercase (integrals_kinetic_energy:
+ *        integrals_KINETIC_ENERGY) in the keys that read them: text with them
+ *        renamed, or reformatted if that cannot be kept in place.
+ */
+std::string uppercase_monitors(const std::string & text, std::vector<Finding> & findings, bool & reformatted) {
+    OrderedValue expected = parse_toml<toml::ordered_type_config>(text);
+    std::vector<std::string> probes;
+    for (const Concrete & c : matches(expected, "probes[].name")) {
+        if (at(expected, c)->is_string()) probes.push_back(at(expected, c)->as_string());
+    }
+    // Longest first, so that a probe whose name extends another's takes its own columns
+    std::sort(probes.begin(), probes.end(),
+              [](const std::string & a, const std::string & b) { return a.size() > b.size(); });
+    std::map<std::string, std::string> monitors, columns;
+    bool renamed = false;
+    const auto rename = [&](const std::string & path, std::map<std::string, std::string> & renames,
+                            const std::function<std::string(const std::string &)> & uppercase, const bool expressions) {
+        for (const Concrete & c : matches(expected, path)) {
+            std::vector<std::string> changes;
+            for (OrderedValue * v : strings_of(*at(expected, c))) {
+                const std::string before = v->as_string();
+                std::vector<std::string> found;
+                for (const std::string & word : expressions ? identifiers(before) : std::vector<std::string>{before}) {
+                    const std::string to = renames.contains(word) ? renames[word] : uppercase(word);
+                    if (to.empty()) continue;
+                    renames[word] = to;
+                    found.push_back("\"" + word + "\" is now \"" + to + "\"");
+                }
+                v->as_string() = rename_identifiers(before, renames);
+                if (v->as_string() == before) continue;
+                for (const auto & f : found) {
+                    if (std::find(changes.begin(), changes.end(), f) == changes.end()) changes.push_back(f);
+                }
+            }
+            if (changes.empty()) continue;
+            renamed = true;
+            std::string list;
+            for (size_t i = 0; i < changes.size(); i++) list += (i == 0 ? "" : ", ") + changes[i];
+            findings.push_back({.key = to_string(c),
+                                .line = line_of(*at(expected, c)),
+                                .message = to_string(c) + ": " + list + ": monitored values and output columns are " +
+                                           "uppercase, like field names",
+                                .removed = true});
+        }
+    };
+    const auto monitor = [&](const std::string & name) { return uppercase_monitor(name, probes); };
+    rename("triggers[].when", monitors, monitor, true);
+    rename("triggers[].do", monitors, monitor, true);
+    rename("statistics.convergence.signals", monitors, monitor, false);
+    rename("probes[].spectra.fields", columns, uppercase_column, false);
+    if (!renamed) return text;
+    const auto renames_of = [&](const std::string & table,
+                                const std::string & key) -> const std::map<std::string, std::string> * {
+        if ((table == "triggers" && (key == "when" || key == "do")) ||
+            (table == "statistics.convergence" && key == "signals") || (table == "statistics" && key == "convergence")) {
+            return &monitors;
+        }
+        if ((table == "probes" && key == "spectra") || (table == "probes.spectra" && key == "fields")) return &columns;
+        return nullptr;
+    };
+    const std::string rewritten = join_lines(rename_lines(split_lines(text), renames_of));
     try {
         if (same(parse_toml<toml::ordered_type_config>(rewritten), expected)) return rewritten;
     } catch (const std::exception &) {
@@ -1011,7 +1167,7 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
                          bool & reformatted, const Rules & table, const int dim,
                          const std::string & unknown_dimension) {
     const std::string upgraded = upgrade_rules(text, findings, reformatted, table, dim, unknown_dimension);
-    return uppercase_quantities(upgraded, findings, reformatted);
+    return uppercase_monitors(uppercase_quantities(upgraded, findings, reformatted), findings, reformatted);
 }
 
 int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {

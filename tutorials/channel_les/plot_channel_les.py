@@ -131,10 +131,10 @@ def results(args):
     integrals = np.genfromtxt(os.path.join(run, "integrals.csv"), delimiter=",", names=True)
     ti = integrals["t"]
     shares = None
-    if "eps_numerical" in integrals.dtype.names:
+    if "EPS_NUMERICAL" in integrals.dtype.names:
         sel = ti >= args.t_start
-        parts = np.array([-integrals["ke_rate_viscous"][sel].mean(), -integrals["ke_rate_sgs"][sel].mean(),
-                          integrals["eps_numerical"][sel].mean()])
+        parts = np.array([-integrals["KE_RATE_VISCOUS"][sel].mean(), -integrals["KE_RATE_SGS"][sel].mean(),
+                          integrals["EPS_NUMERICAL"][sel].mean()])
         shares = 100 * parts / parts.sum()
         print(f"dissipation: molecular {shares[0]:.1f}%, SGS {shares[1]:.1f}%, numerical {shares[2]:.1f}%")
 

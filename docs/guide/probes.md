@@ -160,7 +160,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | Variable | Meaning |
 |---|---|
 | `MASS_FLUX`, `MOMENTUM_FLUX`, `ENTHALPY_FLUX`, `SPECIES_FLUX_*` | Convective fluxes through the face, positive out of the domain |
-| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `area`) |
+| `TRACTION_PRESSURE`, `TRACTION_VISCOUS` | Force per unit area on the boundary; their `integral` is the `[[forces]]` force (per radian in axisymmetric runs, as `AREA`) |
 | `TAU_W`, `TAU_W_X`, ... | Wall shear stress (magnitude, components) |
 | `CF`, `CP` | Skin friction and pressure coefficients of `reference` (the probe's, else `[output] reference`) |
 | `Q_W` | Heat flux into the fluid |
@@ -296,7 +296,7 @@ reductions = ["integral", "mean"]
 
 The probe samples on the `[statistics]` schedule, each sample weighted by the
 time since the last, and writes `MEAN_CF`, `MEAN_Q_W`, ... every `interval`,
-with reductions of the averaged samples (`integral_MEAN_CF`). Rank 0 keeps the
+with reductions of the averaged samples (`INTEGRAL_MEAN_CF`). Rank 0 keeps the
 means in sample order, so they are the same on any number of ranks, and
 restart files carry them: a restarted run continues them bit for bit.
 `statistics.reset = true` starts them afresh. An averaging probe evaluates
@@ -331,12 +331,12 @@ writes the one-sided PSD of every listed variable at every sample point to
 `probe_<name>_spectra.csv`, with columns `step, t, point, f, St, PSD_U_Y`
 (units in the second line: `PSD_U_Y` in `m2 s-1`, velocity squared per
 frequency), at the end of the run and, with `time_interval`, at its
-multiples. Reductions are signals too: `fields = ["integral_TRACTION_PRESSURE_Y"]`
+multiples. Reductions are signals too: `fields = ["INTEGRAL_TRACTION_PRESSURE_Y"]`
 on a wall probe gives the spectrum of the lift, written to
 `probe_<name>_reductions_spectra.csv` (`step, t, f, St, PSD_...`). At each
 write the run's log reports the peak of each spectrum, and the run record
 (`mallard.jsonl`) carries it as the monitor `probe_<name>_spectra`
-(`f_peak_<variable>`, `St_peak_<variable>`):
+(`F_PEAK_<variable>`, `ST_PEAK_<variable>`):
 
 ```text
    85208 2.0000e+02  spectra  probe wake: U_Y peaks at f = 0.032942 (St = 0.1647) (bin width 0.00714)
@@ -360,7 +360,7 @@ Restart files carry the history, so a restarted run continues it bit for bit
 
 | Key | Default | Meaning |
 |---|---|---|
-| `fields` | required | Fields of the probe (`U` for its components), and reduction columns (`mean_P`, `integral_MASS_FLUX`) |
+| `fields` | required | Fields of the probe (`U` for its components), and reduction columns (`MEAN_P`, `INTEGRAL_MASS_FLUX`) |
 | `length` | required | Time spanned by the history; the bin width is `(segments + 1) / (2 length)` |
 | `t_start` | `0` | First sample |
 | `segments` | `1` | Welch segments, overlapping by half: more average out noise, at a coarser bin width |
@@ -412,18 +412,18 @@ curve or set of points weighs each cell by its area, length or count in the
 cell instead of `f V` ([on a mesh](geometry.md#surfaces-and-curves-on-a-mesh)):
 `integral` is then the surface integral, `mean` the area-weighted mean,
 evaluated at the elements' quadrature points (cell averages, or point values
-with `sampling = "point"`), and the third column is `area`, `length` or
-`count`. Surfaces (2D: curves) have normals, so their fluxes (`MASS_FLUX`, ...)
+with `sampling = "point"`), and the third column is `AREA`, `LENGTH` or
+`COUNT`. Surfaces (2D: curves) have normals, so their fluxes (`MASS_FLUX`, ...)
 are variables too: a closed surface's `integral` of `MASS_FLUX` is the net
 outflow. Each output
 appends a row to `reductions_file` (default `probe_<name>_reductions.csv`):
 
 ```
-step,t,area,integral_RHO,integral_T,integral_P,mean_RHO,...,max_P
+step,t,AREA,INTEGRAL_RHO,INTEGRAL_T,INTEGRAL_P,MEAN_RHO,...,MAX_P
 ```
 
-The third column is `sum f V`: `volume` in 3D and axisymmetric runs (per
-radian), `area` in planar 2D runs (per unit depth).
+The third column is `sum f V`: `VOLUME` in 3D and axisymmetric runs (per
+radian), `AREA` in planar 2D runs (per unit depth).
 
 **Measures.** A filled region probe records the region's own volume and
 surface area (planar 2D: area and perimeter; axisymmetric: per radian, of the
@@ -618,8 +618,8 @@ $ mallard post extract solut/restart_000002.restart solut/restart_000004.restart
 == probe_box_reductions.csv ========================================= t = 0.004 s, the last
   column        value         units
   area          0.0799609423  m2
-  integral_RHO  0.079960745   kg m-1
-  mean_RHO      0.999997533   kg m-3
+  INTEGRAL_RHO  0.079960745   kg m-1
+  MEAN_RHO      0.999997533   kg m-3
   ...
 ```
 

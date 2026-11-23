@@ -240,7 +240,7 @@ TEST(PostConvergenceTest, RunsInAnyOrderGiveTheirTablesAndTheSchemesOrder) {
     if (comm::size() > 1) GTEST_SKIP() << "runs on one rank";
     const std::string coarse = wave_run(16), medium = wave_run(32), fine = wave_run(64);
 
-    const Result scalars = convergence_cmd({medium, fine, coarse, "--quantity", "integrals:density_squared", "--format",
+    const Result scalars = convergence_cmd({medium, fine, coarse, "--quantity", "integrals:DENSITY_SQUARED", "--format",
                                             "json"});
     ASSERT_EQ(scalars.status, 0) << scalars.err;
     const json::Value s = json::parse(scalars.out);
@@ -250,10 +250,10 @@ TEST(PostConvergenceTest, RunsInAnyOrderGiveTheirTablesAndTheSchemesOrder) {
     EXPECT_EQ(s["design_order"].number, 2.0);
     ASSERT_EQ(s["quantities"].array.size(), 1u);
     const json::Value & q = s["quantities"].array[0];
-    EXPECT_EQ(q["name"].string, "integrals:density_squared");
+    EXPECT_EQ(q["name"].string, "integrals:DENSITY_SQUARED");
     const std::string dirs[] = {coarse, medium, fine};
     for (size_t i = 0; i < 3; i++) {
-        EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(dirs[i] + "/integrals.csv", "density_squared"));
+        EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(dirs[i] + "/integrals.csv", "DENSITY_SQUARED"));
         EXPECT_NEAR(q["t"].array[i].number, T_STOP, 4 * static_cast<double>(std::numeric_limits<rtype>::epsilon()) * T_STOP);
     }
     EXPECT_NE(q["estimate"]["behavior"].string, "divergent");
@@ -288,21 +288,21 @@ TEST(PostConvergenceTest, RunsInAnyOrderGiveTheirTablesAndTheSchemesOrder) {
     EXPECT_EQ(a["status"].string, "ok") << all.out;  // their inputs differ only in the mesh and where files go
     bool enstrophy = false;
     for (const json::Value & e : a["quantities"].array) {
-        if (e["name"].string != "integrals:enstrophy") continue;
+        if (e["name"].string != "integrals:ENSTROPHY") continue;
         enstrophy = true;
         EXPECT_EQ(e["behavior"].string, "zero");
         EXPECT_EQ(e["status"].string, "ok");
     }
     EXPECT_TRUE(enstrophy) << all.out;
 
-    const Result text = convergence_cmd({coarse, medium, fine, "--quantity", "density_squared"});
+    const Result text = convergence_cmd({coarse, medium, fine, "--quantity", "DENSITY_SQUARED"});
     EXPECT_NE(text.out.find("Grid convergence"), std::string::npos) << text.out;
-    EXPECT_NE(text.out.find("integrals:density_squared: "), std::string::npos) << text.out;
+    EXPECT_NE(text.out.find("integrals:DENSITY_SQUARED: "), std::string::npos) << text.out;
 }
 
 TEST(PostConvergenceTest, TwoRunsOfDifferentSchemesAreWarnings) {
     if (comm::size() > 1) GTEST_SKIP() << "runs on one rank";
-    const Result r = convergence_cmd({wave_run(8), wave_run(16, "Rusanov"), "--quantity", "density_squared",
+    const Result r = convergence_cmd({wave_run(8), wave_run(16, "Rusanov"), "--quantity", "DENSITY_SQUARED",
                                       "--format", "json"});
     ASSERT_EQ(r.status, 0) << r.err;
     const json::Value v = json::parse(r.out);
@@ -366,8 +366,8 @@ void as_single_precision(const std::string & dir, const double kinetic_noise, co
         std::ostringstream v;
         v.precision(12);
         if (header[i] == "t") v << static_cast<double>(static_cast<float>(T_STOP));
-        if (header[i] == "kinetic_energy") v << std::stod(last[i]) * (1.0 + kinetic_noise);
-        if (header[i] == "enstrophy") v << enstrophy;
+        if (header[i] == "KINETIC_ENERGY") v << std::stod(last[i]) * (1.0 + kinetic_noise);
+        if (header[i] == "ENSTROPHY") v << enstrophy;
         if (!v.str().empty()) last[i] = v.str();
     }
     std::string row;
@@ -388,13 +388,13 @@ TEST(PostConvergenceTest, SinglePrecisionRunsGetSinglePrecisionRoundOff) {
     as_single_precision(runs[1], -2e-7, 1e-12);
     as_single_precision(runs[2], 1e-7, 6e-12);
     const Result r = convergence_cmd({runs[0], runs[1], runs[2], "--time", "0.05", "--quantity",
-                                      "kinetic_energy,enstrophy", "--format", "json"});
+                                      "KINETIC_ENERGY,ENSTROPHY", "--format", "json"});
     ASSERT_EQ(r.status, 0) << r.out << r.err;
     const json::Value v = json::parse(r.out);
     EXPECT_EQ(v["status"].string, "ok") << r.out;
     ASSERT_EQ(v["quantities"].array.size(), 2u) << r.out;
     for (const json::Value & q : v["quantities"].array) {
-        EXPECT_EQ(q["behavior"].string, q["name"].string == "integrals:enstrophy" ? "zero" : "unchanged") << r.out;
+        EXPECT_EQ(q["behavior"].string, q["name"].string == "integrals:ENSTROPHY" ? "zero" : "unchanged") << r.out;
     }
 }
 
@@ -431,14 +431,14 @@ TEST(PostConvergenceTest, TablesExtractedFromTheRunsSnapshotsAreTheirs) {
     const std::string runs[] = {wave_run(8), wave_run(16), wave_run(32)};
     for (const std::string & r : runs) extract_max_density(r, r);
     const std::string table = "extract/probe_extract_reductions";
-    const Result r = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table + ":max_RHO", "--format", "json"});
+    const Result r = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table + ":MAX_RHO", "--format", "json"});
     ASSERT_EQ(r.status, 0) << r.out << r.err;
     const json::Value v = json::parse(r.out);
     ASSERT_EQ(v["quantities"].array.size(), 1u) << r.out;
     const json::Value & q = v["quantities"].array[0];
     EXPECT_TRUE(q["extracted"].boolean) << r.out;
     for (size_t i = 0; i < 3; i++) {
-        EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(runs[i] + "/" + table + ".csv", "max_RHO"));
+        EXPECT_DOUBLE_EQ(q["values"].array[i].number, last_value(runs[i] + "/" + table + ".csv", "MAX_RHO"));
         EXPECT_NEAR(q["t"].array[i].number, T_STOP, 4 * static_cast<double>(std::numeric_limits<rtype>::epsilon()) * T_STOP);
     }
     const Result text = convergence_cmd({runs[0], runs[1], runs[2], "--quantity", table});

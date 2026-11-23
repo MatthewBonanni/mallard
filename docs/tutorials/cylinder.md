@@ -90,7 +90,7 @@ number rising from 0.2 to about 0.3 as the flow accelerates around the cylinder.
 ## 5. Forces
 
 `forces_cylinder.csv` holds, every 20 steps, `step, t` and the force on the wall, split into pressure
-and viscous parts: `Fx_pressure, Fy_pressure, Fx_viscous, Fy_viscous`, per unit depth. Divided by the
+and viscous parts: `F_X_PRESSURE, F_Y_PRESSURE, F_X_VISCOUS, F_Y_VISCOUS`, per unit depth. Divided by the
 dynamic pressure times the diameter, ½ ρ U² D = 0.02, they give the drag and lift coefficients:
 
 ```bash

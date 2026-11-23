@@ -26,13 +26,10 @@ std::vector<Convergence::Monitored> Solver::monitored() const {
     if (integral_monitor.interval > 0) {
         for (const auto & [column, dimension] : integral_columns()) all.emplace_back("integrals_" + column, dimension);
     }
-    const Dimension area = measure_dimension().times(dim::length, -1);
     for (const auto & monitor : force_monitors) {
-        for (size_t i = 0; i < 2 * N_DIM; i++) {
-            all.emplace_back("forces_" + monitor.zone + "_F" + "xyz"[i % N_DIM] + (i < N_DIM ? "_pressure" : "_viscous"),
-                             dim::pressure.times(area));
+        for (const auto & [column, dimension] : force_columns(monitor.modeled)) {
+            all.emplace_back("forces_" + monitor.zone + "_" + column, dimension);
         }
-        if (monitor.modeled) all.emplace_back("forces_" + monitor.zone + "_Q", dim::heat_flux.times(area));
     }
     const auto names = probes.value_names();
     const auto dimensions = probes.value_dimensions();

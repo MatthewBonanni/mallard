@@ -34,7 +34,7 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
    stays linear in its samples. MSER-5 trades the bias of what it keeps
    against the variance of a shorter series, so on a short series it
    accepts an early start: on a decay over 400 samples from 9 standard
-   deviations (`tau` = 9), the first 100 samples. `t_stationary` therefore
+   deviations (`tau` = 9), the first 100 samples. `T_STATIONARY` therefore
    follows every accepted check rather than the first: as the series grows,
    the start moves to where the decay no longer biases the mean, and settles.
    `stationary` stays 1 once set, so a trigger on it fires once.
@@ -53,7 +53,7 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
 6. **Window.** Once `[statistics]` averages run, the intervals are those of
    the samples after their start: the uncertainty of what the averages hold.
    The averages start when the trigger fires, after the detection; the
-   samples between `t_stationary` and then were not kept per cell.
+   samples between `T_STATIONARY` and then were not kept per cell.
 7. **Restarts** carry each history (time and value), the truncation state and
    the check schedule (the prefix sums are rebuilt from the history in the
    same order), so a resumed run writes the same rows bitwise
@@ -70,7 +70,7 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
   standard deviations at 1000-1050 samples, rejects a drift and deletes
   little from a stationary series; a run is converged at the sample count
   the tolerance implies.
-- `test/triggers_test.cpp`: a trigger on `convergence_stationary` starts
+- `test/triggers_test.cpp`: a trigger on `convergence_STATIONARY` starts
   the statistics at the step the file first says stationary; a resumed run
   writes the same rows bitwise.
 - `test/step_queue_test.cpp`: an integral, a force and a probe value

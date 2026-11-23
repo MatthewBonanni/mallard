@@ -165,11 +165,15 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
         if (names.empty()) {
             std::string list;
             for (const auto & a : accepted) list += (list.empty() ? "" : ", ") + a;
+            const std::string renamed = uppercase_name(v, accepted);
             throw InputError(Diagnostic{.key = key + ".fields",
                                         .line = line_of(table, "fields"),
                                         .message = "\"" + v + "\" is neither a variable of the probe's samples nor "
                                                    "one of its reductions",
-                                        .fix = "List one of: " + list,
+                                        .suggestion = renamed.empty() ? "" : "\"" + renamed + "\"",
+                                        .fix = renamed.empty() ? "List one of: " + list
+                                                               : "Reduction columns became uppercase, like field names: "
+                                                                 "mallard input upgrade rewrites the old names",
                                         .docs = docs});
         }
         for (const auto & n : names) {
@@ -360,8 +364,8 @@ std::string ProbeSpectra::write(uint64_t step, double t, std::ostream * samples,
             const probe_spectra::Peak p = probe_spectra::peak(psd[first_channel[j] + i], df);
             if (i == 0 || p.psd > best.psd) best = p, at = i;
         }
-        last_peaks.values.emplace_back("f_peak_" + series[j].name, best.f);
-        if (st > 0.0) last_peaks.values.emplace_back("St_peak_" + series[j].name, best.f * st);
+        last_peaks.values.emplace_back("F_PEAK_" + series[j].name, best.f);
+        if (st > 0.0) last_peaks.values.emplace_back("ST_PEAK_" + series[j].name, best.f * st);
         report += (report.empty() ? "" : "; ") + series[j].name + " peaks at f = " + logging::format("%.5g", best.f) +
                   (st > 0.0 ? logging::format(" (St = %.4g)", best.f * st) : "") +
                   (n > 1 ? " at " + point_label + " " + std::to_string(at) : "");

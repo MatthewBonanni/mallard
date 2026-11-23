@@ -10,7 +10,7 @@
    monitor: `[integrals]`, `[[forces]]`, the reductions of `[[probes]]` and
    the values of one-point probes, named `<monitor>_<column>`. kexpr has no
    strings, so a monitor's name is part of the variable name rather than an
-   argument (`combustor_max_T`, not `max(T, "combustor")`). Nothing new is
+   argument (`combustor_MAX_T`, not `max(T, "combustor")`). Nothing new is
    computed on the device: a trigger reads what the monitors wrote.
 2. **Evaluated on the host after every step, once that step's probes are
    written.** Probes are now written before the scheduled snapshots and

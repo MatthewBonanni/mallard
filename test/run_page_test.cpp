@@ -143,7 +143,7 @@ TEST(RunPageTest, ARunWritesItsReportFromItsRecordsAndInfoRebuildsTheSamePage) {
     EXPECT_NE(std::find(groups.begin(), groups.end(), "Forces on bottom"), groups.end());
     EXPECT_GT(n_series, 10u);
     EXPECT_EQ(find_series(data, "min_p")->find("unit")->string, "kg m-1 s-2");
-    EXPECT_EQ(find_series(data, "Fx_pressure")->find("unit")->string, N_DIM == 2 ? "kg s-2" : "kg m s-2");
+    EXPECT_EQ(find_series(data, "F_X_PRESSURE")->find("unit")->string, N_DIM == 2 ? "kg s-2" : "kg m s-2");
 
     EXPECT_EQ(run_page::from_file(log).html(), page);
 }
@@ -323,8 +323,8 @@ TEST(RunPageTest, ProbeValuesArePlottedFromTheProgressRecordsWithTheirUnitsUpToT
 
     const json::Value units = last_record(log, "start")["units"]["probes"];
     EXPECT_EQ(units["point"]["P"].string, "kg m-1 s-2");
-    EXPECT_EQ(units["a"]["integral_RHO"].string, "kg m-2");  // density times the line's length
-    EXPECT_EQ(units["a"]["mean_RHO"].string, "kg m-3");
+    EXPECT_EQ(units["a"]["INTEGRAL_RHO"].string, "kg m-2");  // density times the line's length
+    EXPECT_EQ(units["a"]["MEAN_RHO"].string, "kg m-3");
 
     const json::Value progress = last_record(log, "progress");
     const json::Value & recorded = progress["probes"];

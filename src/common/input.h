@@ -183,6 +183,15 @@ std::size_t line_of(const Input & table, const std::string & key);
 std::string suggest_value(const std::string & value, const std::vector<std::string> & names);
 
 /**
+ * @brief The one name of names that `old`, an output name of a release
+ *        before 0.11.0, became when output names became uppercase
+ *        (integrals_kinetic_energy: integrals_KINETIC_ENERGY,
+ *        forces_wall_Fx_pressure: forces_wall_F_X_PRESSURE, outlet_mean_P:
+ *        outlet_MEAN_P), or empty if none or several.
+ */
+std::string uppercase_name(const std::string & old, const std::vector<std::string> & names);
+
+/**
  * @brief An invalid or missing input value. The message names the key and the
  *        offending value; the caller adds the input file name.
  */

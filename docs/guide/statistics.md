@@ -82,9 +82,9 @@ monitored values, cell by cell.
 - `confidence` (default 0.95) sets the confidence. Restart files carry the
   batches, so a continued run continues them bitwise.
 - A probe's `min` and `max` of intervals that are all NaN are `inf` and
-  `-inf`, so a trigger such as `line_max_CI_MEAN_P < 0.01` holds before two
+  `-inf`, so a trigger such as `line_MAX_CI_MEAN_P < 0.01` holds before two
   batches have closed. Require a closed interval too:
-  `line_max_CI_MEAN_P < 0.01 and line_min_CI_MEAN_P < 1e300`.
+  `line_MAX_CI_MEAN_P < 0.01 and line_MIN_CI_MEAN_P < 1e300`.
 
 **Favre averages** are not computed directly. Favre means follow exactly from
 Reynolds statistics that include `RHO`: with `fields = ["RHO", "U_X", "U_Y", ...]`
@@ -363,17 +363,17 @@ products = ["U_X*U_X", "U_X*U_Y"]
 interval = 10
 
 [statistics.convergence]
-signals = ["wall_integral_TAU_WALL_X", "integrals_kinetic_energy"]
+signals = ["wall_INTEGRAL_TAU_WALL_X", "integrals_KINETIC_ENERGY"]
 tolerance = 0.01                    # converged at +-1% of the means
 
 [[triggers]]
 name = "developed"
-when = "convergence_stationary"     # the initial transient has ended
+when = "convergence_STATIONARY"     # the initial transient has ended
 do = "start statistics"
 
 [[triggers]]
 name = "converged"
-when = "convergence_converged"      # every interval within the tolerance
+when = "convergence_CONVERGED"      # every interval within the tolerance
 do = "stop"
 ```
 
@@ -390,17 +390,17 @@ point, with the same names), one sample each time the monitor writes one.
   first half of the series; a minimum at the end of that half means the
   signal still drifts. MSER-5 runs again each time a signal's series has
   grown by 5%. Once it has accepted a start for every signal, the run is
-  *stationary* (and stays so), from the latest start, `t_stationary`. A
+  *stationary* (and stays so), from the latest start, `T_STATIONARY`. A
   longer series can show that a slow transient lasted longer: each accepted
-  start replaces the previous one, and `t_stationary` moves with it.
+  start replaces the previous one, and `T_STATIONARY` moves with it.
 - **Confidence intervals** on the mean and on the variance of each signal, of
-  the samples after `t_stationary` (and, once the `[statistics]` averages
+  the samples after `T_STATIONARY` (and, once the `[statistics]` averages
   run, after their start, so the intervals are those of the samples the
   averages cover): non-overlapping batch means (Schmeiser 1982) with
   Student's t, which account for the samples' correlation in time; the
   variance is the mean of `(x - mean)^2`.
 - **Integrated autocorrelation time** `tau` (in samples, by Sokal's automatic
-  window) and the effective sample size `n_eff = samples / tau`: how many
+  window) and the effective sample size `N_EFF = samples / tau`: how many
   independent samples the run holds.
 - **Converged** (with `tolerance`): stationary, every interval within
   `tolerance` times the mean (and `variance_tolerance` times the variance),
@@ -418,13 +418,13 @@ point, with the same names), one sample each time the monitor writes one.
 | `file` | `convergence.csv` | Output CSV, a row each time a signal has a new sample |
 
 The values, a row of `file` and the monitor `convergence` of the run record,
-are `stationary` (0 or 1), `t_stationary`, `converged` (with `tolerance`) and,
-per signal, `<signal>_mean`, `_ci` (the half width), `_variance`,
-`_variance_ci`, `_tau`, `_n_eff` and `_samples`; they are NaN before the run
+are `STATIONARY` (0 or 1), `T_STATIONARY`, `CONVERGED` (with `tolerance`) and,
+per signal, `<signal>_MEAN`, `_CI` (the half width), `_VARIANCE`,
+`_VARIANCE_CI`, `_TAU`, `_N_EFF` and `_SAMPLES`; they are NaN before the run
 is stationary. Triggers read them as `convergence_<value>`, e.g.
-`convergence_stationary`, `convergence_integrals_kinetic_energy_ci`: start
+`convergence_STATIONARY`, `convergence_integrals_KINETIC_ENERGY_CI`: start
 the statistics or stop the run with them, as above, or with a tolerance of
-your own (`convergence_forces_cylinder_Fy_pressure_ci < 1e-3` for a mean near
+your own (`convergence_forces_cylinder_F_Y_PRESSURE_CI < 1e-3` for a mean near
 zero, where a relative tolerance means nothing). Restart files carry the
 histories, so a continued run keeps them.
 
@@ -434,7 +434,7 @@ histories, so a continued run keeps them.
 - Samples equally spaced in time (a probe's `time_interval`) are best: a
   sample is a sample, whatever time separates it from the last.
 - The statistics start when the trigger fires, after the transient has been
-  detected, not at `t_stationary`: what came before was not kept.
+  detected, not at `T_STATIONARY`: what came before was not kept.
 - Costs nothing on the device: the analysis runs on the host each time a
   signal has a new sample, on every rank alike.
 

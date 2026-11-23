@@ -79,7 +79,7 @@ def wall_cp(path):
 
 def drag(run):
     f = np.genfromtxt(os.path.join(run, "solut", "forces_ellipsoid.csv"), delimiter=",", names=True)
-    return f["t"], 4.0 * f["Fx_pressure"] / (0.5 * U * U * np.pi * B * B)
+    return f["t"], 4.0 * f["F_X_PRESSURE"] / (0.5 * U * U * np.pi * B * B)
 
 
 def style(ax):

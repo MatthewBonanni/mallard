@@ -28,6 +28,6 @@ post_processing() {
     done
     (cd medium && "$mallard" post derive solut/wake.vtkhdf --latest --fields Q_CRITERION,ENSTROPHY,CP \
          --reference '{rho = 1.0, u = [0.2, 0.0], p = 0.7142857142857143}' > derive.log)
-    "$mallard" post convergence coarse medium --quantity Fx_pressure,Fx_viscous > convergence.log || [ $? -eq 1 ]
+    "$mallard" post convergence coarse medium --quantity F_X_PRESSURE,F_X_VISCOUS > convergence.log || [ $? -eq 1 ]
     python3 "$here/post_processing/plot_post_processing.py" coarse medium --out figures
 }

@@ -165,21 +165,21 @@ TEST(StatisticalConvergenceTest, StationaryAfterTheTransientThenConvergedAtTheTo
     uint64_t stationary_at = 0, converged_at = 0;
     for (uint64_t i = 0; i < x.size() && converged_at == 0; i++) {
         feed(c, x, i, i + 1, NO_WINDOW);
-        if (stationary_at == 0 && value("stationary") == 1.0) stationary_at = i;
-        if (value("converged") == 1.0) converged_at = i;
+        if (stationary_at == 0 && value("STATIONARY") == 1.0) stationary_at = i;
+        if (value("CONVERGED") == 1.0) converged_at = i;
     }
     ASSERT_GT(stationary_at, 0u);
     // By then the start has moved past the decay, whose rest biases the mean by 15 * 400 e^-2.5 / n = 0.05
-    EXPECT_GE(value("t_stationary"), 10.0);
-    EXPECT_LE(value("t_stationary"), 40.0);
+    EXPECT_GE(value("T_STATIONARY"), 10.0);
+    EXPECT_LE(value("T_STATIONARY"), 40.0);
     // Relative half width t sqrt(tau var / n) / 10 = 0.01 at n = t^2 tau var / 0.1^2, about 11000 (t = 2.093
     // for 19 degrees of freedom); 20 batches estimate the variance of the mean to about 30%
     ASSERT_GT(converged_at, 0u);
-    const double n = value("probe_u_samples"), expected = 2.093 * 2.093 * 9.0 / 0.36 / 1e-2;
+    const double n = value("probe_u_SAMPLES"), expected = 2.093 * 2.093 * 9.0 / 0.36 / 1e-2;
     EXPECT_GT(n, 0.5 * expected);
     EXPECT_LT(n, 2.0 * expected);
-    EXPECT_NEAR(value("probe_u_mean"), 10.0, 0.15);
-    EXPECT_NEAR(value("probe_u_tau"), 9.0, 1.5);
+    EXPECT_NEAR(value("probe_u_MEAN"), 10.0, 0.15);
+    EXPECT_NEAR(value("probe_u_TAU"), 9.0, 1.5);
 }
 
 TEST(StatisticalConvergenceTest, IntervalsCoverOnlyTheAveragingWindowOfTheStatistics) {
@@ -190,7 +190,7 @@ TEST(StatisticalConvergenceTest, IntervalsCoverOnlyTheAveragingWindowOfTheStatis
     feed(c, x, 0, 3000, 20.0);
     double samples = 0.0;
     for (const auto & [n, v] : c.last().values) {
-        if (n == "probe_u_samples") samples = v;
+        if (n == "probe_u_SAMPLES") samples = v;
     }
     EXPECT_EQ(samples, 999.0);
 }
@@ -219,6 +219,32 @@ TEST(StatisticalConvergenceTest, RestartedHistoryContinuesBitwise) {
         for (size_t k = 0; k < whole.last().values.size(); k++) {
             EXPECT_EQ(b.last().values[k].second, whole.last().values[k].second) << whole.last().values[k].first;
         }
+    }
+}
+
+TEST(StatisticalConvergenceTest, RestartFilesOfLowercaseSignalNamesStillRestore) {
+    // Before 0.11.0 the signals were lowercase, integrals_enstrophy, and restart files name their histories so
+    const std::vector<double> x = ar1(0.8, 600, 43);
+    const auto input = [] {
+        return parse_toml("[statistics.convergence]\nsignals = [\"integrals_ENSTROPHY\"]\nfile = \"" +
+                          (scratch_dir() / "convergence_renamed.csv").string() + "\"\n");
+    };
+    Convergence a, b;
+    a.init(input(), {{"integrals_ENSTROPHY", dim::none}}, false);
+    b.init(input(), {{"integrals_ENSTROPHY", dim::none}}, false);
+    feed(a, x, 0, 600, NO_WINDOW);
+    RestartData restart;
+    const auto lowercase = [](std::string name) {
+        const size_t at = name.find("ENSTROPHY");
+        return at == std::string::npos ? name : name.replace(at, 9, "enstrophy");
+    };
+    for (const auto & [name, value] : a.attributes()) restart.attributes.emplace_back(lowercase(name), value);
+    for (const auto & [name, values] : a.arrays()) restart.arrays.emplace_back(lowercase(name), values);
+    b.restore(restart, "restart", NO_WINDOW);
+    ASSERT_EQ(b.last().values.size(), a.last().values.size());
+    for (size_t k = 0; k < a.last().values.size(); k++) {
+        const double va = a.last().values[k].second, vb = b.last().values[k].second;
+        EXPECT_TRUE(va == vb || (std::isnan(va) && std::isnan(vb))) << a.last().values[k].first;
     }
 }
 
@@ -280,7 +306,7 @@ TEST(StatisticalConvergenceTest, DeviceUpdateIsTheHostsBitForBit) {
     }
     EXPECT_EQ(mismatches, 0u);
     for (const auto & [name, value] : host.last().values) {
-        if (name == "probe_u_tau") {
+        if (name == "probe_u_TAU") {
             EXPECT_GT(5.0 * value, 256.0);
         }
     }

@@ -96,7 +96,7 @@ reductions = ["integral", "mean", "max"]
 `[regions]` defines regions once, by name; any `region` key, and any part of a
 `union`, `intersection` or `difference`, takes the name instead of a table. The
 source and the probe above act on the same cells with the same fractions: the
-probe's `integral_RHO` is the mass the source heats. Mallard reads each named
+probe's `INTEGRAL_RHO` is the mass the source heats. Mallard reads each named
 region, and computes its fractions on the mesh, once.
 
 ```toml
@@ -671,7 +671,7 @@ Who follows a moving region:
   that of the cells, times the fraction the region has there at the stage;
   its time step limit takes the fraction as 1.
 - `[[probes]]` of filled regions: at every write. The reductions file's
-  measure column (`area`, `volume`) is the region's measure in the domain at
+  measure column (`AREA`, `VOLUME`) is the region's measure in the domain at
   that time; the file's `measures.region` is the region's own while it only
   translates and rotates, and `null` once it changes shape (`scale` or sizes
   of `t`, an implicit `f` of `t`).

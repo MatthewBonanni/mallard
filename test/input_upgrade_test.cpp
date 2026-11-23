@@ -604,3 +604,34 @@ TEST(InputUpgradeTest, AParticleQuantityWhoseUppercaseNameIsTakenIsLeftForTheUse
     ASSERT_EQ(findings.size(), 1u);
     EXPECT_NE(findings[0].message.find("by hand"), std::string::npos) << findings[0].message;
 }
+
+TEST(InputUpgradeTest, LowercaseMonitoredValuesAndReductionColumnsBecomeUppercase) {
+    const std::string text = "[[probes]]\nname = \"outlet\"\nreductions = [\"mean\"]\n"
+                             "spectra = {fields = [\"mean_P\", \"RHO\"], length = 1.0}\n\n"
+                             "[statistics.convergence]\nsignals = [\n    \"integrals_enstrophy\",  # the dissipation\n"
+                             "    \"forces_wing_Fy_viscous\",\n]\n\n"
+                             "[[triggers]]\nwhen = \"forces_wing_Fx_pressure > 1 and outlet_mean_T < max(t, 2)\"\n"
+                             "do = [\"stop\", \"log {convergence_integrals_enstrophy_n_eff} at {integrals_les_C}\"]\n\n"
+                             "[[triggers]]\nwhen = \"convergence_converged\"\ndo = \"checkpoint\"\n";
+    const std::string expected = "[[probes]]\nname = \"outlet\"\nreductions = [\"mean\"]\n"
+                                 "spectra = {fields = [\"MEAN_P\", \"RHO\"], length = 1.0}\n\n"
+                                 "[statistics.convergence]\nsignals = [\n    \"integrals_ENSTROPHY\",  # the dissipation\n"
+                                 "    \"forces_wing_F_Y_VISCOUS\",\n]\n\n"
+                                 "[[triggers]]\nwhen = \"forces_wing_F_X_PRESSURE > 1 and outlet_MEAN_T < max(t, 2)\"\n"
+                                 "do = [\"stop\", \"log {convergence_integrals_ENSTROPHY_N_EFF} at {integrals_LES_C}\"]\n\n"
+                                 "[[triggers]]\nwhen = \"convergence_CONVERGED\"\ndo = \"checkpoint\"\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(upgrade(text, reformatted, findings), expected);
+    EXPECT_FALSE(reformatted);
+    std::vector<std::string> keys;
+    for (const Finding & f : findings) keys.push_back(f.key);
+    EXPECT_EQ(keys, (std::vector<std::string>{"triggers[0].when", "triggers[1].when", "triggers[0].do",
+                                              "statistics.convergence.signals", "probes[0].spectra.fields"}));
+    EXPECT_EQ(findings[0].line, 13u);
+    EXPECT_NE(findings[0].message.find("\"outlet_mean_T\" is now \"outlet_MEAN_T\""), std::string::npos)
+        << findings[0].message;
+    findings.clear();
+    EXPECT_EQ(upgrade(expected, reformatted, findings), expected);
+    EXPECT_TRUE(findings.empty());
+}

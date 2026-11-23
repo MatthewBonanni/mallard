@@ -32,7 +32,7 @@ from tutfig import render  # noqa: E402
 
 U, D = 0.2, 1.0
 Q = 0.5 * U**2 * D  # dynamic pressure times the diameter (density 1)
-DRAG = ["forces_cylinder:Fx_pressure", "forces_cylinder:Fx_viscous"]
+DRAG = ["forces_cylinder:F_X_PRESSURE", "forces_cylinder:F_X_VISCOUS"]
 # Steady flow at Re = 40, incompressible: Dennis & Chang (1970), Fornberg (1980),
 # Taira & Colonius (2007); Coutanceau & Bouard (1977) measured
 REFERENCES = {"C_D": (1.50, 1.54), "L / D": (2.13, 2.35), "separation angle [deg]": (53.7, 55.6)}
@@ -58,7 +58,7 @@ class Run:
         self.name = os.path.basename(os.path.normpath(path))
         forces = mallard.open(os.path.join(path, "forces_cylinder.csv"))
         self.t = forces.read_all("t")
-        self.cd = (forces.read_all("Fx_pressure") + forces.read_all("Fx_viscous")) / Q
+        self.cd = (forces.read_all("F_X_PRESSURE") + forces.read_all("F_X_VISCOUS")) / Q
         snapshots = mallard.open(os.path.join(path, "solut", "wake.vtkhdf"))
         self.cells = snapshots.mesh["cells"]
 
@@ -80,7 +80,7 @@ class Run:
         self.length = crossing(self.x, self.u) - 0.5 * D
 
         contour = mallard.open(os.path.join(path, "extract", "probe_contour_reductions.csv"))
-        self.cd_contour = -contour.read("integral_MOMENTUM_FLUX_X")[0] / Q
+        self.cd_contour = -contour.read("INTEGRAL_MOMENTUM_FLUX_X")[0] / Q
 
         average = mallard.open(os.path.join(path, "average", "average.vtkhdf"))
         self.rms = average.read("RMS_U_X") / U

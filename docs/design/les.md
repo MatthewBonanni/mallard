@@ -553,8 +553,8 @@ two-point pressure flux `mean(p) n` of the cell values, `sum_f mean(p) (u_1 -
 u_0) . n A_f` (a central flux with first-order states changes `K` by exactly
 this, section 4.3), plus the whole kinetic-energy rate of the boundary faces'
 fluxes, so that `eps_num` is the dissipation of the interior faces. The run
-reports `eps_mol`, `eps_sgs`, `eps_num`, `Pi_h` (`pressure_work`) and `Pi`
-from the cell gradients (`pressure_dilatation`) in `[integrals]` (with
+reports `eps_mol`, `eps_sgs`, `eps_num`, `Pi_h` (`PRESSURE_WORK`) and `Pi`
+from the cell gradients (`PRESSURE_DILATATION`) in `[integrals]` (with
 `budget = true`). The criterion
 for an LES result to count as explicit-model LES is **`eps_num <= 0.5 eps_sgs`
 averaged over the analysis window**, i.e. the model removes at least two
@@ -738,7 +738,7 @@ behind Shu-Osher's shock); the KE correction keeps it.
 
 **Inviscid Taylor-Green vortex** (32³, Euler, the initial field of `examples/taylor_green_3d`,
 SSPRK3, CFL 0.8, HLLC as the Riemann solver; resolved kinetic energy over its initial value,
-and `eps_numerical` from `[integrals] budget`): with nothing else to remove energy, the
+and `EPS_NUMERICAL` from `[integrals] budget`): with nothing else to remove energy, the
 central flux on reconstructed states adds it, with TENO5 and with MUSCL (the `les` preset);
 the cell values keep it bounded. The last two rows are on tetrahedra (`cartesian_tet`, 16³
 boxes of six), where the reconstructed states add energy at a third of the rows but the
@@ -861,8 +861,8 @@ alone), set `central = "cell_averages"`.
   geometric source).
 - **Output**: `MU_T` (cell eddy viscosity).
 - **Budget**: `[integrals] budget = true` adds the columns
-  `ke_rate_convective, ke_rate_viscous, ke_rate_sgs` (the `dK/dt|_R` of
-  section 4.2) and `eps_numerical = pressure_dilatation - ke_rate_convective`,
+  `KE_RATE_CONVECTIVE, KE_RATE_VISCOUS, KE_RATE_SGS` (the `dK/dt|_R` of
+  section 4.2) and `EPS_NUMERICAL = PRESSURE_DILATATION - KE_RATE_CONVECTIVE`,
   from one extra RHS evaluation that neither updates the mixture
   temperature seeds nor advances the characteristic boundaries, so output
   does not change the solution.
@@ -980,7 +980,7 @@ the current state, so restarts reproduce):
   and `E = 1`. Cost per step: one gradient of `c`, `n` filter passes with a
   halo exchange each, one gradient of `hat(c)` and one fixed-point
   reduction of four sums (the Colin operator's two vorticity passes are
-  skipped). The integrals file gets a `tf_beta` column.
+  skipped). The integrals file gets a `TF_BETA` column.
 - **Transport**: species diffusivities and the conductivity become
   `E F D_k` and `E F lambda`, and the SGS diffusivities `(1 - Omega) D_t`
   (the thickened flame is resolved, so its SGS transport is in `E`);
@@ -1143,7 +1143,7 @@ the state in `calc_dt`.
   random field loses kinetic energy faster with the model than without, by
   the amount the budget reports; laminar Couette and Poiseuille flows are
   unchanged by Sigma and WALE (pure shear, `mu_t = 0` to round-off) but not
-  by Smagorinsky; the budget's `ke_rate_sgs` equals `-int 2 mu_t |S^d|^2 dV`
+  by Smagorinsky; the budget's `KE_RATE_SGS` equals `-int 2 mu_t |S^d|^2 dV`
   computed independently on a smooth field; `MU_T` output and the time
   step include `nu_t`.
 - **Mixtures**: SGS species fluxes sum to zero; a uniform-composition flow
@@ -1486,7 +1486,7 @@ with the mean `E` in the flame:
   = 1` at every width and window, and than Colin except at `F = 4` over the
   late window. On the nearly flat case 2 it adds 5-11% at `F = 8`, where
   `C_u = 28` and `E = 1` add nothing: the remaining bias.
-- `beta` (integrals column `tf_beta`) is 0.01-0.10 on case 1 and
+- `beta` (integrals column `TF_BETA`) is 0.01-0.10 on case 1 and
   0.005-0.04 on case 2, rising as the flame wrinkles; `|eps_num /
   eps_sgs|` (window means) 0.03 / 0.07 / 0.12 (case 1) and 0.38 / 0.26 /
   0.46 (case 2; `E = 1` 0.37, `C_u = 28` 0.40 at `F = 8`).
