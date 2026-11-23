@@ -105,7 +105,8 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
         if (face_quad_points.is_allocated()) {
             h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
         }
-        const auto h_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
+        Kokkos::View<rtype *[4]>::host_mirror_type h_rule;
+        if (face_rule.is_allocated()) h_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
         std::vector<uint32_t> faces, cells;
         std::vector<std::array<rtype, N_DIM>> offsets;
         for (uint32_t f = 0; f < mesh->n_faces; f++) {
