@@ -33,6 +33,7 @@ import les_models
 import limiters
 import mesh_fields
 import particles
+import post_flame
 import probes
 import python
 import regions
@@ -67,6 +68,7 @@ def main():
     les_models.figures()
     limiters.figures()
     particles.figures(args.mallard)
+    post_flame.figures()
     schematics.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()
