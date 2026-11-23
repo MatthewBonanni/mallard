@@ -1182,8 +1182,8 @@ constexpr Command COMMANDS[] = {
             "\n"
             "Each quantity has the units of the file's units line, composed: the variance in the column's "
             "squared, the PSD in its squared per frequency; a nondimensional run's units are 1. The spectrum "
-            "needs samples equally spaced in time (a probe's time_interval); other signals get the statistics "
-            "and the autocorrelation alone. A probe file of several samples needs --point; a [[forces]] file "
+            "needs samples equally spaced in time (a probe's time_interval); other signals (forces, written "
+            "every interval steps) get the statistics and the autocorrelation alone. A probe file of several samples needs --point; a [[forces]] file "
             "with --reference also has the coefficients CD and CL. It reads the file where it is and runs on "
             "one rank.",
         .options = SIGNAL_OPTIONS,
@@ -1191,8 +1191,8 @@ constexpr Command COMMANDS[] = {
         .examples = "$ mallard post signal solut/probe_wake_point.csv --column U_Y --times 60: --strouhal 1,0.2\n"
                     "$ mallard post signal solut/probe_wake_arc_reductions.csv --column mean_P --tolerance 0.01\n"
                     "$ mallard post signal solut/probe_line.csv --column P --point 12 --segment 20 -o line_12\n"
-                    "$ mallard post signal solut/forces_cylinder.csv --column CL --times 60: \\\n"
-                    "      --reference '{rho = 1, u = [0.2, 0], length = 1}' --format json | jq .spectrum.peak",
+                    "$ mallard post signal solut/forces_cylinder.csv --column CD --times 60: \\\n"
+                    "      --reference '{rho = 1, u = [0.2, 0], length = 1}' --format json | jq .statistics",
         .exit_status = "0  analyzed\n"
                        "1  the file cannot be read, has no such column or point, or holds too few samples\n"
                        "2  usage error",

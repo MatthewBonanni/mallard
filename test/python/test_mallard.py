@@ -219,7 +219,7 @@ def test_post_signal(tmp_path):
     with open(path, "w") as f:
         f.write("step,t,U_Y\n# units: 1,s,m s-1\n")
         for i, ti in enumerate(t):
-            f.write(f"{i},{ti!r},{0.4 * np.sin(2 * np.pi * 0.5 * ti)!r}\n")
+            f.write(f"{i},{float(ti)!r},{float(0.4 * np.sin(2 * np.pi * 0.5 * ti))!r}\n")
     report = mallard.post.signal(path, "U_Y", segment=20, strouhal="1,2")
     assert report["schema"] == "mallard-signal" and report["units"] == "m s-1"
     assert report["spectrum"]["peak"]["f"] == pytest.approx(0.5, abs=1e-3)

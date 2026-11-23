@@ -140,6 +140,31 @@ TEST(PostSignalTest, NoisySineGivesItsFrequencyAndAmplitude) {
     EXPECT_NEAR(j["statistics"]["rms"].number, std::sqrt(0.5 * amplitude * amplitude + 0.25), 0.02);
 }
 
+TEST(PostSignalTest, LinearDetrendRemovesEachSegmentsRamp) {
+    if (!comm::is_root()) GTEST_SKIP() << "runs on one rank";
+    // A sine of amplitude 0.5 on a ramp: each segment's line removed, the PSD integrates to the sine's 0.125
+    std::vector<double> x(2000);
+    for (size_t i = 0; i < x.size(); i++) {
+        const double t = 0.1 * static_cast<double>(i);
+        x[i] = 0.02 * t + 0.5 * std::sin(2.0 * std::numbers::pi * 0.73 * t);
+    }
+    const std::string file = series_file("ramp", x, 0.1);
+    const auto power = [&](const std::string & detrend) {
+        const Result r = signal_cmd({file, "--column", "U_Y", "--segment", "40", "--overlap", "0.75", "--detrend", detrend,
+                                     "--window", "rectangular", "--format", "json"});
+        EXPECT_EQ(r.status, 0) << r.err;
+        const json::Value j = r.json();
+        // Segments of 400 samples, 100 apart: (2000 - 400) / 100 + 1
+        EXPECT_EQ(j["spectrum"]["segments"].number, 17.0);
+        double sum = 0.0;
+        for (const auto & p : j["spectrum"]["psd"].array) sum += p.number * j["spectrum"]["df"].number;
+        return sum;
+    };
+    EXPECT_NEAR(power("linear"), 0.125, 0.002);
+    // The mean alone leaves the ramp's variance (0.02 * 40)^2 / 12 = 0.053 in each segment
+    EXPECT_NEAR(power("constant"), 0.125 + 0.0533, 0.003);
+}
+
 TEST(PostSignalTest, AutocorrelationOfAnAR1ProcessIsPhiToTheLag) {
     if (!comm::is_root()) GTEST_SKIP() << "runs on one rank";
     const double phi = 0.8;

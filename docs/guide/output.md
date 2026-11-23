@@ -1320,27 +1320,42 @@ extract`), after the run and where the file is, by the same code, so the run
 and a later analysis agree:
 
 ```sh
-mallard post signal solut/probe_wake_point.csv --column U_Y --times 60: --segment 33 --strouhal 1,0.2
+mallard post signal solut/probe_wake_point.csv --column U_Y --times 60: --strouhal 1,0.2
 mallard post signal solut/probe_line.csv --column P --point 12 --tolerance 0.01 -o line_12
-mallard post signal solut/forces_cylinder.csv --column CL --times 60: \
+mallard post signal solut/forces_cylinder.csv --column CD --times 60: \
     --reference '{rho = 1, u = [0.2, 0], length = 1}' --format json
 ```
 
 ```text
+$ mallard post signal solut/probe_wake_point.csv --column U_Y --times 60: --strouhal 1,0.2
+== Signal =================================================================================
+  U_Y of solut/probe_wake_point.csv, in m s-1
+  1001 samples, t = 60 to 160 s, every 0.1 s
+
 == Statistics =============================================================================
-  stationary from t = 60.8 (MSER-5 deletes 8 samples); 993 samples after it
-  quantity  value         +- (95%)    units
-  mean      -0.000412271  0.00314478  1
-  rms       0.0661908     0.00119458  1
-  ...
+  stationary from t = 60 (MSER-5 deletes 0 samples); 1001 samples after it
+  quantity  value       +- (95%)    units
+  mean      0.00156926  0.0411002   m s-1
+  rms       0.0902576   0.0109158   m s-1
+  variance  0.00814643  0.00197046  m2 s-2
+  tau       2.63932     -           s
+  batch means: 20 batches of 50 samples; tau 26.39 samples (Sokal window 140), 37.93
+  effective samples
+
 == Spectrum ===============================================================================
-  Welch: 5 segments of 330 samples (33), hann window, overlap 0.5, detrend constant; bin
-  width 0.030303
-  quantity        value      units
-  peak frequency  0.0327875  1
-  St              0.163937   1
-  peak amplitude  0.0928127  1
+  Welch: 1 segments of 1001 samples (100.1 s), hann window, overlap 0.5, detrend constant;
+  bin width 0.00999001 s-1
+  quantity        value     units
+  peak frequency  0.033088  s-1
+  St              0.16544   1
+  peak amplitude  0.129029  m s-1
+  peak PSD        0.49782   m2 s-1
 ```
+
+That is the wake probe of
+[`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
+(St = 0.165); with `--reference`, its forces give a mean `CD` of
+1.364 +- 0.003.
 
 - **Transient and statistics**, as `[statistics.convergence]` computes them:
   MSER-5 finds the end of the initial transient, and the samples after it give
@@ -1364,8 +1379,11 @@ mallard post signal solut/forces_cylinder.csv --column CL --times 60: \
   neighbors; its amplitude, `sqrt(2 df sum P)` over the 2 bins on each side, is
   a sine's amplitude to 0.1% with the Hann window. `--strouhal L,U` adds
   `St = f L / U`. The spectrum needs equally spaced samples (a probe's
-  `time_interval`); a file that has none (forces every `interval` steps of a
-  varying time step) gets the statistics and autocorrelation alone.
+  `time_interval`); a file that has none gets the statistics and
+  autocorrelation alone. `[[forces]]` writes every `interval` steps, which a
+  varying time step spaces unequally: for the spectrum of a lift, give a wall
+  probe the `reductions = ["integral"]` of `TRACTION_PRESSURE` and
+  `TRACTION_VISCOUS` and a `time_interval`.
 - **Force coefficients:** for a `[[forces]]` file, `--reference '{rho, u,
   length}'` (2D; `area` in 3D) adds the columns `CD` and `CL`, the total force
   (pressure plus viscous) along `u` and across it (`u` turned by +90 degrees in
@@ -1386,8 +1404,8 @@ nondimensional run's, `1`, give `1`. `-o DIR` writes `DIR/statistics.csv`,
 autocorrelation included, and `mallard.post.signal(file, column, ...)` returns
 it in Python.
 
-![The spectrum of the transverse velocity two diameters behind the cylinder of examples/cylinder at Re = 100, from its probe file by mallard post signal: the peak at St = 0.164 with its refined frequency and amplitude, and the signal itself](../images/guide/post_signal-light.svg#gh-light-mode-only)
-![The spectrum of the transverse velocity two diameters behind the cylinder of examples/cylinder at Re = 100, from its probe file by mallard post signal: the peak at St = 0.164 with its refined frequency and amplitude, and the signal itself](../images/guide/post_signal-dark.svg#gh-dark-mode-only)
+![The spectrum of the transverse velocity two diameters behind the cylinder of examples/cylinder at Re = 100, from its probe file by mallard post signal: the peak at St = 0.165 with its refined frequency and amplitude, and the signal itself](../images/guide/post_signal-light.svg#gh-light-mode-only)
+![The spectrum of the transverse velocity two diameters behind the cylinder of examples/cylinder at Re = 100, from its probe file by mallard post signal: the peak at St = 0.165 with its refined frequency and amplitude, and the signal itself](../images/guide/post_signal-dark.svg#gh-dark-mode-only)
 
 ### Comparing two solutions: `mallard diff`
 

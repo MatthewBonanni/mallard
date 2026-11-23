@@ -61,7 +61,7 @@ def figure(data):
         ax1.semilogy(St[keep], psd[keep], color=P["teal"], lw=1.4, marker="o", ms=3.5)
         peak = sp["peak"]
         ax1.axvline(peak["St"], color=P["flame"], lw=1.0, ls="--")
-        figstyle.label(ax1, peak["St"] + 0.012, peak["psd"] * 0.6,
+        figstyle.label(ax1, peak["St"] + 0.09, peak["psd"],
                        f"St = {peak['St']:.4f}\namplitude {peak['amplitude']:.3f}", P, color=P["flame"],
                        size=12, ha="left", va="top")
         ax1.set_xlim(0, 0.6)

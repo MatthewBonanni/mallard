@@ -163,6 +163,7 @@ struct Units {
 struct Reference {
     double rho = 0.0, speed = 0.0, size = 0.0;
     std::vector<double> drag, lift;  // unit directions: along u, and across it (lift, 2D or given)
+    bool lift_given = false;
 };
 
 struct Signal {
@@ -285,6 +286,7 @@ Reference parse_reference(const std::string & text, uint32_t axes, const std::st
         std::vector<double> lift;
         for (const rtype c : find_real_vector(table, "lift", dim::none)) lift.push_back(static_cast<double>(c));
         r.lift = unit_vector(lift, key + ".lift", axes);
+        r.lift_given = true;
     } else if (axes == 2) {
         r.lift = {-r.drag[1], r.drag[0]};
     }
@@ -377,8 +379,8 @@ Signal read_signal(const std::string & path, const cli::Args & args) {
         }
         s.units = "1";
         s.notes.push_back(s.column + " = (F_pressure + F_viscous) . e / (rho |u|^2 / 2 " +
-                          (axes == 3 ? "area" : "length") + "), e along " +
-                          (s.column == "CD" ? "u" : "lift, else u turned by +90 degrees"));
+                          (axes == 3 ? "area" : "length") + "), e " +
+                          (s.column == "CD" ? "along u" : reference->lift_given ? "along lift" : "u turned by +90 degrees"));
     } else {
         all = output::read_all(c, s.column);
         s.units = c.field(s.column)->units;
