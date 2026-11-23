@@ -399,6 +399,38 @@ TEST(FlameletSolverTest, BurntRegionsTakeTheTablesBurntState) {
     for (const auto & [x, Z] : column(solver, 0, 0)) EXPECT_NEAR(Z, x < 0.5 ? 0.1 + 0.5 * x : 0.3, tol(1e-12, 1e-6)) << x;
 }
 
+// [les.combustion] model = "tfles" combines with the flamelet gas: accepted with the defaults (progress sensor,
+// zero subgrid variance), and refused with the key for the sensors and keys of mixtures. Catches the thickened
+// flame refused with gas = "flamelet", and mixture sensors (temperature reads h in a flamelet gas) accepted.
+TEST(FlameletSolverTest, ThickenedFlameCombinesWithTheFlameletGas) {
+    const std::string les = N_DIM == 2 ? "[les]\nmodel = \"wale\"\n" : "[les]\nmodel = \"sigma\"\n";
+    const std::string base = "[run]\nn_steps = 1\ncfl = 0.5\n" + strip(4, 1.0) +
+                             "[initialize]\ntype = \"constant\"\np = 1e5\nT = 300\nu = " +
+                             (N_DIM == 2 ? std::string("[0.0, 0.0]") : std::string("[0.0, 0.0, 0.0]")) +
+                             "\nZ = 0.5\nC = 0.1\n" + flamelet_physics("solver_reactor.h5", "navier_stokes") + les +
+                             "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1e-3\ns_L = 1.0\n";
+    {
+        Solver solver;
+        solver.set_distributed(false);
+        EXPECT_NO_THROW(solver.init(parse_toml(base)));
+    }
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {base + "sensor = \"temperature\"\nT_unburnt = 300.0\nT_burnt = 2000.0\n", "les.combustion.sensor"},
+        {base + "sensor = \"reaction\"\n", "les.combustion.sensor"},
+        {base + "T_unburnt = 300.0\n", "les.combustion.T_unburnt"},
+    };
+    for (const auto & [text, key] : cases) {
+        Solver solver;
+        solver.set_distributed(false);
+        try {
+            solver.init(parse_toml(text));
+            ADD_FAILURE() << key << " was accepted";
+        } catch (const InputError & e) {
+            EXPECT_NE(std::string(e.what()).find(key), std::string::npos) << e.what();
+        }
+    }
+}
+
 #endif
 
 // Inputs the flamelet gas does not take are refused with the key: catches a run that silently
@@ -409,6 +441,7 @@ TEST(FlameletSolverTest, InvalidFlameletInputsAreRejected) {
                              (N_DIM == 2 ? std::string("[0.0, 0.0]") : std::string("[0.0, 0.0, 0.0]")) +
                              "\nZ = 0.5\n" + flamelet_physics("solver_mixing.h5", "euler");
     const std::string les = N_DIM == 2 ? "[les]\nmodel = \"wale\"\n" : "[les]\nmodel = \"sigma\"\n";
+    const std::string tfles = "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 1e-3\ns_L = 1.0\n";
     const auto with = [&](const std::string & keys) {
         std::string text = base;
         return text.insert(text.find("[numerics]"), keys);
@@ -416,7 +449,12 @@ TEST(FlameletSolverTest, InvalidFlameletInputsAreRejected) {
     const std::vector<std::pair<std::string, std::string>> cases = {
         {base + "[chemistry]\nintegrator = \"bdf\"\n", "chemistry"},
         {base + "[radiation]\n", "radiation"},
-        {base + les + "[les.combustion]\nmodel = \"pasr\"\n", "les.combustion"},
+        {base + les + "[les.combustion]\nmodel = \"pasr\"\n", "les.combustion.model"},
+        {with("variance = \"algebraic\"\n") + les + tfles, "physics.variance"},
+        {with("variance = \"transported\"\n") + les + tfles, "physics.variance"},
+        {with("C_Z = 0.1\n") + les + tfles, "physics.C_Z"},
+        {with("variance = \"none\"\nC_chi = 2.0\n") + les, "physics.C_chi"},
+        {with("variance = \"none\"\n"), "physics.variance"},
         {with("C_Z = 0.2\n"), "physics.C_Z"},
         {with("variance = \"transported\"\n"), "physics.variance"},
         {with("variance = \"dynamic\"\n") + les, "physics.variance"},

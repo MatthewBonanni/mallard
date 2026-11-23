@@ -64,7 +64,7 @@ export LD_LIBRARY_PATH="$hdf5/lib:$hdf5/lib64:$mpi_lib${LD_LIBRARY_PATH:+:$LD_LI
 
 for dim in 2 3; do
     cmake -S "$src" -B "$out/build-$dim" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$stage" \
-        -DUSE_SYSTEM_KOKKOS=OFF -DMallard_ENABLE_TESTS=OFF -DMallard_ENABLE_PYTHON=OFF \
+        -DUSE_SYSTEM_KOKKOS=OFF -DMallard_ENABLE_TESTS=OFF -DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF \
         -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DHDF5_ROOT="$hdf5" \
         -DMallard_ENABLE_CGNS=ON -DUSE_SYSTEM_CGNS=OFF -DMallard_ENABLE_ZLIB=ON \
         -DCMAKE_INSTALL_RPATH='$ORIGIN/../lib' -DCMAKE_BUILD_WITH_INSTALL_RPATH=OFF \

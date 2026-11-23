@@ -1,0 +1,84 @@
+# Particles flung out of a vortex (2D build): inertial particles in solid-body
+# rotation against their exact spirals.
+#
+# Gas in solid-body rotation, u = Omega (-y, x) with Omega = 0.2, fills the
+# annulus 0.2 < r < 1 between slip walls; the pressure p0 + rho Omega^2 r^2 / 2
+# balances it, so the flow is steady (it has no shear: viscosity does not
+# act). Solid particles of relaxation time tau = 2.5 (Stokes number
+# Omega tau = 0.5), released at the gas velocity, lag the rotation and spiral
+# out. With z = x + i y the motion is linear, tau z'' + z' = i Omega z, so
+# z(t) = a e^(l1 t) + b e^(l2 t) with tau l^2 + l = i Omega: they spiral out at
+# the rate Re(l1) = 0.054, turning at Im(l1) = 0.157 (0.79 Omega).
+# check_particle_centrifuge.py computes the spirals and compares; the outer
+# wall catches the particles that reach it (stick).
+#
+# Run (4,200 steps: about 3 minutes on two CPU threads):
+#   ../../build/src/mallard -i input.toml
+#   python check_particle_centrifuge.py particles.csv
+#
+# Result: at t = 15 the particles released at r = 0.25 and 0.35 have spiraled
+# out to r = 0.55 and 0.77 and are within 1.5e-3 of their exact positions;
+# those released at r = 0.5 and 0.65 have reached the outer wall and stuck, at
+# t = 13.4 and 8.6, as the spirals predict. The difference is the flow's: the
+# rotation is not exactly steady next to the walls, at this resolution (on 64 x
+# 16 cells the particles are 8e-3 off).
+
+[run]
+t_stop = 15.0
+cfl = 0.8
+
+[mesh]
+type = "annulus"
+Ntheta = 128
+Nr = 32
+r_inner = 0.2
+r_outer = 1.0
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["-0.2 * y", "0.2 * x"]
+p = "1 / 1.4 + 0.02 * (x^2 + y^2)"
+
+[[boundaries]]
+name = "inner"
+type = "symmetry"
+
+[[boundaries]]
+name = "outer"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+mu = 1e-3
+
+[particles]
+type = "solid"
+diameter = 6.708203932499369e-3   # tau = density diameter^2 / (18 mu) = 2.5
+density = 1000.0
+drag = "stokes"
+points = [[0.25, 0.0], [0.0, 0.25], [-0.25, 0.0], [0.0, -0.25],
+          [0.35, 0.0], [0.0, 0.35], [-0.35, 0.0], [0.0, -0.35],
+          [0.5, 0.0], [0.0, 0.5], [-0.5, 0.0], [0.0, -0.5],
+          [0.65, 0.0], [0.0, 0.65], [-0.65, 0.0], [0.0, -0.65]]
+file = "particles.csv"
+
+[[particles.walls]]
+zones = ["outer"]
+interaction = "stick"
+
+[output]
+check_interval = 200

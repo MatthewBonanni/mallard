@@ -19,6 +19,7 @@ set(MALLARD_TEST_SOURCES
     case_template_test.cpp
     front_end_test.cpp
     cli_test.cpp
+    cpp_api_test.cpp
     time_integrator_test.cpp
     binding_test.cpp
     comm_test.cpp
@@ -39,7 +40,6 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     structured_blocks_test.cpp
-    stencil_shapes_test.cpp
     face_weights_test.cpp
     statistics_test.cpp
     conditional_statistics_test.cpp
@@ -155,7 +155,7 @@ FetchContent_MakeAvailable(googletest)
 
 target_link_libraries(mallard-test PRIVATE gtest)
 
-target_link_libraries(mallard-test PRIVATE MallardCommands)
+target_link_libraries(mallard-test PRIVATE MallardCommands MallardApi)
 # Malformed CGNS files written by the tests
 if(Mallard_ENABLE_CGNS)
     target_link_libraries(mallard-test PRIVATE ${MALLARD_CGNS_LIBRARY})

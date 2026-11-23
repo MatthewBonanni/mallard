@@ -46,7 +46,6 @@ add_library(MallardCore STATIC
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
-    mesh/stencil_shapes.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp
@@ -402,7 +401,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp install_verify.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 
@@ -410,11 +409,22 @@ add_executable(mallard main.cpp)
 target_link_libraries(mallard PRIVATE MallardCommands)
 set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
-if(Mallard_ENABLE_PYTHON)
-    add_library(MallardReader SHARED io/reader_c_api.cpp)
-    target_link_libraries(MallardReader PRIVATE MallardCore)
-    set_target_properties(MallardReader PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
-    mallard_target_warnings(MallardReader)
+# The C++ library API (include/mallard), compiled once for libmallard2d/3d and the test suite
+add_library(MallardApi OBJECT api/mallard_api.cpp)
+target_include_directories(MallardApi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
+target_include_directories(MallardApi PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(MallardApi PUBLIC MallardCore)
+mallard_target_warnings(MallardApi)
+# libmallard2d/3d: the C++ library API, and the C interface of the reader that the Python package loads
+if(Mallard_ENABLE_LIBRARY)
+    add_library(MallardLibrary SHARED io/reader_c_api.cpp)
+    target_link_libraries(MallardLibrary PRIVATE MallardApi MallardCore)
+    target_include_directories(MallardLibrary INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_features(MallardLibrary INTERFACE cxx_std_17)
+    set_target_properties(MallardLibrary PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d EXPORT_NAME mallard${Mallard_DIM}d)
+    add_library(Mallard::mallard${Mallard_DIM}d ALIAS MallardLibrary)
+    mallard_target_warnings(MallardLibrary)
 endif()
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)
 add_custom_command(TARGET mallard POST_BUILD
