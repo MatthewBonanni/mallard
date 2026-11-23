@@ -5,10 +5,12 @@
 
 From short runs of examples/particle_vortex (a 2D build with HDF5, about a
 minute on 2 CPU threads): particle snapshots of [[write_data]] over the gas
-speed of a VTU snapshot at the same times (particle_snapshots). The particle
-files are read with h5py.
+speed of a VTU snapshot at the same times (particle_snapshots), and the
+crossings of the boundary of the core probe's disk against the probe's count
+(particle_crossings). The particle files are read with h5py.
 """
 import argparse
+import csv
 import functools
 import re
 import subprocess
@@ -96,7 +98,62 @@ def particle_snapshots(P, args):
     return fig
 
 
-GUIDE_RUNS = {"particle_snapshots": particle_snapshots}
+CORE = (0.25, 0.25, 0.1)
+
+
+def read_csv(path):
+    with open(path) as f:
+        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
+    return {name: np.array([float(r[k]) for r in rows[1:]]) for k, name in enumerate(rows[0])}
+
+
+@functools.cache
+def crossing_run(binary):
+    """The crossings of the boundary of the probe's disk, and the probe, of examples/particle_vortex."""
+    work = Path(tempfile.mkdtemp())
+    cx, cy, r = CORE
+    run(binary, vortex_input('[[particles.crossings]]\nname = "core"\n'
+                             f'region = {{type = "boundary", of = {{type = "disk", center = [{cx}, {cy}], radius = {r}}}}}\n'),
+        work)
+    return read_csv(work / "particle_crossings_core.csv"), read_csv(work / "particle_probe_core.csv")
+
+
+def particle_crossings(P, args):
+    crossings, probe = crossing_run(args.mallard)
+    cx, cy, r = CORE
+    lattice = np.linspace(0.1, 0.4, 9)
+    X, Y = np.meshgrid(lattice, lattice)
+    inside0 = int(np.sum(np.hypot(X - cx, Y - cy) < r))
+    fig, (a, b) = plt.subplots(1, 2, figsize=(10.4, 4.3), gridspec_kw=dict(wspace=0.3, width_ratios=[1, 1.35]))
+    theta = np.linspace(0, 2 * np.pi, 300)
+    a.plot(cx + r * np.cos(theta), cy + r * np.sin(theta), color=P["line"], lw=1.2)
+    a.plot(X.ravel(), Y.ravel(), "o", color=P["muted"], ms=2.5, label="seeds")
+    for direction, color, name in [(1, P["flame"], "out"), (-1, P["blue"], "in")]:
+        sel = crossings["direction"] == direction
+        a.plot(crossings["x"][sel], crossings["y"][sel], "o", color=color, ms=5, mfc="none",
+               label=f"{name} (direction {direction}): {sel.sum()}")
+    bare(a)
+    a.set_xlim(0.05, 0.45)
+    a.set_ylim(0.05, 0.45)
+    a.legend(fontsize=9.5, loc="upper center", bbox_to_anchor=(0.5, 0.02), ncol=3, handletextpad=0.2, columnspacing=0.8)
+    a.set_title("crossings of the core's circle", fontsize=12)
+    order = np.argsort(crossings["t"], kind="stable")
+    t = np.concatenate([[0], crossings["t"][order], [probe["t"][-1]]])
+    net = np.cumsum(crossings["direction"][order])
+    count = inside0 - np.concatenate([[0], net, net[-1:]])
+    b.step(t, count, where="post", color=P["flame"], label="seeds inside less net crossings out")
+    b.plot(probe["t"], probe["count"], "o", color=P["blue"], ms=4, mfc="none", label="probe count")
+    b.set_xlabel("t")
+    b.set_ylabel("particles in the core")
+    b.set_xlim(0, None)
+    b.set_ylim(0, None)
+    b.yaxis.get_major_locator().set_params(integer=True)
+    b.legend(fontsize=10, loc="upper right")
+    b.set_title("the crossings account for the probe's count", fontsize=12)
+    return fig
+
+
+GUIDE_RUNS = {"particle_crossings": particle_crossings, "particle_snapshots": particle_snapshots}
 
 
 def figures(mallard=None, names=None):

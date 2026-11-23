@@ -707,6 +707,16 @@ stage. Rows are sorted by step, then by id, so the files are bitwise the same
 on any number of ranks and with or without step graphs. A restarted run
 appends to them, after the run's `# mallard-run` line.
 
+![Crossings of the circle bounding the core probe's disk in the particle_vortex example: 20 particles leave the core, and the seeds inside less the net crossings out match the probe's count at every sample](../images/guide/particle_crossings-light.svg#gh-light-mode-only)
+![Crossings of the circle bounding the core probe's disk in the particle_vortex example: 20 particles leave the core, and the seeds inside less the net crossings out match the probe's count at every sample](../images/guide/particle_crossings-dark.svg#gh-dark-mode-only)
+
+*The [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example with crossings of the boundary of its probe's disk,
+`region = {type = "boundary", of = {type = "disk", center = [0.25, 0.25], radius = 0.1}}`
+(a Mallard run). Left: the seeds and the crossing points, all out of the disk.
+Right: the 21 seeds inside less the net crossings out, by `t` of the rows,
+against the probe `core`'s count at its samples.*
+
 **Pitfalls.**
 
 - The host writes the crossings after every step, so a run with crossings
