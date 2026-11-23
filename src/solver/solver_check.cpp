@@ -115,6 +115,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     }
     if (!r.setup_done || !mesh) return r;
 
+    if (!options.geometry_only) check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
     r.periodic = periodic_summary(*mesh);
     r.t = static_cast<double>(t);
@@ -122,7 +123,6 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         check_regions(r, options);
         return r;
     }
-    check_memory(r, options, tracker);
     check_time_step(r);
     const CheckFields resolution = check_resolution(r);
     check_mesh_quality(r, options, resolution);
@@ -1138,7 +1138,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
     }
     const std::vector<std::string> mesh_names = automatic.names();
     const Input * names = region::named_regions(input);
-    auto link = [&](case_view::Block & b, const std::string & label) {
+    auto link_input = [&](case_view::Block & b, const std::string & label) {
         if (names && names->is_table() && names->as_table().entries().contains(label)) {
             b.key = b.element = "regions." + label;
         } else {
@@ -1157,7 +1157,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
                 std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
             OnMesh m = on_mesh(*mesh, *region, block_name(label), false, false, levels, static_cast<double>(t));
             m.block.kind = kind;
-            link(m.block, label);
+            link_input(m.block, label);
             CheckRegion g = entry(*mesh, label, *region, m, false);
             g.resolution = 0;
             g.solution = true;
@@ -1167,7 +1167,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
-        link(m.block, label);
+        link_input(m.block, label);
         CheckRegion g = entry(*mesh, label, *region, m, false);
         g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
                                   [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
@@ -1188,7 +1188,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         blocks.push_back(std::move(m.block));
     }
     for (case_view::Block & b : probes.view_blocks()) {
-        link(b, b.name);
+        link_input(b, b.name);
         blocks.push_back(std::move(b));
     }
     for (case_view::Block & b : blocks) {
