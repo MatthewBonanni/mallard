@@ -9,10 +9,10 @@ number over the backward-facing step, over the vorticity of the gas.
 extract reads a run's frames (frames/frame_*.restart, which carry the particles, and the snapshots of the gas
 frames/step_*.vtu) into one compact file: every particle's position and velocity by id, and the vorticity and
 streamwise velocity of the gas on a uniform grid of the window. profiles prints and plots, at the stations
-x / H = 2, 4, 6, 8 and 10 and from T (in U0 t / H since the seeding) on, the gas's mean streamwise velocity, each
-run's particle mean streamwise velocity and its particle concentration against the inlet's, and the share of
-the particles in the recirculation zone. render draws one panel per run on one clock, the first run's
-vorticity under every panel (the particles do not act on the gas, so every run has the same flow), each
+x / H = 2, 4, 6, 8 and 10 and from T (in U0 t / H since the seeding, default 15) on, the gas's mean streamwise velocity, each
+run's particle mean streamwise velocity and its particle concentration against the inlet's, and the number of
+particles under the shear layer (from the step to the mean reattachment, below y = H) against the first run's.
+render draws one panel per run on one clock, the vorticity of the run that has it under every panel (the particles do not act on the gas, so every run has the same flow), each
 particle a round dot. Frames are drawn at 3840 x 2160; render writes OUT.mp4 at that size and OUT_1080p.mp4 at
 half of it (H.264), and the poster as OUT.jpg, OUT.png and OUT_1080p.jpg (T in U0 t / H since the seeding;
 OUT "-" skips the video).
@@ -124,9 +124,10 @@ def profiles(args):
         axes[0, k].set_xlabel("U / U0")
         axes[1, k].set_xlabel("concentration / inlet")
     floor = u_mean[2, :]
-    cross = np.flatnonzero((floor[:-1] < 0) & (floor[1:] >= 0) & (xs[:-1] > 0))
+    cross = np.flatnonzero((floor[:-1] < 0) & (floor[1:] >= 0) & (xs[:-1] > 0) & (xs[:-1] < 16))
     reattach = xs[cross[-1] + 1] if len(cross) else np.nan
     print(f"gas: mean reattachment (U at y = {ys[2]:.3f} turns positive) at x / H = {reattach:.2f}")
+    reference = 1.0
     for d, r in runs:
         st = round(float(r["stokes"]), 6)
         sel = (r["t"] - t0) * U0 >= args.start
@@ -142,11 +143,12 @@ def profiles(args):
         density_inlet = n_inlet / area_inlet
         frames = pos.shape[0]
         inside = np.isfinite(pos[..., 0])
-        recirc = inside & (pos[..., 0] > 0) & (pos[..., 0] < reattach) & (pos[..., 1] < 1)
-        downstream = inside & (pos[..., 0] > 0) & (pos[..., 0] < reattach)
-        share = recirc.sum() / max(downstream.sum(), 1)
-        print(f"St = {st:g}: {frames} frames; particles below the step's height over 0 < x < x_r: "
-              f"{100 * share:.1f}% of those over 0 < x < x_r")
+        bubble = inside & (pos[..., 0] > 0) & (pos[..., 0] < reattach) & (pos[..., 1] < 1)
+        n_bubble = bubble.sum() / frames
+        reference = reference if d != args.runs[0] else n_bubble
+        v_bubble = np.nanmean(vel[..., 0][bubble]) / U0 if bubble.any() else np.nan
+        print(f"St = {st:g}: {frames} frames; under the shear layer (0 < x < x_r, y < H) {n_bubble:.0f} particles "
+              f"on average ({n_bubble / reference:.2f} of the first run's), mean V_X = {v_bubble:+.3f} U0")
         line = []
         for k, xs_ in enumerate(STATIONS):
             m = inside & (np.abs(pos[..., 0] - xs_) < half)
@@ -159,7 +161,8 @@ def profiles(args):
             axes[0, k].plot(mean, yc, "o-", ms=3, color=colors.get(st), label=f"St = {st:g}")
             axes[1, k].plot(conc, yc, "-", color=colors.get(st), label=f"St = {st:g}")
             low = yc < 0.5
-            line.append(f"x/H={xs_:g}: V/U0 at y<0.5 {np.nanmean(mean[low]):+.3f}, conc {np.mean(conc[low]):.2f}")
+            line.append(f"x/H={xs_:g}: y < H/2: V {np.nanmean(mean[low]) if np.isfinite(mean[low]).any() else np.nan:+.2f} U0, "
+                        f"concentration {np.mean(conc[low]):.3f}")
         print("   " + "; ".join(line))
     axes[0, 0].set_ylabel("y / H")
     axes[1, 0].set_ylabel("y / H")
@@ -288,14 +291,15 @@ def render(args):
         st = round(float(r["stokes"]), 6)
         ims.append(fig.figimage(np.zeros((PH, PW, 3), dtype=np.uint8), xo=xo, yo=yo, origin="upper"))
         fig.text((xo + PW - 24) / W, (yo + PH - 16) / HT, label(st), color=COLORS.get(st, FG), fontsize=17,
-                 va="top", ha="right", fontweight="bold", zorder=5)
+                 va="top", ha="right", fontweight="bold", zorder=5,
+                 bbox=dict(boxstyle="round,pad=0.25", facecolor=BG, edgecolor="none", alpha=0.75))
         slots.append((r, st))
     fig.text(MARGIN / W, 1 - 34 / HT, "Solid particles over a backward-facing step", color=FG, fontsize=26,
              va="top", fontweight="bold")
-    fig.text(MARGIN / W, 1 - 112 / HT, "Laminar inflow at Re_H = 3000, Mach 0.3, expansion 5:3 (after Fessler & "
-             "Eaton): 45,600 particles per Stokes number St = τU0/5H, over the vorticity of the gas "
-             "(red: counterclockwise). Mallard, TENO5, 29,280 cells",
-             color="#b8bcc6", fontsize=13.5, va="top")
+    fig.text(MARGIN / W, 1 - 112 / HT, "Laminar inflow, Re_H = 3000, Mach 0.3, expansion 5:3 (after Fessler & Eaton): "
+             "45,600 particles per St = τU0/5H, seeded upstream, over the gas vorticity (red: counterclockwise). "
+             "Mallard, TENO5, 29,280 cells",
+             color="#b8bcc6", fontsize=12.5, va="top")
     clock_text = fig.text(1 - MARGIN / W, 1 - 34 / HT, "", color=FG, fontsize=20, va="top", ha="right",
                           family="monospace")
 

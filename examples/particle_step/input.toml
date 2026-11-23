@@ -5,9 +5,9 @@
 # period of the shear layer's vortices), sets what the step does to them:
 # tracers roll up into the vortices and fill the recirculation zone, particles
 # of St near 1 are flung out of the vortex cores onto the braids between them,
-# and heavy particles fly across the shear layer and reach the floor beyond
-# the recirculation zone without entering it. This input has St = 1;
-# run_particle_step.py runs it at St = 0 (tracers), 1 and 4.
+# and heavy particles cross the shear layer and reach the floor near the
+# reattachment without entering the recirculation zone. This input has St = 1;
+# run_particle_step.py runs it at St = 0 (tracers), 1 and 4 (README.md).
 
 [run]
 t_stop = 400.0
