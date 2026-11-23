@@ -100,9 +100,9 @@ Every method and reference is cited in [docs/references.md](https://matthewbonan
 | | Best for |
 |---|---|
 | Container: `ghcr.io/matthewbonanni/mallard` (CPU) or `:cuda` (NVIDIA GPUs), with Docker, Apptainer or Kubernetes | Trying Mallard; workstations; GPU nodes; Kubernetes |
-| Relocatable archive for Linux CPUs, attached to each release from 0.11.0 | Linux clusters with an MPICH-based MPI; no container runtime |
+| Portable binaries for Linux CPUs, MPICH or Open MPI, attached to each release from 0.11.0 | Linux clusters; no container runtime |
 | [Spack](https://spack.io): `spack install mallard` with this repository's package | Clusters: your compilers, MPI and GPUs |
-| From source with CMake | Development; every build option |
+| From source with CMake | Development: tests, fuzzing, sanitizers, warnings as errors |
 
 Quickest, on a CPU:
 
@@ -112,13 +112,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-[Installation](https://matthewbonanni.github.io/mallard/docs/installation/) covers containers, relocatable archives, Spack, GPU and MPI builds and every CMake option. [Supported platforms](https://matthewbonanni.github.io/mallard/docs/installation/#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs. The [feature matrix](https://matthewbonanni.github.io/mallard/docs/guide/features/) shows which features combine, each pair marked validated, verified, implemented, rejected or untested.
+[Installation](https://matthewbonanni.github.io/mallard/docs/installation/) covers containers, portable binaries, Spack, GPU and MPI builds and every CMake option. [Supported platforms](https://matthewbonanni.github.io/mallard/docs/installation/#supported-platforms): GCC 15, Clang 22 or Xcode 26.4 and newer, CMake 4.2 and newer, on Linux (x86-64 and arm64) and macOS, with CUDA 13.4, ROCm or oneAPI for GPUs. The [feature matrix](https://matthewbonanni.github.io/mallard/docs/guide/features/) shows which features combine, each pair marked validated, verified, implemented, rejected or untested.
 
 ## Running
 
 ```sh
 cd examples/riemann_2d
-mallard -i input.toml --kokkos-num-threads=8                   # installed (container, archive, Spack)
+mallard -i input.toml --kokkos-num-threads=8                   # installed (container, portable binaries, Spack)
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 

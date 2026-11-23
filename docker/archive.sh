@@ -1,28 +1,35 @@
 #!/usr/bin/env bash
-# Builds a relocatable archive of Mallard, 2D and 3D, for one architecture and backend, in a container of an
-# old glibc (manylinux_2_28: glibc 2.28, RHEL 8 and newer), for the release:
+# Builds the portable binaries of Mallard, 2D and 3D, for one architecture, backend and MPI, in a container of
+# an old glibc (manylinux_2_28: glibc 2.28, RHEL 8 and newer), for the release:
 #
-#   archive.sh SOURCE OUTDIR VARIANT [CMAKE_ARGS...]
+#   archive.sh SOURCE OUTDIR VARIANT MPI [CMAKE_ARGS...]
 #
 # VARIANT is cpu (OpenMP), cuda12, cuda13 (CUDA with an OpenMP host backend) or rocm (HIP); the container
 # brings the compilers and toolkits (release.yml names them). The archive unpacks anywhere:
 #
-#   OUTDIR/mallard-<version>-linux-<arch>-<variant>.tar.gz   bin/, lib/, share/ under one directory
-#   OUTDIR/<archive>.sha256                                  for sha256sum -c
-#   OUTDIR/<archive>.json                                    its entry of release-manifest.json
+#   OUTDIR/mallard-<version>-linux-<arch>-<variant>-<mpi>.tar.gz   bin/, lib/, share/ under one directory
+#   OUTDIR/<archive>.sha256                                        for sha256sum -c
+#   OUTDIR/<archive>.json                                          its entry of release-manifest.json
 #
-# MPI is MPICH's ABI (libmpi.so.12, its C interface only): the archive carries MPICH's library, so it runs on one node as it is,
-# and multi-node runs load the site's MPICH-derived MPI (Cray MPICH, Intel MPI, MVAPICH, MPICH) with
-# `module load`, whose library comes first on LD_LIBRARY_PATH: every executable and library finds the rest
-# of the archive through its RUNPATH ($ORIGIN/../lib), which LD_LIBRARY_PATH overrides. CGNS and Kokkos
-# are linked in; HDF5 (parallel, from the submodule) and every other library but the C and C++ runtimes of
-# the system (and the GPU driver) are copied into lib/.
+# MPI is the ABI of one MPI family, its C interface only, and the archive carries a library of it, so it runs
+# on one node as it is:
+#   mpich    libmpi.so.12: MPICH, Cray MPICH, Intel MPI, MVAPICH. Built and carried: the container's MPICH
+#            (mpich-devel).
+#   openmpi  libmpi.so.40: Open MPI 4.x and 5.x. Built against the container's Open MPI 4.1 (openmpi-devel),
+#            whose binaries Open MPI 5 runs too; carries Open MPI 5 built here with its components linked in
+#            (--disable-dlopen), which runs a single process without a launcher or its install prefix.
+# Multi-node runs load the site's MPI of that family with `module load`, whose library comes first on
+# LD_LIBRARY_PATH: every executable and library finds the rest of the archive through its RUNPATH
+# ($ORIGIN/../lib), which LD_LIBRARY_PATH overrides. CGNS and Kokkos are linked in; HDF5 (parallel, from the
+# submodule) and every other library but the C and C++ runtimes of the system (and the GPU driver) are copied
+# into lib/.
 set -euo pipefail
 
 src=$(cd "$1" && pwd)
 out=$(mkdir -p "$2" && cd "$2" && pwd)
 variant=$3
-shift 3
+mpi_family=$4
+shift 4
 arch=$(uname -m)
 case "$variant" in
     cpu) backend=(-DKokkos_ENABLE_OPENMP=ON) ;;
@@ -36,18 +43,37 @@ case "$variant" in
 esac
 version=$(git -C "$src" describe --tags --match 'v[0-9]*' 2> /dev/null | sed 's/^v//') ||
     version=$(sed -n 's/^project(Mallard VERSION \([0-9.]*\) .*/\1/p' "$src/CMakeLists.txt")
-name="mallard-$version-linux-$arch-$variant"
+name="mallard-$version-linux-$arch-$variant-$mpi_family"
 stage="$out/stage/$name"
 rm -rf "$stage" && mkdir -p "$stage"
 
-mpicc=$(command -v mpicc || ls /usr/lib64/mpich/bin/mpicc 2> /dev/null) ||
-    { echo "archive.sh: no MPICH (mpicc); the container must provide MPICH's development files" >&2; exit 1; }
+case "$mpi_family" in
+    mpich) mpicc=/usr/lib64/mpich/bin/mpicc ;;
+    openmpi) mpicc=/usr/lib64/openmpi/bin/mpicc ;;
+    *) echo "archive.sh: MPI $mpi_family: mpich or openmpi" >&2; exit 2 ;;
+esac
+[ -x "$mpicc" ] || { echo "archive.sh: no $mpicc; the container must provide $mpi_family-devel" >&2; exit 1; }
 export PATH="$(dirname "$mpicc"):$PATH"
-mpicc -show | grep -q mpich || { echo "archive.sh: $mpicc is not MPICH's" >&2; exit 1; }
+mpicc -show | grep -q "$mpi_family" || { echo "archive.sh: $mpicc is not $mpi_family's" >&2; exit 1; }
 # MPI's C library and headers alone: no libmpicxx, and none of the distribution's flags that its compiler
 # wrappers add (RHEL's add _GLIBCXX_ASSERTIONS and hardening options)
 mpi_lib=$(dirname "$(dirname "$mpicc")")/lib
 mpi_inc=$(mpicc -show | tr ' ' '\n' | sed -n 's/^-I//p' | head -n 1)
+carried_lib=$mpi_lib
+if [ "$mpi_family" = openmpi ]; then
+    ompi=openmpi-5.0.10
+    ompi_sha256=0acecc4fc218e5debdbcb8a41d182c6b0f1d29393015ed763b2a91d5d7374cc6
+    curl -fsSL -o "$out/$ompi.tar.bz2" "https://download.open-mpi.org/release/open-mpi/v5.0/$ompi.tar.bz2"
+    echo "$ompi_sha256  $out/$ompi.tar.bz2" | sha256sum -c -
+    tar -C "$out" -xjf "$out/$ompi.tar.bz2"
+    # One node's transports (shared memory, TCP); a site's Open MPI brings its network's
+    (cd "$out/$ompi" && ./configure --prefix="$out/openmpi" --disable-dlopen --disable-mpi-fortran --disable-oshmem \
+        --without-ofi --without-ucx --without-psm2 --without-cuda --with-hwloc=internal \
+        --with-libevent=internal --with-pmix=internal --with-prrte=internal > "$out/$ompi.configure.log" &&
+        make -j "${JOBS:-$(nproc)}" > "$out/$ompi.make.log" && make install > /dev/null) ||
+        { tail -n 50 "$out/$ompi".*.log >&2; exit 1; }
+    carried_lib=$out/openmpi/lib
+fi
 mpi=(-DMPI_SKIP_COMPILER_WRAPPER=ON -DMPI_C_HEADER_DIR="$mpi_inc" -DMPI_CXX_HEADER_DIR="$mpi_inc"
     -DMPI_C_LIB_NAMES=mpi -DMPI_CXX_LIB_NAMES=mpi -DMPI_mpi_LIBRARY="$mpi_lib/libmpi.so" -DMPI_CXX_SKIP_MPICXX=ON)
 
@@ -59,8 +85,9 @@ cmake -S "$src/src/external/hdf5" -B "$out/build-hdf5" -DCMAKE_BUILD_TYPE=Releas
     -DHDF5_BUILD_JAVA=OFF -DHDF5_BUILD_UTILS=OFF
 cmake --build "$out/build-hdf5" --parallel "${JOBS:-$(nproc)}"
 cmake --install "$out/build-hdf5"
-# What ldd resolves while collecting lib/: the libraries the build linked from outside system paths
-export LD_LIBRARY_PATH="$hdf5/lib:$hdf5/lib64:$mpi_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# What ldd resolves while collecting lib/: the libraries the build linked from outside system paths, and
+# the MPI library the archive carries
+export LD_LIBRARY_PATH="$hdf5/lib:$hdf5/lib64:$carried_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 for dim in 2 3; do
     cmake -S "$src" -B "$out/build-$dim" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$stage" \
@@ -110,12 +137,12 @@ done
 glibc=$(for f in $(elves); do objdump -T "$f" 2> /dev/null; done | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' |
     sort -t. -k1,1n -k2,2n -k3,3n -u | tail -n 1)
 cat > "$stage/share/mallard/archive.toml" << EOF
-# A relocatable archive of Mallard (docker/archive.sh): unpack it anywhere and run bin/mallard.
+# Portable binaries of Mallard (docker/archive.sh): unpack them anywhere and run bin/mallard.
 version = "$version"
 variant = "$variant"
 platform = "linux-$arch"
 glibc = "$glibc"
-mpi = "mpich-abi"
+mpi = "$mpi_family"
 EOF
 
 # Every executable runs from the moved tree, with nothing on LD_LIBRARY_PATH
@@ -132,6 +159,6 @@ tar -C "$out/stage" -czf "$out/$name.tar.gz" "$name"
 sha=$(cut -d' ' -f1 "$out/$name.tar.gz.sha256")
 size=$(stat -c %s "$out/$name.tar.gz")
 cat > "$out/$name.tar.gz.json" << EOF
-{"kind": "archive", "name": "$name.tar.gz", "variant": "$variant", "platform": "linux-$arch", "sha256": "$sha", "size": $size, "glibc": "$glibc", "mpi": "mpich-abi", "dims": [2, 3]}
+{"kind": "archive", "name": "$name.tar.gz", "variant": "$variant", "platform": "linux-$arch", "sha256": "$sha", "size": $size, "glibc": "$glibc", "mpi": "$mpi_family", "dims": [2, 3]}
 EOF
 echo "archive.sh: $out/$name.tar.gz ($size bytes, glibc $glibc, sha256 $sha)"
