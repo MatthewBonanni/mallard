@@ -37,6 +37,7 @@ import regions
 import run_report
 import runs
 import schematics
+import surface_high_order
 import teno
 import theory
 import time_integrators
@@ -75,6 +76,7 @@ def main():
         probes.main()
         python.figures(args.mallard)
         regions.figures(args.mallard, args.mallard3d)
+        surface_high_order.figures(args.mallard)
         sys.argv = [sys.argv[0], "--mallard", args.mallard]
         run_report.main()
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

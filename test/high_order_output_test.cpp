@@ -241,7 +241,8 @@ TEST(HighOrderOutputTest, AWriterOfPartOfTheMeshRejectsTheKey) {
     solver.set_distributed(false);
     try {
         solver.init(parse_toml(polynomial_case(mesh_file, 3,
-                                               "[[write_data]]\nprefix = \"" + dir + "/b\"\nregion = \"left\"\n"
+                                               "[regions]\nbox = {type = \"rectangle\", center = [0.5, 0.5], size = [0.4, 0.4]}\n"
+                                               "[[write_data]]\nprefix = \"" + dir + "/b\"\nregion = \"box\"\n"
                                                "interval = 1\nhigh_order = true\nfields = [\"P\"]\n")));
         FAIL() << "accepted";
     } catch (const std::exception & e) {

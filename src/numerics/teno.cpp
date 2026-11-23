@@ -2353,6 +2353,9 @@ struct TENOFunctor {
     Kokkos::View<uint32_t *> extra_cells{};  // TENO::extra_cells
     Kokkos::View<rtype *[N_DIM]> point_offsets{};  // from the cell centroid, point_cells.extent(0) groups
     Kokkos::View<rtype *[N_CONSERVATIVE]> point_W{};
+    // point_gradients: the gradients of W at the points, and 1 where written
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> point_dW{};
+    Kokkos::View<uint8_t *> point_exact{};
 
     /**
      * @brief W at the points of a cell from its central polynomial, if the
@@ -2416,6 +2419,33 @@ struct TENOFunctor {
             to_primitives(U, Wq);
             if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) continue;
             FOR_I_CONSERVATIVE point_W(p, i) = Wq[i];
+            if (point_exact.extent(0) == 0) continue;
+            rtype dpsi[NK * N_DIM];
+            teno::monomial_derivatives(DEG, xi, dpsi);
+            rtype dU[N_CONSERVATIVE][N_DIM] = {};
+            for (uint8_t l = 0; l < NK; l++) {
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+                    for (uint8_t d = 0; d < N_DIM; d++) dU[v][d] = fmadd(aK[l][v], dpsi[l * N_DIM + d], dU[v][d]);
+                }
+            }
+            const rtype inv_h = 1.0_r / h;
+            for (uint8_t d = 0; d < N_DIM; d++) {
+                rtype dW[N_CONSERVATIVE];
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dW[v] = dU[v][d] * inv_h;
+                if constexpr (!PRIM) {
+                    // d(rho u) = rho du + u drho, dE = dp / (gamma - 1) + |u|^2 drho / 2 + rho u . du
+                    const rtype rho_p = Wq[0];
+                    rtype work = dW[N_DIM + 1] - 0.5_r * dot<N_DIM>(Wq + 1, Wq + 1) * dW[0];
+                    for (uint8_t a = 0; a < N_DIM; a++) {
+                        const rtype du = (dW[1 + a] - Wq[1 + a] * dW[0]) / rho_p;
+                        dW[1 + a] = du;
+                        work -= rho_p * Wq[1 + a] * du;
+                    }
+                    dW[N_DIM + 1] = (gamma - 1.0_r) * work;
+                }
+                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) point_dW(p, v, d) = dW[v];
+            }
+            point_exact(p) = 1;
         }
     }
 
@@ -3520,7 +3550,8 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 
 template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -3536,6 +3567,8 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     functor.extra_cells = extra_cells_device;
     functor.point_offsets = offsets;
     functor.point_W = out;
+    functor.point_dW = gradients;
+    functor.point_exact = exact;
     gated::parallel_for("teno_point_values", Kokkos::RangePolicy<typename Functor::PointPass>(0, cells.extent(0)),
                          functor);
 }
@@ -3641,6 +3674,36 @@ bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::
         case 7: launch_points<3, true, rtype>(solution, cells, offsets, out); break;
         case 9: launch_points<4, true, rtype>(solution, cells, offsets, out); break;
         case 11: launch_points<5, true, rtype>(solution, cells, offsets, out); break;
+        default: throw std::runtime_error("TENO: unsupported degree.");
+    }
+    return true;
+}
+
+bool TENO::point_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact) {
+    if (cells.extent(0) == 0) return true;
+#if N_DIM == 3
+    if (single_tables) {
+        switch (degree) {
+            case 2: launch_points<2, false, float>(solution, cells, offsets, out, gradients, exact); break;
+            case 3: launch_points<3, false, float>(solution, cells, offsets, out, gradients, exact); break;
+            case 4: launch_points<4, false, float>(solution, cells, offsets, out, gradients, exact); break;
+            case 5: launch_points<5, false, float>(solution, cells, offsets, out, gradients, exact); break;
+            default: throw std::runtime_error("TENO: unsupported degree.");
+        }
+        return true;
+    }
+#endif
+    switch (degree * 2 + primitive) {
+        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
     return true;

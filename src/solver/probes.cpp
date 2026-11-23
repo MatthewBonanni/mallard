@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <numeric>
 #include <regex>
@@ -40,6 +41,7 @@
 #include "log.h"
 #include "provenance.h"
 #include "json.h"
+#include "lagrange.h"
 #include "region_input.h"
 #include "region_motion.h"
 #include "run_log.h"
@@ -179,11 +181,44 @@ constexpr int32_t EXCHANGE_H = FIRST + 24;
 constexpr int32_t SPECIES_FLUX = FIRST + 32;                     // + species
 constexpr int32_t SPECIES_DIFFUSIVE_FLUX = FIRST + (1 << 16);    // + species
 constexpr int32_t SPECIES_TOTAL_FLUX = FIRST + (2 << 16);        // + species
+// Snapshots of Lagrange elements: fields of the velocity gradient and the state at each node (+ PointField)
+constexpr int32_t POINT_DERIVED = 1 << 28;
+enum PointField : int32_t {
+    VORTICITY,  // 2D: its z component
+    VORTICITY_X,
+    VORTICITY_Y,
+    VORTICITY_Z,
+    Q_CRITERION,
+    LAMBDA2,
+    SCHLIEREN,
+    DILATATION,
+    HELICITY,
+    ENSTROPHY,
+    STRAIN_RATE,
+    MACH,
+    SOUND_SPEED,
+    N_POINT_FIELDS
+};
+const char * const POINT_FIELDS[N_POINT_FIELDS] = {"VORTICITY",  "VORTICITY_X", "VORTICITY_Y", "VORTICITY_Z", "Q_CRITERION",
+                                                   "LAMBDA2",    "SCHLIEREN",   "DILATATION",  "HELICITY",    "ENSTROPHY",
+                                                   "STRAIN_RATE", "MACH",       "SOUND_SPEED"};
 
-constexpr bool on_faces(int32_t k) { return (k >= TRACTION_PRESSURE && k < SPECIES_FLUX) || k >= SPECIES_DIFFUSIVE_FLUX; }
-constexpr bool normals(int32_t k) { return k >= FIRST; }
+KOKKOS_INLINE_FUNCTION constexpr bool flux_code(int32_t k) { return k >= FIRST && k < POINT_DERIVED; }
+constexpr bool on_faces(int32_t k) {
+    return (k >= TRACTION_PRESSURE && k < SPECIES_FLUX) || (k >= SPECIES_DIFFUSIVE_FLUX && flux_code(k));
+}
+constexpr bool normals(int32_t k) { return flux_code(k); }
 KOKKOS_INLINE_FUNCTION constexpr bool diffusive(int32_t k) {
-    return k == ENERGY_DIFFUSIVE_FLUX || k == ENERGY_TOTAL_FLUX || k >= SPECIES_DIFFUSIVE_FLUX;
+    return k == ENERGY_DIFFUSIVE_FLUX || k == ENERGY_TOTAL_FLUX || (k >= SPECIES_DIFFUSIVE_FLUX && flux_code(k));
+}
+/** @brief The code of a field a Lagrange snapshot evaluates at its nodes, or -1. */
+int32_t point_code(const std::string & name) {
+    for (int32_t f = 0; f < N_POINT_FIELDS; f++) {
+        const bool exists = N_DIM == 2 ? f != VORTICITY_X && f != VORTICITY_Y && f != VORTICITY_Z && f != HELICITY
+                                       : f != VORTICITY;
+        if (exists && name == POINT_FIELDS[f]) return POINT_DERIVED + f;
+    }
+    return -1;
 }
 constexpr bool gradients(int32_t k) {
     return (k >= TRACTION_VISCOUS && k <= Q_W && k != CP) || k == U_TAU || k == Y_PLUS || diffusive(k) ||
@@ -215,6 +250,52 @@ const std::vector<std::pair<std::string, int32_t>> VECTORS = {{"MOMENTUM_FLUX", 
 } // namespace code
 
 const char * const AXES = "XYZ";
+
+/**
+ * @brief The degree of a snapshot's Lagrange elements (0: one value per element): high_order (default on for
+ *        surfaces and curves with a reconstruction of polynomials) and high_order_degree (default theirs).
+ */
+uint32_t lagrange_degree(const Input & entry, const std::string & key, const bool surface, const uint32_t max_degree) {
+    const char * const docs = "docs/guide/output.md#surfaces-from-the-polynomials";
+    const bool given = entry.contains("high_order");
+    const bool on = find_value_or<bool>(entry, "high_order", surface && max_degree > 0);
+    if (on && !surface) {
+        throw InputError(Diagnostic{.key = key + ".high_order",
+                                    .line = line_of(entry, "high_order"),
+                                    .message = "is for boundary zones, cut planes and surfaces and curves of [regions]; "
+                                               "points, lines and resampled surfaces are point samples already",
+                                    .fix = "Remove high_order",
+                                    .docs = docs});
+    }
+    if (on && max_degree == 0) {
+        throw InputError(Diagnostic{.key = key + ".high_order",
+                                    .line = line_of(entry, "high_order"),
+                                    .message = "needs the polynomials of a TENO reconstruction; this run's has none",
+                                    .fix = "Set [numerics.face_reconstruction] type = \"TENO\", or remove high_order",
+                                    .docs = docs});
+    }
+    if (!on) {
+        if (entry.contains("high_order_degree")) {
+            throw InputError(Diagnostic{.key = key + ".high_order_degree",
+                                        .line = line_of(entry, "high_order_degree"),
+                                        .message = given ? "is given with high_order = false"
+                                                         : "needs the polynomials of a TENO reconstruction",
+                                        .fix = "Remove high_order_degree",
+                                        .docs = docs});
+        }
+        return 0;
+    }
+    const int degree = find_value_or<int>(entry, "high_order_degree", int(max_degree));
+    if (degree < 1 || degree > int(max_degree)) {
+        throw InputError(Diagnostic{.key = key + ".high_order_degree",
+                                    .line = line_of(entry, "high_order_degree"),
+                                    .message = "is " + std::to_string(degree) +
+                                               "; the reconstruction's polynomials have degree " + std::to_string(max_degree),
+                                    .fix = "Give a degree from 1 to " + std::to_string(max_degree),
+                                    .docs = docs});
+    }
+    return static_cast<uint32_t>(degree);
+}
 
 int32_t variable_code(const std::string & name, const std::vector<std::string> & species_names,
                       const std::string & key) {
@@ -270,13 +351,15 @@ std::vector<std::string> expand_variables(const std::vector<std::string> & liste
     return names;
 }
 
-/** @brief A probe's VTK PolyData: its points, cells and whether the samples are the cells. */
+/** @brief A probe's VTK PolyData, or UnstructuredGrid of Lagrange cells: its points, cells and whether the samples are the cells. */
 struct PolyLayout {
     std::vector<double> xyz;  // 3 per point
     std::vector<int64_t> connectivity, offsets;  // offsets from 0
-    const char * cells;  // Verts, Lines or Polys
+    std::vector<uint8_t> types;  // Lagrange cells: their VTK types (an UnstructuredGrid)
+    const char * cells;  // Verts, Lines or Polys; Cells of an UnstructuredGrid
     bool cell_data;
     size_t n_points() const { return xyz.size() / 3; }
+    bool grid() const { return cells == std::string("Cells"); }
 };
 
 /**
@@ -288,8 +371,10 @@ PolyLayout poly_layout(const probe::Geometry & g) {
     PolyLayout l;
     const bool polygons = !g.polygon_offsets.empty();
     const bool vertices = g.dim == 0 || g.polylines.empty();
-    l.cells = polygons ? (g.dim == 1 ? "Lines" : "Polys") : vertices ? "Verts" : "Lines";
-    l.cell_data = polygons && (!g.vertices.empty() || g.nodes.empty());
+    const bool lagrange = g.lagrange;
+    l.cells = lagrange ? "Cells" : polygons ? (g.dim == 1 ? "Lines" : "Polys") : vertices ? "Verts" : "Lines";
+    l.cell_data = !lagrange && polygons && (!g.vertices.empty() || g.nodes.empty());
+    l.types = g.cell_types;
     const std::vector<probe::Point> & points = l.cell_data ? g.vertices : g.nodes;
     l.xyz.assign(3 * points.size(), 0.0);
     for (size_t p = 0; p < points.size(); p++) {
@@ -358,6 +443,8 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
         return a;
     };
     const PolyLayout layout = poly_layout(g);
+    const bool grid = layout.grid();
+    const size_t n_mesh_arrays = grid ? 4 : 3;
     const size_t n = g.nodes.size();
     const std::vector<int64_t> offsets(layout.offsets.begin() + 1, layout.offsets.end());
     std::vector<Array> sample_data;
@@ -369,6 +456,7 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
     for (const auto & a : geometry_arrays(g)) sample_data.push_back(doubles(a.name, a.components, a.values));
     std::vector<Array> arrays = {doubles("Points", 3, layout.xyz), integers("connectivity", layout.connectivity),
                                  integers("offsets", offsets)};
+    if (grid) arrays.push_back(Array{"types", "UInt8", 1, std::vector<char>(layout.types.begin(), layout.types.end())});
     for (auto & a : sample_data) arrays.push_back(std::move(a));
 
     make_parent(file);
@@ -385,16 +473,17 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
     const size_t n_cells = offsets.size();
     std::vector<std::string> sample_names;
     std::vector<FieldDescription> descriptions;
-    for (size_t a = 3; a < arrays.size(); a++) {
+    for (size_t a = n_mesh_arrays; a < arrays.size(); a++) {
         sample_names.push_back(arrays[a].name);
         descriptions.push_back(geometry_field(arrays[a].name, g));
     }
+    const char * const kind = grid ? "UnstructuredGrid" : "PolyData";
     // Field data belongs to the data set, before the piece, for VTK to read it
     out << "<?xml version=\"1.0\"?>\n" << provenance::xml_comment() << "\n"
         << provenance::xml_comment(snapshot_block::NAME, block.json()) << "\n"
         << provenance::xml_comment(snapshot_block::PROBE_SAMPLING, sampling)
-        << "\n<VTKFile type=\"PolyData\" version=\"1.0\" byte_order=\"LittleEndian\" "
-           "header_type=\"UInt64\">\n  <PolyData>\n";
+        << "\n<VTKFile type=\"" << kind << "\" version=\"1.0\" byte_order=\"LittleEndian\" "
+           "header_type=\"UInt64\">\n  <" << kind << ">\n";
     out << "    <FieldData>\n      <DataArray type=\"Float64\" Name=\"TIME\" NumberOfTuples=\"1\" format=\"ascii\">"
         << std::setprecision(17) << block.time << "</DataArray>\n"
         << "      <DataArray type=\"Int64\" Name=\"STEP\" NumberOfTuples=\"1\" format=\"ascii\">" << block.step
@@ -402,18 +491,21 @@ void write_vtp_file(const std::string & file, const snapshot_block::Block & bloc
            "format=\"ascii\">"
         << file_format::PROBE_OUTPUT.version << "</DataArray>\n"
         << field_units::vtk_field_data(sample_names, descriptions, "      ") << "    </FieldData>\n";
-    out << "    <Piece NumberOfPoints=\""
-        << layout.n_points() << "\" NumberOfVerts=\"" << (cells == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
-        << (cells == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
-        << (cells == "Polys" ? n_cells : 0) << "\">\n";
+    if (grid) {
+        out << "    <Piece NumberOfPoints=\"" << layout.n_points() << "\" NumberOfCells=\"" << n_cells << "\">\n";
+    } else {
+        out << "    <Piece NumberOfPoints=\""
+            << layout.n_points() << "\" NumberOfVerts=\"" << (cells == "Verts" ? n_cells : 0) << "\" NumberOfLines=\""
+            << (cells == "Lines" ? n_cells : 0) << "\" NumberOfStrips=\"0\" NumberOfPolys=\""
+            << (cells == "Polys" ? n_cells : 0) << "\">\n";
+    }
     out << "      <Points>\n";
     data_array(arrays[0]);
     out << "      </Points>\n      <" << cells << ">\n";
-    data_array(arrays[1]);
-    data_array(arrays[2]);
+    for (size_t a = 1; a < n_mesh_arrays; a++) data_array(arrays[a]);
     out << "      </" << cells << ">\n      <" << data << ">\n";
-    for (size_t a = 3; a < arrays.size(); a++) data_array(arrays[a]);
-    out << "      </" << data << ">\n    </Piece>\n  </PolyData>\n  <AppendedData encoding=\"raw\">\n   _";
+    for (size_t a = n_mesh_arrays; a < arrays.size(); a++) data_array(arrays[a]);
+    out << "      </" << data << ">\n    </Piece>\n  </" << kind << ">\n  <AppendedData encoding=\"raw\">\n   _";
     for (const auto & a : arrays) {
         const uint64_t size = a.bytes.size();
         out.write(reinterpret_cast<const char *>(&size), sizeof(size));
@@ -552,6 +644,12 @@ void allocate_samples(Probes::Samples & s, const std::vector<uint32_t> & h_cells
     s.inside_W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_inside_W", h_inside.size());
     s.W = Kokkos::View<rtype *[N_CONSERVATIVE]>("probe_W", h_cells.size());
     s.values = Kokkos::View<rtype **, Kokkos::LayoutRight>("probe_values", h_cells.size(), n_variables);
+    if (s.polynomial_gradients) {
+        s.inside_dW = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("probe_inside_dW", h_inside.size());
+        s.inside_exact = Kokkos::View<uint8_t *>("probe_inside_exact", h_inside.size());
+        s.dW = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("probe_dW", h_cells.size());
+        s.exact = Kokkos::View<uint8_t *>("probe_exact", h_cells.size());
+    }
 }
 
 } // namespace
@@ -636,6 +734,183 @@ void Probes::select_snapshot_elements(Probe & p, const Mesh & mesh, const region
         }
         p.nodes.set_normals(normals);
     }
+    if (p.lagrange_degree > 0 && dimension >= 1) lagrange_elements(p, mesh);
+}
+
+void Probes::lagrange_elements(Probe & p, const Mesh & mesh) {
+    // Rank 0 cuts each element into Lagrange cells and places their nodes, in sample order; each sample's rank
+    // takes its nodes, so the nodes and their values do not depend on the ranks
+    probe::Geometry & g = p.geometry;
+    Samples & s = p.nodes;
+    const uint32_t q = p.lagrange_degree;
+    const bool root = !s.distributed || comm::is_root();
+    std::vector<std::vector<double>> element_nodes;
+    probe::Geometry out;
+    if (root) {
+        out.dim = g.dim;
+        out.type = g.type;
+        out.revolved = g.revolved;
+        out.lagrange = true;
+        out.polygon_offsets = {0};
+        struct Rule {
+            std::vector<lagrange::Point> reference;
+            std::vector<double> linear;
+        };
+        std::map<lagrange::Shape, Rule> rules;
+        const auto rule = [&](lagrange::Shape shape) -> const Rule & {
+            Rule & r = rules[shape];
+            if (r.reference.empty()) {
+                r.reference = lagrange::reference_nodes(shape, q);
+                r.linear = lagrange::basis(shape, 1, r.reference);
+            }
+            return r;
+        };
+        const uint64_t n = s.n_global;
+        const bool segments = !g.segments.empty();
+        if ((segments ? g.segments.size() / 2 : std::max<size_t>(g.polygon_offsets.size(), 1) - 1) != n) {
+            throw std::logic_error("probe " + p.name + ": its elements are not its samples");
+        }
+        element_nodes.resize(n);
+        std::vector<probe::Point> corners;
+        for (uint64_t k = 0; k < n; k++) {
+            corners.clear();
+            if (segments) {
+                corners = {g.segments[2 * k], g.segments[2 * k + 1]};
+            } else {
+                for (uint64_t v = g.polygon_offsets[k]; v < g.polygon_offsets[k + 1]; v++) {
+                    corners.push_back(g.vertices[g.polygon_vertices[v]]);
+                }
+            }
+            // Its pieces, by their corners
+            std::vector<std::pair<lagrange::Shape, std::vector<size_t>>> pieces;
+            if (g.dim == 1) {
+                pieces.push_back({lagrange::Shape::CURVE, {0, 1}});
+            } else if (corners.size() == 4) {
+                pieces.push_back({lagrange::Shape::QUADRILATERAL, {0, 1, 2, 3}});
+            } else {
+                for (size_t j = 1; j + 1 < corners.size(); j++) pieces.push_back({lagrange::Shape::TRIANGLE, {0, j, j + 1}});
+            }
+            const double length = segments ? std::hypot(corners[1][0] - corners[0][0], corners[1][1] - corners[0][1]) : 0.0;
+            for (const auto & [shape, idx] : pieces) {
+                const Rule & r = rule(shape);
+                for (size_t l = 0; l < r.reference.size(); l++) {
+                    probe::Point x{};
+                    for (size_t d = 0; d < N_DIM; d++) {
+                        double v = 0.0;
+                        for (size_t c = 0; c < idx.size(); c++) v += r.linear[l * idx.size() + c] * corners[idx[c]][d];
+                        x[d] = v;
+                    }
+                    out.polygon_vertices.push_back(static_cast<uint32_t>(out.nodes.size()));
+                    out.nodes.push_back(x);
+                    element_nodes[k].insert(element_nodes[k].end(), x.begin(), x.end());
+                    if (!g.normals.empty()) out.normals.push_back(g.normals[k]);
+                    if (!g.arc_length.empty()) out.arc_length.push_back(g.arc_length[k] + (r.reference[l][0] - 0.5) * length);
+                }
+                out.polygon_offsets.push_back(out.polygon_vertices.size());
+                out.cell_types.push_back(lagrange::vtk_type(shape));
+            }
+        }
+    }
+    // Each sample's nodes on its rank: rows of their count then their coordinates
+    size_t width = 1;
+    for (const auto & e : element_nodes) width = std::max(width, 1 + e.size());
+    if (s.distributed) width = static_cast<size_t>(comm::allreduce(uint64_t(width), comm::Op::MAX));
+    std::vector<double> rows;
+    if (root) {
+        rows.assign(element_nodes.size() * width, 0.0);
+        for (size_t k = 0; k < element_nodes.size(); k++) {
+            rows[k * width] = double(element_nodes[k].size() / N_DIM);
+            std::copy(element_nodes[k].begin(), element_nodes[k].end(), rows.begin() + std::ptrdiff_t(k * width + 1));
+        }
+    }
+    const std::vector<double> local = s.scatter(rows, width);
+    std::vector<size_t> first = {0};
+    std::vector<probe::Point> points;
+    for (size_t i = 0; i < s.host_cells.size(); i++) {
+        const size_t m = static_cast<size_t>(local[i * width]);
+        for (size_t j = 0; j < m; j++) {
+            probe::Point x;
+            for (size_t d = 0; d < N_DIM; d++) x[d] = local[i * width + 1 + j * N_DIM + d];
+            points.push_back(x);
+        }
+        first.push_back(points.size());
+    }
+    // Rank 0's row of each node: the nodes of the samples before its sample's row, then its place
+    std::vector<uint64_t> row;
+    if (root) {
+        std::vector<uint64_t> count_of_row(element_nodes.size() + 1, 0);
+        for (size_t k = 0; k < element_nodes.size(); k++) count_of_row[s.gathered_row[k] + 1] = element_nodes[k].size() / N_DIM;
+        std::partial_sum(count_of_row.begin(), count_of_row.end(), count_of_row.begin());
+        row.reserve(out.nodes.size());
+        for (size_t k = 0; k < element_nodes.size(); k++) {
+            for (uint64_t j = 0; j < element_nodes[k].size() / N_DIM; j++) row.push_back(count_of_row[s.gathered_row[k]] + j);
+        }
+    }
+    const uint64_t n_global = s.distributed ? comm::allreduce(uint64_t(points.size()), comm::Op::SUM) : points.size();
+    s.expand(mesh, first, points, n_global, std::move(row), static_cast<uint32_t>(p.codes.extent(0)));
+    if (root) {
+        g = std::move(out);
+    } else {
+        g.nodes.clear();
+        g.normals.clear();
+        g.vertices.clear();
+        g.polygon_offsets.clear();
+        g.polygon_vertices.clear();
+        g.node_weights.clear();
+        g.arc_length.clear();
+        g.segments.clear();
+        g.cell_types.clear();
+        g.lagrange = true;
+    }
+}
+
+void Probes::Samples::expand(const Mesh & mesh, const std::vector<size_t> & first,
+                             const std::vector<probe::Point> & points, const uint64_t n_global_nodes,
+                             std::vector<uint64_t> row, const uint32_t n_variables) {
+    const auto h_inside = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), inside);
+    const auto h_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), faces);
+    const auto h_normals = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), normals);
+    std::vector<uint8_t> is_inside(host_cells.size(), 0);
+    for (size_t j = 0; j < h_inside.extent(0); j++) is_inside[h_inside(j)] = 1;
+    const bool on_face = h_faces.extent(0) > 0, oriented = h_normals.extent(0) > 0;
+    std::vector<uint32_t> cells_out, inside_out, faces_out;
+    std::vector<rtype> offsets, distances, radii;
+    std::vector<probe::Point> normals_out;
+    for (size_t i = 0; i + 1 < first.size(); i++) {
+        const uint32_t c = host_cells[i];
+        for (size_t k = first[i]; k < first[i + 1]; k++) {
+            const uint32_t sample = static_cast<uint32_t>(cells_out.size());
+            cells_out.push_back(c);
+            probe::Point n{};
+            if (oriented) {
+                for (size_t d = 0; d < N_DIM; d++) n[d] = static_cast<double>(h_normals(i, d));
+                normals_out.push_back(n);
+            }
+            double dn = 0.0;
+            if (is_inside[i]) {
+                inside_out.push_back(sample);
+                for (size_t d = 0; d < N_DIM; d++) {
+                    const double r = points[k][d] - static_cast<double>(mesh.h_cell_coords(c, d));
+                    offsets.push_back(static_cast<rtype>(r));
+                    dn += r * n[d];
+                }
+            }
+            if (on_face) {
+                faces_out.push_back(h_faces(i));
+                distances.push_back(static_cast<rtype>(dn));
+            }
+            if (mesh.axisymmetric) radii.push_back(static_cast<rtype>(points[k][1]));
+        }
+    }
+    n_global = n_global_nodes;
+    gathered_row = std::move(row);
+    allocate_samples(*this, cells_out, inside_out, offsets, n_variables);
+    if (on_face) {
+        faces = to_device(faces_out, "probe_faces");
+        distance = to_device(distances, "probe_distance");
+    }
+    if (oriented) set_normals(normals_out);
+    if (mesh.axisymmetric) radius = to_device(radii, "probe_radius");
 }
 
 void Probes::select_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables,
@@ -944,7 +1219,10 @@ void Probes::Samples::locate(const Mesh & mesh, const std::vector<probe::Point> 
     order(mesh);
 }
 
-void Probes::set_reconstruction(const FaceReconstruction * r) { reconstruction = point_reconstruction(r); }
+void Probes::set_reconstruction(const FaceReconstruction * r) {
+    reconstruction = point_reconstruction(r);
+    polynomial_degree = r && r->get_type() == FaceReconstructionType::TENO ? static_cast<const TENO *>(r)->degree : 0;
+}
 
 std::string Probes::Probe::sampling_json() const {
     const bool point = sampling == Sampling::POINT;
@@ -1183,12 +1461,43 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             const bool admissible = Wq[0] > 0.0_r && Wq[E] > 0.0_r;
             FOR_I_CONSERVATIVE in_W(j, i) = admissible ? Wq[i] : Wc(c, i);
         });
-        if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
+        const bool exact_gradients = polynomial_gradients && fields.reconstruction;
+        if (exact_gradients) {
+            gated::fill(inside_exact, uint8_t(0));
+            fields.reconstruction->point_gradients(Wc, in_cells, in_offsets, in_W, inside_dW, inside_exact);
+        } else if (fields.reconstruction) {
+            fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
+        }
         const auto in = inside;
         gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             if (counted && j >= *counted) return;
             FOR_I_CONSERVATIVE Ws(in(j), i) = in_W(j, i);
         });
+        if (polynomial_gradients) {
+            // The polynomial's gradients where it has them, the cell's elsewhere
+            const auto dWs = dW;
+            const auto ex = exact;
+            gated::parallel_for("probe_cell_dW", n, KOKKOS_LAMBDA(const uint32_t s) {
+                const uint32_t c = cell(s);
+                ex(s) = 0;
+                FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) dWs(s, i, d) = G(c, i, d);
+            });
+            if (exact_gradients) {
+                const auto in_dW = inside_dW;
+                const auto in_exact = inside_exact;
+                // The last slot: the gradient of p / rho, which the temperature's follows at the cell's composition
+                gated::parallel_for("probe_point_dW", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
+                    if (!in_exact(j)) return;
+                    const uint32_t s = in(j);
+                    ex(s) = 1;
+                    const rtype pv = in_W(j, E) / in_W(j, 0);
+                    for (uint8_t d = 0; d < N_DIM; d++) {
+                        for (uint8_t i = 0; i < E; i++) dWs(s, i, d) = in_dW(j, i, d);
+                        dWs(s, E, d) = (in_dW(j, E, d) - pv * in_dW(j, 0, d)) / in_W(j, 0);
+                    }
+                });
+            }
+        }
     }
 
     const Euler physics = fields.physics;
@@ -1256,6 +1565,10 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const ProbeReference ref = reference;
     const WallModelFunctor wall_model = fields.wall_model;
     const bool modeled = wall_model.wm.active();
+    const bool point_gradients = polynomial_gradients && sampling == Sampling::POINT;
+    const auto dWs = dW;
+    const auto ex = exact;
+    const auto radii = radius;
     gated::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
         if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
@@ -1282,9 +1595,18 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             const BoundaryCondition & bc = boundaries.bcs(ibc);
             const rtype R_c = mixture ? p_c / (rho_c * T_c) : physics.R;
             rtype gu[N_DIM][N_DIM], gT[N_DIM];
+            // The polynomial's gradients at the sample, but normal to walls (below): its central polynomial
+            // there fits the walls' mirrored ghost states, and its normal derivative is less accurate there
+            // than the wall difference the viscous flux takes
+            const bool exact_here = point_gradients && ex(s);
             FOR_I_DIM {
-                for (uint8_t k = 0; k < N_DIM; k++) gu[k][i] = G(c, 1 + k, i);
-                gT[i] = (G(c, E, i) - R_c * T_c * G(c, 0, i)) / (rho_c * R_c);
+                if (exact_here) {
+                    for (uint8_t k = 0; k < N_DIM; k++) gu[k][i] = dWs(s, 1 + k, i);
+                    gT[i] = dWs(s, E, i) / R_c;
+                } else {
+                    for (uint8_t k = 0; k < N_DIM; k++) gu[k][i] = G(c, 1 + k, i);
+                    gT[i] = (G(c, E, i) - R_c * T_c * G(c, 0, i)) / (rho_c * R_c);
+                }
             }
             if (bc.is_wall()) {
                 const rtype dn = dist(s);
@@ -1335,7 +1657,51 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
         for (uint32_t v = 0; v < n_vars; v++) {
             const int32_t k = code(v);
             rtype value = 0.0_r;
-            if (k == CellSampler::RHO) {
+            if (k >= code::POINT_DERIVED) {
+                // From the gradients at the sample (the polynomial's, or the cell's) and its point values
+                derived::Tensor a{};
+                if (point_gradients) {
+                    for (uint8_t q = 0; q < N_DIM; q++) {
+                        FOR_I_DIM a.a[q][i] = dWs(s, 1 + q, i);
+                    }
+                } else {
+                    for (uint8_t q = 0; q < N_DIM; q++) {
+                        FOR_I_DIM a.a[q][i] = G(c, 1 + q, i);
+                    }
+                }
+                if (radii.extent(0) > 0) a.a[2][2] = Wf[2] / radii(s);
+                rtype w[3];
+                derived::vorticity(a, w);
+                const int32_t f = k - code::POINT_DERIVED;
+                if (f == code::VORTICITY) {
+                    value = w[2];
+                } else if (f <= code::VORTICITY_Z) {
+                    value = w[f - code::VORTICITY_X];
+                } else if (f == code::Q_CRITERION) {
+                    value = derived::q_criterion(a);
+                } else if (f == code::LAMBDA2) {
+                    value = derived::lambda2(a);
+                } else if (f == code::SCHLIEREN) {
+                    rtype g2 = 0.0_r;
+                    FOR_I_DIM {
+                        const rtype d = point_gradients ? dWs(s, 0, i) : G(c, 0, i);
+                        g2 += d * d;
+                    }
+                    value = Kokkos::sqrt(g2);
+                } else if (f == code::DILATATION) {
+                    value = derived::dilatation(a);
+                } else if (f == code::HELICITY) {
+                    value = dot<N_DIM>(Wf + 1, w);
+                } else if (f == code::ENSTROPHY) {
+                    value = derived::enstrophy(a);
+                } else if (f == code::STRAIN_RATE) {
+                    value = derived::strain_rate(a);
+                } else if (f == code::MACH) {
+                    value = Kokkos::sqrt(dot<N_DIM>(Wf + 1, Wf + 1) * Wf[0] / (g * Wf[E]));
+                } else {
+                    value = Kokkos::sqrt(g * Wf[E] / Wf[0]);
+                }
+            } else if (k == CellSampler::RHO) {
                 value = Wf[0];
             } else if (k < CellSampler::FIRST_PRIMITIVE + N_DIM + 1) {
                 value = Wf[1 + (k - CellSampler::FIRST_PRIMITIVE)];
@@ -1703,6 +2069,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         p.sampling = Sampling::POINT;
         p.format = snapshot->format;
         p.file = snapshot->file;
+        const bool surface = elements ? elements->dimension() >= 1
+                                      : !region_zones.empty() ||
+                                            (where != &entry && find_value_or<std::string>(*where, "type", "") == "cut_plane");
+        p.lagrange_degree = lagrange_degree(entry, key, surface, polynomial_degree);
     } else {
     // Keys that do not apply to a region probe are not read, so its resolved input does not set them
     const bool reductions_only = region && !p.resampled;
@@ -1782,6 +2152,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     if (p.variables.empty()) throw InputError(key + ".fields is empty.");
     std::vector<int32_t> h_codes;
     for (const auto & v : p.variables) {
+        if (p.lagrange_degree > 0 && code::point_code(v) >= 0) {
+            h_codes.push_back(code::point_code(v));
+            continue;
+        }
         try {
             h_codes.push_back(variable_code(v, species_names, key + ".fields"));
         } catch (const InputError &) {
@@ -1851,6 +2225,10 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     }
     p.transport = p.gradients && !species_names.empty();
+    p.nodes.polynomial_gradients =
+        p.lagrange_degree > 0 && (p.gradients || std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) {
+            return k >= code::POINT_DERIVED && k < code::POINT_DERIVED + code::MACH;
+        }));
     p.diffusive = std::any_of(h_codes.begin(), h_codes.end(), [](int32_t k) { return code::diffusive(k); });
     if (std::find(p.reductions.begin(), p.reductions.end(), Reduction::MOMENT) != p.reductions.end()) {
         const std::string rkey = key + ".reductions";
@@ -2070,6 +2448,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         p.nodes.on_faces(mesh, set, static_cast<uint32_t>(h_codes.size()));
         p.geometry = std::move(set.geometry);
         p.geometry.type = zones.size() == 1 ? "boundary " + zones[0] : "boundaries";
+        if (p.lagrange_degree > 0) lagrange_elements(p, mesh);
     } else if (cut) {
         const Input & g = *where;
         probe::Vec3 x = {0.0, 0.0, 0.0}, n = {0.0, 0.0, 0.0};
@@ -2104,6 +2483,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (!p.reductions.empty()) p.quadrature.in_cells(mesh, set.quadrature, {unit_n}, static_cast<uint32_t>(h_codes.size()));
         p.geometry = std::move(set.geometry);
         if (p.nodes.n_global == 0) throw InputError(gkey + ": the plane misses the mesh.");
+        if (p.lagrange_degree > 0) lagrange_elements(p, mesh);
     } else if (probe::Geometry g = probe::make_geometry(*where, gkey); !g.curves.empty()) {
         // One sample per cell each curve crosses
         probe::CurveCells set = probe::curve_cells(mesh, g, mesh.n_global_cells > 0);
@@ -3556,6 +3936,7 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     const uint64_t k = snapshot ? 0 : vtkhdf_steps, n = geometry.nodes.size();
     const size_t n_cols = n_evaluated();
     const PolyLayout layout = poly_layout(geometry);
+    const bool grid = layout.grid();  // Lagrange cells: an UnstructuredGrid, its cells at the top
     const std::string data = layout.cell_data ? "CellData" : "PointData";
     const std::vector<GeometryArray> fixed = geometry_arrays(geometry);
     // Extracted at each write: each step's geometry follows the previous ones' in the file
@@ -3579,7 +3960,17 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         const int64_t n_points = static_cast<int64_t>(layout.n_points());
         h5::write_rows<int64_t>(top, "NumberOfPoints", 1, 1, 0, 1, &n_points, H5P_DEFAULT);
         array(top, "Points", layout.n_points(), 3, layout.xyz.data());
+        if (grid) {
+            const int64_t counts[2] = {static_cast<int64_t>(layout.types.size()),
+                                       static_cast<int64_t>(layout.connectivity.size())};
+            h5::write_rows<int64_t>(top, "NumberOfCells", 1, 1, 0, 1, &counts[0], H5P_DEFAULT);
+            h5::write_rows<int64_t>(top, "NumberOfConnectivityIds", 1, 1, 0, 1, &counts[1], H5P_DEFAULT);
+            array(top, "Offsets", layout.offsets.size(), 1, layout.offsets.data());
+            array(top, "Connectivity", layout.connectivity.size(), 1, layout.connectivity.data());
+            array(top, "Types", layout.types.size(), 1, layout.types.data());
+        }
         for (const char * kind : kinds) {
+            if (grid) break;
             h5::Handle group(H5Gopen2(top, kind, H5P_DEFAULT), H5Gclose, kind);
             const std::vector<int64_t> none, zero = {0};
             const auto & o = kind == mine ? layout.offsets : zero;
@@ -3614,8 +4005,9 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         }
         h5::Handle top(H5Gcreate2(created, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "VTKHDF");
         h5::write_array_attribute(top, "Version", std::vector<int64_t>{2, 0});
-        h5::write_string_scalar_attribute(top, "Type", "PolyData");
+        h5::write_string_scalar_attribute(top, "Type", grid ? "UnstructuredGrid" : "PolyData");
         for (const char * group_name : {"Vertices", "Lines", "Polygons", "Strips", "CellData", "PointData", "FieldData"}) {
+            if (grid && std::string(group_name).find("Data") == std::string::npos) continue;
             h5::Handle group(H5Gcreate2(top, group_name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, group_name);
         }
         return created;
@@ -3623,6 +4015,17 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     const auto same_geometry = [&](const std::string & mesh) {
         h5::Handle opened(H5Fopen(mesh.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + mesh);
         h5::Handle top(H5Gopen2(opened, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+        if ((h5::read_strings_attribute(top, "Type").at(0) == "UnstructuredGrid") != grid) return false;
+        if (grid) {
+            return h5::n_rows(top, "Points") == layout.n_points() &&
+                   h5::read_rows<double>(top, "Points", 0, layout.n_points(), 3, H5P_DEFAULT) == layout.xyz &&
+                   h5::n_rows(top, "Offsets") == layout.offsets.size() &&
+                   h5::read_rows<int64_t>(top, "Offsets", 0, layout.offsets.size(), 1, H5P_DEFAULT) == layout.offsets &&
+                   h5::n_rows(top, "Connectivity") == layout.connectivity.size() &&
+                   h5::read_rows<int64_t>(top, "Connectivity", 0, layout.connectivity.size(), 1, H5P_DEFAULT) ==
+                       layout.connectivity &&
+                   h5::read_rows<uint8_t>(top, "Types", 0, layout.types.size(), 1, H5P_DEFAULT) == layout.types;
+        }
         h5::Handle group(H5Gopen2(top, mine.c_str(), H5P_DEFAULT), H5Gclose, "opening " + mine);
         return h5::n_rows(top, "Points") == layout.n_points() &&
                h5::read_rows<double>(top, "Points", 0, layout.n_points(), 3, H5P_DEFAULT) == layout.xyz &&
@@ -3708,7 +4111,22 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
         h5::put_rows<int64_t>(top, "NumberOfPoints", k + 1, 1, k, 1, &n_points, H5P_DEFAULT);
         h5::put_rows(top, "Points", points_before + layout.n_points(), 3, points_before, layout.n_points(),
                      layout.xyz.data(), H5P_DEFAULT);
-        for (size_t i = 0; i < 4; i++) {
+        if (grid) {
+            cells_before[0] = sum(top, "NumberOfCells");
+            ids_before[0] = sum(top, "NumberOfConnectivityIds");
+            const int64_t counts[2] = {static_cast<int64_t>(layout.types.size()),
+                                       static_cast<int64_t>(layout.connectivity.size())};
+            h5::put_rows<int64_t>(top, "NumberOfCells", k + 1, 1, k, 1, &counts[0], H5P_DEFAULT);
+            h5::put_rows<int64_t>(top, "NumberOfConnectivityIds", k + 1, 1, k, 1, &counts[1], H5P_DEFAULT);
+            const uint64_t at = static_cast<uint64_t>(cells_before[0]) + k, cells = static_cast<uint64_t>(cells_before[0]);
+            const uint64_t ids = static_cast<uint64_t>(ids_before[0]);
+            const std::vector<int64_t> & o = layout.offsets, & c = layout.connectivity;
+            h5::put_rows(top, "Offsets", at + o.size(), 1, at, o.size(), o.data(), H5P_DEFAULT);
+            h5::put_rows(top, "Connectivity", ids + c.size(), 1, ids, c.size(), c.data(), H5P_DEFAULT);
+            h5::put_rows(top, "Types", cells + layout.types.size(), 1, cells, layout.types.size(), layout.types.data(),
+                         H5P_DEFAULT);
+        }
+        for (size_t i = 0; i < 4 && !grid; i++) {
             h5::Handle group(H5Gopen2(top, kinds[i], H5P_DEFAULT), H5Gclose, kinds[i]);
             cells_before[i] = sum(group, "NumberOfCells");
             ids_before[i] = sum(group, "NumberOfConnectivityIds");
@@ -3764,8 +4182,9 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
     h5::put_rows(steps, "PartOffsets", k + 1, 1, k, 1, &part, H5P_DEFAULT);
     h5::put_rows(steps, "NumberOfParts", k + 1, 1, k, 1, &one, H5P_DEFAULT);
     h5::put_rows(steps, "PointOffsets", k + 1, 1, k, 1, &point_offset, H5P_DEFAULT);
-    h5::put_rows(steps, "CellOffsets", k + 1, 4, k, 1, cells_before.data(), H5P_DEFAULT);
-    h5::put_rows(steps, "ConnectivityIdOffsets", k + 1, 4, k, 1, ids_before.data(), H5P_DEFAULT);
+    const int kinds_written = grid ? 1 : 4;
+    h5::put_rows(steps, "CellOffsets", k + 1, kinds_written, k, 1, cells_before.data(), H5P_DEFAULT);
+    h5::put_rows(steps, "ConnectivityIdOffsets", k + 1, kinds_written, k, 1, ids_before.data(), H5P_DEFAULT);
     h5::Handle data_offsets(H5Gopen2(steps, (data + "Offsets").c_str(), H5P_DEFAULT), H5Gclose,
                             "opening " + data + "Offsets");
     for (const auto & v : variables) h5::put_rows(data_offsets, v.c_str(), k + 1, 1, k, 1, &offset, H5P_DEFAULT);
@@ -3779,7 +4198,8 @@ void Probes::Probe::write_vtkhdf([[maybe_unused]] const snapshot_block::Block & 
 void Probes::Probe::write_vtp(const snapshot_block::Block & block, const std::vector<double> & values) {
     const std::filesystem::path pvd(file);
     std::ostringstream piece;
-    piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step << ".vtp";
+    piece << pvd.stem().string() << "_" << std::setw(6) << std::setfill('0') << block.step
+          << (geometry.lagrange ? ".vtu" : ".vtp");
     last_file = (pvd.parent_path() / piece.str()).string();
     write_vtp_file(last_file, block, sampling_json(), geometry, variables, values, n_evaluated());
     series.push_back({block.time, block.step, piece.str()});

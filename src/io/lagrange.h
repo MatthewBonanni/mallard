@@ -21,20 +21,21 @@ class Geometry;
 
 namespace lagrange {
 
-/** @brief The shapes of VTK Lagrange cells that Mallard writes (pyramids as two tetrahedra). */
+/** @brief The shapes of VTK Lagrange cells that Mallard writes (pyramids as two tetrahedra; curves on 2D surfaces). */
 enum class Shape : uint8_t {
     TRIANGLE,
     QUADRILATERAL,
     TETRAHEDRON,
     HEXAHEDRON,
     WEDGE,
+    CURVE,
 };
 
 /** @brief A node's reference coordinates times the cell's order: integers in [0, order]. */
 using Lattice = std::array<uint32_t, 3>;
 using Point = std::array<double, 3>;
 
-/** @brief VTK_LAGRANGE_TRIANGLE (69) to VTK_LAGRANGE_WEDGE (73). */
+/** @brief VTK_LAGRANGE_CURVE (68), VTK_LAGRANGE_TRIANGLE (69) to VTK_LAGRANGE_WEDGE (73). */
 uint8_t vtk_type(Shape shape);
 
 /** @brief Nodes of a cell of this shape and order. */
@@ -43,9 +44,9 @@ uint32_t n_nodes(Shape shape, uint32_t order);
 /**
  * @brief The nodes of a cell of this shape and order (at least 1), in VTK's
  *        order: vertices, edge nodes edge by edge, face nodes face by face,
- *        then body nodes, as vtkLagrangeTriangle ... vtkLagrangeWedge number
+ *        then body nodes, as vtkLagrangeCurve ... vtkLagrangeWedge number
  *        them; reference coordinates are lattice / order, on VTK's reference
- *        cells (simplices with a vertex at 0, unit squares and cubes).
+ *        cells (simplices with a vertex at 0, unit segments, squares and cubes).
  */
 std::vector<Lattice> lattice(Shape shape, uint32_t order);
 

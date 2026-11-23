@@ -167,8 +167,8 @@ std::pair<std::vector<uint32_t>, std::vector<double>> region_cells(const Solver 
 } // namespace
 
 TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheirPointProbesWriteThem) {
-    // The snapshot and the probe of a region share their sampling code: the
-    // same point values (of the reconstruction) on the same geometry
+    // The snapshot (one value per element) and the probe of a region share their
+    // sampling code: the same point values (of the reconstruction) on the same geometry
     const std::string dir = fresh_dir("sampled");
     std::string names = "\"bottom\"";
     std::ostringstream s;
@@ -180,7 +180,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheir
         names += ", \"" + name + "\"";
     }
     const std::string variables = "fields = [\"RHO\", \"U\", \"P\"]\ninterval = 2\n";
-    s << "[[write_data]]\nprefix = \"" << dir << "/s/s\"\nformat = \"vtu\"\nregions = [" << names << "]\n" << variables;
+    s << "[[write_data]]\nprefix = \"" << dir << "/s/s\"\nformat = \"vtu\"\nregions = [" << names << "]\n" << "high_order = false\n" << variables;
     auto probe = [&](const std::string & name, const std::string & format, const std::string & where) {
         const std::string sub = format == "vtp" ? "p" : "pk";
         s << "[[probes]]\nname = \"" << sub << "_" << name << "\"\nsampling = \"point\"\nformat = \"" << format
@@ -191,7 +191,7 @@ TEST(RegionSnapshotsTest, ZonesCutPlanesSurfacesCurvesAndPointsAreWrittenAsTheir
     probe("bottom", "vtp", "boundary = \"bottom\"\n");
     for (const auto & [name, keys] : sampled_regions()) probe(name, "vtp", keys);
 #ifdef Mallard_HAS_HDF5
-    s << "[[write_data]]\nprefix = \"" << dir << "/k/k\"\nformat = \"vtkhdf\"\nregions = [" << names << "]\n" << variables;
+    s << "[[write_data]]\nprefix = \"" << dir << "/k/k\"\nformat = \"vtkhdf\"\nregions = [" << names << "]\n" << "high_order = false\n" << variables;
     probe("bottom", "vtkhdf", "boundary = \"bottom\"\n");
     for (const auto & [name, keys] : sampled_regions()) probe(name, "vtkhdf", keys);
 #endif

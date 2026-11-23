@@ -191,6 +191,8 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
                 const double L = std::hypot(r.coords[1][0] - r.coords[0][0], r.coords[1][1] - r.coords[0][1]);
                 line.push_back(static_cast<uint32_t>(order.size()));
                 order.push_back(i);
+                g.segments.push_back(r.coords[0]);
+                g.segments.push_back(r.coords[1]);
                 g.arc_length.push_back(s + 0.5 * L);
                 s += L;
                 int64_t next = -1;

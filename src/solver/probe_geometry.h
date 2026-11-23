@@ -83,6 +83,12 @@ struct Geometry {
     std::vector<uint64_t> polygon_offsets;  // polygons + 1
     std::vector<uint32_t> polygon_vertices;
     std::vector<Curve> curves;  // n_points = "cells": the curves, not yet sampled (no nodes)
+    // 2D boundary zones: each sample's face, its two ends with the fluid on the left
+    std::vector<Point> segments;
+    // Snapshots of Lagrange elements (lagrange): the VTK type of each cell over
+    // the nodes (polygon_offsets, polygon_vertices), whose samples are the nodes
+    bool lagrange = false;
+    std::vector<uint8_t> cell_types;
 };
 
 /** @brief A resampled surface's geometry: its grid's nodes with normals, quadrilaterals and Gauss points. */

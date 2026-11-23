@@ -468,8 +468,9 @@ mallard post derive solut/restart_000500.restart --fields MACH --with-state --hi
 ```
 
 MUSCL and first-order runs have no polynomial beyond the average, and
-`high_order = true` is an error there, as it is on `xdmf`, restart, region and
-boundary writers.
+`high_order = true` is an error there, as it is on `xdmf`, restart and volume
+region writers. Boundary zones, cut planes and surfaces are drawn from the
+polynomials too: [surfaces from the polynomials](#surfaces-from-the-polynomials).
 
 ### Snapshots of regions
 
@@ -512,9 +513,9 @@ What a snapshot holds depends on the region's dimension:
 |---|---|---|
 | A volume (an area in 2D): any region of [`[regions]`](geometry.md#regions), e.g. `sphere`, `box`, booleans | The cells it covers (cell fraction above 0), as a mesh of its own: only their nodes, curved cells as quadratic ones; a [moving](geometry.md#moving-regions) region or a `where` region [of the solution](geometry.md#regions-defined-by-the-solution), the cells it covers at each write | The cells' fields, and `REGION_FRACTION`, each cell's [volume fraction](geometry.md#regions-on-a-mesh) of the region |
 | `"domain"` | The whole mesh, as without `region` | The cells' fields |
-| A boundary zone, by its name | Its faces: polygons (3D), a polyline (2D) | Point values at the face centroids, as a [boundary probe](probes.md#boundary-data) with `sampling = "point"` writes them, wall quantities included; other cell fields (`P_MAX`, `HRR`) from each face's cell |
-| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points; an `isosurface` or another surface [of the solution](geometry.md#regions-defined-by-the-solution), the elements extracted at each write | Point values at each element's center, with its normal and measure; other cell fields from the element's cell |
-| A cut plane or other [probe type as a region](geometry.md#probe-types-as-regions) | The exact cut of the mesh, or the resampled surface, curve or points | Point values of the reconstruction, as a [probe](probes.md) of it with `sampling = "point"`; fluxes (`MASS_FLUX`, ...) through surfaces and 2D curves; other cell fields from the cell of each sample |
+| A boundary zone, by its name | Its faces: polygons (3D), a polyline (2D); with TENO, [Lagrange cells](#surfaces-from-the-polynomials) | Point values of the wall-side cell's polynomial at the nodes of each face (with `high_order = false`, at the face centroids, as a [boundary probe](probes.md#boundary-data) with `sampling = "point"` writes them), wall quantities included; other cell fields (`P_MAX`, `HRR`) from each face's cell |
+| A surface, curve or points of [`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (`filled = false`, `boundary`, flat disks, circles, ...) | Its elements on the mesh: polygons (3D), segments (2D), points; an `isosurface` or another surface [of the solution](geometry.md#regions-defined-by-the-solution), the elements extracted at each write; with TENO, surfaces and curves as [Lagrange cells](#surfaces-from-the-polynomials) | Point values at each element's nodes (with `high_order = false`, its center, with its measure), with its normal; other cell fields from the element's cell |
+| A cut plane or other [probe type as a region](geometry.md#probe-types-as-regions) | The exact cut of the mesh, or the resampled surface, curve or points; with TENO, a cut plane as [Lagrange cells](#surfaces-from-the-polynomials) | Point values of the reconstruction, as a [probe](probes.md) of it with `sampling = "point"`; fluxes (`MASS_FLUX`, ...) through surfaces and 2D curves; other cell fields from the cell of each sample |
 
 A volume is written by every rank in global order, like the whole mesh;
 `compression`, `relative_error` and `series` apply as they do there. A boundary
@@ -523,7 +524,9 @@ the same code: `vtkhdf` writes one PolyData file per snapshot,
 `PREFIX_<step>.vtkhdf`, its geometry in `PREFIX_mesh.vtkhdf` unless it changes,
 and the series file `PREFIX.vtkhdf` over them (`series` is always on), `vtu`
 one VTK PolyData file per snapshot,
-`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Its `fields` are sampled
+`PREFIX_<step>.vtp`, and the `PREFIX.pvd` series. Written as Lagrange cells,
+they are VTK UnstructuredGrid instead, in the same files (`.vtu` for the `.vtp`
+ones). Its `fields` are sampled
 as [`[[probes]]`](probes.md) sample them (`U` writes `U_X`, `U_Y`, `U_Z`);
 any other variable of a snapshot (`HRR`, `P_MAX`, `MEAN_P`, ...) takes the value
 of the cell holding each sample. Either kind is
@@ -537,8 +540,10 @@ Pitfalls:
   the values are those of a [probe](probes.md#cut-planes-and-surfaces) of the plane, not
   a cell average. Across a shock, use a volume region around it instead.
 - On a surface, curve or points, `RHO`, the primitives and `Y_<s>` are point
-  values, while cell fields such as `HRR`, `VORTICITY` or `MEAN_*` are the
-  averages of the cells the samples lie in: first order across the cell.
+  values, while cell fields such as `HRR` or `MEAN_*` are the averages of the
+  cells the samples lie in: first order across the cell. So is `VORTICITY`,
+  and the other fields of the velocity gradient, except on
+  [Lagrange cells](#surfaces-from-the-polynomials).
 - A volume region much smaller than a cell can cover no cell, which is an error.
   A region that moves or follows the solution may cover none at some write:
   that snapshot has no cells (no elements), and the series goes on.
@@ -552,6 +557,66 @@ Pitfalls:
 - Regions are written as `vtkhdf` or `vtu` only, not as `xdmf`.
 - `compression` on a region of lower dimension, alone in its entry, is an
   unused key: those files are small and written uncompressed.
+
+#### Surfaces from the polynomials
+
+In a TENO run, a boundary zone, a cut plane, and a surface or curve of
+[`[regions]`](geometry.md#surfaces-and-curves-on-a-mesh) (an `isosurface`
+included) are written from the reconstruction's polynomials: each element is a
+VTK Lagrange cell of their degree, `order - 1`, a triangle or quadrilateral in
+3D and a curve in 2D, and its nodes hold the values of the polynomial of the
+element's cell, of the wall-side cell on a boundary. Other polygons (the cut of
+a hexahedron can have five or six corners) are fans of triangles from their
+first corner, the same on every rank. `high_order = false` writes one value
+per element instead, and `high_order_degree` lowers the degree, as for the
+[high-order view](#high-order-view):
+
+```toml
+[[write_data]]
+prefix = "solut/x"
+time_interval = 2e-5
+regions = ["x1", "x2", "wing"]
+fields = ["U", "P", "Q_CRITERION", "TAU_W"]
+high_order_degree = 2   # optional: quadratic elements; default order - 1
+# high_order = false    # one value per element
+```
+
+![A cut line and a wall of a TENO order 5 run on a coarse mesh: one value per element, flat across each, and Lagrange curves of degree 4 that follow the field inside each element](../images/guide/surface-high-order-light.svg#gh-light-mode-only)
+![A cut line and a wall of a TENO order 5 run on a coarse mesh: one value per element, flat across each, and Lagrange curves of degree 4 that follow the field inside each element](../images/guide/surface-high-order-dark.svg#gh-dark-mode-only)
+
+At the nodes:
+
+- `RHO`, `RHOU`, `RHOE`, the primitives, `T`, `H`, `MACH`, `SOUND_SPEED` and
+  `Y_<s>` are the polynomial's point values. Troubled cells, and cells whose
+  polynomial leaves the admissible states, hold their averages at every node.
+- `VORTICITY` (`VORTICITY_X`, `_Y`, `_Z` and `HELICITY` in 3D),
+  `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN`, `DILATATION`, `ENSTROPHY` and
+  `STRAIN_RATE` come from the polynomial's derivatives there, in place of the
+  cell's gradient.
+- Wall quantities (`TAU_W`, `CF`, `Q_W`, `U_TAU`, `Y_PLUS`, the tractions)
+  and the diffusive fluxes take the polynomial's derivatives along the wall
+  and the difference to the wall state across it, as the viscous flux does:
+  the polynomial of a wall cell fits the mirrored states of its ghost cells,
+  and its own normal derivative there is less accurate than that difference.
+- Fluxes through the elements (`MASS_FLUX`, ...) are point values of the
+  fluxes at the nodes.
+
+Cell fields stay the value of the element's cell at all its nodes: `MEAN_*`
+and the other statistics (accumulated as cell averages, with no
+reconstruction of their own), `HRR`, `P_MAX`, `CFL`, `TENO_SIGMA` and the
+other fields of the cell. The element's `measure` is not written (its nodes'
+coordinates give it), and nodes on a curved wall lie on the straight face.
+
+The nodes are not shared between elements, so the jumps between neighbors'
+polynomials stay visible, as in the high-order view. In ParaView, raise
+**Nonlinear Subdivision Level** to 2 or 3 to draw each element's polynomial.
+The files are the same on any number of ranks, threads and partitions. A
+Lagrange element of degree `p` holds `p + 1` nodes in 2D and up to
+`(p + 1)^2` in 3D, each with its coordinates and normal: in 2D about `p + 1`
+times the field data of one value per element, in 3D up to `(p + 1)^2` times
+(order 5: 5 and 25 times). Surfaces are small beside the whole mesh, and each
+file also holds the run's metadata, so on small surfaces the files differ
+little in size.
 
 ## Mesh and stencil fields
 
