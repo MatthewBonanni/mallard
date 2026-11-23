@@ -1019,7 +1019,7 @@ TEST(TENO3DOutputPoints, TroubledCellsTakeTheFluxsChoiceAtTheirFacePoints) {
                 if (at[p][0] < 0) continue;
                 const uint32_t f = uint32_t(at[p][0]);
                 const auto q = uint8_t(at[p][1]), side = uint8_t(at[p][2]);
-                FOR_I_CONSERVATIVE EXPECT_NEAR(got(p, i), h_face_W(f, q, side, i), 1e-12) << type << ", cell " << c << ", variable " << int(i);
+                FOR_I_CONSERVATIVE EXPECT_NEAR(got(p, i), h_face_W(f, q, side, i), roundoff(1e-12)) << type << ", cell " << c << ", variable " << int(i);
                 off_central = std::max(off_central, std::abs(double(got(p, 0)) - double(h_central(p, 0))));
             }
             n_sectors += off_central > 1e-3;

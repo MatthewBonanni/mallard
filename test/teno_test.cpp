@@ -447,7 +447,7 @@ TEST(TENOOutputPoints, TroubledCellsAtADiscontinuityTakeTheFluxsSectorsNotTheCen
         double off_central = 0.0;
         for (uint32_t p = c * m; p < (c + 1) * m; p++) {
             const auto [f, q, side] = at[p];
-            FOR_I_CONSERVATIVE EXPECT_NEAR(got(p, i), h_face_W(f, q, side, i), 1e-12) << "cell " << c << ", variable " << int(i);
+            FOR_I_CONSERVATIVE EXPECT_NEAR(got(p, i), h_face_W(f, q, side, i), roundoff(1e-12)) << "cell " << c << ", variable " << int(i);
             off_central = std::max(off_central, std::abs(double(got(p, 0)) - double(central(p, 0))));
         }
         n_sectors += off_central > 1e-3;
@@ -475,7 +475,7 @@ TEST(TENOOutputPoints, BoundPreservingKeepsTroubledCellsPointsWithinTheFluxsBoun
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         if (sigma(c) < teno->sigma_threshold) continue;
         n_troubled++;
-        double lo[2] = {h_W(c, 0), h_W(c, P)}, hi[2] = {h_W(c, 0), h_W(c, P)};
+        double lo[2] = {double(h_W(c, 0)), double(h_W(c, P))}, hi[2] = {lo[0], lo[1]};
         for (uint32_t k = mesh->h_offsets_faces_of_cell(c); k < mesh->h_offsets_faces_of_cell(c + 1); k++) {
             const uint32_t f = mesh->h_faces_of_cell(k);
             const int32_t nb = mesh->h_cells_of_face(f, 0) == int32_t(c) ? mesh->h_cells_of_face(f, 1) : mesh->h_cells_of_face(f, 0);
@@ -487,8 +487,8 @@ TEST(TENOOutputPoints, BoundPreservingKeepsTroubledCellsPointsWithinTheFluxsBoun
         }
         for (uint8_t v = 0; v < 2; v++) {
             const double slack = double(teno::BOUND_SLACK) * std::abs(double(h_W(c, v == 0 ? 0 : P)));
-            lo[v] -= slack + 1e-14;
-            hi[v] += slack + 1e-14;
+            lo[v] -= slack + roundoff(1e-14);
+            hi[v] += slack + roundoff(1e-14);
         }
         for (uint32_t p = c * m; p < (c + 1) * m; p++) {
             EXPECT_GE(got(p, 0), lo[0]) << "cell " << c;
