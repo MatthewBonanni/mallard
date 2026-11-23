@@ -182,9 +182,9 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
             if (!interior) continue;
             n_checked++;
             for (size_t k = first; k < first + n; k++) {
-                EXPECT_NEAR(rho[k], polynomial_rho(order, points[3 * k], points[3 * k + 1]), 1e-12)
+                EXPECT_NEAR(rho[k], polynomial_rho(order, points[3 * k], points[3 * k + 1]), roundoff(1e-12))
                     << "order " << order << " cell " << c << " node " << k - first;
-                EXPECT_NEAR(u[3 * k], 0.2, 1e-12);
+                EXPECT_NEAR(u[3 * k], 0.2, roundoff(1e-12));
                 EXPECT_EQ(u[3 * k + 2], 0.0);
             }
         }
@@ -292,7 +292,8 @@ TEST(HighOrderOutputTest, TheDefaultIsOffWhereTheViewDoesNotApply) {
 
 TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
-    const std::string mesh_file = write_temp("high_order_check.msh", jittered_mixed_mesh(8));
+    // Large enough that the values outweigh each file's metadata, which the projection leaves out
+    const std::string mesh_file = write_temp("high_order_check.msh", jittered_mixed_mesh(24));
     const std::string dir = (scratch_dir() / "mallard_high_order_check").string();
     std::filesystem::remove_all(dir);
     const std::string input = polynomial_case(mesh_file, 4,
@@ -382,12 +383,12 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactlyOnEveryCell
             if (!interior) continue;
             n_checked++;
             for (size_t k = first; k < first + n; k++) {
-                EXPECT_NEAR(values[k], rho(points[3 * k], points[3 * k + 1], points[3 * k + 2]), 1e-11)
+                EXPECT_NEAR(values[k], rho(points[3 * k], points[3 * k + 1], points[3 * k + 2]), roundoff(1e-11))
                     << type << " cell " << c << " node " << k - first;
             }
         }
         EXPECT_GT(n_checked, 7u) << type;
-        if (shape == Shape::TETRAHEDRON) EXPECT_NEAR(volume, 1.0, 1e-12) << type;
+        if (shape == Shape::TETRAHEDRON) EXPECT_NEAR(volume, 1.0, roundoff(1e-12)) << type;
     }
 }
 
@@ -431,13 +432,14 @@ TEST(HighOrderOutputTest, CurvedWallsKeepTheirExactShape) {
     const auto types = h5_values<uint8_t>(file, "VTKHDF/Types");
     const auto rho = h5_values<double>(file, "VTKHDF/PointData/RHO");
     size_t inner_on_wall = 0;  // nodes but vertices
+    const double tol = roundoff(1e-12);  // the nodes' coordinates are written in the build's precision
     for (size_t c = 0; c < types.size(); c++) {
         const int64_t n_vertices = types[c] == 69 ? 3 : types[c] == 70 || types[c] == 71 ? 4 : types[c] == 72 ? 8 : 6;
         for (size_t k = size_t(offsets[c]); k < size_t(offsets[c + 1]); k++) {
             const double r = std::hypot(points[3 * k] - 0.5, points[3 * k + 1] - 0.5);
-            EXPECT_GT(r, 0.2 - 1e-12) << "cell " << c << " node " << k;
-            inner_on_wall += r < 0.2 + 1e-12 && int64_t(k) - offsets[c] >= n_vertices;
-            EXPECT_NEAR(rho[k], 1.0, 1e-12);
+            EXPECT_GT(r, 0.2 - tol) << "cell " << c << " node " << k;
+            inner_on_wall += r < 0.2 + tol && int64_t(k) - offsets[c] >= n_vertices;
+            EXPECT_NEAR(rho[k], 1.0, tol);
         }
     }
     EXPECT_GE(inner_on_wall, 16u);  // two per cubic edge on the wall, 8 of them in 2D
