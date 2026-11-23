@@ -359,9 +359,9 @@ TEST(CheckCost, StepTimeGrowsWithTheHaloNeighborsAndExchangesBetweenNodes) {
         ASSERT_NE(r.scaling, nullptr) << device;
         EXPECT_GT(r.scaling->beta + r.scaling->delta, 0.0) << device;
         const double fitted = check_step_seconds(r, part, 4);
-        PartSize half = part;
-        half.owned /= 2;
-        EXPECT_GT(check_step_seconds(r, half, 8), 0.5 * fitted * 1.01) << device;
+        PartSize smaller = part;
+        smaller.owned /= 2;
+        EXPECT_GT(check_step_seconds(r, smaller, 8), 0.5 * fitted * 1.01) << device;
     }
 }
 
