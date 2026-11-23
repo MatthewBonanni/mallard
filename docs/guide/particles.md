@@ -769,6 +769,15 @@ number of ranks and with or without step graphs. A restarted run appends to
 them, after the run's `# mallard-run` line, from its first output after the
 restart.
 
+![Trajectories of 15 of the 81 particles of the particle_vortex example, colored by their temperature: they spiral out of the vortex core, heating toward the gas temperature](../images/guide/particle_trajectories-light.svg#gh-light-mode-only)
+![Trajectories of 15 of the 81 particles of the particle_vortex example, colored by their temperature: they spiral out of the vortex core, heating toward the gas temperature](../images/guide/particle_trajectories-dark.svg#gh-dark-mode-only)
+
+*Trajectories (`interval = 10`, `fraction = 0.25`, `fields = ["T_P"]`) of the
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example, one pathline per `id` of the CSV file, colored by `T_P` (a Mallard
+run): the hash of the ids chose 15 of the 81 particles, which spiral out of
+their vortex (dots: seeds) as they heat toward the gas temperature.*
+
 **Pitfalls.**
 
 - Each output gathers the subset's rows on rank 0: follow a fraction of a
