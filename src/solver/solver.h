@@ -979,6 +979,12 @@ class Solver {
         /** @brief Mixtures: the temperature and composition of an entry, or an error for an unsupported type. */
         void read_mixture_boundary(const Input & bound, BoundaryEntry & entry) const;
         void init_mesh();
+        /**
+         * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
+         *        covariances. A curved cell's rule sums over its faces as the local mesh orients them, which
+         *        differs in the outermost halo layer, and so rounds differently (collective among neighbors).
+         */
+        void exchange_halo_geometry();
         /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);
@@ -996,7 +1002,8 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -1025,6 +1032,8 @@ class Solver {
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The initial state's primitive fields as a snapshot (check --initial). */
+        void check_initial(CheckReport & report, const CheckOptions & options);
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
         void init_run_parameters();
@@ -1272,6 +1281,8 @@ class Solver {
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
+        void revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights);
         void read_les();
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
@@ -1444,6 +1455,9 @@ class Solver {
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
         FaceWeights<> flux_weights;
+        // Unit normals of the convective flux points, (face, q, dim): curved meshes, else empty.
+        // The face reconstruction's, but r-weighted on curved faces of axisymmetric runs
+        Kokkos::View<rtype ***> flux_normals;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
