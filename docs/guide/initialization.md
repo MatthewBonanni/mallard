@@ -21,7 +21,7 @@ T = 1.0
 [`ellipsoid`](https://matthewbonanni.github.io/mallard/docs/examples/#ellipsoid),
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct)
-and 10 more.
+and 13 more.
 
 ## Expressions
 
@@ -45,7 +45,7 @@ p = """\
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 20 more.
+and 23 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -234,6 +234,10 @@ those of the interpolated field. Pitfalls:
   temperatures are not: use `linear` there.
 - An entry that no expression reads is an error; so are rows that do not
   form a grid.
+- A column's name belongs to its table: expressions see a value column only
+  as `<name>_<column>`, and `at` fills a coordinate column from the cell's
+  `x`, `y`, `z`, so a column may be named like a coordinate. The run log
+  shows each mapping as `column r <- cell "hypot(y, z)"`.
 
 **An axisymmetric table in 3D.** `at` can map every point to a radius, so a
 solution on the `(x, r)` plane fills a 3D box; the expressions then turn its
@@ -286,6 +290,9 @@ mode number is the same on 144³, but the rate is not grid-converged: there it
 is 15-20% lower, as the coarser mesh's dissipation thickens the core. Modes
 21 to 23 start growing only midway through the fit window, so their fitted
 rates are not those of an exponential.*
+
+Boundaries read the same files, in their local coordinates, with
+[`[[boundaries.data]]`](boundary_conditions.md#profiles-from-data).
 
 ## Synthetic turbulence
 
@@ -400,8 +407,8 @@ and 14 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot
-foil `P_MAX`, `[statistics]` averages, characteristic boundary states) in
-global cell order. A restarted run continues the uninterrupted one **bit for
+foil `P_MAX`, `[statistics]` averages, characteristic boundary states,
+[particles](particles.md#tracers-particles)) in global cell order. A restarted run continues the uninterrupted one **bit for
 bit**, also on a different number of MPI ranks, or serially from a parallel
 run. The step and time continue from the file; `t_stop` and `n_steps` refer to
 the total.

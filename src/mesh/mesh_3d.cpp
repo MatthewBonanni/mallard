@@ -188,8 +188,8 @@ void Mesh::h_cell_tetrahedra(uint32_t i_cell, std::vector<std::array<std::array<
 }
 
 void Mesh::compute_geometry() {
-    // Neighbors first, so that their tables are freed before the geometry is allocated
-    compute_cell_neighbors();
+    // Shift rows first, so that their tables are freed before the geometry is allocated
+    compute_periodic_shifts();
     allocate_geometry();
     if constexpr (N_DIM == 2) {
         compute_face_areas();

@@ -35,6 +35,7 @@
 #include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mesh_quality.h"
+#include "output_reader.h"
 #include "partition.h"
 #include "region_input.h"
 #include "report.h"
@@ -230,6 +231,45 @@ TEST(CheckBoundaries, ZonesWithoutAConditionAreNamed) {
     EXPECT_TRUE(mentions(r.errors(), "no condition for zone top (" + std::to_string(n_top) + " faces)"))
         << (first_error(r));
     EXPECT_FALSE(r.ok());
+    ASSERT_EQ(r.unassigned.size(), 1u);
+    EXPECT_EQ(r.unassigned[0].zone, "top");
+    EXPECT_EQ(r.unassigned[0].faces, n_top);
+}
+
+TEST(CheckBoundaries, ASetupStoppedByAZoneWithoutAConditionStillDrawsTheMesh) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_unassigned_view";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", {"left", "right", "bottom"}), options);
+    EXPECT_FALSE(r.setup_done);
+    EXPECT_FALSE(r.view_file.empty());
+    comm::barrier();
+    if (!comm::is_root()) return;
+#ifndef Mallard_HAS_HDF5
+    std::ifstream vtm(r.view_file);
+    const std::string text((std::istreambuf_iterator<char>(vtm)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("name=\"top\""), std::string::npos);
+#endif
+}
+
+TEST(CheckBoundaries, PeriodicPairsGiveTheirMapFacesAreaAndHowWellTheyMatch) {
+    const std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[periodic]]\nzones = [\"left\", \"right\"]\n",
+            N_DIM == 3 ? std::vector<std::string>{"bottom", "top", "back", "front"}
+                       : std::vector<std::string>{"bottom", "top"});
+    const CheckReport r = check(input);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_EQ(r.periodic.size(), 1u);
+    const CheckPeriodic & p = r.periodic[0];
+    EXPECT_EQ(p.zone_a, "left");
+    EXPECT_EQ(p.zone_b, "right");
+    EXPECT_FALSE(p.rotation);
+    EXPECT_NEAR(p.translation[0], 2.0, 1e-12);
+    EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 8u);
+    EXPECT_NEAR(p.area, N_DIM == 3 ? 0.25 : 1.0, 1e-12);
+    EXPECT_LT(p.node_offset_relative, roundoff(1e-10));
 }
 
 TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
@@ -256,6 +296,17 @@ TEST(CheckTimeStep, FixedTimeStepReportsItsCflAndWarnsAboveTheIntegratorsLimit) 
     const CheckReport fast = check(box("1.0", "t_stop = 0.5\ncfl = 1.5\n"));
     EXPECT_TRUE(mentions(fast.warnings(), "stability limit of SSPRK3"));
     EXPECT_TRUE(fast.ok());  // a warning, not an error
+}
+
+TEST(CheckTimeStep, EveryIntegratorHasItsLimitAndWarnsAboveIt) {
+    for (const auto & [name, type] : TIME_INTEGRATOR_TYPES) {
+        std::string input = box("1.0", "t_stop = 0.5\ncfl = 5.0\n");
+        input.replace(input.find("\"SSPRK3\""), 8, "\"" + name + "\"");
+        const CheckReport r = check(input);
+        EXPECT_EQ(r.integrator, name);
+        EXPECT_EQ(r.cfl_limit, cfl_limit(type)) << name;
+        EXPECT_TRUE(mentions(r.warnings(), "stability limit of " + name)) << name;
+    }
 }
 
 TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
@@ -357,6 +408,27 @@ TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
     EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
 }
 
+TEST(CheckSizing, AGpuSizedFromAHostBuildLeavesOutWhatGpusFreeAfterSetup) {
+    // The mesh's node lists: GPU runs free them after setup, a host build's device views are the host copies
+    CheckOptions options;
+    ASSERT_EQ(set_memory_target("a100-80", options), "");
+    CheckReport r = check(sized_box(64, 32, false), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    const uint64_t released = r.released_on_devices[size_t(memory::Category::MESH)];
+    if (r.device_memory) {
+        EXPECT_EQ(sum(r.released_on_devices), 0u);
+        return;
+    }
+    EXPECT_GT(released, 0u);
+    EXPECT_EQ(sum(r.released_on_devices), released);
+    EXPECT_LT(released, r.steady_bytes[size_t(memory::Category::MESH)]);
+    r.setup_phases.clear();
+    CheckReport kept = r;
+    kept.released_on_devices.fill(0);
+    const double n = 1e6;
+    EXPECT_NEAR(predicted_peak(kept, n) - predicted_peak(r, n), double(released) / double(r.local_cells) * n, 1.0);
+}
+
 TEST(CheckSizing, CellsPerRankStayWithinTheEntriesOfAView) {
     // With a terabyte per rank, a View of rank 2 or more runs out of entries before the memory does
     CheckOptions options;
@@ -423,6 +495,29 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
 }
 
+TEST(CheckOutput, InitialWritesTheInitialStateAsASnapshot) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_initial";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.initial = (dir / "initial").string();
+    std::string input = box();
+    input.replace(input.find("rho = \"1.0\""), 11, "rho = \"1 + x\"");
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_FALSE(r.initial_file.empty());
+    EXPECT_TRUE(output_files_enabled());
+    comm::barrier();
+    if (!comm::is_root() || comm::size() > 1) return;
+    const output::Contents file = output::open(r.initial_file);
+    const std::vector<double> rho = output::read(file, "RHO", 0);
+    ASSERT_EQ(rho.size(), N_DIM == 3 ? 256u : 128u);
+    // The cell averages of 1 + x over 16 cells across [0, 2]
+    EXPECT_NEAR(*std::min_element(rho.begin(), rho.end()), 1.0625, roundoff(1e-10));
+    EXPECT_NEAR(*std::max_element(rho.begin(), rho.end()), 2.9375, roundoff(1e-10));
+    EXPECT_EQ(output::read(file, "P", 0).size(), rho.size());
+}
+
 TEST(CheckUnits, PhysicsUnitsSetsTheUnitsOfWhatIsPrinted) {
     std::string nondimensional = box();
     nondimensional.replace(nondimensional.find("gamma = 1.4"), 11, "gamma = 1.4\nunits = \"nondimensional\"");
@@ -464,6 +559,22 @@ TEST(CheckSettings, TflesThickeningAboveFiveIsAWarning) {
     EXPECT_TRUE(mentions(coarse.warnings(), "F = 10"));
     EXPECT_NEAR(fine.cells_per_delta_L_min, 1.25, roundoff(1e-12));
     EXPECT_NEAR(coarse.cells_per_delta_L_max, 0.5, roundoff(1e-12));
+}
+
+TEST(CheckSettings, TriggerThatCannotFireBeforeTStopIsAWarning) {
+    auto warned = [](const std::string & trigger) {
+        const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[triggers]]\nname = \"late\"\n" + trigger +
+                                                                                  "do = \"checkpoint\"\n"));
+        EXPECT_TRUE(r.ok()) << first_error(r);
+        return mentions(r.warnings(), "triggers[0] (late)");
+    };
+    EXPECT_TRUE(warned("when = \"t >= 5\"\n"));  // ms meant
+    EXPECT_TRUE(warned("when = \"t > 0.6 or t < 0\"\n"));
+    EXPECT_TRUE(warned("when = \"0\"\n"));
+    EXPECT_TRUE(warned("when = \"t >= 0.25\"\nfor = 1.0\n"));
+    EXPECT_FALSE(warned("when = \"t >= 0.25\"\n"));
+    EXPECT_FALSE(warned("when = \"t > 0.6 or t == 0.5\"\n"));
+    EXPECT_FALSE(warned("when = \"step >= 1000000\"\n"));  // reads more than t: not decided
 }
 
 namespace {
@@ -543,6 +654,14 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
     EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
     EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
+    // Every wall face of an owned cell has its y+ for the case view, and no other face
+    uint64_t walls = 0;
+    for (const double y : r.face_y_plus) {
+        if (!std::isfinite(y)) continue;
+        walls++;
+        EXPECT_NEAR(y, r.y_plus_max, 1e-5 * r.y_plus_max);
+    }
+    EXPECT_EQ(comm::allreduce(walls, comm::Op::SUM), N_DIM == 3 ? 2u * 8u * 4u : 2u * 8u);
 }
 
 namespace {
@@ -671,6 +790,31 @@ TEST(MeshQualityMetrics, SkewedPairOfCellsAgainstHandComputedValues) {
     EXPECT_NEAR(q.cells[2][tri], std::sqrt(5.0) / std::sqrt(2.0), roundoff(1e-12));
     // The triangle's bottom leg: its centroid is 1/6 off the leg's midpoint, 1/3 above it
     EXPECT_NEAR(q.cells[0][tri], std::atan(0.5) * 180.0 / std::numbers::pi, roundoff(1e-10));
+}
+
+TEST(MeshQualityMetrics, HistogramsCountEveryCellFromTheSmallestValueToTheLargest) {
+    if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
+    Mesh stretched;
+    stretched.init(parse_input_string(
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 20\nLx = 1.0\nLy = 1.0\nstretching = [0.0, 2.0]\n"));
+    const MeshQuality q = mesh_quality(stretched);
+    const auto s = summarize(stretched, q, 1);
+    const QualitySummary & aspect = s[2];
+    ASSERT_EQ(aspect.counts.size(), QualitySummary::N_BINS);
+    const uint64_t cells = comm::allreduce(uint64_t(stretched.n_owned()), comm::Op::SUM);
+    EXPECT_EQ(std::accumulate(aspect.counts.begin(), aspect.counts.end(), uint64_t(0)), cells);
+    EXPECT_EQ(aspect.min, -comm::allreduce(-*std::min_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
+    EXPECT_EQ(aspect.max, comm::allreduce(*std::max_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
+    const double width = (aspect.max - aspect.min) / double(QualitySummary::N_BINS);
+    for (size_t k = 0; k < QualitySummary::N_BINS; k++) {
+        const auto n = std::count_if(q.cells[2].begin(), q.cells[2].end(), [&](double v) {
+            const double lo = aspect.min + width * double(k);
+            return v >= lo - 1e-12 && (k + 1 == QualitySummary::N_BINS ? true : v < lo + width - 1e-12);
+        });
+        EXPECT_EQ(aspect.counts[k], comm::allreduce(uint64_t(n), comm::Op::SUM)) << k;
+    }
+    const std::string json = histogram_json(aspect);
+    EXPECT_EQ(json.rfind("{\"edges\": [", 0), 0u) << json;
 }
 
 TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
@@ -855,6 +999,49 @@ TEST(CheckRegions, ARegionOutsideTheDomainIsAnErrorWithItsExtent) {
                                         "\np = 1.0\nT = 1.0\n"));
     EXPECT_TRUE(mentions(r.errors(), "region sponges[0].region lies outside the domain: it spans (4.5, 4"))
         << (first_error(r));
+}
+
+TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitErrors) {
+    // A box 0.4 m wide in the 2 x 1 domain (3D: 2 x 1 x 0.25): in 2D across z = 0, which its section is
+    const auto box_stl = [](const double scale) {
+        const double z0 = N_DIM == 3 ? 0.05 : -0.1, z1 = N_DIM == 3 ? 0.2 : 0.1;
+        const double lo[3] = {0.8 * scale, 0.3 * scale, z0 * scale}, hi[3] = {1.2 * scale, 0.7 * scale, z1 * scale};
+        const int faces[6][4] = {{0, 2, 3, 1}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 6, 7, 3}, {0, 4, 6, 2}, {1, 3, 7, 5}};
+        std::ostringstream s;
+        s << "solid box\n";
+        for (const auto & f : faces) {
+            for (const int t : {0, 1}) {
+                s << "facet normal 0 0 0\nouter loop\n";
+                for (const int c : {f[0], f[1 + t], f[2 + t]}) {
+                    s << "vertex " << ((c & 1) ? hi[0] : lo[0]) << " " << ((c & 2) ? hi[1] : lo[1]) << " "
+                      << ((c & 4) ? hi[2] : lo[2]) << "\n";
+                }
+                s << "endloop\nendfacet\n";
+            }
+        }
+        return s.str() + "endsolid box\n";
+    };
+    const std::string m = write_temp_shared("check_box_m.stl", box_stl(1.0));
+    const std::string mm = write_temp_shared("check_box_mm.stl", box_stl(1000.0));
+    const auto run = [](const std::string & region) {
+        return check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n",
+                         "[[sponges]]\nstrength = 1.0\nregion = " + region + "\nu = " + U_ZERO + "\np = 1.0\nT = 1.0\n"));
+    };
+    const CheckReport placed = run("{type = \"stl\", file = \"" + m + "\", units = \"m\"}");
+    ASSERT_TRUE(placed.ok()) << first_error(placed);
+    EXPECT_FALSE(mentions(placed.warnings(), "region sponges[0].region"));
+    const CheckRegion & g = placed.regions.back();
+    ASSERT_TRUE(g.from_file);
+    EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
+    EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
+    EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    // Millimeters read as meters: 1000 times larger than it should be
+    const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
+    EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
+    EXPECT_FALSE(mentions(run("{type = \"stl\", file = \"" + mm + "\", units = \"mm\"}").warnings(), "region sponges[0].region"));
+    const CheckReport out = run("{type = \"stl\", file = \"" + m + "\", units = \"m\", translate = [1, 0, 0]}");
+    EXPECT_TRUE(mentions(out.warnings(), "region sponges[0].region spans (1.8, 0.3")) << first_error(out);
+    EXPECT_TRUE(mentions(out.warnings(), "its part outside the domain is left out"));
 }
 
 namespace {
@@ -1219,6 +1406,8 @@ CheckReport report_case() {
     r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
     r.setup_bytes[size_t(memory::Category::MESH)] = r.steady_bytes[size_t(memory::Category::MESH)] = 42'900;
     r.setup_bytes[size_t(memory::Category::SETUP)] = 58'100;
+    r.released_on_devices.fill(0);
+    r.released_on_devices[size_t(memory::Category::MESH)] = 4'200;
     r.bytes = r.target_bytes = 70'000;
     r.bytes_peak = r.target_bytes_peak = 128'100;
     return r;

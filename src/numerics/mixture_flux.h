@@ -30,14 +30,14 @@
  */
 KOKKOS_INLINE_FUNCTION
 void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma_l, const rtype gamma_r, const rtype M_cut) {
-    const rtype M_l2 = dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma_l * W_l[N_DIM + 1]);
-    const rtype M_r2 = dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma_r * W_r[N_DIM + 1]);
+    const rtype M_l2 = fma_dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma_l * W_l[N_DIM + 1]);
+    const rtype M_r2 = fma_dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma_r * W_r[N_DIM + 1]);
     const rtype z = Kokkos::fmin(1.0_r, Kokkos::fmax(M_cut, Kokkos::sqrt(Kokkos::fmax(M_l2, M_r2))));
     FOR_I_DIM {
         const rtype mean = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
         const rtype half_jump = 0.5_r * (W_l[1 + i] - W_r[1 + i]);
-        W_l[1 + i] = mean + z * half_jump;
-        W_r[1 + i] = mean - z * half_jump;
+        W_l[1 + i] = fmadd(z, half_jump, mean);
+        W_r[1 + i] = fmadd(-z, half_jump, mean);
     }
 }
 
@@ -54,7 +54,7 @@ struct MixtureFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
+    FaceWeights<> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     Kokkos::View<rtype **[2][2]> face_thermo;
     BoundaryData boundaries;
@@ -138,12 +138,12 @@ struct MixtureFluxFunctor {
                     low_mach_correction(W_l, W_r, th_l[0], th_r[0], low_mach_cutoff);
                 }
                 T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, side_l, side_r);
-                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
+                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = fmadd(phi, flux_q[i] - central[i], central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
             face_mdot(i_face, i_quad) = flux_q[0];
-            FOR_I_CONSERVATIVE flux[i] += w_q * flux_q[i];
+            FOR_I_CONSERVATIVE flux[i] = fmadd(w_q, flux_q[i], flux[i]);
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D)
@@ -170,7 +170,7 @@ struct MixtureDoubleFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;
+    FaceWeights<> face_weights;
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[2]> frozen;  // (cell, [gamma, e0])
@@ -255,16 +255,16 @@ struct MixtureDoubleFluxFunctor {
             }
             if (hybrid) {
                 FOR_I_CONSERVATIVE {
-                    F_0[i] = K_0[i] + phi * (F_0[i] - K_0[i]);
-                    F_1[i] = K_1[i] + phi * (F_1[i] - K_1[i]);
+                    F_0[i] = fmadd(phi, F_0[i] - K_0[i], K_0[i]);
+                    F_1[i] = fmadd(phi, F_1[i] - K_1[i], K_1[i]);
                 }
             }
             const rtype mdot = 0.5_r * (F_0[0] + F_1[0]);
             face_mdot(i_face, i_quad) = mdot;
-            flux[0] += w_q * mdot;
-            FOR_I_DIM flux[1 + i] += w_q * 0.5_r * (F_0[1 + i] + F_1[1 + i]);
-            flux[E] += w_q * F_0[E];
-            energy_1 += w_q * F_1[E];
+            flux[0] = fmadd(w_q, mdot, flux[0]);
+            FOR_I_DIM flux[1 + i] = fmadd(w_q * 0.5_r, F_0[1 + i] + F_1[1 + i], flux[1 + i]);
+            flux[E] = fmadd(w_q, F_0[E], flux[E]);
+            energy_1 = fmadd(w_q, F_1[E], energy_1);
         }
 
         const rtype scale = 0.5_r * face_area(i_face);
@@ -329,7 +329,7 @@ struct SpeciesSlotFunctor {
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> face_area;
     Kokkos::View<rtype *> quad_weights;   // 2D
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D; 2D axisymmetric (see MixtureFluxFunctor); else empty
+    FaceWeights<> face_weights;  // (face, q): 3D; 2D axisymmetric (see MixtureFluxFunctor); else empty
     Kokkos::View<rtype **> face_mdot;
     Eval values;
     BoundaryData boundaries;

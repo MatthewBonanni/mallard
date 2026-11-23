@@ -30,29 +30,35 @@
 using Point = std::array<double, N_DIM>;
 
 /**
- * @brief The variables of boundary expressions, by index: x, y, z, t, then the
- *        local coordinates of the face (docs/guide/boundary_conditions.md#local-coordinates).
+ * @brief The variables of boundary expressions, by index: x, y, z, t, the
+ *        local coordinates of the face (docs/guide/boundary_conditions.md#local-coordinates),
+ *        then the columns of the entry's [[boundaries.data]] at the face.
  */
 namespace boundary_variable {
 constexpr uint16_t T = 3;
-constexpr uint16_t N = 4;   // distance to the nearest wall
-constexpr uint16_t XI = 5;  // along the tangent axis of the zone's frame
+constexpr uint16_t N = 4;    // distance to the nearest wall over its largest value on the boundary
+constexpr uint16_t N_M = 5;  // distance to the nearest wall [m]
+constexpr uint16_t U = 6;    // along the boundary, 0 to 1
+constexpr uint16_t U_M = 7;  // u as a length [m]
 #if N_DIM == 2
-constexpr uint16_t S = 6;   // arc length along the zone
-constexpr uint16_t COUNT = 7;
+constexpr uint16_t FIRST_DATA = 8;
 #else
-constexpr uint16_t ETA = 6;    // along the second tangent axis
-constexpr uint16_t R = 7;      // hypot(xi, eta)
-constexpr uint16_t THETA = 8;  // atan2(eta, xi)
-constexpr uint16_t COUNT = 9;
+constexpr uint16_t V = 8;      // across the patch, 0 to 1
+constexpr uint16_t V_M = 9;    // v as a length [m]
+constexpr uint16_t R = 10;     // v of a ring or a disk
+constexpr uint16_t R_M = 11;   // v_m of a ring or a disk
+constexpr uint16_t THETA = 12; // 2 pi u of a ring or a disk
+constexpr uint16_t FIRST_DATA = 13;
 #endif
 constexpr uint16_t FIRST_LOCAL = N;
+constexpr uint16_t MAX_DATA = 16;  // data columns of an entry, at most
+constexpr uint16_t COUNT = FIRST_DATA + MAX_DATA;
 } // namespace boundary_variable
 
 /**
  * @brief A face's values of the variables of boundary expressions, by index
- *        (boundary_variable), t's slot unused: its position, and its local
- *        coordinates, NaN where they were not computed.
+ *        (boundary_variable), t's slot unused: its position, its local
+ *        coordinates and its data, NaN where they were not computed.
  */
 struct FacePoint {
     std::array<double, boundary_variable::COUNT> v;
@@ -86,13 +92,31 @@ struct FacePoint {
 class BoundaryValue {
     public:
         BoundaryValue() = default;
-        BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension);
+        /** @param variables Those of the entry's expressions (variables(entry)). */
+        BoundaryValue(const Input & v, const std::string & name, const Dimension & dimension,
+                      const std::vector<std::string> & variables = BoundaryValue::variables());
 
         /** @brief Whether v is an expression rather than a number or a quantity with a unit. */
         static bool is_expression(const Input & v);
 
         /** @brief The variables of the expressions, by index (boundary_variable): x, y, z, t, then the local coordinates. */
         static const std::vector<std::string> & variables();
+
+        /**
+         * @brief The variables of the expressions of a [[boundaries]] entry: variables(), then
+         *        the variables of its [[boundaries.data]], <name>_<column>, from the files' headers.
+         */
+        static std::vector<std::string> variables(const Input & entry);
+
+        /**
+         * @brief The data entries of a [[boundaries]] entry: its [[boundaries.data]],
+         *        then, if its turbulence.profile names a file, the entry it stands for
+         *        (name "profile", the columns of the precursor's mean and stresses).
+         */
+        static std::vector<Input> data_entries(const Input & entry);
+
+        /** @brief The name of the data entry turbulence.profile reads, or "" if it has none. */
+        static std::string profile_data(const Input & entry);
 
         /** @brief Adds to the error for an unknown symbol: a local coordinate of the other dimension, or a unit. */
         static std::string hint(const std::string & symbol);
@@ -318,10 +342,10 @@ class TimedBoundaryFields {
         struct Gas {
             double R = 0.0;
             bool mixture = false;
-            chemistry::ThermoTable<> thermo;
+            Mixture gas;  // species thermodynamics, or a flamelet table (bc_Y then holds Z, C)
             Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
             Kokkos::View<rtype *[2]> bc_thermo;
-            Kokkos::View<rtype **, Kokkos::LayoutRight> transport;  // (T, X) per condition; empty if inviscid
+            Kokkos::View<rtype **, Kokkos::LayoutRight> transport;  // (T or h, X) per condition; empty if inviscid
         };
 
         /** @brief The faces' conditions at the time held in `time`. */

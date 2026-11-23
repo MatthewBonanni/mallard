@@ -6,6 +6,7 @@
  */
 
 #include "repair_audit.h"
+#include "gated.h"
 
 #include <array>
 #include <span>
@@ -28,7 +29,7 @@ size_t RepairAudit::add_site(const std::string & name, const std::vector<std::st
 
 void RepairAudit::touch(const size_t site, const Kokkos::View<uint8_t *> & flags) const {
     const Kokkos::View<uint8_t *> touched = sites[site].recorder.touched;
-    Kokkos::parallel_for("repair_touch", flags.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("repair_touch", flags.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
         if (flags(c)) touched(c) = 3;
     });
 }
@@ -63,14 +64,14 @@ void RepairAudit::local_values(const uint32_t n_owned, const Kokkos::View<double
     for (const Site & site : sites) {
         const Kokkos::View<uint8_t *> touched = site.recorder.touched;
         const Kokkos::View<RepairCells> cells = site.cells;
-        Kokkos::parallel_reduce("repair_cells", n_owned, CellCountFunctor{touched}, cells);
-        Kokkos::parallel_for("repair_cells_reset", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_reduce("repair_cells", n_owned, CellCountFunctor{touched}, cells);
+        gated::parallel_for("repair_cells_reset", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             touched(c) = static_cast<uint8_t>(touched(c) & 2u);
         });
         const Kokkos::View<uint64_t[1]> activations = site.recorder.activations;
         const Kokkos::View<double *> change = site.recorder.change;
         const size_t first = offset;
-        Kokkos::parallel_for("repair_values", 1, KOKKOS_LAMBDA(const int) {
+        gated::parallel_for("repair_values", 1, KOKKOS_LAMBDA(const int) {
             out(first) = static_cast<double>(activations(0));
             out(first + 1) = static_cast<double>(cells().n[0]);
             out(first + 2) = static_cast<double>(cells().n[1]);

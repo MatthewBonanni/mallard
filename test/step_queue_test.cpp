@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "example_inputs.h"
 #include "json.h"
+#include "particles.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -291,17 +292,28 @@ struct Outcome {
     uint64_t rejected = 0;
     uint64_t queued = 0;
     uint64_t graph_steps = 0;
+    bool gated = false;  // step graphs gated their bodies
+    bool conditional_nodes = false;  // step graphs could hold NCCL operations under conditional nodes
     std::string error;
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
     std::vector<std::string> warnings;
 };
 
+/** @brief Distributed runs with particles step on the host, which moves the particles between ranks. */
+bool migrates_particles(const Solver & solver) { return solver.get_particles() && solver.get_particles()->migrates(); }
+
 /**
  * @brief Queued steps take the graph's step path on every backend; its capture records no fence, allocation or
  *        host copy.
  */
 void expect_capturable(const StepGraphGuard & guard, const Solver & solver) {
+    if (Solver::are_cuda_graphs_off()) return;
+    if (migrates_particles(solver)) {
+        EXPECT_EQ(solver.device_steps_unsupported(), "particles migrate between ranks through the host");
+        EXPECT_EQ(guard.captures(), 0u);
+        return;
+    }
     EXPECT_TRUE(solver.step_graph_unsupported().empty()) << solver.step_graph_unsupported();
     if (solver.get_step() > 1) {
         EXPECT_GT(guard.captures(), 0u);
@@ -327,7 +339,9 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         } catch (const std::exception & e) {
             o.error = e.what();
         }
-        if (depth > 0 && c.capture_fault == Solver::CaptureFault::NONE) expect_capturable(guard, solver);
+        const bool captures = c.capture_fault == Solver::CaptureFault::NONE ||
+                              c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES;
+        if (depth > 0 && captures) expect_capturable(guard, solver);
         solver.copy_device_to_host();
         const size_t n_species = solver.h_species.span() > 0 ? solver.h_species.extent(1) : 0;
         for (uint32_t i = 0; i < solver.get_mesh()->n_owned(); i++) {
@@ -335,6 +349,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             for (size_t k = 0; k < n_species; k++) o.U.push_back(solver.h_species(i, k));
         }
         o.graph_steps = solver.get_graph_steps();
+        o.gated = solver.get_gate_steps();
+        o.conditional_nodes = o.graph_steps > 0 && solver.conditional_nodes_work();
         o.step = solver.get_step();
         o.t = solver.get_time();
         o.rejected = solver.get_rejected_steps();
@@ -400,6 +416,10 @@ Outcome expect_queue_invariant(const std::string & name, const Case & c, const b
         expect_same(host, queued, name + ", step_queue = " + std::to_string(depth));
         if (depth > 1 && runs_ahead) {
             EXPECT_GT(queued.queued, 0u) << name << ": no step ran ahead of the host";
+        }
+        if (c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES && !Solver::are_cuda_graphs_off()) {
+            EXPECT_TRUE(queued.gated) << name << ": step graphs did not gate their bodies";
+            EXPECT_GT(queued.graph_steps, 0u) << name;
         }
     }
     return host;
@@ -539,16 +559,13 @@ TEST(StepQueueTest, OutputsByStep) {
               "[statistics]\ninterval = 2\nt_start = 0.01\nfields = [\"RHO\", \"P\"]\n";
     const Outcome o = expect_queue_invariant("by_step", c);
     EXPECT_EQ(o.step, 30u);
-    // Where conditional nodes fail (NCCL across a network), the steps run kernel by kernel to the same results
+#ifdef KOKKOS_ENABLE_CUDA
+    // Where conditional nodes fail (NCCL across a network), gated step graphs reach the same results
     Case unconditional = c;
     unconditional.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
-    expect_queue_invariant("by_step_unconditional", unconditional, false);
-#ifdef KOKKOS_ENABLE_CUDA
-    const Outcome fallback = run_case("by_step_unconditional", unconditional, 3);
-    EXPECT_EQ(fallback.graph_steps, 0u);
-    if (comm::is_root()) {
-        ASSERT_EQ(fallback.warnings.size(), 1u);
-        EXPECT_NE(fallback.warnings[0].find("conditional nodes failed"), std::string::npos) << fallback.warnings[0];
+    expect_queue_invariant("by_step_unconditional", unconditional);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_TRUE(run_case("by_step_unconditional", unconditional, 3).warnings.empty());
     }
 #endif
     // Serial runs on several ranks write their files and log on the root rank only
@@ -646,6 +663,7 @@ namespace {
 
 /** @brief The queued run took its steps as step graphs, with no capture fallen back to kernel-by-kernel steps. */
 void expect_graphed(const Outcome & o, const std::string & what) {
+    if (Solver::are_cuda_graphs_off()) return;
 #ifdef KOKKOS_ENABLE_CUDA
     EXPECT_GT(o.graph_steps, 0u) << what;
 #endif
@@ -673,7 +691,7 @@ std::string reacting_body(const std::string & chemistry, const std::string & T =
 } // namespace
 
 TEST(StepQueueTest, DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice) {
-    // Means and conditional statistics of derived fields, computed under the sampling's conditional node
+    // Means and conditional statistics of derived fields, computed under the sampling's gate
     const std::string restarts = "check_interval = 1000\n"
                                  "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 10\n";
     Case c;
@@ -745,9 +763,11 @@ TEST(StepQueueTest, FusedChemistryIsFlushedOnTheDeviceForWhatReadsTheState) {
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
     EXPECT_EQ(differ, 0u);
+#ifdef KOKKOS_ENABLE_CUDA
     // Without conditional nodes the flushes and samples happen at the same steps
     c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
-    expect_queue_invariant("fused_unconditional", c, false);
+    expect_queue_invariant("fused_unconditional", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
@@ -860,6 +880,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n" + restart;
     EXPECT_EQ(run_case("moving_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("moving_probes_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfWhereRegionsAreStagedWithoutStoppingTheDevice) {
@@ -990,6 +1014,10 @@ TEST(StepQueueTest, ProbesOfMovingRegionsOutgrowingTheirStagingStopTheDevice) {
     EXPECT_LT(queued, unstopped);
     // Each stop regrows the staging to twice the cells covered then
     EXPECT_GE(queued + 3, unstopped);
+#ifdef KOKKOS_ENABLE_CUDA
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    expect_queue_invariant("growing_probe_gated", c);
+#endif
 }
 
 TEST(StepQueueTest, ProbesOfStatisticsAreStagedWithoutStoppingTheDevice) {
@@ -1244,7 +1272,7 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
     const std::string outputs = "check_interval = 4\n"
                                 "[[write_data]]\nprefix = \"{dir}/restart\"\nformat = \"restart\"\ninterval = 12\n"
                                 "[[write_data]]\nprefix = \"{dir}/flow\"\nformat = \"vtu\"\ntime_interval = 0.15\n"
-                                "variables = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
+                                "fields = [\"RHO\", \"P\", \"MEAN_P\", \"CI_MEAN_P\", \"CFL\"]\n";
     c.extra = outputs + "[statistics]\ninterval = 2\nt_start = 0.005\nbatch = 0.01\nfields = [\"P\"]\n";
     c.distributed = comm::size() > 1;
     const Outcome o = expect_queue_invariant("staged_outputs", c);
@@ -1261,7 +1289,9 @@ TEST(StepQueueTest, SnapshotsAndRestartsAreStagedWithoutStoppingTheDevice) {
                    statistics;
     Case bare = c;
     bare.extra = "check_interval = 4\n" + statistics;
-    EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(run_case("spaced_outputs", spaced, 3).queued, run_case("bare", bare, 3).queued);
+    }
 }
 
 namespace {
@@ -1352,7 +1382,9 @@ TEST(StepQueueTest, OutputsOfSourcesAndMovingRegionsAreStagedWithoutStoppingTheD
     bare.extra = base;
     const Outcome queued = run_case("sources_regions", c, 3);
     expect_graphed(queued, "sources_regions");
-    EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("sources_regions_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
@@ -1377,7 +1409,9 @@ TEST(StepQueueTest, OutputsOfManyWritersAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("many_writers", c, 3);
     expect_graphed(queued, "many_writers");
-    EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("many_writers_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
@@ -1400,7 +1434,9 @@ TEST(StepQueueTest, OutputsOfFusedChemistryAreStagedWithoutStoppingTheDevice) {
     bare.extra = "check_interval = 1000\n";
     const Outcome queued = run_case("fused_outputs", c, 3), quiet = run_case("fused_outputs_bare", bare, 3);
     expect_graphed(queued, "fused_outputs");
-    EXPECT_EQ(queued.queued, quiet.queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, quiet.queued);
+    }
     ASSERT_EQ(queued.U.size(), quiet.U.size());
     size_t differ = 0;
     for (size_t k = 0; k < queued.U.size(); k++) differ += queued.U[k] != quiet.U[k];
@@ -1440,7 +1476,9 @@ TEST(StepQueueTest, OutputsOfAveragedSpectraAndPhasesAreStagedWithoutStoppingThe
     bare.extra = "check_interval = 1000\n" + statistics;
     const Outcome queued = run_case("spectra_phases", c, 3);
     expect_graphed(queued, "spectra_phases");
-    EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    if (!Solver::are_cuda_graphs_off()) {
+        EXPECT_EQ(queued.queued, run_case("spectra_phases_bare", bare, 3).queued);
+    }
 }
 
 TEST(StepQueueTest, ProgressRowsWithHealthAndNanChecks) {
@@ -1640,6 +1678,154 @@ TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) 
     EXPECT_EQ(run_case("averaged_reductions", c, 3).queued, run_case("averaged_reductions_at_step", at_step, 3).queued);
 }
 
+TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
+    // A disk's and a where region's reductions and the disk's time averages kept per cell, written every 3 steps and
+    // sampled every 2, reduced on the device over the cells covered at each write (or held by the averages): the
+    // queue stops only at a sampling step after the write whose every value the condition equals, as a checkpoint at
+    // that step does, and goes on from the host's means. The disk leaves the box and comes back: it is reduced
+    // again once it covers cells
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.3 + 12 * t * (0.6 - t)", "0.5", "0.2") + ", radius = 0.25}";
+    const std::string reductions = "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS + "[statistics]\ninterval = 2\nt_start = 0.01\n"
+        "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"P\", \"RHO\"]\ninterval = 3\n" + reductions +
+        "reductions_file = \"{dir}/disk_reductions.csv\"\n"
+        "[[probes]]\nname = \"mean_disk\"\nregion = " + disk + "\nfields = [\"P\", \"RHO\"]\ninterval = 3\n"
+        "average = true\n" + reductions + "reductions_file = \"{dir}/mean_disk_reductions.csv\"\n"
+        "[[probes]]\nname = \"hot\"\nregion = {type = \"where\", condition = \"P > 1.25 and x > 0.2\"}\n"
+        "fields = [\"P\"]\ninterval = 3\nreductions = [\"integral\", \"max\"]\n"
+        "reductions_file = \"{dir}/hot_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("moving_reductions_reference", c, 0);
+    // The second write after the disk has left the box that finds it back
+    std::vector<double> measures;
+    if (comm::is_root()) {
+        for (uint64_t step = 0; step <= 60; step += 3) {
+            measures.push_back(value_at(reference, "disk_reductions.csv", N_DIM == 2 ? "area" : "volume", step));
+        }
+    }
+    measures = comm::allgatherv(measures);
+    uint64_t out = 0, back = 0;
+    for (size_t k = 3; k < measures.size() && back == 0; k++) {
+        if (out == 0 && measures[k] == 0.0) out = 3 * k;
+        if (out != 0 && measures[k] > 0.0 && measures[k - 1] > 0.0) back = 3 * k;
+    }
+    ASSERT_NE(back, 0u) << "the disk does not leave the box and come back";
+    const std::vector<std::string> names = {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"};
+    const std::string when = written_at(reference, "disk", names, "pt", "P", 6) + " and " +
+                             written_at(reference, "mean_disk",
+                                        {"integral_MEAN_P", "mean_MEAN_P", "favre_MEAN_P", "rms_MEAN_P", "min_MEAN_P",
+                                         "max_MEAN_RHO"},
+                                        "pt", "P", 6) +
+                             " and " + written_at(reference, "hot", {"integral_P", "max_P"}, "pt", "P", 6) +
+                             " and step % 3 == 2";
+    const std::string when_back = written_at(reference, "disk", names, "pt", "P", back) + " and step % 3 == 2";
+    const auto triggers = [&](const std::string & values, const std::string & again) {
+        return "[[triggers]]\nname = \"values\"\nwhen = \"" + values + "\"\ndo = \"checkpoint\"\n"
+               "[[triggers]]\nname = \"back\"\nwhen = \"" + again + "\"\ndo = \"checkpoint\"\n";
+    };
+    c.extra = probes + triggers(when, when_back);
+    const Outcome o = expect_queue_invariant("moving_reductions", c);
+    EXPECT_EQ(o.step, 60u);
+    if (comm::is_root()) {
+        for (const uint64_t step : {uint64_t(8), back + 2}) {
+            std::ostringstream file;
+            file << "restart_" << std::setw(6) << std::setfill('0') << step << ".restart";
+            EXPECT_TRUE(o.files.count(file.str())) << file.str();
+        }
+        EXPECT_NE(value_at(o, "disk_reductions.csv", "integral_RHO", 3), value_at(o, "disk_reductions.csv", "integral_RHO", 6));
+    }
+    Case at_step = c;
+    at_step.extra = probes + triggers("step == 8", "step == " + std::to_string(back + 2));
+    EXPECT_EQ(run_case("moving_reductions", c, 3).queued, run_case("moving_reductions_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, TriggersOfTimeAveragesOfAMovingRegionAcrossTwoCellsAreReducedOnTheDevice) {
+    // A small disk going back and forth across the face of two cells: its time averages per cell are the host's and
+    // the device's means of f V and f V q, decaying in the cell it left, and sums of two terms of like size keep
+    // their last bits, so a trigger that equals the written means fires on the device only if each mean is updated
+    // with the same roundings on both
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 0.03 * sin(3000 * t)", "0.55", "0.2") + ", radius = 0.015}";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"dot\"\nregion = " + disk + "\nfields = [\"P\"]\ninterval = 3\naverage = true\n"
+        "reductions = [\"integral\", \"mean\", \"min\", \"max\"]\nreductions_file = \"{dir}/dot_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("two_cells_reference", c, 0);
+    // At every write: each trigger checkpoints after its write's values, on the host and on the device alike
+    std::string triggers;
+    for (uint64_t step = 3; step < 30; step += 3) {
+        const std::string when =
+            written_at(reference, "dot", {"integral_MEAN_P", "mean_MEAN_P", "min_MEAN_P", "max_MEAN_P"}, "pt", "P", step) + " and step == " +
+            std::to_string(step + 2);
+        triggers += "[[triggers]]\nname = \"at_" + std::to_string(step) + "\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    }
+    c.extra = probes + triggers;
+    const Outcome o = expect_queue_invariant("two_cells", c);
+    if (comm::is_root()) {
+        for (uint64_t step = 5; step < 30; step += 3) {
+            std::ostringstream file;
+            file << "restart_" << std::setw(6) << std::setfill('0') << step << ".restart";
+            EXPECT_TRUE(o.files.count(file.str())) << file.str();
+        }
+    }
+}
+
+TEST(StepQueueTest, TriggersOfMovingRegionsStagedWhileTheyCoverNoCellAreReducedOnTheDevice) {
+    // A disk growing from a corner outgrows its staging and stops the device until it holds every cell: each stop
+    // stages the probes anew, among them a small disk still outside the box, which enters it later within its
+    // staging; the trigger reading it fires one step after the write whose values the condition equals
+    const std::string shape = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = ";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"grow\"\nregion = " + shape + vector_of("0.1", "0.1", "0.2") +
+        ", radius = \"0.05 + 6 * t\"}\nfields = [\"RHO\"]\ninterval = 2\nreductions = [\"integral\"]\n"
+        "reductions_file = \"{dir}/grow.csv\"\n"
+        "[[probes]]\nname = \"dot\"\nregion = " + shape + vector_of("1.3 - t", "0.5", "0.2") +
+        ", radius = 0.08}\nfields = [\"P\", \"RHO\"]\ninterval = 2\nreductions = [\"integral\", \"mean\", \"max\"]\n"
+        "reductions_file = \"{dir}/dot_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 2\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    Case c;
+    c.run = "n_steps = 60\ncfl = 0.5\n";
+    c.cells = "Nx = 40\nNy = 30\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("dot_reductions_reference", c, 0);
+    // The second write that finds the dot in the box
+    std::vector<double> measures;
+    if (comm::is_root()) {
+        for (uint64_t step = 0; step <= 60; step += 2) {
+            measures.push_back(value_at(reference, "dot_reductions.csv", N_DIM == 2 ? "area" : "volume", step));
+        }
+    }
+    measures = comm::allgatherv(measures);
+    uint64_t in = 0;
+    for (size_t k = 1; k < measures.size() && in == 0; k++) {
+        if (measures[k] > 0.0 && measures[k - 1] > 0.0) in = 2 * k;
+    }
+    ASSERT_FALSE(measures.empty());
+    ASSERT_EQ(measures[0], 0.0) << "the dot is in the box at the start";
+    ASSERT_NE(in, 0u) << "the dot does not enter the box";
+    const std::string when =
+        written_at(reference, "dot", {"integral_P", "mean_P", "max_RHO"}, "pt", "P", in) + " and step % 2 == 1";
+    c.extra = probes + "[[triggers]]\nname = \"entered\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
+    const Outcome o = expect_queue_invariant("dot_reductions", c);
+    EXPECT_EQ(o.step, in + 1);
+}
+
 TEST(StepQueueTest, SpectraTheDeviceSampledAtAStopOfTheQueueAreWrittenOnce) {
     // The trigger stops the queue at step 20, whose statistics and spectra the device sampled: the host writes the
     // staged sample there, once, and does not sample the statistics again
@@ -1720,10 +1906,62 @@ TEST(StepQueueTest, DistributedRunsAsTheHostTakesThem) {
     EXPECT_EQ(o.step, 24u);
 }
 
+TEST(MPITest, GatedStepGraphsRunAsConditionalNodesDo) {
+    // Where conditional nodes cannot hold NCCL operations (NCCL over a network), step graphs gate their bodies and
+    // launch them also when they are not due: a line's reductions, reduced every 3 steps and read by a trigger that
+    // stops at step 19, give the run of conditional nodes bit for bit
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "off CUDA every step graph gates its bodies";
+#else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
+    if (comm::size() == 1) GTEST_SKIP() << "MPI runs on several ranks only";
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"line\"\nfile = \"{dir}/line.csv\"\ninterval = 3\nfields = [\"P\", \"RHO\"]\n"
+        "start = " + point_of("0.1", "0.3", "0.2") + "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 7\n"
+        "reductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+        "reductions_file = \"{dir}/line_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n"
+        "[integrals]\nfile = \"{dir}/integrals.csv\"\ninterval = 4\n";
+    c.extra = probes;
+    c.distributed = true;
+    const Outcome reference = run_case("gated_reference", c, 0);
+    const std::string when =
+        written_at(reference, "line", {"integral_P", "mean_P", "favre_P", "rms_P", "min_P", "max_RHO"}, "pt", "P", 18) +
+        " and step % 3 == 1";
+    c.extra = probes + "[[triggers]]\nname = \"values\"\nwhen = \"" + when + "\"\ndo = \"stop\"\n";
+    // Names of one length: restarts carry their run's record, with its length, in binary
+    const Outcome nodes = run_case("nodes", c, 3);
+    c.capture_fault = Solver::CaptureFault::CONDITIONAL_NODES;
+    const Outcome gated = run_case("gated", c, 3);
+    expect_same(nodes, gated, "gated step graphs");
+    EXPECT_EQ(gated.step, 19u);
+    EXPECT_EQ(gated.queued, nodes.queued);
+    EXPECT_GT(gated.graph_steps, 0u);
+    // Over a network the unfaulted run gates too, as Mallard decides from its trial of a conditional node
+    EXPECT_EQ(nodes.gated, !nodes.conditional_nodes);
+#ifdef Mallard_HAS_MPI
+    MPI_Comm node;
+    MPI_Comm_split_type(comm::communicator(), MPI_COMM_TYPE_SHARED, comm::rank(), MPI_INFO_NULL, &node);
+    int on_node = 0;
+    MPI_Comm_size(node, &on_node);
+    MPI_Comm_free(&node);
+    if (on_node == comm::size()) {
+        EXPECT_TRUE(nodes.conditional_nodes) << "the ranks share a node";
+    }
+#endif
+    EXPECT_TRUE(gated.gated);
+#endif
+}
+
 TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
 #ifndef KOKKOS_ENABLE_CUDA
     GTEST_SKIP() << "step graphs are captured in CUDA builds only";
 #else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
     // A capture that fails inside the step's conditional body, at once (a fence) or only at cudaStreamEndCapture (a
     // copy on the legacy stream), warns, and the run takes its steps kernel by kernel, as the host would
     Case c;
@@ -1751,6 +1989,7 @@ struct ExampleOutcome {
     uint64_t step = 0, rejected = 0, queued = 0;
     rtype t = 0.0;
     std::vector<std::string> rows;
+    bool host_steps = false;
 };
 
 ExampleOutcome run_example(const ExampleCase & c, const int depth) {
@@ -1778,6 +2017,7 @@ ExampleOutcome run_example(const ExampleCase & c, const int depth) {
     o.t = solver.get_time();
     o.rejected = solver.get_rejected_steps();
     o.queued = solver.get_queued_steps();
+    o.host_steps = migrates_particles(solver);
     std::ifstream in(log);
     for (std::string line; std::getline(in, line);) {
         const json::Value v = json::parse(line);
@@ -1800,7 +2040,11 @@ TEST_P(StepQueueExample, EnqueuedStepsMatchTheHostsBitForBit) {
     const ExampleOutcome queued = run_example(GetParam(), 3);
     EXPECT_EQ(host.queued, 0u);
     // A progress row every step, also of runs with fused chemistry
-    EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    if (queued.host_steps) {
+        EXPECT_EQ(queued.queued, 0u);
+    } else {
+        EXPECT_GT(queued.queued, 0u) << "no step ran ahead of the host";
+    }
     EXPECT_EQ(queued.step, host.step);
     EXPECT_EQ(queued.t, host.t);
     EXPECT_EQ(queued.rejected, host.rejected);

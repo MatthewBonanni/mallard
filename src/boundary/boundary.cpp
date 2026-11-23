@@ -49,7 +49,7 @@ const std::vector<BoundarySubtype> & boundary_subtypes() {
 const std::vector<std::string> & boundary_option_keys(const std::string & option) {
     static const std::unordered_map<std::string, std::vector<std::string>> keys = {
         {"nscbc", {"nscbc"}},           {"average", {"average"}}, {"turbulence", {"turbulence"}},
-        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance"}}, {"u-field", {}},
+        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance", "Z", "C"}}, {"u-field", {}},
     };
     return keys.at(option);
 }
@@ -574,9 +574,10 @@ ImageNeighbors image_neighbors(const Mesh & mesh, const std::vector<int32_t> & h
             }
             if (read.empty()) break;
             std::vector<uint32_t> next;
+            const VertexNeighbors & neighbors = mesh.vertex_neighbors();
             for (uint32_t x : front) {
-                for (uint32_t k = mesh.h_offsets_cells_of_cell(x); k < mesh.h_offsets_cells_of_cell(x + 1); k++) {
-                    const uint32_t y = mesh.h_cells_of_cell(k);
+                for (uint32_t k = neighbors.h_offsets(x); k < neighbors.h_offsets(x + 1); k++) {
+                    const uint32_t y = neighbors.h_cells(k);
                     if (seen[y] != c + 1) {
                         seen[y] = c + 1;
                         next.push_back(y);
@@ -703,14 +704,14 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         // their frame (images do not cross rotations: the exterior state would
         // need turning)
         uint32_t image_shift = 0;
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
-             image == c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            const uint32_t s = mesh.h_cells_of_cell_shift(k);
+        const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+        for (uint32_t k = neighbors.h_offsets(c); image == c && k < neighbors.h_offsets(c + 1); k++) {
+            const uint32_t s = neighbors.h_shift(k);
             if (s == 0 || mesh.h_rotated_row(s)) continue;
             rtype q[N_DIM];
             FOR_I_DIM q[i] = p[i] - mesh.h_shifts(s, i);
-            if (point_in_cell(mesh, mesh.h_cells_of_cell(k), q)) {
-                image = mesh.h_cells_of_cell(k);
+            if (point_in_cell(mesh, neighbors.h_cells(k), q)) {
+                image = neighbors.h_cells(k);
                 image_shift = s;
             }
         }

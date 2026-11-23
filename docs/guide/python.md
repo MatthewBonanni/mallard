@@ -17,30 +17,32 @@ rho = f.read_all("RHO")                       # (11, 800): every snapshot
 x = f.geometry().vertex_averages()[:, 0]      # where each cell is
 ```
 
-Every function and class: [Python API](python_api.md).
+Every function and class: [Python API](python_api.md). To run cases from a
+program instead, see the [C++ API](cpp_api.md).
 
 ## Installing
 
-Every installer installs the package with Mallard, so `import mallard` works
-after its usual command:
+Every installer but the [relocatable archive](../installation.md#relocatable-archive)
+installs the package with Mallard, so `import mallard` works after its usual
+command:
 
 | Installer | Command | Opt out |
 |---|---|---|
 | [Container](../installation.md#container) | `docker run --rm -v "$PWD:/work" ghcr.io/matthewbonanni/mallard python3 script.py` | |
 | [Spack](../installation.md#spack) | `spack install mallard && spack load mallard` | `~python` |
-| [From source](../installation.md#from-source) | `cmake --install build`, then `pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF` |
+| [From source](../installation.md#from-source) | `cmake --install build`, then `uv pip install PREFIX/share/mallard/tools` | `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` |
 
 The package is `tools/mallard` of the Mallard repository
-(`share/mallard/tools/mallard` of an install; its distribution name, for pip,
+(`share/mallard/tools/mallard` of an install; its distribution name, for uv,
 is `mallard-python`). A build writes its library,
 `build/src/libmallard2d.so` (`.dylib` on macOS), next to `build/src/mallard`,
 and `cmake --install` installs it in `PREFIX/lib`; a build with
 `-DMallard_DIM=3` gives `libmallard3d`, and either reads the output of both
 dimensions. From a build or an install, add the package to a Python
-environment with [uv](https://docs.astral.sh/uv/) or pip:
+environment with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv && uv pip install -e tools        # in the repository; or: pip install -e tools
+uv venv && uv pip install -e tools        # in the repository
 uv pip install PREFIX/share/mallard/tools  # from an install
 ```
 
@@ -289,8 +291,9 @@ differ from the archive's manifest. `mallard.command` runs any other command tha
 - **Cell order.** Values of a region snapshot or a VTU piece are not in the
   mesh's global order; line them up with their own `geometry()`, not with the
   whole mesh's.
-- **Memory.** A field is read whole: `read_all` of a large series holds every
-  snapshot at once. Loop over `read(field, k)` to hold one.
+- **Memory.** A field is read whole, into the array returned without a copy:
+  `read_all` of a large series holds every snapshot at once. Loop over
+  `read(field, k)` to hold one.
 - **Old builds.** The library reads the format versions of its own Mallard and
   earlier, and refuses newer files with a message saying so: use the package and
   library of the newer Mallard.

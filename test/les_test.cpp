@@ -20,9 +20,11 @@
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "data_paths.h"
 #include "exact_riemann.h"
+#include "flux_functor.h"
 #include "input.h"
 #include "les.h"
 #include "solver.h"
@@ -687,7 +689,7 @@ std::string mixture_box(const std::string & les, const std::string & composition
     return s.str();
 }
 
-const std::string UNIFORM = "X = { H2 = 0.2, O2 = 0.1, N2 = 0.7 }\n";
+const std::string PURE = "X = { N2 = 1.0 }\n";
 const std::string STRATIFIED = "X = { H2 = \"0.2 + 0.15 * sin(628.3185307179586 * y)\", O2 = 0.1, N2 = 0.5 }\n";
 
 } // namespace
@@ -700,21 +702,24 @@ TEST(LESMixture, SchmidtNumberActsOnCompositionGradientsOnly) {
         return solver;
     };
     const std::string model = N_DIM == 2 ? "model = \"vreman\"\n" : "model = \"sigma\"\n";
-    auto low = run("[les]\n" + model + "Sc_t = 0.3\n", UNIFORM);
-    auto high = run("[les]\n" + model + "Sc_t = 3.0\n", UNIFORM);
-    auto none = run("", UNIFORM);
+    auto low = run("[les]\n" + model + "Sc_t = 0.3\n", PURE);
+    auto high = run("[les]\n" + model + "Sc_t = 3.0\n", PURE);
+    auto none = run("", PURE);
     const uint32_t n = low->get_mesh()->n_cells;
     double les_effect = 0.0;
     double sc_effect = 0.0;
     for (uint32_t c = 0; c < n; c++) {
         FOR_I_CONSERVATIVE {
-            const double ref = std::abs(double(low->h_conservatives(c, i))) + 1.0;
-            sc_effect = std::max(sc_effect, std::abs(double(low->h_conservatives(c, i) - high->h_conservatives(c, i))) / ref);
+            sc_effect = std::max(sc_effect, std::abs(double(low->h_conservatives(c, i) - high->h_conservatives(c, i))));
         }
         les_effect = std::max(les_effect, std::abs(double(low->h_conservatives(c, 1) - none->h_conservatives(c, 1))));
     }
-    // Uniform mass fractions leave only round-off gradients for the SGS species fluxes
-    EXPECT_LT(sc_effect, precision_tol<double>(1e-11, 1e-5));
+    // A pure gas's X = 1 varies by at most its last bit (in double; not at all in float), and a single
+    // species's SGS flux -c dX + Y (c dX / Y) cancels that to an ulp: far below the rounding of the
+    // fluxes it joins, so Sc_t changes nothing, bit for bit. A uniform mixture's round-off gradients of
+    // X feed SGS fluxes in 1 / Sc_t that shift rho E by ulps of its terms (near 1e5), which no tolerance
+    // relative to rho E bounds where it crosses zero, as it does here
+    EXPECT_EQ(sc_effect, 0.0);
     EXPECT_GT(les_effect, 1e-6);
 
     auto low_s = run("[les]\n" + model + "Sc_t = 0.3\n", STRATIFIED);
@@ -903,6 +908,56 @@ TEST(HybridFlux, MixtureCellAverageCentralFluxChangesKineticEnergyOnlyByThePress
         const auto reconstructed = budget("", "");
         EXPECT_GT(std::abs(reconstructed[0] - reconstructed[1]), 0.01 * std::abs(reconstructed[1]));
     }
+}
+
+namespace {
+
+/**
+ * @brief Upwind fractions of 1 mm cells of air at rest, each with dilatation
+ *        div[i] and vorticity omega[i] (SI), in units of length L and time T
+ *        (in meters and seconds).
+ */
+std::vector<double> sensor_decisions(const std::vector<double> & div, const std::vector<double> & omega, const double L,
+                                     const double T) {
+    const double h = 1e-3 / L, p = 1e5 * L * T * T, rho = 1.2 * L * L * L;
+    const uint32_t n = static_cast<uint32_t>(div.size());
+    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients("gradients", n);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", n);
+    Kokkos::View<rtype *> volume("volume", n), upwind("upwind", n);
+    auto h_gradients = Kokkos::create_mirror_view(gradients);
+    auto h_W = Kokkos::create_mirror_view(W);
+    auto h_volume = Kokkos::create_mirror_view(volume);
+    for (uint32_t c = 0; c < n; c++) {
+        h_gradients(c, 1, 0) = static_cast<rtype>(div[c] * T);
+        h_gradients(c, 2, 0) = static_cast<rtype>(omega[c] * T);
+        h_W(c, 0) = static_cast<rtype>(rho);
+        h_W(c, N_DIM + 1) = static_cast<rtype>(p);
+        h_volume(c) = static_cast<rtype>(std::pow(h, N_DIM));
+    }
+    Kokkos::deep_copy(gradients, h_gradients);
+    Kokkos::deep_copy(W, h_W);
+    Kokkos::deep_copy(volume, h_volume);
+    Kokkos::parallel_for(n, UpwindSensorFunctor{gradients, W, volume, 1.4_r, {}, upwind, 0.65_r, 0.0_r,
+                                                static_cast<rtype>(DEFAULT_DILATATION_SCALE)});
+    auto h_upwind = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), upwind);
+    std::vector<double> out(n);
+    for (uint32_t c = 0; c < n; c++) out[c] = double(h_upwind(c));
+    return out;
+}
+
+} // namespace
+
+TEST(HybridFlux, SensorIgnoresRoundOffCompressions) {
+    // With omega = 0 every compression had theta = 1, round-off ones in
+    // uniform flow included: 30% of the cells of the double Mach reflection,
+    // most of them ahead of the shocks. Here c / h = 3.4e5 / s: a round-off
+    // compression, grid-scale noise (still upwinded: that damps it, and
+    // Sod's problem is less accurate without), a shock, a vortex, an expansion
+    const std::vector<double> div = {-1e-2, -1e3, -1e5, -1e5, 1e5}, omega = {0.0, 0.0, 0.0, 5e5, 0.0};
+    const std::vector<double> expected = {0.0, 1.0, 1.0, 0.0, 0.0};
+    // epsilon is (c / h)^2 times a number, so millimetres and microseconds change nothing
+    EXPECT_EQ(sensor_decisions(div, omega, 1.0, 1.0), expected);
+    EXPECT_EQ(sensor_decisions(div, omega, 1e-3, 1e-6), expected);
 }
 
 TEST(HybridFlux, CentralKeyNeedsTheHybridFluxAndAKnownValue) {
