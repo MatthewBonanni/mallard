@@ -150,11 +150,16 @@ def compute():
         if (fl is ext or fl is flamelets[-1] or C_st(fl) < C_st(kept[-1]) - 0.0025
                 or abs(np.log(fl["chi_st"] / kept[-1]["chi_st"])) > 0.35):
             kept.append(fl)
-    short = lambda v: [float(f"{x:.4g}") for x in v] if isinstance(v, list) else float(f"{v:.6g}")  # noqa: E731
+    # 5 digits, but the progress variable at full precision: on the rich side the burning flamelets' C differ by
+    # 1e-5 of C, and rounding it would reorder them in the Lambda remap
+    def short(k, v):
+        if k == "Y_H2O":
+            return v
+        return [float(f"{x:.5g}") for x in v] if isinstance(v, list) else float(f"{v:.6g}")
     DATA.write_text(json.dumps(dict(
-        Z=short(Z_GRID.tolist()), Z_st=Z_st, fuel=FUEL, oxidizer=OXIDIZER, T=T_IN, p=P,
-        mixing={k: short(v) for k, v in mixing.items() if v is not None},
-        flamelets=[{k: short(v) for k, v in fl.items()} for fl in kept]), separators=(",", ":")) + "\n")
+        Z=Z_GRID.tolist(), Z_st=Z_st, fuel=FUEL, oxidizer=OXIDIZER, T=T_IN, p=P,
+        mixing={k: short(k, v) for k, v in mixing.items() if v is not None},
+        flamelets=[{k: short(k, v) for k, v in fl.items()} for fl in kept]), separators=(",", ":")) + "\n")
     print(f"wrote {DATA.name}: {len(kept)} of {len(flamelets)} flamelets")
 
 
