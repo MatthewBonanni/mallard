@@ -266,7 +266,8 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)), also in
+[axisymmetric runs](#axisymmetric-flows).
 
 | Key | Description |
 |---|---|
@@ -415,8 +416,10 @@ averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
 and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
-mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
+mixture model, chemistry and MPI work as in planar runs, and so do
+[curved boundaries](#curved-boundaries), revolved with the cells next to
+them; meshes cannot be periodic in y. Guide:
+[axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 
@@ -1563,7 +1566,8 @@ reductions = ["mean", "rms"]
 ## `[particles]`
 
 Lagrangian particles: massless tracers or solid spheres
-([Particles](guide/particles.md)). Restart files carry them and their
+([Particles](guide/particles.md); equations in the theory manual's
+[Lagrangian particles](theory/particles.md)). Restart files carry them and their
 quantities: a run restarted from a file with particles continues them and does
 not seed; a file without particles (or a `remap` start) seeds them from these
 keys.
@@ -1573,7 +1577,7 @@ keys.
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
 | `diameter` | Sphere diameter (`"solid"`). Required for solid particles |
 | `density` | Material density (`"solid"`). Required for solid particles |
-| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (Singh et al., continuum to free-molecular, subsonic to hypersonic) (`"solid"`), default `"schiller_naumann"` |
+| `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
 | `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, default none |
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |

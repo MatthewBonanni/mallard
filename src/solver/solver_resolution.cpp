@@ -524,6 +524,7 @@ CheckCellScales Solver::check_viscous_scales(CheckReport & r, CheckFields & fiel
     int resolved = 0, with_model = 0;
     std::vector<double> cell_y_plus(n_owned, 0.0);
     const bool have_u_tau = local_shear || u_tau_global > 0.0;
+    if (have_u_tau) r.face_y_plus.assign(mesh->n_faces, std::numeric_limits<double>::quiet_NaN());
     for (const WallFace & w : walls) {
         if (!have_u_tau) break;
         const double u_tau =
@@ -536,6 +537,7 @@ CheckCellScales Solver::check_viscous_scales(CheckReport & r, CheckFields & fiel
         sum_y_plus += yp * w.area;
         sum_tau += u_tau * u_tau * w.area;
         cell_y_plus[w.cell] = std::max(cell_y_plus[w.cell], yp);
+        r.face_y_plus[w.face] = yp;
         if (modeled(w.bc)) {
             with_model = 1;
             const WallModelSpec & spec = wall_model_specs[size_t(w.bc)];
