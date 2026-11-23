@@ -530,6 +530,11 @@ Options:
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
+  --initial PREFIX          Write the initial state, as the run would start from
+                            it (initialize, its regions and data, or a restart),
+                            to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds
+                            without HDF5), the default snapshot format: RHO, U,
+                            P, T and, for mixtures, Y_*. Default: none.
   --partial                 The input is still being written: exit with 0 when
                             the only errors are missing pieces (a required key
                             or table, or a mesh file, not there yet), which the
@@ -538,16 +543,18 @@ Options:
   --view DIR                Write the case view, without running the case:
                             DIR/case.vtkhdf for ParaView (builds without HDF5:
                             DIR/case.vtm), one block each for the mesh, every
-                            boundary zone, region the case uses (filled regions
-                            as their cells with their fractions, surfaces and
-                            curves with their normals or tangents and measures),
-                            probe and periodic pair; and DIR/case-light.svg and
-                            DIR/case-dark.svg, the annotated image (3D: an
-                            isometric view over three orthographic ones) with
-                            every boundary labeled by its name and condition and
-                            every region and probe by its name, a legend, axes,
-                            a scale bar and the domain's extent in its units.
-                            Default: none.
+                            boundary zone (walls with their first cells' y+ as
+                            the field y_plus once it is estimated), region the
+                            case uses (filled regions as their cells with their
+                            fractions, surfaces and curves with their normals or
+                            tangents and measures), probe and periodic pair (a
+                            setup that stops draws the mesh alone); and
+                            DIR/case-light.svg and DIR/case-dark.svg, the
+                            annotated image (3D: an isometric view over three
+                            orthographic ones) with every boundary labeled by
+                            its name and condition and every region and probe by
+                            its name, a legend, axes, a scale bar and the
+                            domain's extent in its units. Default: none.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).

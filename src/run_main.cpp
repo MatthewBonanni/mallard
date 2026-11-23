@@ -260,6 +260,7 @@ std::string check_options(const cli::Args & args, CheckOptions & options) {
     options.catalog_file = args.value_or("--catalog", "");
     options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
+    options.initial = args.value_or("--initial", "");
     std::string error = mesh_field_options(args, options);
     if (error.empty() && args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
     if (!error.empty()) return error;
