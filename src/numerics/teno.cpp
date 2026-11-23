@@ -819,15 +819,47 @@ class PackedRows {
                 for (uint32_t c = a; c < std::min(n, a + slice); c++) largest = std::max(largest, (tables[c].*cells).size());
                 slice_start.push_back(slice_start.back() + largest);
             }
-            // Cells of a cache's blob share a row, ranked once with the lowest global id of its cells; others one each
-            std::vector<uint32_t> row(n), first;
+            // Cells of one stencil shape (e.g. from a cache) hold bitwise-equal tables: each table is ranked
+            // once, with the lowest global id of its cells, which gives the shapes of ranking every cell. A cache's
+            // cells share a blob exactly when their tables are equal; others are compared by their bits
+            using Bits = std::conditional_t<sizeof(rtype) == 8, uint64_t, uint32_t>;
+            std::vector<uint64_t> bits(n);
+            gated::parallel_for("teno_pack_bits", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
+                                 [&](const uint32_t c) {
+                const CellTables & t = tables[c];
+                if (t.*blob != CellTables::NO_BLOB) return;
+                uint64_t h = (t.*pinv).size();
+                for (const uint16_t k : segments(t)) h = (h ^ k) * 0x9e3779b97f4a7c15ULL;
+                for (const rtype v : t.*pinv) h = ((h ^ std::bit_cast<Bits>(v)) * 0x9e3779b97f4a7c15ULL) ^ (h >> 29);
+                bits[c] = h;
+            });
+            auto same_bits = [&](const uint32_t a, const uint32_t b) {
+                const auto & x = tables[a].*pinv;
+                const auto & y = tables[b].*pinv;
+                return x.size() == y.size() && segments(tables[a]) == segments(tables[b]) &&
+                       std::memcmp(x.data(), y.data(), x.size() * sizeof(rtype)) == 0;
+            };
+            constexpr uint32_t NO_ROW = ~0u;
+            std::vector<uint32_t> row(n), first;  // (cell): its row; (row): its first cell
             std::vector<uint64_t> ids;
             std::map<std::pair<uint32_t, std::vector<uint16_t>>, uint32_t> of_blob;
+            std::unordered_multimap<uint64_t, uint32_t> seen;  // bits: row
             for (uint32_t c = 0; c < n; c++) {
                 const uint64_t id = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
                 const uint32_t b = tables[c].*blob;
-                uint32_t r = uint32_t(first.size());
-                if (b != CellTables::NO_BLOB) r = of_blob.try_emplace({b, segments(tables[c])}, r).first->second;
+                uint32_t r = NO_ROW;
+                if (b != CellTables::NO_BLOB) {
+                    r = of_blob.try_emplace({b, segments(tables[c])}, uint32_t(first.size())).first->second;
+                } else {
+                    const auto range = seen.equal_range(bits[c]);
+                    for (auto it = range.first; it != range.second && r == NO_ROW; ++it) {
+                        if (same_bits(first[it->second], c)) r = it->second;
+                    }
+                    if (r == NO_ROW) {
+                        r = static_cast<uint32_t>(first.size());
+                        seen.emplace(bits[c], r);
+                    }
+                }
                 if (r == first.size()) {
                     first.push_back(c);
                     ids.push_back(id);
