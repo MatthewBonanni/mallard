@@ -8,7 +8,8 @@ With --mallard (a 2D build; an MPI build for the partitions) the figures from
 short runs and the sample run report are redrawn too (the Python package's with a
 build that has its library, the default).
 With --mallard3d the 3D region, probe and mesh-field figures are drawn too.
-With either, the local coordinates of boundary faces are checked against Mallard's.
+With either, the local coordinates of boundary faces are checked against Mallard's, and with
+--mallard the structured blocks of the cell numbering figure too.
 MALLARD_FIGURE_PREVIEW=dir also writes PNGs on the site's backgrounds there, for
 review.
 
@@ -17,11 +18,13 @@ Each module's figures are drawn by one call below, in alphabetical order.
 import argparse
 import sys
 
+import axisymmetric_curved
 import boundary_coordinates
 import boundary_data
 import case_view
 import domains
 import effective_resolution
+import flamelet
 import geometry
 import gui_mockups
 import high_order_cost
@@ -31,15 +34,18 @@ import les_models
 import limiters
 import mesh_fields
 import particles
+import post_flame
 import probes
 import python
 import regions
 import run_report
 import runs
 import schematics
+import structured_blocks
 import teno
 import theory
 import time_integrators
+import triple_flame_sensor
 import viscous_gradients
 import work_precision
 
@@ -50,10 +56,12 @@ def main():
     ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D region, probe and mesh-field figures")
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
+    axisymmetric_curved.figures()
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     boundary_data.figures()
     domains.figures()
     effective_resolution.figures()
+    flamelet.figures()
     geometry.figures(args.mallard, args.mallard3d)
     gui_mockups.figures()
     high_order_cost.figures()
@@ -61,10 +69,13 @@ def main():
     les_models.figures()
     limiters.figures()
     particles.figures(args.mallard)
+    post_flame.figures()
     schematics.figures()
+    structured_blocks.figures(args.mallard)
     teno.figures()
     theory.figures()
     time_integrators.figures()
+    triple_flame_sensor.figures()
     viscous_gradients.figures()
     work_precision.figures()
     if args.mallard:
