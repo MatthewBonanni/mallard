@@ -1581,7 +1581,7 @@ keys.
 | `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
 | `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `V_X`, `V_Y`, `V_Z` of solid particles, their temperature `T_P` with heat transfer, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.lattice]`
@@ -1618,7 +1618,7 @@ Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
 
 | Key | Description |
 |---|---|
-| `name` | Its name. Required |
+| `name` | Its name, an uppercase field name (`[A-Z][A-Z0-9_]*`) other than the variables in any case, e.g. `TURNS`. Required |
 | `integral` | Expression whose time integral along the path it is, at the time integrator's order |
 | `max`, `min` | Expression whose largest (smallest) value at the steps' starts it is |
 | `first_time` | Condition: the first step start's `t` at which it holds, `nan` until then |
@@ -1629,7 +1629,7 @@ Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
 
 Statistics of particle expressions over the particles in a region
 ([Particle probes](guide/particles.md#particle-probes)): per row `step`, `t`,
-`count`, and each field's mean, standard deviation, min and max.
+`COUNT`, and each field's `MEAN_`, `STD_`, `MIN_` and `MAX_`.
 
 | Key | Description |
 |---|---|

@@ -566,3 +566,41 @@ TEST(InputUpgradeTest, TheLesPresetsIntegratorGetsANotice) {
     EXPECT_NE(with_cfl[0].find("the cfl this input sets"), std::string::npos) << with_cfl[0];
     EXPECT_EQ(with_cfl[0].find("[run] cfl = 0.8"), std::string::npos) << with_cfl[0];
 }
+
+TEST(InputUpgradeTest, LowercaseParticleQuantityNamesBecomeUppercaseWithTheirReferences) {
+    const std::string text = "[particles]\ntype = \"tracer\"\n\n"
+                             "[[particles.quantities]]\nname = \"turns\"   # about the center\n"
+                             "winding = {point = [0.25, 0.25]}\n\n"
+                             "[[particles.quantities]]\nname = \"speed_max\"\nmax = \"hypot(U_X, U_Y)\"\n"
+                             "while = \"turns > 1 and in(turns) > 0\"\n\n"
+                             "[[particles.probes]]\nname = \"turns\"\nregion = \"turns\"\n"
+                             "fields = [\n    \"turns\",\n    \"speed_max / max(turns, 1)\",\n]\n";
+    const std::string expected = "[particles]\ntype = \"tracer\"\n\n"
+                                 "[[particles.quantities]]\nname = \"TURNS\"   # about the center\n"
+                                 "winding = {point = [0.25, 0.25]}\n\n"
+                                 "[[particles.quantities]]\nname = \"SPEED_MAX\"\nmax = \"hypot(U_X, U_Y)\"\n"
+                                 "while = \"TURNS > 1 and in(turns) > 0\"\n\n"
+                                 "[[particles.probes]]\nname = \"turns\"\nregion = \"turns\"\n"
+                                 "fields = [\n    \"TURNS\",\n    \"SPEED_MAX / max(TURNS, 1)\",\n]\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(upgrade(text, reformatted, findings), expected);
+    EXPECT_FALSE(reformatted);
+    ASSERT_EQ(findings.size(), 2u);
+    EXPECT_EQ(findings[0].key, "particles.quantities[0].name");
+    EXPECT_EQ(findings[0].line, 5u);
+    EXPECT_EQ(findings[0].suggestion, "TURNS");
+    EXPECT_EQ(findings[1].suggestion, "SPEED_MAX");
+    findings.clear();
+    EXPECT_EQ(upgrade(expected, reformatted, findings), expected);
+    EXPECT_TRUE(findings.empty());
+}
+
+TEST(InputUpgradeTest, AParticleQuantityWhoseUppercaseNameIsTakenIsLeftForTheUser) {
+    const std::string text = "[[particles.quantities]]\nname = \"t\"\nintegral = \"1\"\n";
+    bool reformatted = true;
+    std::vector<Finding> findings;
+    EXPECT_EQ(upgrade(text, reformatted, findings), text);
+    ASSERT_EQ(findings.size(), 1u);
+    EXPECT_NE(findings[0].message.find("by hand"), std::string::npos) << findings[0].message;
+}

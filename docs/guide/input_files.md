@@ -273,6 +273,15 @@ Keys and options changed so far:
 | `[[write_data]]` `variables`, `[[probes]]` `variables` | `fields`, as `[statistics]` names them ([`mallard list fields`](cli.md#mallard-list-fields)) | 0.10.0 | 0.11.0 |
 | `[numerics]` `preset = "robust"`, `"accurate"` | `"second_order"`, `"high_order"`: presets are named by their order ([presets](numerics.md#presets)) | 0.10.0 | 0.11.0 |
 
+Before 1.0, names an input gives that a release makes stricter are not
+deprecated first: the run stops with an error naming the line and the new
+form, and `mallard input upgrade` rewrites them with their references. In
+0.11.0, `[[particles.quantities]]` names became uppercase field names, like
+`RHO` and `U_X`: `name = "turns"` becomes `"TURNS"`, and so do the
+expressions of quantities and of `[[particles.probes]]` `fields` that read it.
+A name whose uppercase form is a particle variable (`"t"`, `"x"`) is listed
+for renaming by hand.
+
 A changed default is not a deprecated key, and `mallard input upgrade`
 leaves the file as it is: it only prints a note, which does not change the
 exit status of `--check`. In 0.10.0 the default without a `[numerics] preset`

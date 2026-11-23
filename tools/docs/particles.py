@@ -273,7 +273,7 @@ def settling_velocity(binary, d, rho_p, drag="schiller_naumann", periods=6):
     run(binary, cfg, work)
     with open(Path(work) / "droplets.csv") as f:
         rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    return -float(rows[1][rows[0].index("v_y")]), v_t
+    return -float(rows[1][rows[0].index("V_Y")]), v_t
 
 
 def singh_terminal_velocity(d, rho_p, rho, mu, g, c, gamma=1.4):

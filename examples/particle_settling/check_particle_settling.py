@@ -67,9 +67,9 @@ def main():
     tol = 1e-3 + transient
     failed = 0
     for r in rows:
-        v = -r["v_y"]
+        v = -r["V_Y"]
         err = abs(v - v_t) / v_t
-        ok = err <= tol and abs(r["v_x"]) <= 1e-12 * v_t
+        ok = err <= tol and abs(r["V_X"]) <= 1e-12 * v_t
         failed += not ok
         print(f"  particle {int(r['id'])}: v = {v:.6g} m/s, {err:.1e} of v_t{'' if ok else '  FAIL'}")
     print(f"{len(rows) - failed} of {len(rows)} particles within {tol:.1e} of v_t (rest of the transient {transient:.1e})")

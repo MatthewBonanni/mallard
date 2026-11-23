@@ -300,7 +300,7 @@ TEST(ParticlesTest, RestartedRunContinuesTheTrajectoriesExactly) {
     const std::string dir = (scratch_dir() / "mallard_particles_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 20\n";
     const std::string q = "[[particles.quantities]]\nname = \"I\"\nintegral = \"U_X * U_Y\"\n"
-                          "[[particles.quantities]]\nname = \"top\"\nmax = \"y\"\n";
+                          "[[particles.quantities]]\nname = \"TOP\"\nmax = \"y\"\n";
     Solver straight;
     straight.init(parse_toml(vortex(16, 0.01, 40, TENO4, "SSPRK3") + q));
     straight.run();
@@ -438,14 +438,14 @@ double turning_integral_error(const std::string & integrator, uint32_t n_steps) 
     run.precision(17);
     run << "n_steps = " << n_steps << "\ndt = " << t / n_steps << "\n";
     std::string input = box(12, vec("0.3", "-0.2", "0.0"), "xy", "", run.str(),
-                            lattice(0.3, 0.7) + "[[particles.quantities]]\nname = \"X\"\nintegral = \"x\"\n", TENO4,
+                            lattice(0.3, 0.7) + "[[particles.quantities]]\nname = \"X_INT\"\nintegral = \"x\"\n", TENO4,
                             integrator);
     input.insert(input.find("[numerics]"), "[source]\nrhou = " + vec("-2 * pi * rho * u_y", "2 * pi * rho * u_x", "0.0") + "\n");
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input));
     solver.run();
-    const std::vector<double> X = quantity_of(*solver.get_particles(), "X");
+    const std::vector<double> X = quantity_of(*solver.get_particles(), "X_INT");
     const auto seeds = lattice_points(0.3, 0.7);
     // x(t) = x0 + (u0_x sin Kt + u0_y (cos Kt - 1)) / K, so int_0^t x = x0 t + (u0_x (1 - cos Kt) + u0_y (sin Kt - K t)) / K^2
     double error = 0.0;
@@ -483,14 +483,14 @@ TEST(ParticleQuantitiesTest, WindingCountsTheTurnsAboutTheVortexAxis) {
     const uint32_t n = 32;
     const double dt = 0.005, t = 2.0;
     const std::string axis = N_DIM == 3 ? ", axis = [0.0, 0.0, 2.0]" : "";
-    const std::string q = "[[particles.quantities]]\nname = \"turns\"\nwinding = {point = " + numbers(0.5, 0.5, 0.0) +
-                          axis + "}\n[[particles.quantities]]\nname = \"age\"\nintegral = \"1\"\n";
+    const std::string q = "[[particles.quantities]]\nname = \"TURNS\"\nwinding = {point = " + numbers(0.5, 0.5, 0.0) +
+                          axis + "}\n[[particles.quantities]]\nname = \"AGE\"\nintegral = \"1\"\n";
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(vortex(n, dt, static_cast<uint32_t>(std::lround(t / dt)), TENO4, "RK4") + q));
     solver.run();
     const Particles & p = *solver.get_particles();
-    const std::vector<double> turns = quantity_of(p, "turns"), age = quantity_of(p, "age");
+    const std::vector<double> turns = quantity_of(p, "TURNS"), age = quantity_of(p, "AGE");
     const auto seeds = vortex_seeds(n);
     const std::vector<particles::Record> records = p.gather();
     ASSERT_EQ(turns.size(), seeds.size());
@@ -509,15 +509,15 @@ TEST(ParticleQuantitiesTest, WindingCountsTheTurnsAboutTheVortexAxis) {
 TEST(ParticleQuantitiesTest, ExtremaAndFirstTimesAreThoseOfTheStepStarts) {
     // Particles move exactly in uniform flow, so the values at the step starts are known: the extrema of
     // sin(2 pi x) over them, the first with x > 0.6, and the largest x among those with y > 0.5
-    const std::string q = "[[particles.quantities]]\nname = \"top\"\nmax = \"sin(2 * pi * x)\"\n"
-                          "[[particles.quantities]]\nname = \"bottom\"\nmin = \"sin(2 * pi * x)\"\n"
-                          "[[particles.quantities]]\nname = \"arrival\"\nfirst_time = \"x > 0.6\"\n"
-                          "[[particles.quantities]]\nname = \"gated\"\nmax = \"x\"\nwhile = \"y > 0.5\"\n";
+    const std::string q = "[[particles.quantities]]\nname = \"TOP\"\nmax = \"sin(2 * pi * x)\"\n"
+                          "[[particles.quantities]]\nname = \"BOTTOM\"\nmin = \"sin(2 * pi * x)\"\n"
+                          "[[particles.quantities]]\nname = \"ARRIVAL\"\nfirst_time = \"x > 0.6\"\n"
+                          "[[particles.quantities]]\nname = \"GATED\"\nmax = \"x\"\nwhile = \"y > 0.5\"\n";
     const uint32_t n_steps = 150;
     auto check = [&](const Solver & s) {
         const Particles & p = *s.get_particles();
-        const std::vector<double> top = quantity_of(p, "top"), bottom = quantity_of(p, "bottom");
-        const std::vector<double> arrival = quantity_of(p, "arrival"), gated = quantity_of(p, "gated");
+        const std::vector<double> top = quantity_of(p, "TOP"), bottom = quantity_of(p, "BOTTOM");
+        const std::vector<double> arrival = quantity_of(p, "ARRIVAL"), gated = quantity_of(p, "GATED");
         const auto seeds = lattice_points(0.07, 0.93);
         ASSERT_EQ(top.size(), seeds.size());
         for (size_t k = 0; k < seeds.size(); k++) {
@@ -557,15 +557,15 @@ TEST(ParticleQuantitiesTest, ResidenceTimeInARegionIsItsLengthOverTheSpeed) {
     // residence time exact to the integrator's error
     const std::string slab = std::string("type = \"") + (N_DIM == 3 ? "box" : "rectangle") + "\"\ncenter = " + numbers(0.355, 0.5, 0.25) + "\nsize = " + numbers(0.31, 4.0, 4.0) + "\n";
     const std::string regions = "[regions.slab]\n" + slab + "[regions.soft]\n" + slab + "edge = 0.05\n";
-    const std::string q = "[[particles.quantities]]\nname = \"sharp\"\nintegral = \"in(slab)\"\n"
-                          "[[particles.quantities]]\nname = \"smooth\"\nintegral = \"in(soft)\"\n";
+    const std::string q = "[[particles.quantities]]\nname = \"SHARP\"\nintegral = \"in(slab)\"\n"
+                          "[[particles.quantities]]\nname = \"SMOOTH\"\nintegral = \"in(soft)\"\n";
     // Entering at t = 0.4925 and leaving at 1.5258, within steps
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(uniform("points = [" + numbers(0.05225, 0.5, 0.25) + "]\n" + q, 250, regions)));
     solver.run();
     const Particles & p = *solver.get_particles();
-    const double sharp = quantity_of(p, "sharp").at(0), smooth = quantity_of(p, "smooth").at(0);
+    const double sharp = quantity_of(p, "SHARP").at(0), smooth = quantity_of(p, "SMOOTH").at(0);
     const double exact = 0.31 / U_UNIFORM;
     EXPECT_NEAR(sharp, exact, DT_UNIFORM);
     EXPECT_NEAR(smooth, exact, 1e-4);
@@ -616,12 +616,36 @@ TEST(ParticleQuantitiesTest, AQuantityGivesExactlyOneKind) {
     Solver solver;
     try {
         solver.init(parse_toml(uniform(lattice(0.07, 0.93) +
-                                           "[[particles.quantities]]\nname = \"q\"\nmax = \"x\"\nmin = \"x\"\n",
+                                           "[[particles.quantities]]\nname = \"Q\"\nmax = \"x\"\nmin = \"x\"\n",
                                        1)));
         FAIL() << "no error";
     } catch (const InputError & e) {
         EXPECT_NE(std::string(e.what()).find("gives 2 kinds"), std::string::npos) << e.what();
     }
+}
+
+TEST(ParticleQuantitiesTest, ANameIsAnUppercaseFieldName) {
+    const auto error_of = [](const std::string & quantity) {
+        Solver solver;
+        try {
+            solver.init(parse_toml(uniform(lattice(0.07, 0.93) + "[[particles.quantities]]\n" + quantity, 1)));
+        } catch (const InputError & e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string lowercase = error_of("name = \"speed_max\"\nmax = \"U_X\"\n");
+    EXPECT_NE(lowercase.find("particles.quantities[0].name"), std::string::npos) << lowercase;
+    EXPECT_NE(lowercase.find("line "), std::string::npos) << lowercase;
+    EXPECT_NE(lowercase.find("\"SPEED_MAX\""), std::string::npos) << lowercase;
+    EXPECT_NE(lowercase.find("mallard input upgrade"), std::string::npos) << lowercase;
+    EXPECT_NE(error_of("name = \"Turns\"\nintegral = \"1\"\n").find("\"TURNS\""), std::string::npos);
+    // The uppercase forms of the particle variables, x and t included, are taken
+    for (const char * taken : {"X", "T", "T_P", "U_X"}) {
+        const std::string e = error_of("name = \"" + std::string(taken) + "\"\nintegral = \"1\"\n");
+        EXPECT_NE(e.find("is the particle variable"), std::string::npos) << taken << ": " << e;
+    }
+    EXPECT_EQ(error_of("name = \"SPEED_MAX\"\nmax = \"U_X\"\n"), "");
 }
 
 namespace {
@@ -1202,6 +1226,28 @@ TEST(SolidParticlesTest, HeatTransferRelaxesAtTheRanzMarshallRate) {
         ASSERT_EQ(records.size(), 16u);
         for (const auto & r : records) EXPECT_NEAR(r.T, T, roundoff(tol)) << "U = " << U;
     }
+}
+
+TEST(ParticleQuantitiesTest, TheParticlesFileNamesItsColumnsInUppercase) {
+    const std::string file = (rank_scratch_dir() / "mallard_particle_columns.csv").string();
+    const auto header = [&](const std::string & input) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(input));
+        solver.run();
+        std::ifstream in(file);
+        std::string line;
+        while (std::getline(in, line) && (line.empty() || line[0] == '#')) {}
+        return line;
+    };
+    const std::string at = "file = \"" + file + "\"\n";
+    const std::string axes = N_DIM == 3 ? "x,y,z" : "x,y";
+    EXPECT_EQ(header(uniform(at + lattice(0.07, 0.93) + "[[particles.quantities]]\nname = \"TURNS\"\n" +
+                             "winding = {point = " + numbers(0.5, 0.5, 0.5) + (N_DIM == 3 ? ", axis = [0, 0, 1]" : "") +
+                             "}\n", 1)),
+              "id," + axes + ",TURNS");
+    EXPECT_EQ(header(settling(0.1, 1.0, "stokes", 1, 0.01, "RK4", "specific_heat = 10.0\n" + at)),
+              "id," + axes + (N_DIM == 3 ? ",V_X,V_Y,V_Z" : ",V_X,V_Y") + ",T_P");
 }
 
 TEST(SolidParticlesTest, ProbesReadTheParticleVelocityAndTemperature) {
