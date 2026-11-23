@@ -175,6 +175,52 @@ TENO's design order up to the axis (the truncation error of a manufactured
 solution converges at order 3.1, 4.5, 5.4 for TENO3-5 on quadrilaterals).
 Viscous fluxes are second order, as in planar runs.
 
+## Curved boundaries
+
+A body of revolution with a curved meridian (a sphere, a nozzle contour) has
+curved boundary faces ([curved boundaries](curved_boundaries.md), #725).
+`make_axisymmetric` runs after `apply_curved`, so every revolved quantity of
+the cells and faces that touch a curved face comes from the curved geometry:
+
+- **Cells.** `cell_measure`, the revolved centroid and the r-weighted
+  covariance of a curved cell are integrated over its curved rule
+  (`curved::Geometry::cell_rule`, cubic, the cones from its vertex average)
+  times `r`. Its planar area and centroid are `apply_curved`'s.
+- **Faces.** `face_measure` of a curved face is `int r dS` along the curve
+  (16-point Gauss), for the viscous fluxes, inflows and probe surfaces.
+- **Flux points.** At the Gauss points of a curved face, the area vectors of
+  the planar rule (`face_rule`, which sum to the chord's) are multiplied by
+  `r_q` and shifted by a common vector, in proportion to the Gauss weights, so
+  that they sum to the face's revolved area vector
+  `R_f = int r n dS = ((y_1^2 - y_0^2) / 2, -int y dx)`, the first component
+  exact and the second by 16-point Gauss. Their lengths and directions are the
+  points' flux weights (`flux_weights`) and unit normals (`flux_normals`, the
+  face reconstruction's elsewhere). Summed over a cell, the `R_f` give
+  `(0, A_c)` with `A_c` the curved planar area, exactly for polynomial
+  (Gmsh) curves and to round-off for projected ones; with the cell-value
+  source `p A_c`, a uniform state then stays uniform to round-off, at rest or
+  moving. The shift is the r-weighted Gauss rule's error, `O(h^(2 n_q))` of
+  the face; a per-point normal is needed because one point (first order, or
+  MUSCL) cannot match both components with a weight.
+- **Sources.** The cell-value source multiplies by `A_c`. TENO's high-order
+  source evaluates the polynomial at the curved cell's own rule (degree
+  `k + 1`, `TENO::curved_rule`), whose weights sum to `A_c`, instead of the
+  fan of triangles.
+- **Reconstruction.** TENO's moments of curved cells are r-weighted as those
+  of straight cells; MUSCL uses the revolved centroids.
+- **Initial averages, regions and probes.** Analytical initial conditions are
+  averaged over the curved rules times `r`. Region volume fractions and
+  measures over curved cells already integrate `r` over the curved cones
+  (`sampler::cone`, #724), point and cut-cell probes weight by `r` and
+  `cell_measure`, and boundary probes use `face_measure`.
+
+Each of these is needed: without the r-weighted flux points, gas at rest or
+in uniform motion between curved walls changes by 0.1-0.5 in 20 steps on a
+3 x 9 shell; without the curved measures, TENO's curved source rules, the
+r-weighted initial averages or the r-weighted moments of curved cells, the
+TENO4 residual of the shell state below converges at order 1.9-2.0 instead of
+3.1.
+
 ## Validation
 
 Unit tests (`test/axisymmetric_test.cpp`, `MPITest.AxisymmetricRunsMatchSerial`):
@@ -192,6 +238,14 @@ Unit tests (`test/axisymmetric_test.cpp`, `MPITest.AxisymmetricRunsMatchSerial`)
   the cell-value source instead, 2.5-2.9 on quadrilaterals and 1.1-1.6 on
   triangles.
 - Distributed runs match serial ones bitwise on 1-4 ranks.
+- Curved walls (the meridian half-plane of a spherical shell, `1 <= R <= 2`,
+  quadrilaterals and triangles, walls projected or P2): exact revolved
+  volumes, first moments and sphere areas; uniform flow and gas at rest stay
+  uniform to round-off for FO, MUSCL, TENO3 and TENO5; boundary probes
+  measure `2 R^2` per radian; the residual of a smooth state tangent to the
+  spheres converges at order 2.7 (TENO3) and 3.1 (TENO4), from 2.7e-3 to
+  4.3e-4 and 7.2e-4 to 8.1e-5 between 8 x 24 and 16 x 48 cells, below a
+  tenth of the straight walls' error.
 
 Examples:
 
@@ -204,6 +258,26 @@ Examples:
 - `sphere_axisymmetric`: Re = 100 and 150, Cd within 1.2% of Clift, Grace &
   Weber at Mach 0.2, separation angle within 0.2 degrees, wake length 0.885 and
   1.21 D (Johnson & Patel: 0.88, about 1.2).
+- Sphere with curved walls (`tools/dev/axisymmetric_sphere.py`, Euler,
+  TENO3, 32 L x 16 L quadrilaterals, P2 sphere). At Mach 0.3 (HLLC, from the
+  potential flow), the wall entropy error (mean over the revolved wall)
+  converges at third order with curved walls, 3.8e-3, 6.4e-4, 9.2e-5 at
+  L = 1, 2, 4 (rates 2.6 and 2.8), and at first order with straight ones,
+  2.8e-3, 1.1e-3, 4.4e-4 (1.4 and 1.3). With HLL, which has no contact wave
+  and so diffuses entropy at every face, both stall near second order
+  (7.1e-3, 1.9e-3, 4.6e-4 curved). TENO4 on these O-grids builds up entropy
+  errors of 5-50% with straight or curved walls, planar or axisymmetric,
+  with HLL or HLLC. At Mach 3 (HLL, t = 6; HLLC grows a carbuncle on the
+  axis) the standoff is 0.2305 R at L = 4 for both walls (Billig 0.205, an
+  experimental fit); the wall entropy stays 0.5-1.5% above the normal
+  shock's with curved walls, where straight walls dip 0.6% below it, which
+  inviscid flow cannot do. The stagnation pressure is 2.7% below Rayleigh's
+  at L = 4 for both walls, an error of the axisymmetric runs only (the
+  planar cylinder on the same mesh: 0.24% below), made where the captured
+  shock crosses the axis row: there the cells behind it hold 2.7% more
+  entropy than the normal shock's (L = 2), relaxing to 1.5% at the wall
+  (`p_0` scales as entropy to the power -2.5), where the planar cylinder's
+  stay within 1% of it.
 - Counterflow diffusion flame (H2/N2 against air, 1 atm, 10 mm gap, the
   finite-jet setup of the 3D counterflow validation on the meridian plane, 20
   cells per flame width, MUSCL, mixture-averaged transport, started from

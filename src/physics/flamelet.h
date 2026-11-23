@@ -160,15 +160,15 @@ struct Gas {
 class FlameletModel {
     public:
         /**
-         * @brief The closure of the subgrid variance of Z: none (laminar), or in LES algebraic or from the
-         *        transported second moment Z2.
+         * @brief The closure of the subgrid variance of Z: none (laminar, or LES at zero variance, the default
+         *        with a thickened flame), or in LES algebraic or from the transported second moment Z2.
          */
         enum class Variance : uint8_t { NONE, ALGEBRAIC, TRANSPORTED };
 
         /**
          * @brief From the [physics] table: table (the file, relative to the
          *        working directory); type = "euler" or "navier_stokes"; with
-         *        [les], variance = "algebraic" (constant C_Z) or "transported" (constant C_chi).
+         *        [les], variance = "algebraic" (constant C_Z), "transported" (constant C_chi) or "none".
          */
         static FlameletModel from_input(const Input & input);
 
@@ -216,6 +216,8 @@ class FlameletModel {
          *        table's species but those named as a transported scalar (Z, C).
          */
         const std::vector<std::string> & output_names() const { return m_output_names; }
+        /** @brief The table has HRR, the second of output_names(). */
+        bool heat_release() const { return m_heat_release; }
 
         /**
          * @brief The output fields at density rho, scalars (Z, C) and subgrid variance Zvar into out,
@@ -237,6 +239,7 @@ class FlameletModel {
         std::vector<uint32_t> m_output_fields;  // after T_TABLE: the fields of m_output_names
         bool m_heat_release = false;            // the first of m_output_fields is HRR
         Variance m_variance = Variance::NONE;
+        bool m_les = false;
         double m_C_Z = 0.1;
         double m_C_chi = 2.0;
 };
