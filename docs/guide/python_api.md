@@ -137,8 +137,8 @@ matplotlib's `tripcolor(points[:, 0], points[:, 1], triangles, facecolors=values
 
 The snapshots of a series, as `(File, index)` pairs in time order (then step): of a series index or
 snapshot file, or of every series index and snapshot file in a directory (not its subdirectories) whose
-name matches `pattern`, as `run_files` lists them, but files still being written. `file.read(field, index)`
-reads one.
+name matches `pattern`, as `run_files` lists them, but files still being written and high-order views
+(`PREFIX_high_order...`, unless `pattern` names them). `file.read(field, index)` reads one.
 
 ### `mallard.run_files(directory)`
 

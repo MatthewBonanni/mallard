@@ -606,8 +606,8 @@ void Solver::check_outputs(CheckReport & r) const {
             r.warning(diagnostic_code::OUTPUT_SIZE,
                       "[[write_data]] " + o.prefix + " writes a high-order view of " + bytes(o.high_order_bytes) +
                           " per snapshot (degree " + std::to_string(o.high_order_degree) + "; the cell values: " +
-                          bytes(o.bytes) + "): lower its high_order_degree, write it less often, or drop "
-                          "high_order = true to write the cell values alone");
+                          bytes(o.bytes) + "): lower its high_order_degree, write it less often, or set "
+                          "high_order = false to write the cell values alone");
         }
         r.outputs.push_back(std::move(o));
     }

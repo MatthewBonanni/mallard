@@ -266,8 +266,8 @@ void high_order_option(Input::table_type & entry, const cli::Args & args, const 
         if (args.has("--high-order") && value == "on") throw UsageError("--high-order applies to the whole mesh, not --region");
         return;
     }
+    entry["high_order"] = Input(value == "on");
     if (value == "off") return;
-    entry["high_order"] = Input(true);
     const std::string view = plan.snapshot_prefix + "_high_order";
     plan.files.push_back(view + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
     plan.files.push_back(view + ".vtkhdf");

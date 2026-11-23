@@ -197,13 +197,13 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
     }
 }
 
-TEST(HighOrderOutputTest, TheViewIsOptInAndLeavesTheSolutionFilesAlone) {
+TEST(HighOrderOutputTest, TheViewIsOnByDefaultAndLeavesTheSolutionFilesAlone) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string mesh_file = write_temp("high_order_opt_out.msh", jittered_mixed_mesh(6));
     const std::string dir = (scratch_dir() / "mallard_high_order_opt_out").string();
     std::filesystem::remove_all(dir);
     for (const std::string variant : {"on", "off"}) {
-        const std::string key = variant == "on" ? "high_order = true\n" : "";
+        const std::string key = variant == "on" ? "" : "high_order = false\n";
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(polynomial_case(
@@ -273,6 +273,29 @@ TEST(HighOrderOutputTest, TheViewNeedsTenoAndADegreeOfItsPolynomials) {
     }
 }
 
+TEST(HighOrderOutputTest, TheDefaultIsOffWhereTheViewDoesNotApply) {
+    if (comm::size() > 1) GTEST_SKIP() << "serial";
+    const std::string mesh_file = write_temp("high_order_default.msh", jittered_mixed_mesh(4));
+    const std::string dir = (scratch_dir() / "mallard_high_order_default").string();
+    const auto writer = [&](const std::string & keys) {
+        return "[[write_data]]\nprefix = \"" + dir + "/w\"\ninterval = 1\n" + keys;
+    };
+    std::string muscl = polynomial_case(mesh_file, 3, writer("format = \"vtu\"\nfields = [\"RHO\"]\n"));
+    const std::string teno = "type = \"TENO\"\ntroubled_threshold = 1.0\norder = 3\n";
+    muscl.replace(muscl.find(teno), teno.size(), "type = \"MUSCL\"\n");
+    for (const std::string & input :
+         {muscl, polynomial_case(mesh_file, 3, writer("region = \"left\"\nfields = [\"P\"]\n")),
+          polynomial_case(mesh_file, 3, writer("format = \"restart\"\n")),
+          polynomial_case(mesh_file, 3, writer("format = \"vtu\"\nfields = [\"TENO_SIGMA\"]\n"))}) {
+        Solver checked;
+        checked.set_distributed(false);
+        const CheckReport r = checked.check(parse_toml(input), CheckOptions{});
+        EXPECT_TRUE(r.unused.empty()) << input;
+        for (const CheckDiagnostic & d : r.diagnostics) EXPECT_NE(d.severity, report::Status::ERROR) << d.message;
+        for (const CheckOutput & o : r.outputs) EXPECT_EQ(o.high_order_degree, 0u) << input;
+    }
+}
+
 TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string mesh_file = write_temp("high_order_check.msh", jittered_mixed_mesh(8));
@@ -280,9 +303,9 @@ TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     std::filesystem::remove_all(dir);
     const std::string input = polynomial_case(mesh_file, 4,
                                               "[[write_data]]\nprefix = \"" + dir + "/v\"\nformat = \"vtu\"\n"
-                                              "interval = 1\nhigh_order = true\nfields = [\"RHO\", \"U\", \"P\", \"TENO_SIGMA\"]\n"
+                                              "interval = 1\nfields = [\"RHO\", \"U\", \"P\", \"TENO_SIGMA\"]\n"
                                               "[[write_data]]\nprefix = \"" + dir + "/c\"\nformat = \"vtu\"\n"
-                                              "interval = 1\nfields = [\"RHO\"]\n");
+                                              "interval = 1\nhigh_order = false\nfields = [\"RHO\"]\n");
     Solver checked;
     checked.set_distributed(false);
     const CheckReport r = checked.check(parse_toml(input), CheckOptions{});

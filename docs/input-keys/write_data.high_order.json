@@ -1,5 +1,9 @@
 {
  "default": "false",
+ "defaults_by_dim": {
+  "2": "true",
+  "3": "true"
+ },
  "dims": [
   2,
   3
