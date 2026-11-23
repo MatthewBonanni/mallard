@@ -133,10 +133,15 @@ const mallard::Case c = mallard::Case::from_toml_file("input.toml")
   `config::Run`, `[numerics.face_reconstruction]` is
   `config::NumericsFaceReconstruction`. An element of an array of tables takes
   its index (`config::Probes(1)`, `config::WriteData(0)`; the array's length
-  appends one), a named table its name (`config::Regions("jet")`). A table
-  inside an array of tables or a named table is set through its parent's
-  setter (`config::Probes(0).region(config::ProbesRegion().type("circle"))`),
-  an array of tables inside one through a `std::vector` of its elements.
+  appends one). A table inside an array of tables is set through its
+  parent's setter (`config::Probes(0).region(...)`), an array of tables
+  inside one through a `std::vector` of its elements.
+- **Regions.** Every [region](../input.md#regions) is a `config::Region`,
+  wherever it is (a `region` key, the parts `a`, `b`, `of` and `regions` of a
+  boolean, `[check] regions`), with a setter for every key any region type
+  takes; setup checks that the keys fit the type. `config::Regions("jet")` is
+  a Region in `[regions]`, and a region key also takes a region's name:
+  `config::Probes(0).region(config::Region().type("difference").a("jet").b(config::Region().type("sphere").center({0.5, 0.5}).radius(0.1)))`.
 - **Values.** Setters take `bool`, `std::int64_t`, `double` or
   `std::string_view` as the key's type is; a key with a physical dimension
   takes a `mallard::Quantity`: a plain number in SI units (or the unit the key
@@ -144,11 +149,12 @@ const mallard::Case c = mallard::Case::from_toml_file("input.toml")
   ([units](input_files.md#units)). Keys without one type (expressions,
   arrays, a region's name or inline table) take a `mallard::Value`; a species
   table (`X`, `Y`) takes each species and its value (`.X("O2", 0.21)`).
-- **Coverage.** The catalog has the keys some input of the repository sets up,
-  so a key the catalog lacks for a table (a region's parameters of another
-  type) has no setter: set it with `Value::toml("{...}")` on the parent's
-  setter, or with `case.set(key, value)`. `tools/dev/input_config.py`
-  regenerates the header from the catalog, and CI fails when it is out of date.
+- **Coverage.** The catalog has the keys some input of the repository sets up
+  (its examples, tutorials, and inputs written for the catalog), and so the
+  setters: a key without one can still be set with `Value::toml("{...}")` on
+  the parent's setter, or with `case.set(key, value)`.
+  `tools/dev/input_config.py` regenerates the header from the catalog, and CI
+  fails when it is out of date.
 
 ## Checking a case
 
@@ -158,17 +164,29 @@ written), then `status` (`"ok"`, `"warning"`, `"error"`), `ok`,
 `diagnostics` (each with its `level`, `code`, `message` and `docs`),
 `unused_keys` (each `key`, `line` and `suggestion`), `boundaries`,
 `time_step`, `resolution` (the estimates of y+, cells per flame thickness,
-...), `memory` and `cost`, the `resolved` input (every key explicit), and the
-whole report as `mallard check` prints it (`text`) and as
+...), `memory` and `cost`, the `resolved` input (every key explicit) and its
+`keys`, and the whole report as `mallard check` prints it (`text`) and as
 `mallard check --format json` writes it (`json`). An invalid input gives a
 report of its errors, not an exception. `CheckOptions` takes `mallard check`'s
 `ranks`, `throughput`, `steps` and `memory`, and a `log` sink for the setup's
 console output. It needs a `Session`, and is collective under MPI.
 
+`keys` is the resolved input as a `mallard::InputKey` per key setup read
+(and per table), in order: its `path` (`boundaries[0].p`), `catalog_path`
+(`boundaries.p`, as the key catalog and the typed configs name it), `value`
+(TOML text, in the key's plain units, `1e5` for `"1 bar"`), whether the input
+`set` it or `value` is its default, and its record in the key catalog: `type`,
+`dimension`, `unit` (of a plain number), `required`, `default_value` and the
+accepted `values`. This is what an editor of the input shows beside each key:
+what setup read for this case, exactly.
+
 ```cpp
 const mallard::CheckReport r = c.check();
 for (const mallard::CheckUnusedKey & k : r.unused_keys) std::cerr << k.key << ": did you mean " << k.suggestion << "\n";
 if (r.ok) std::cout << "dt " << r.time_step->dt << " s, " << r.cost->wall_per_time << " wall s per s\n";
+for (const mallard::InputKey & k : r.keys) {
+    if (!k.set && !k.type.empty()) std::cout << k.path << " = " << k.value << " " << k.unit << " (default)\n";
+}
 ```
 
 ## Fields

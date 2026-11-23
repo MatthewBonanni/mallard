@@ -1,0 +1,104 @@
+# For the key catalog only (tools/dev/input_catalog.py): the regions and keys
+# of regions only 3D has (boxes, flat surfaces and curves with their normal and
+# reference, rotations about an axis or to axes), so that the typed configs'
+# region class has a setter for every key a region takes.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Nz = 8
+Lx = 1.0
+Ly = 1.0
+Lz = 1.0
+
+[initialize]
+T = 1.0
+p = 1.0
+u = [0.0, 0.0, 0.0]
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[regions]
+box = { type = "box", center = [0.5, 0.5, 0.5], size = [0.4, 0.3, 0.2], rotate = { axis = [0.0, 0.0, 1.0], angle = 30.0 } }
+boxes = { type = "box", center = [0.3, 0.5, 0.5], size = [0.2, 0.2, 0.4], pivot = [0.3, 0.5, 0.5], rotate = { axes = [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] }, repeat = { count = 4, rotate = { axis = [0.0, 0.0, 1.0], angle = 90.0 }, pivot = [0.5, 0.5, 0.5] } }
+rectangle = { type = "rectangle", center = [0.5, 0.5, 0.5], normal = [0.0, 0.0, 1.0], size = [0.4, 0.2], reference = [1.0, 0.0, 0.0] }
+disk = { type = "disk", center = [0.5, 0.5, 0.5], radius = 0.2, normal = [0.0, 1.0, 0.0] }
+annulus = { type = "annulus", center = [0.5, 0.5, 0.5], radius = 0.3, inner_radius = 0.2, normal = [1.0, 0.0, 0.0] }
+polygon = { type = "polygon", vertices = [[0.1, 0.1, 0.5], [0.9, 0.1, 0.5], [0.5, 0.9, 0.5]] }
+circle = { type = "circle", center = [0.5, 0.5, 0.5], radius = 0.3, normal = [0.0, 0.0, 1.0], reference = [1.0, 0.0, 0.0] }
+ellipse = { type = "ellipse", center = [0.5, 0.5, 0.5], semi_axes = [0.3, 0.2], normal = [0.0, 0.0, 1.0], reference = [0.0, 1.0, 0.0] }
+
+[check]
+regions = ["box", "boxes"]
+
+[[probes]]
+name = "rectangle"
+fields = ["P"]
+region = "rectangle"
+reductions = ["mean"]
+
+[[probes]]
+name = "disk"
+fields = ["P"]
+region = "disk"
+reductions = ["mean"]
+
+[[probes]]
+name = "annulus"
+fields = ["P"]
+region = "annulus"
+reductions = ["mean"]
+
+[[probes]]
+name = "polygon"
+fields = ["P"]
+region = "polygon"
+reductions = ["mean"]
+
+[[probes]]
+name = "circle"
+fields = ["P"]
+region = "circle"
+reductions = ["mean"]
+
+[[probes]]
+name = "ellipse"
+fields = ["P"]
+region = "ellipse"
+reductions = ["mean"]

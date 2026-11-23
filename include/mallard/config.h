@@ -13,11 +13,213 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "mallard/mallard.h"
 
 namespace mallard::config {
+
+/** @brief [region.repeat.rotate]: the keys of this table its parent's setter takes.
+ */
+class RegionRepeatRotate : public Table {
+    public:
+        RegionRepeatRotate() : Table("") {}
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRepeatRotate & angle(const Value & v) { put("angle", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRepeatRotate & axes(const Value & v) { put("axes", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRepeatRotate & axis(const Value & v) { put("axis", v); return *this; }
+};
+
+/** @brief [region.repeat]: the keys of this table its parent's setter takes.
+ */
+class RegionRepeat : public Table {
+    public:
+        RegionRepeat() : Table("") {}
+        /** @brief A key of a region (docs/input.md#regions). Required.
+         */
+        RegionRepeat & count(std::int64_t v) { put("count", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        RegionRepeat & pivot(const Value & v) { put("pivot", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        RegionRepeat & rotate(const RegionRepeatRotate & t) { put("rotate", t); return *this; }
+        /** @brief rotate as a value (a region's name, an inline table). */
+        RegionRepeat & rotate(const Value & v) { put("rotate", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        RegionRepeat & translate(const Value & v) { put("translate", v); return *this; }
+};
+
+/** @brief [region.rotate]: the keys of this table its parent's setter takes.
+ */
+class RegionRotate : public Table {
+    public:
+        RegionRotate() : Table("") {}
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRotate & angle(const Value & v) { put("angle", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRotate & axes(const Value & v) { put("axes", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions). 3D.
+         */
+        RegionRotate & axis(const Value & v) { put("axis", v); return *this; }
+};
+
+/** @brief A region (docs/input.md#regions): the keys of every region of the input, which every region key (region, the
+ *        parts of a boolean, the lists of regions) takes; Regions places one in [regions].
+ */
+class Region : public Table {
+    public:
+        Region() : Table("") {}
+        /** @brief A key of the region types difference. 2D.
+         */
+        Region & a(const Region & t) { put("a", t); return *this; }
+        /** @brief a as a value (the name of a region, an inline table). */
+        Region & a(const Value & v) { put("a", v); return *this; }
+        /** @brief A key of the region types cylinder, cone, frustum, torus. 2D.
+         */
+        Region & axis(const Value & v) { put("axis", v); return *this; }
+        /** @brief A key of the region types difference. 2D.
+         */
+        Region & b(const Region & t) { put("b", t); return *this; }
+        /** @brief b as a value (the name of a region, an inline table). */
+        Region & b(const Value & v) { put("b", v); return *this; }
+        /** @brief A key of the region types cone, frustum. 2D.
+         */
+        Region & base(const Value & v) { put("base", v); return *this; }
+        /** @brief A key of the region types cone, frustum. 2D.
+         */
+        Region & base_radius(const Value & v) { put("base_radius", v); return *this; }
+        /** @brief A key of the region types sphere, disk, ellipsoid, cylinder, annulus, box, rectangle, circle, ellipse,
+         *        torus.
+         */
+        Region & center(const Value & v) { put("center", v); return *this; }
+        /** @brief A key of the region types where. Required; 2D.
+         */
+        Region & condition(std::string_view v) { put("condition", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        Region & edge(const Value & v) { put("edge", v); return *this; }
+        /** @brief A key of the region types implicit. Required; 2D.
+         */
+        Region & f(std::string_view v) { put("f", v); return *this; }
+        /** @brief A key of the region types isosurface. Required; 2D.
+         */
+        Region & field(std::string_view v) { put("field", v); return *this; }
+        /** @brief A key of the region types stl, obj. Required; 2D.
+         */
+        Region & file(std::string_view v) { put("file", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        Region & filled(const Value & v) { put("filled", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        Region & flip(bool v) { put("flip", v); return *this; }
+        /** @brief A key of the region types cylinder, annulus.
+         */
+        Region & inner_radius(const Value & v) { put("inner_radius", v); return *this; }
+        /** @brief A key of the region types cylinder, cone, frustum. 2D.
+         */
+        Region & length(const Value & v) { put("length", v); return *this; }
+        /** @brief A key of the region types torus. 2D.
+         */
+        Region & major_radius(const Value & v) { put("major_radius", v); return *this; }
+        /** @brief A key of the region types torus. 2D.
+         */
+        Region & minor_radius(const Value & v) { put("minor_radius", v); return *this; }
+        /** @brief A key of the region types annulus, rectangle, disk, circle, ellipse, half_space.
+         */
+        Region & normal(const Value & v) { put("normal", v); return *this; }
+        /** @brief A key of the region types boundary, interior. 2D.
+         */
+        Region & of(const Region & t) { put("of", t); return *this; }
+        /** @brief of as a value (the name of a region, an inline table). */
+        Region & of(const Value & v) { put("of", v); return *this; }
+        /** @brief Center of `scale` and `rotate` (default the origin).
+         */
+        Region & pivot(const Value & v) { put("pivot", v); return *this; }
+        /** @brief A key of the region types half_space. 2D.
+         */
+        Region & point(const Value & v) { put("point", v); return *this; }
+        /** @brief A key of the region types sphere, disk, cylinder, annulus, circle.
+         */
+        Region & radius(const Value & v) { put("radius", v); return *this; }
+        /** @brief A key of the region types rectangle, circle, ellipse. 3D.
+         */
+        Region & reference(const Value & v) { put("reference", v); return *this; }
+        /** @brief A key of the region types union, intersection, difference. 2D.
+         */
+        Region & regions(const std::vector<Region> & items) { for (std::size_t i = 0; i < items.size(); i++) put("regions" "[" + std::to_string(i) + "]", items[i]); return *this; }
+        /** @brief regions as a value (names of regions, inline tables). */
+        Region & regions(const Value & v) { put("regions", v); return *this; }
+        /** @brief Copies of the region (after its transforms), whose union it becomes: `{count = N, translate = [...]}`
+         *        (copy `j` translated `j` times) or `{count = N, rotate = ..., pivot = [...]}` (rotated `j` times,
+         *        `rotate` as above but an angle about an axis; `pivot` default the origin), or a list of them, which
+         *        repeats the copies of the levels before it (copy `k` numbered with the first level listed fastest).
+         *        Regions of primitives only; default none. Arrays of copies.
+         */
+        Region & repeat(const RegionRepeat & t) { put("repeat", t); return *this; }
+        /** @brief repeat as a value (a region's name, an inline table). */
+        Region & repeat(const Value & v) { put("repeat", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions).
+         */
+        Region & resolution(const Value & v) { put("resolution", v); return *this; }
+        /** @brief 3D: `{axis = [...], angle = degrees}` or `{axes = [[...], [...], [...]]}` (the region's x, y, z axes in
+         *        world coordinates, orthonormal and right-handed); 2D: an angle in degrees, counterclockwise; about
+         *        `pivot`.
+         */
+        Region & rotate(const RegionRotate & t) { put("rotate", t); return *this; }
+        /** @brief rotate as a value (a region's name, an inline table). */
+        Region & rotate(const Value & v) { put("rotate", v); return *this; }
+        /** @brief A number, or one factor per axis; about `pivot`.
+         */
+        Region & scale(const Value & v) { put("scale", v); return *this; }
+        /** @brief A key of the region types ellipsoid.
+         */
+        Region & semi_axes(const Value & v) { put("semi_axes", v); return *this; }
+        /** @brief A key of the region types box, rectangle.
+         */
+        Region & size(const Value & v) { put("size", v); return *this; }
+        /** @brief A key of the region types cone, frustum. 2D.
+         */
+        Region & top_radius(const Value & v) { put("top_radius", v); return *this; }
+        /** @brief A displacement.
+         */
+        Region & translate(const Value & v) { put("translate", v); return *this; }
+        /** @brief A key of a region (docs/input.md#regions). One of annulus, boundary, box, circle, cone, cylinder,
+         *        difference, disk, ellipse, ellipsoid, frustum, half_space, implicit, interior, intersection, isosurface,
+         *        obj, polygon, rectangle, sphere, stl, torus, union, where; required.
+         */
+        Region & type(std::string_view v) { put("type", v); return *this; }
+        /** @brief A key of the region types stl, obj. Required; 2D.
+         */
+        Region & units(std::string_view v) { put("units", v); return *this; }
+        /** @brief A key of the region types isosurface. 2D.
+         */
+        Region & value(const Value & v) { put("value", v); return *this; }
+        /** @brief A key of the region types polygon.
+         */
+        Region & vertices(const Value & v) { put("vertices", v); return *this; }
+
+    protected:
+        explicit Region(std::string path) : Table(std::move(path)) {}
+};
+
+/** @brief [regions.NAME]: a named region, which region keys take by its name: the keys of a Region the case sets in the
+ *        named table.
+ */
+class Regions : public Region {
+    public:
+        explicit Regions(std::string_view table_name) : Region("regions." + std::string(table_name)) {}
+};
 
 /** @brief [boundaries.data.scale]: the keys of this table its parent's setter takes.
  */
@@ -75,60 +277,6 @@ class InitializeDataScale : public Table {
         /** @brief 2D.
          */
         InitializeDataScale & velocity(const Value & v) { put("velocity", v); return *this; }
-};
-
-/** @brief [initialize.regions.region]: the keys of this table its parent's setter takes.
- */
-class InitializeRegionsRegion : public Table {
-    public:
-        InitializeRegionsRegion() : Table("") {}
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & center(const Value & v) { put("center", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & edge(const Value & v) { put("edge", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false.
-         */
-        InitializeRegionsRegion & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        InitializeRegionsRegion & normal(const Value & v) { put("normal", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        InitializeRegionsRegion & point(const Value & v) { put("point", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & radius(const Value & v) { put("radius", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & resolution(const Value & v) { put("resolution", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        InitializeRegionsRegion & size(const Value & v) { put("size", v); return *this; }
-        /** @brief A key of the input.
-         */
-        InitializeRegionsRegion & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, box, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required.
-         */
-        InitializeRegionsRegion & type(std::string_view v) { put("type", v); return *this; }
 };
 
 /** @brief [initialize.regions.turbulence]: the keys of this table its parent's setter takes.
@@ -223,51 +371,6 @@ class OutputMixtureProgress : public Table {
         OutputMixtureProgress & species(const Value & v) { put("species", v); return *this; }
 };
 
-/** @brief [particles.probes.region]: the keys of this table its parent's setter takes.
- */
-class ParticlesProbesRegion : public Table {
-    public:
-        ParticlesProbesRegion() : Table("") {}
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & center(const Value & v) { put("center", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & edge(const Value & v) { put("edge", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false; 2D.
-         */
-        ParticlesProbesRegion & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & radius(const Value & v) { put("radius", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & resolution(const Value & v) { put("resolution", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        ParticlesProbesRegion & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required; 2D.
-         */
-        ParticlesProbesRegion & type(std::string_view v) { put("type", v); return *this; }
-};
-
 /** @brief [particles.quantities.winding]: the keys of this table its parent's setter takes.
  */
 class ParticlesQuantitiesWinding : public Table {
@@ -276,64 +379,6 @@ class ParticlesQuantitiesWinding : public Table {
         /** @brief Length (m), a number in SI units or a quantity with its unit; required; 2D.
          */
         ParticlesQuantitiesWinding & point(const std::vector<Quantity> & v) { put("point", Value(std::vector<Value>(v.begin(), v.end()))); return *this; }
-};
-
-/** @brief [[probes.region.regions]]: the keys of this array of tables its parent's setter takes.
- */
-class ProbesRegionRegions : public Table {
-    public:
-        ProbesRegionRegions() : Table("") {}
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & center(const Value & v) { put("center", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false; 2D.
-         */
-        ProbesRegionRegions & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & radius(const Value & v) { put("radius", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegionRegions & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required; 2D.
-         */
-        ProbesRegionRegions & type(std::string_view v) { put("type", v); return *this; }
-};
-
-/** @brief [regions.NAME.repeat]: the keys of this table its parent's setter takes.
- */
-class RegionsRepeat : public Table {
-    public:
-        RegionsRepeat() : Table("") {}
-        /** @brief Required; 2D.
-         */
-        RegionsRepeat & count(std::int64_t v) { put("count", v); return *this; }
-        /** @brief 2D.
-         */
-        RegionsRepeat & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        RegionsRepeat & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        RegionsRepeat & translate(const Value & v) { put("translate", v); return *this; }
 };
 
 /** @brief [[boundaries.data]]: the keys of this array of tables its parent's setter takes.
@@ -532,6 +577,8 @@ class InitializeData : public Table {
         InitializeData & reference(const Value & v) { put("reference", v); return *this; }
         /** @brief Instead of `at`, one coordinate: the signed distance to this region. 2D.
          */
+        InitializeData & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         InitializeData & region(const Value & v) { put("region", v); return *this; }
         /** @brief Rescale the data to these scales: `length`, `velocity`, `density`, `temperature`, e.g. `{length = 0.02,
          *        velocity = 15}`; each column by its dimension (velocities by the velocity ratio, Reynolds stresses by its
@@ -626,8 +673,8 @@ class InitializeRegions : public Table {
         InitializeRegions & priority(std::int64_t v) { put("priority", v); return *this; }
         /** @brief The region (required), with an optional smooth `edge`.
          */
-        InitializeRegions & region(const InitializeRegionsRegion & t) { put("region", t); return *this; }
-        /** @brief region as a value (a region's name, an inline table). */
+        InitializeRegions & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         InitializeRegions & region(const Value & v) { put("region", v); return *this; }
         /** @brief Values inside: numbers, quantities with units, or expressions. At most two of `rho`, `p`, `T`; one alone
          *        keeps the pressure below (else its temperature). Unset keys keep the state below.
@@ -1013,8 +1060,8 @@ class ParticlesProbes : public Table {
         ParticlesProbes & name(std::string_view v) { put("name", v); return *this; }
         /** @brief A filled region of primitives that does not move, or its name, default every particle. 2D.
          */
-        ParticlesProbes & region(const ParticlesProbesRegion & t) { put("region", t); return *this; }
-        /** @brief region as a value (a region's name, an inline table). */
+        ParticlesProbes & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         ParticlesProbes & region(const Value & v) { put("region", v); return *this; }
 };
 
@@ -1067,173 +1114,6 @@ class ParticlesWalls : public Table {
         ParticlesWalls & zones(const Value & v) { put("zones", v); return *this; }
 };
 
-/** @brief [probes.region]: the keys of this table its parent's setter takes.
- */
-class ProbesRegion : public Table {
-    public:
-        ProbesRegion() : Table("") {}
-        /** @brief 2D.
-         */
-        ProbesRegion & a(const Value & v) { put("a", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & b(const Value & v) { put("b", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & center(const Value & v) { put("center", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & edge(const Value & v) { put("edge", v); return *this; }
-        /** @brief Required; 2D.
-         */
-        ProbesRegion & field(std::string_view v) { put("field", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false; 2D.
-         */
-        ProbesRegion & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & radius(const Value & v) { put("radius", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & regions(const std::vector<ProbesRegionRegions> & items) { for (std::size_t i = 0; i < items.size(); i++) put("regions" "[" + std::to_string(i) + "]", items[i]); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & resolution(const Value & v) { put("resolution", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required; 2D.
-         */
-        ProbesRegion & type(std::string_view v) { put("type", v); return *this; }
-        /** @brief 2D.
-         */
-        ProbesRegion & value(const Value & v) { put("value", v); return *this; }
-};
-
-/** @brief [regions.NAME]: the keys of this table the case sets in the named table.
- */
-class Regions : public Table {
-    public:
-        explicit Regions(std::string_view table_name) : Table("regions." + std::string(table_name)) {}
-        /** @brief 2D.
-         */
-        Regions & center(const Value & v) { put("center", v); return *this; }
-        /** @brief Required; 2D.
-         */
-        Regions & condition(std::string_view v) { put("condition", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & edge(const Value & v) { put("edge", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false; 2D.
-         */
-        Regions & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & inner_radius(const Value & v) { put("inner_radius", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & length(const Value & v) { put("length", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & radius(const Value & v) { put("radius", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & repeat(const RegionsRepeat & t) { put("repeat", t); return *this; }
-        /** @brief repeat as a value (a region's name, an inline table). */
-        Regions & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & resolution(const Value & v) { put("resolution", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & size(const Value & v) { put("size", v); return *this; }
-        /** @brief 2D.
-         */
-        Regions & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required; 2D.
-         */
-        Regions & type(std::string_view v) { put("type", v); return *this; }
-};
-
-/** @brief [sources.region]: the keys of this table its parent's setter takes.
- */
-class SourcesRegion : public Table {
-    public:
-        SourcesRegion() : Table("") {}
-        /** @brief 2D.
-         */
-        SourcesRegion & center(const Value & v) { put("center", v); return *this; }
-        /** @brief Required; 2D.
-         */
-        SourcesRegion & condition(std::string_view v) { put("condition", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & edge(const Value & v) { put("edge", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & filled(const Value & v) { put("filled", v); return *this; }
-        /** @brief Default false; 2D.
-         */
-        SourcesRegion & flip(bool v) { put("flip", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & pivot(const Value & v) { put("pivot", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & repeat(const Value & v) { put("repeat", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & resolution(const Value & v) { put("resolution", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & rotate(const Value & v) { put("rotate", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & scale(const Value & v) { put("scale", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & size(const Value & v) { put("size", v); return *this; }
-        /** @brief 2D.
-         */
-        SourcesRegion & translate(const Value & v) { put("translate", v); return *this; }
-        /** @brief One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-         *        half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-         *        union, where; required; 2D.
-         */
-        SourcesRegion & type(std::string_view v) { put("type", v); return *this; }
-};
-
 /** @brief [[statistics.conditional]]: the keys of this array of tables its parent's setter takes.
  */
 class StatisticsConditional : public Table {
@@ -1265,6 +1145,8 @@ class StatisticsConditional : public Table {
         /** @brief A region of the mesh's dimension, its name, or a region of the mesh: each cell weighted by its fraction
          *        in it (default the whole mesh). 3D.
          */
+        StatisticsConditional & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         StatisticsConditional & region(const Value & v) { put("region", v); return *this; }
         /** @brief Sampling, default those of `[statistics]`. Time (s), a number in SI units or a quantity with its unit;
          *        3D.
@@ -1476,14 +1358,16 @@ class Check : public Table {
         Check() : Table("check") {}
         /** @brief Filled regions (names of `[regions]` or of the mesh's cell zones, or inline tables) the report also gives
          *        its values for, each on its own rows. Default: every cell zone of the mesh. Regions that move or are
-         *        defined by the solution are errors. 2D.
+         *        defined by the solution are errors.
          */
+        Check & regions(const std::vector<Region> & items) { for (std::size_t i = 0; i < items.size(); i++) put("regions" "[" + std::to_string(i) + "]", items[i]); return *this; }
+        /** @brief regions as a value (names of regions, inline tables). */
         Check & regions(const Value & v) { put("regions", v); return *this; }
         /** @brief A file of an earlier run of the case on this mesh (a restart file, or a VTKHDF or XDMF snapshot of the
          *        whole mesh) whose `[statistics]` averages give the dissipation, instead of the initial state's or the
          *        forcing's: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`) from `MEAN_STRAIN_RATE` and
          *        `COV_STRAIN_RATE_STRAIN_RATE` (`fields = ["STRAIN_RATE"]`, `products = ["STRAIN_RATE*STRAIN_RATE"]`),
-         *        else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none. Required; 2D.
+         *        else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none. Required.
          */
         Check & statistics(std::string_view v) { put("statistics", v); return *this; }
 };
@@ -2277,8 +2161,8 @@ class Probes : public Table {
          *        on a grid of samples, and a filled region with `n_points` samples at the nodes of a grid inside it too
          *        (below). Default none.
          */
-        Probes & region(const ProbesRegion & t) { put("region", t); return *this; }
-        /** @brief region as a value (a region's name, an inline table). */
+        Probes & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         Probes & region(const Value & v) { put("region", v); return *this; }
         /** @brief Transform of the geometry, as for regions: scaled (a factor, or one per axis), then rotated (2D: `rotate
          *        = <degrees>`; 3D: `rotate = {axis = [x, y, z], angle = <degrees>}` or `{axes = [[...], [...], [...]]}`),
@@ -2450,8 +2334,8 @@ class Sources : public Table {
         /** @brief everywhere; A region, or the name of one in [`[regions]`](#named-regions-regions): the values are
          *        multiplied by each cell's volume fraction of it. It must fill space (a volume; an area in 2D).
          */
-        Sources & region(const SourcesRegion & t) { put("region", t); return *this; }
-        /** @brief region as a value (a region's name, an inline table). */
+        Sources & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         Sources & region(const Value & v) { put("region", v); return *this; }
         /** @brief none; Mass, momentum (one per component) and energy sources: numbers, quantities with units (`rhoE = "5
          *        MW/m^3"`, with `total`: `"50 W"`) or expressions (in SI units).
@@ -2501,6 +2385,8 @@ class Sponges : public Table {
          *        [`[regions]`](#named-regions-regions): `strength` is multiplied by each cell's volume fraction of it, so
          *        its `edge` ramps the layer up smoothly. It must fill space (a volume; an area in 2D).
          */
+        Sponges & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         Sponges & region(const Value & v) { put("region", v); return *this; }
         /** @brief Damping rate (1/s): a number or an expression in `x`, `y`, `z`, zero outside the layer, e.g. `"x > 4 ? 20
          *        * ((x - 4) / 1)^2 : 0"` (a gradual ramp reflects less than a step).
@@ -2679,10 +2565,14 @@ class WriteData : public Table {
          *        `fields` as point values, any other variable as the value of each sample's cell; `"domain"` is the whole
          *        mesh. Every region is written at the end of the run too. Not for `xdmf`.
          */
+        WriteData & region(const Region & t) { put("region", t); return *this; }
+        /** @brief region as a value (the name of a region, an inline table). */
         WriteData & region(const Value & v) { put("region", v); return *this; }
         /** @brief (`vtkhdf`, `vtu`) Instead of `region`: a list of regions, each written as `region` writes it, to
          *        `PREFIX_<name>` (a named region or zone) or `PREFIX_<index>` (inline, from 0).
          */
+        WriteData & regions(const std::vector<Region> & items) { for (std::size_t i = 0; i < items.size(); i++) put("regions" "[" + std::to_string(i) + "]", items[i]); return *this; }
+        /** @brief regions as a value (names of regions, inline tables). */
         WriteData & regions(const Value & v) { put("regions", v); return *this; }
         /** @brief (`vtkhdf`, `vtu`, `xdmf`, with `compression = "zlib"`) Error bound of lossy compression: each cell value
          *        is rounded to the fewest mantissa bits that keep it within this relative error of itself (\|x′ − x\| ≤

@@ -768,7 +768,7 @@ TEST(CppApiTest, ATypedConfigEmitsTheTomlThatReproducesTheRun) {
 
     // A table inside an array of tables has no place of its own: its parent's setter places it
     try {
-        c.set(config::ProbesRegion().type("circle"));
+        c.set(config::Region().type("circle"));
         ADD_FAILURE() << "no error";
     } catch (const mallard::Error & e) {
         EXPECT_EQ(e.code(), "E-INPUT");
@@ -780,6 +780,68 @@ TEST(CppApiTest, ATypedConfigEmitsTheTomlThatReproducesTheRun) {
     } catch (const mallard::Error & e) {
         EXPECT_EQ(e.code(), "E-INPUT");
     }
+}
+
+TEST(CppApiTest, ARegionAnywhereIsOneTypedClassWithEveryRegionKey) {
+    namespace config = mallard::config;
+#if Mallard_DIM == 2
+    const config::Region hole =
+        config::Region().type("rectangle").center({0.4, 0.5}).size({0.1, 0.2}).repeat(config::RegionRepeat().count(2).translate({0.2, 0.0}));
+    const mallard::Value center{0.5, 0.5};
+#else
+    const config::Region hole = config::Region().type("box").center({0.4, 0.5, 0.5}).size({0.1, 0.2, 0.2}).repeat(
+        config::RegionRepeat().count(2).translate({0.2, 0.0, 0.0}));
+    const mallard::Value center{0.5, 0.5, 0.5};
+#endif
+    const mallard::CheckReport r = mallard::Case::from_toml(case_text("typed_regions", "n_steps = 1\n"))
+                                       .set(config::Regions("ball").type("sphere").center(center).radius(0.3))
+                                       .set(config::Probes(1)
+                                                .name("cut")
+                                                .fields({"P"})
+                                                .reductions({"mean"})
+                                                .region(config::Region().type("difference").a("ball").b(hole)))
+                                       .check();
+    ASSERT_TRUE(r.ok) << r.text;
+    const auto read = [&](const std::string & path) {
+        return std::any_of(r.keys.begin(), r.keys.end(), [&](const mallard::InputKey & k) { return k.path == path; });
+    };
+    EXPECT_TRUE(read("regions.ball.radius"));
+    EXPECT_TRUE(read("probes[1].region.b.size"));
+    EXPECT_TRUE(read("probes[1].region.b.repeat.count"));
+}
+
+TEST(CppApiTest, TheResolvedInputGivesEachKeyWithItsCatalogRecord) {
+    const mallard::CheckReport r = mallard::Case::from_toml(case_text("resolved_keys", "n_steps = 4\n"))
+                                       .set("physics.p_ref", "1 bar")
+                                       .check();
+    ASSERT_TRUE(r.ok) << r.text;
+    const auto key = [&](const std::string & path) {
+        const auto it = std::find_if(r.keys.begin(), r.keys.end(), [&](const mallard::InputKey & k) { return k.path == path; });
+        EXPECT_NE(it, r.keys.end()) << path;
+        return it == r.keys.end() ? mallard::InputKey{} : *it;
+    };
+    const mallard::InputKey p_ref = key("physics.p_ref");
+    EXPECT_TRUE(p_ref.set);
+    EXPECT_EQ(p_ref.type, "number");
+    EXPECT_EQ(p_ref.unit, "Pa");
+    EXPECT_NE(p_ref.dimension.find("pressure"), std::string::npos) << p_ref.dimension;
+    EXPECT_EQ(std::stod(p_ref.value), 1e5);
+    const mallard::InputKey riemann = key("numerics.riemann_solver");
+    EXPECT_EQ(riemann.value, "\"HLLC\"");
+    EXPECT_NE(std::find(riemann.values.begin(), riemann.values.end(), "HLLC"), riemann.values.end());
+    EXPECT_EQ(key("boundaries[1].type").catalog_path, "boundaries.type");
+    // Keys the input leaves out are there at their defaults
+    size_t defaults = 0;
+    for (const mallard::InputKey & k : r.keys) {
+        if (k.set || k.default_value.empty()) continue;
+        EXPECT_EQ(k.value, k.default_value) << k.path;
+        defaults++;
+    }
+    EXPECT_GT(defaults, 0u);
+
+    const mallard::CheckReport broken =
+        mallard::Case::from_toml(case_text("resolved_keys", "n_steps = 4\n")).set("mesh.type", "nonsense").check();
+    EXPECT_TRUE(broken.keys.empty());
 }
 
 TEST(CppApiTest, ACheckReportGivesMallardChecksResultsAsStructs) {

@@ -14,6 +14,8 @@
   "examples/source_regions/input.toml",
   "examples/turbulent_inflow_duct/input.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/regions.toml",
+  "tools/dev/catalog_inputs/3d/regions.toml",
   "tutorials/wedge/input.toml"
  ],
  "type": "string"

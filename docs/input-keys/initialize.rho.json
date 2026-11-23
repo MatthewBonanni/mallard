@@ -22,6 +22,7 @@
   "examples/sod/input.toml",
   "examples/tracer_vortex/input.toml",
   "examples/viscous_shock_tube/input.toml",
-  "tools/dev/catalog_inputs/2d/check.toml"
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/regions.toml"
  ]
 }

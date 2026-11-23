@@ -208,6 +208,9 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
 
+/** @brief A key path as the catalog lists it: no array indices, and regions.<name> for every named region. */
+std::string catalog_path(const std::string & path);
+
 /** @brief A key setup looked up, as the accessors recorded it, and the value the run used. */
 struct KeyRecord {
     std::string path;                 // "boundaries[0].p"

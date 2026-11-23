@@ -85,7 +85,10 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     }
     for (const auto & finding : deprecated_keys) r.warning(diagnostic_code::KEY_DEPRECATED, input_upgrade::advice(finding));
     const ResolvedInput resolved = resolve_input(input);
-    if (r.setup_done) r.resolved = resolved.toml;
+    if (r.setup_done) {
+        r.resolved = resolved.toml;
+        r.keys = resolved.keys;
+    }
     if (!options.catalog_file.empty() && comm::is_root()) {
         std::ofstream file(options.catalog_file);
         file << key_catalog(resolved);

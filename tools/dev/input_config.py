@@ -10,6 +10,9 @@ and documented by the key's row in docs/input.md (else by the catalog's default 
 only collect keys and values: Case::set (mallard.Case.set) writes them into the case's TOML, which setup then reads
 and checks as a file's. A table is an array of tables when the catalog types it as an array, docs/input.md heads it
 `[[...]]`, or an input of the catalog writes it as one; a table whose keys are all species names (X, Y) is a map.
+Every region (a `region` key, a named region of [regions], the lists of regions of REGION_LISTS, and a region's parts
+a, b, of and regions) is one class, Region, whose keys are those of every region of the catalog: a region takes the
+same keys wherever it is, so the catalog inputs need set each key in one region only.
 tools/dev/precheck.sh runs --check, so the generated files cannot drift from the catalog.
 """
 import argparse
@@ -34,6 +37,10 @@ CPP_KEYWORDS = {"and", "auto", "bool", "break", "case", "catch", "char", "class"
                 "struct", "switch", "template", "this", "throw", "true", "try", "typedef", "typename", "union",
                 "unsigned", "using", "virtual", "void", "volatile", "while", "xor", "path", "entries", "put"}
 PY_RESERVED = set(keyword.kwlist) | {"path", "entries"}
+REGION_LISTS = {"check.regions", "write_data.regions"}  # lists of regions outside a region
+REGION_PARTS = {"a", "b", "of", "regions"}  # the keys of a region that are regions (regions: a list of them)
+REGION_DOC = ("A region (docs/input.md#regions): the keys of every region of the input, which every region key "
+              "(region, the parts of a boolean, the lists of regions) takes; Regions places one in [regions].")
 
 
 class Node:
@@ -44,6 +51,7 @@ class Node:
         self.array = False          # an array of tables
         self.map = False            # keys are names (species): set as name -> value
         self.parent = None
+        self.region = False         # a region (or with array, a list of regions): set as a Region
 
     @property
     def name(self):
@@ -51,7 +59,7 @@ class Node:
 
     @property
     def table(self):
-        return bool(self.children) and not self.map
+        return bool(self.children) and not self.map and not self.region
 
 
 def tree(catalog, arrays):
@@ -74,6 +82,94 @@ def tree(catalog, arrays):
             node.map = all(not c.children and re.fullmatch(r"[A-Z][A-Z0-9]*", c.name) for c in node.children.values())
     mark(root)
     return root
+
+
+def is_region(node):
+    if node.name == "region" or node.path == "regions.<name>" or node.path in REGION_LISTS:
+        return True
+    return node.parent is not None and node.name in REGION_PARTS and is_region(node.parent)
+
+
+def merge_entry(a, b):
+    """The catalog entry of a key that two regions take: what both say."""
+    if a is None or b is None:
+        return a or b
+    out = {"dims": sorted(set(a.get("dims", [])) | set(b.get("dims", []))),
+           "set_in": sorted(set(a.get("set_in", [])) | set(b.get("set_in", [])))}
+    for field in ("type", "dimension", "unit", "default"):
+        if field in a and a.get(field) == b.get(field):
+            out[field] = a[field]
+    if a.get("required") and b.get("required"):
+        out["required"] = True
+    if a.get("values") or b.get("values"):
+        out["values"] = sorted(set(a.get("values", [])) | set(b.get("values", [])))
+    return out
+
+
+def regions(root):
+    """The Region node, whose keys are those of every region of the tree (None without regions), and the tree's
+    regions marked and emptied: their parents' setters take a Region."""
+    merged = Node("region")
+    found = []
+
+    def merge(into, node):
+        for name, child in node.children.items():
+            target = into.children.get(name)
+            if target is None:
+                target = into.children[name] = Node(f"{into.path}.{name}")
+                target.parent = into
+            target.entry = merge_entry(target.entry, child.entry)
+            if into is merged and name in REGION_PARTS:
+                target.region, target.array = True, name == "regions"
+            else:
+                merge(target, child)
+
+    def merge_region(node):
+        merge(merged, node)
+        for part in REGION_PARTS & set(node.children):
+            merge_region(node.children[part])
+
+    def visit(node):
+        for child in list(node.children.values()):
+            if is_region(child):
+                found.append(child)
+                merge_region(child)
+            else:
+                visit(child)
+    visit(root)
+    for node in found:
+        node.region, node.array, node.children = True, node.path in REGION_LISTS, {}
+
+    def sort(node):
+        node.children = dict(sorted(node.children.items()))
+        for child in node.children.values():
+            sort(child)
+    sort(merged)
+    merged.shared = True
+    merged.named = any(node.path == "regions.<name>" for node in found)
+    return merged if found else None
+
+
+def region_descriptions():
+    """{region.<key>: text} from the Regions section of docs/input.md: the rows of its table of keys, else the types
+    whose row names the key."""
+    out, types_of, section = {}, {}, False
+    for line in (ROOT / "docs" / "input.md").read_text().splitlines():
+        if line.startswith("## "):
+            section = line.strip() == "## Regions"
+        if not section or not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
+        if len(cells) == 3:
+            types = re.findall(r"`(\w+)`", cells[0])
+            for key in re.findall(r"`(\w+)`", cells[1]):
+                types_of.setdefault(key, [])
+                types_of[key] += [t for t in types if t not in types_of[key]]
+        elif len(cells) == 2 and re.fullmatch(r"`\w+`", cells[0]):
+            out[f"region.{cells[0].strip('`')}"] = plain(cells[1])
+    for key, types in types_of.items():
+        out.setdefault(f"region.{key}", "A key of the region types " + ", ".join(types))
+    return out
 
 
 def walk(value, parts):
@@ -147,8 +243,8 @@ def camel(path):
     return "".join(p[:1].upper() + p[1:] for part in path.replace("<name>", "").split(".") for p in part.split("_") if p)
 
 
-def classes(root):
-    """Every table node with its class name, children before parents, and whether it is set alone (its path)."""
+def classes(root, region=None):
+    """Every table node with its class name, the Region classes first, children before parents."""
     out = []
 
     def visit(node):
@@ -159,19 +255,32 @@ def classes(root):
             out.append(node)
     for child in root.children.values():
         visit(child)
+    if region:
+        visit(region)
     names = {}
     for node in out:
         node.cls = camel(node.path)
         if node.cls in names:
             raise SystemExit(f"input_config.py: {node.path} and {names[node.cls]} both make class {node.cls}")
         names[node.cls] = node.path
-    out.sort(key=lambda n: (-n.path.count("."), n.path))
+    out.sort(key=lambda n: (not shared(n), -n.path.count("."), n.path))
     return out
+
+
+def shared(node):
+    """Whether the node is the Region node or inside it."""
+    while node is not None:
+        if getattr(node, "shared", False):
+            return True
+        node = node.parent
+    return False
 
 
 def standalone(node):
     """How a table's class is placed: at its path (fixed), by index (an element of a top-level array), by name
     (a named table), or only by its parent's setter (nested: in an array of tables or a named table)."""
+    if shared(node):
+        return "nested"
     parts = node.path.split(".")
     if len(parts) == 1 and node.array:
         return "index"
@@ -209,7 +318,17 @@ def cpp_setters(node, cls, descriptions):
         name = cpp_name(child.name)
         doc = cpp_comment(describe(child, descriptions), "        ")
         key = f'"{child.name}"'
-        if child.table and child.array:
+        if child.region and child.array:
+            body = (f"for (std::size_t i = 0; i < items.size(); i++) put({key} \"[\" + std::to_string(i) + \"]\", "
+                    "items[i]); return *this;")
+            out += doc + [f"        {cls} & {name}(const std::vector<Region> & items) {{ {body} }}",
+                          f"        /** @brief {child.name} as a value (names of regions, inline tables). */",
+                          f"        {cls} & {name}(const Value & v) {{ put({key}, v); return *this; }}"]
+        elif child.region:
+            out += doc + [f"        {cls} & {name}(const Region & t) {{ put({key}, t); return *this; }}",
+                          f"        /** @brief {child.name} as a value (the name of a region, an inline table). */",
+                          f"        {cls} & {name}(const Value & v) {{ put({key}, v); return *this; }}"]
+        elif child.table and child.array:
             body = (f"for (std::size_t i = 0; i < items.size(); i++) put({key} \"[\" + std::to_string(i) + \"]\", "
                     "items[i]); return *this;")
             out += doc + [f"        {cls} & {name}(const std::vector<{child.cls}> & items) {{ {body} }}"]
@@ -233,25 +352,29 @@ def cpp_setters(node, cls, descriptions):
     return out
 
 
-def header(root, descriptions):
+def header(root, region, descriptions):
     out = ["/**", " * @file config.h",
            " * @brief Typed configs: a class per table of the input, a setter per key, for Case::set.",
            " *", " * " + GENERATED,
            " * Guide: docs/guide/cpp_api.md#typed-configs.", " */", "",
            "#ifndef MALLARD_CONFIG_H", "#define MALLARD_CONFIG_H", "", "#include <cstddef>", "#include <cstdint>",
-           "#include <string>", "#include <string_view>", "#include <vector>", "", '#include "mallard/mallard.h"', "",
+           "#include <string>", "#include <string_view>", "#include <utility>", "#include <vector>", "",
+           '#include "mallard/mallard.h"', "",
            "namespace mallard::config {", ""]
-    for node in classes(root):
+    for node in classes(root, region):
         cls = node.cls
         place = standalone(node)
         kind = "array of tables" if node.array else "table"
         shown = node.path.replace("<name>", "NAME")
-        out += cpp_comment(f"[{'[' if node.array else ''}{shown}{']' if node.array else ''}]: "
-                           f"the keys of this {kind} " + {
-                               "fixed": "the case sets.",
-                               "index": "the case sets in its element index (index = its length appends one).",
-                               "name": "the case sets in the named table.",
-                               "nested": "its parent's setter takes."}[place], "")
+        if getattr(node, "shared", False):
+            out += cpp_comment(REGION_DOC, "")
+        else:
+            out += cpp_comment(f"[{'[' if node.array else ''}{shown}{']' if node.array else ''}]: "
+                               f"the keys of this {kind} " + {
+                                   "fixed": "the case sets.",
+                                   "index": "the case sets in its element index (index = its length appends one).",
+                                   "name": "the case sets in the named table.",
+                                   "nested": "its parent's setter takes."}[place], "")
         out.append(f"class {cls} : public Table {{")
         out.append("    public:")
         if place == "fixed":
@@ -264,7 +387,15 @@ def header(root, descriptions):
         else:
             out.append(f'        {cls}() : Table("") {{}}')
         out += cpp_setters(node, cls, descriptions)
+        if getattr(node, "shared", False):
+            out += ["", "    protected:", f"        explicit {cls}(std::string path) : Table(std::move(path)) {{}}"]
         out += ["};", ""]
+        if getattr(node, "named", False):
+            out += cpp_comment("[regions.NAME]: a named region, which region keys take by its name: the keys of a "
+                               "Region the case sets in the named table.", "")
+            out += ["class Regions : public Region {", "    public:",
+                    '        explicit Regions(std::string_view table_name) : Region("regions." + std::string(table_name)) {}',
+                    "};", ""]
     out += ["} // namespace mallard::config", "", "#endif // MALLARD_CONFIG_H", ""]
     return "\n".join(out)
 
@@ -277,6 +408,8 @@ def py_name(name):
 
 
 def py_kind(child):
+    if child.region:
+        return ("array" if child.array else "table"), "Region"
     if child.table:
         return ("array" if child.array else "table"), child.cls
     if child.map:
@@ -286,6 +419,8 @@ def py_kind(child):
 
 
 def py_hint(child):
+    if child.region:
+        return "list | None" if child.array else "Region | dict | Inline | str | None"
     if child.table:
         return f"list[{child.cls}] | None" if child.array else f"{child.cls} | dict | Inline | str | None"
     if child.map:
@@ -300,13 +435,13 @@ def py_hint(child):
             "array": "list | None"}.get(t, "object")
 
 
-def module(root, descriptions):
+def module(root, region, descriptions):
     out = ['"""Typed configs: a class per table of the input, a keyword per key, for mallard.Case.set.', "",
            "    case = case.set(config.Run(dt=\"1 us\", n_steps=100))", "",
            GENERATED, "Guide: docs/guide/python.md#typed-configs.", '"""', "from __future__ import annotations", "",
            "from typing import Literal", "", "from ._config import Inline, Table", ""]
     names = []
-    for node in classes(root):
+    for node in classes(root, region):
         cls = node.cls
         place = standalone(node)
         names.append(cls)
@@ -318,7 +453,10 @@ def module(root, descriptions):
         out += ["", f"class {cls}(Table):"]
         how = {"fixed": "the case sets.", "index": "the case sets in its element index (its length appends one).",
                "name": "the case sets in the named table.", "nested": "its parent's keyword takes."}[place]
-        out.append(f'    """{title}: the keys of this {"array of tables" if node.array else "table"} {how}"""')
+        if getattr(node, "shared", False):
+            out.append(f'    """{REGION_DOC}"""')
+        else:
+            out.append(f'    """{title}: the keys of this {"array of tables" if node.array else "table"} {how}"""')
         keys = [c for c in node.children.values() if c.name != "<name>"]
         out.append("    _keys = {")
         for child in keys:
@@ -335,6 +473,13 @@ def module(root, descriptions):
         out += doc + ['        """'] if len(doc) > 1 else []
         args = ", ".join(f"{py_name(c.name)!r}: {py_name(c.name)}" for c in keys)
         out.append(f"        super().__init__({path}, {{{args}}})")
+        if getattr(node, "named", False):
+            names.append("Regions")
+            out += ["", "class Regions(Region):",
+                    '    """[regions.NAME]: a named region, which region keys take by its name: the keywords of Region '
+                    'the case sets in the named table."""', "",
+                    f"    def __init__(self, name, *, {params}):",
+                    f'        Table.__init__(self, f"regions.{{name}}", {{{args}}})']
     out += ["", "", "__all__ = [" + ", ".join(repr(n) for n in ["Inline", "Table"] + sorted(names)) + "]", ""]
     return "\n".join(out)
 
@@ -349,7 +494,17 @@ def main():
         for path in paths:
             descriptions.setdefault(path, plain(text))
     root = tree(catalog, array_paths(catalog))
-    files = {HEADER: header(root, descriptions), MODULE: module(root, descriptions)}
+    region = regions(root)
+    for path, text in region_descriptions().items():
+        descriptions.setdefault(path, text)
+
+    def region_keys(node):
+        for child in node.children.values():
+            descriptions.setdefault(child.path, "A key of a region (docs/input.md#regions)")
+            region_keys(child)
+    if region:
+        region_keys(region)
+    files = {HEADER: header(root, region, descriptions), MODULE: module(root, region, descriptions)}
     stale = [f for f, text in files.items() if not f.exists() or f.read_text() != text]
     if args.check:
         if stale:

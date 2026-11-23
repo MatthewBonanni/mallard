@@ -185,9 +185,9 @@ def test_a_typed_config_emits_the_toml_mallard_runs_bit_for_bit(tmp_path, monkey
     base = mallard.Case.from_toml(case_text(4))
     case = (base.set(config.Run(n_steps=8, cfl=0.3, t_stop=(60, "ms")))
             .set(config.Numerics(riemann_solver="HLL", face_reconstruction={"type": "MUSCL", "limiter": "barth_jespersen"}))
-            .set(config.Probes(0, name="left", fields=["RHO"], region=config.Inline({"type": "box" if DIM == 3 else "rectangle",
-                                                                                        "center": [0.3, 0.5, 0.5][:DIM],
-                                                                                        "size": [0.2, 0.4, 0.6][:DIM]}),
+            .set(config.Probes(0, name="left", fields=["RHO"], region=config.Region(type="box" if DIM == 3 else "rectangle",
+                                                                                     center=[0.3, 0.5, 0.5][:DIM],
+                                                                                     size=[0.2, 0.4, 0.6][:DIM]),
                                reductions=["max"], interval=2)))
     # The same keys set one by one: a typed config is only a typed way to write them
     by_key = (base.set("run.n_steps", 8).set("run.cfl", 0.3).set("run.t_stop", "60 ms")
@@ -197,7 +197,7 @@ def test_a_typed_config_emits_the_toml_mallard_runs_bit_for_bit(tmp_path, monkey
     # In the order of the class's keywords
     assert text.startswith(by_key.toml() + '\n[[probes]]\nfields = ["RHO"]\ninterval = 2\nname = "left"\n'), text
     with pytest.raises(ValueError):
-        base.set(config.ProbesRegion(type="circle"))
+        base.set(config.Region(type="circle"))
     with pytest.raises(TypeError):
         config.Run(n_step=8)
 
@@ -225,6 +225,33 @@ def test_check_reports_mallard_checks_results_as_structs(tmp_path, monkeypatch):
     assert not bad.ok and bad.status == "error"
     assert [(k.key, k.suggestion) for k in bad.unused_keys] == [("run.t_stpo", "run.t_stop")]
     assert any(d.code == "E-KEY-UNUSED" and d.level == "error" for d in bad.diagnostics)
+
+
+def test_a_region_anywhere_is_one_typed_class_names_and_regions_mixed(tmp_path, monkeypatch):
+    from mallard import config
+    monkeypatch.chdir(tmp_path)
+    hole = config.Region(type="box" if DIM == 3 else "rectangle", center=[0.4, 0.5, 0.5][:DIM], size=[0.1, 0.2, 0.2][:DIM],
+                         repeat=config.RegionRepeat(count=2, translate=[0.2, 0.0, 0.0][:DIM]))
+    case = (mallard.Case.from_toml(case_text(1))
+            .set(config.Regions("ball", type="sphere", center=[0.5] * DIM, radius=0.3))
+            .set(config.Probes(0, name="parts", fields=["P"], reductions=["mean"],
+                               region=config.Region(type="union", regions=["ball", hole]))))
+    report = case.check()
+    assert report.ok, report.text
+    keys = {k.path for k in report.keys}
+    assert {"regions.ball.radius", "probes[0].region.regions[1].size", "probes[0].region.regions[1].repeat.count"} <= keys
+
+
+def test_check_gives_the_resolved_input_with_each_keys_catalog_record(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    report = mallard.Case.from_toml(case_text(4)).set("physics.p_ref", "1 bar").check()
+    keys = {k.path: k for k in report.keys}
+    p_ref = keys["physics.p_ref"]
+    assert (p_ref.set, p_ref.type, p_ref.unit, float(p_ref.value)) == (True, "number", "Pa", 1e5)
+    assert "HLLC" in keys["numerics.riemann_solver"].values
+    assert keys["boundaries[1].type"].catalog_path == "boundaries.type"
+    defaults = [k for k in report.keys if not k.set and k.default]
+    assert defaults and all(k.value == k.default for k in defaults)
 
 
 def test_progress_output_and_record_callbacks_and_the_log_sink(tmp_path, monkeypatch, capfd):

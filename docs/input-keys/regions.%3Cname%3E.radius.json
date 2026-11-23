@@ -1,9 +1,12 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
  "set_in": [
   "examples/moving_heaters/input.toml",
-  "examples/source_regions/input.toml"
+  "examples/source_regions/input.toml",
+  "tools/dev/catalog_inputs/2d/regions.toml",
+  "tools/dev/catalog_inputs/3d/regions.toml"
  ]
 }

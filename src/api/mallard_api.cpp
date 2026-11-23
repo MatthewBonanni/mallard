@@ -363,6 +363,12 @@ CheckReport Case::check(const CheckOptions & options) const {
                              r.wall_per_time, r.flow_through_time, r.t_stop,     r.n_steps};
     }
     out.resolved = r.resolved;
+    for (const KeyRecord & k : r.keys) {
+        const Dimension & d = k.use.dimension;
+        out.keys.push_back({k.path, catalog_path(k.path), k.value, k.set, k.use.type,
+                            d.same_as(dim::none) ? "" : d.describe(), d.symbol(), k.use.required,
+                            k.use.required ? "" : k.use.fallback, k.values});
+    }
     out.text = check_text(r, false);
     out.json = check_json(r);
     return out;
