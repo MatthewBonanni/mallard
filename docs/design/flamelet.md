@@ -498,6 +498,47 @@ only for `C_chi` of a few. The test relaxes a linear `Z` in uniform shear from
 zero variance to `2 D_t Delta^2 |grad Z|^2 / (C_chi (D + D_t))`, exact on a
 uniform mesh because the discrete diffusion of `Z^2` is `2 |grad Z|^2` there.
 
+### 5.8 Thickened flames (TFLES) with the table
+
+`[les.combustion]` `model = "tfles"` with the flamelet gas: the flame of the
+table is thickened until the mesh resolves it, the use FPV/FGM tables get on
+meshes that do not resolve the laminar flame (Kuenne et al. 2011). Decisions:
+
+- **Thickening as for finite-rate chemistry**, with no flamelet-specific
+  path: `ThickenFunctor` already multiplies every scalar's `rho D` and the
+  conducted `kappa / cp` by `E F` (for the flamelet gas these are `Z`, `C`,
+  and enthalpy, with unity Lewis number) and the eddy coefficients by
+  `1 - Omega`, and the source of `C` takes the chemistry time scale `E / F`
+  of the step, as the Strang reactors do (`ProgressSourceFunctor`). `Z` is
+  thickened with `C`, as every species is in TFLES: unity Lewis number keeps
+  `Z`, `C` and `h` diffusing alike, which the table assumes. The efficiency
+  multiplies the source (Colin et al. 2000; Charlette et al. 2002): the
+  thickened flame then propagates at `E s_L`, its subgrid wrinkling. `HRR`
+  output is scaled as the source.
+- **Sensor on `Lambda`**, not `T`: the transport values of the flamelet gas
+  hold `h`, not `T`, and the table's normalized progress variable is the
+  progress variable the table is built on, 0 and 1 at the fresh and burnt
+  states of every `Z`, so a non-premixed or stratified flame needs no
+  `T_unburnt`, `T_burnt`. Where the table has no flame (`C_max = C_min`),
+  `Lambda = 0` and nothing is thickened. The dynamic efficiency filters the
+  same `Lambda`. Mixture sensors (`temperature`, `reaction`) are input errors.
+- **Zero subgrid variance**: the thickened flame is resolved, and a presumed
+  PDF over a subgrid variance would represent the same unresolved structure a
+  second time. With `[les.combustion]` the variance closure is `none` (the
+  default; `algebraic` and `transported` are input errors), which allocates no
+  variance and leaves every lookup on the table's `Sz = 0` slice, exactly the
+  laminar flamelets (the axis starts at 0 by the format). `variance = "none"`
+  is also accepted in LES without thickening. Tables keep their `Sz` axis
+  (the format needs every axis to have two nodes); only its first slice is read.
+- **PaSR** stays an input error: it scales finite-rate rates.
+
+Tests (`test/flamelet_les_test.cpp`): lookups with `variance = "none"` and with
+a thickened flame are those of the `Sz = 0` slice of the variance table; in
+uniform shear with `Omega = 1`, a cosine of `Z` decays at `E F D k^2` (no eddy
+diffusivity) and `C` follows `dC/dt = (E / F) k C^2 (1 - C)` with Charlette's
+saturated `E = F^0.5`; a reaction-diffusion front thickened by `F = 3` keeps its
+laminar speed within 1% and is `F` times thicker.
+
 ## 6. Interaction with the existing models
 
 - **Finite-rate chemistry:** exclusive. `gas = "flamelet"` loads no mechanism
@@ -507,12 +548,10 @@ uniform mesh because the discrete diffusion of `Z^2` is `2 |grad Z|^2` there.
   and the variance closure through the filter width `Delta` (les.md, section 3).
   The kinetic-energy budget and the low-dissipation flux are independent of the
   gas model.
-- **TFLES:** not combined with FPV (the table already represents the subgrid
-  flame). For FGM in premixed LES on meshes that do not resolve the tabulated
-  flame, thickening the progress-variable equation (`D -> E F D`,
-  `omega_C -> E omega_C / F`) is the standard combination (e.g. Kuenne et al.
-  2011); it reuses `ThickenedFlame` and its dynamic efficiency unchanged, with
-  the sensor on `Lambda` instead of `T`. Stage 5.
+- **TFLES:** thickens `Z`, `C` and enthalpy (`D -> E F D`,
+  `omega_C -> E omega_C / F`), the standard combination (e.g. Kuenne et al.
+  2011), with `ThickenedFlame` and its dynamic efficiency unchanged, the sensor
+  on `Lambda` instead of `T`, and the table at zero subgrid variance (5.8).
 - **PaSR:** not applicable (it scales finite-rate rates).
 - **Radiation:** the optically thin model needs `T` and `X_H2O`, `X_CO2` from the
   table; it then removes enthalpy, which needs the enthalpy-defect axis (stage
@@ -561,7 +600,7 @@ case.
 Each must fail under a plausible bug (CONTRIBUTING.md).
 
 - **Reader and lookup (C++, `test/flamelet_table_test.cpp`)**: the fixture
-  ([table_format.md](table_format.md#10-reference-fixture)), written by an
+  ([table_format.md](table_format.md#10-reference-fixtures)), written by an
   independent Python writer, reads with its tags, species, pressure and
   provenance. Every field looks up in a device kernel as the writer computed
   it, which catches node order, field order, stride and byte order.

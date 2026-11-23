@@ -24,19 +24,24 @@
 
 namespace {
 
-/** @brief Adds the table's source of rho C at each cell's [Z, C] and density to the scalars' rates (per unit volume). */
+/**
+ * @brief Adds the table's source of rho C at each cell's [Z, C] and density to the scalars' rates (per unit
+ *        volume), times the thickened flame's E / F where there is one.
+ */
 struct ProgressSourceFunctor {
     flamelet::Gas<> gas;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     ScalarView scalars;
     SpeciesView rhs;
+    Kokkos::View<rtype *> scale;  // [les.combustion]: E / F of each cell, else empty
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         using G = flamelet::Gas<>;
         const flamelet::Point<3> p = gas.locate(static_cast<double>(scalars(c, G::Z)), gas.cell_variance(c),
                                                 static_cast<double>(scalars(c, G::C)));
-        rhs(c, G::C) += static_cast<rtype>(gas.source(p, static_cast<double>(W(c, 0))));
+        const double source = gas.source(p, static_cast<double>(W(c, 0)));
+        rhs(c, G::C) += static_cast<rtype>(scale.extent(0) > 0 ? source * static_cast<double>(scale(c)) : source);
     }
 };
 
@@ -222,19 +227,21 @@ void Solver::check_flamelet_input() const {
         refuse("radiation", "radiation with gas = \"flamelet\" needs tables with an enthalpy-defect axis, not yet read",
                "Remove [radiation]");
     }
-    if (les_on && input.at("les").contains("combustion")) {
-        throw InputError({.key = "les.combustion",
-                          .line = line_of(input.at("les"), "combustion"),
-                          .message = "the flamelet table already represents the subgrid flame: neither thickening "
-                                     "(TFLES) nor PaSR combines with gas = \"flamelet\"",
-                          .fix = "Remove [les.combustion]",
-                          .docs = "docs/guide/flamelet.md"});
+    if (les_on && input.at("les").contains("combustion") &&
+        find_value_or<std::string>(input.at("les").at("combustion"), "model", "") == "pasr") {
+        throw InputError({.key = "les.combustion.model",
+                          .line = line_of(input.at("les").at("combustion"), "model"),
+                          .message = "the partially stirred reactor scales finite-rate reaction rates, which "
+                                     "gas = \"flamelet\" does not have",
+                          .fix = "Use model = \"tfles\" (thickened flame), or remove [les.combustion]",
+                          .docs = "docs/guide/flamelet.md#thickened-flames"});
     }
 }
 
 void Solver::add_progress_source(SpeciesView rhs) {
     gated::parallel_for("progress_source", mesh->n_owned(),
-                         ProgressSourceFunctor{mixture.flamelet, W_cells, cell_scalars, rhs});
+                         ProgressSourceFunctor{mixture.flamelet, W_cells, cell_scalars, rhs,
+                                               tfles_on ? chem_time_scale : Kokkos::View<rtype *>()});
     if (mixture.flamelet.second_moment) {
         gated::parallel_for("second_moment_sink", mesh->n_owned(),
                              SecondMomentSinkFunctor{mixture.flamelet, cell_transport, les_coefficients,
