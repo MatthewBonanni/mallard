@@ -486,12 +486,14 @@ void read_vtk_metadata(Contents & c, const VtkXml & x, const char * data_section
     if (const auto a = inline_array(field_data, "MALLARD_FIELD_NAMES")) names = vtk_strings(*a);
     if (const auto a = inline_array(field_data, "MALLARD_FIELD_UNITS")) units = vtk_strings(*a);
     if (const auto a = inline_array(field_data, "MALLARD_FIELD_LONG_NAMES")) long_names = vtk_strings(*a);
+    // A snapshot's PointData: the nodes of its high-order view
+    const bool nodes_too = x.type == "UnstructuredGrid";
     for (const auto & a : x.arrays) {
-        if (a.section != data_section) continue;
+        if (a.section != data_section && !(nodes_too && a.section == "PointData")) continue;
         Field f;
         f.name = a.name;
         f.components = a.components;
-        f.location = std::string(data_section) == "CellData" ? "cell" : "point";
+        f.location = a.section == "CellData" ? "cell" : "point";
         for (size_t i = 0; i < names.size(); i++) {
             if (names[i] != a.name) continue;
             if (i < units.size()) f.units = units[i];
@@ -1122,6 +1124,10 @@ Contents open_vtkhdf(const std::string & path) {
     const bool series = exists(top, "Steps");
     // A series stores every snapshot's rows one after the other: a field's columns are its shape's second dimension
     group_fields(c, group, data == "CellData" ? "cell" : "point");
+    if (c.kind == Kind::snapshot && exists(top, "PointData")) {
+        Handle nodes(H5Gopen2(top, "PointData", H5P_DEFAULT), H5Gclose, "opening PointData");
+        group_fields(c, nodes, "point");
+    }
     Handle field_data(H5Gopen2(top, "FieldData", H5P_DEFAULT), H5Gclose, "opening FieldData");
     const std::vector<int64_t> recorded_steps =
         exists(field_data, "STEP") ? all<int64_t>(field_data, "STEP") : std::vector<int64_t>{};

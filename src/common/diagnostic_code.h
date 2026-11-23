@@ -46,6 +46,7 @@ inline constexpr const char * TABLE_PRESSURE = "W-TABLE-PRESSURE";  // a flamele
 inline constexpr const char * SIZING_FIXED = "W-SIZING-FIXED";  // the memory that does not scale with the cells
 inline constexpr const char * SIZING_PARTS = "W-SIZING-PARTS";  // no partition fits
 inline constexpr const char * TRIGGER_NEVER = "W-TRIGGER-NEVER";  // a trigger that cannot fire before the run ends
+inline constexpr const char * OUTPUT_SIZE = "W-OUTPUT-SIZE";  // a snapshot's high-order view above the size worth warning of
 inline constexpr const char * ENV_GPU_AWARE_MPI = "E-ENV-GPU-AWARE-MPI";  // built for it, the MPI library has none
 inline constexpr const char * ENV_HOST_STAGING = "W-ENV-HOST-STAGING";    // device halos go through host memory
 inline constexpr const char * ENV_PLACEMENT = "W-ENV-PLACEMENT";          // binding::check
@@ -95,7 +96,7 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 63> ALL = {{
+inline constexpr std::array<Entry, 64> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {INITIAL_WRITE, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
@@ -104,7 +105,7 @@ inline constexpr std::array<Entry, 63> ALL = {{
     {QUALITY_ASPECT_RATIO, CHECK_PAGE}, {QUALITY_VOLUME_RATIO, CHECK_PAGE}, {CFL_LIMIT, CHECK_PAGE},
     {TFLES_THICKENING, CHECK_PAGE}, {WALL_Y_PLUS, CHECK_PAGE}, {WALL_SPACING, CHECK_PAGE},
     {WALL_MODEL_EXCHANGE, CHECK_PAGE}, {DNS_ETA, CHECK_PAGE}, {TABLE_PRESSURE, CHECK_PAGE}, {SIZING_FIXED, CHECK_PAGE},
-    {SIZING_PARTS, CHECK_PAGE}, {TRIGGER_NEVER, CHECK_PAGE},
+    {SIZING_PARTS, CHECK_PAGE}, {TRIGGER_NEVER, CHECK_PAGE}, {OUTPUT_SIZE, CHECK_PAGE},
     {ENV_GPU_AWARE_MPI, CHECK_PAGE}, {ENV_HOST_STAGING, CHECK_PAGE}, {ENV_PLACEMENT, CHECK_PAGE},
     {ENV_THREAD_BINDING, CHECK_PAGE},
     {RUN, RUN_PAGE}, {DIVERGED, RUN_PAGE}, {HEALTH_MARGIN, RUN_PAGE}, {RESTART_SKIPPED, RUN_PAGE},

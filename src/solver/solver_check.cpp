@@ -119,6 +119,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_cost(r, options, tracker);
     check_sizing(r, options);
     check_settings(r);
+    check_outputs(r);
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
@@ -592,6 +593,24 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
     double length = 0.0;
     for (size_t d = 0; d < N_DIM; d++) length += std::fabs(u[d]) / speed * (lo_hi[N_DIM + d] + lo_hi[d]);
     r.flow_through_time = length / speed;
+}
+
+void Solver::check_outputs(CheckReport & r) const {
+    for (const auto & writer : data_writers) {
+        CheckOutput o{writer->get_prefix(), FORMAT_NAMES.at(writer->get_format()), writer->snapshot_bytes(), 0.0, 0};
+        if (const DataWriter * view = writer->high_order_writer()) {
+            o.high_order_bytes = view->snapshot_bytes();
+            o.high_order_order = lagrange_view.order;
+        }
+        if (o.high_order_bytes > OUTPUT_SIZE_WARNING) {
+            r.warning(diagnostic_code::OUTPUT_SIZE,
+                      "[[write_data]] " + o.prefix + " writes a high-order view of " + bytes(o.high_order_bytes) +
+                          " per snapshot (order " + std::to_string(o.high_order_order) + "; the cell values: " +
+                          bytes(o.bytes) + "): set high_order = false in that [[write_data]] to write the cell "
+                          "values alone, or write it less often");
+        }
+        r.outputs.push_back(std::move(o));
+    }
 }
 
 void Solver::check_settings(CheckReport & r) const {

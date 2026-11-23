@@ -223,6 +223,10 @@ constexpr Option EXTRACT_OPTIONS[] = {
     {"--snapshot", "", "vtkhdf|vtu",
      "Also write a snapshot of --fields (of --region, if given) at each step extracted, as [[write_data]] "
      "writes it: OUTPUT/NAME.vtkhdf, or .vtu files with a .pvd index. Default: none."},
+    {"--high-order", "", "on|off",
+     "With a TENO input, also write NAME_high_order: the reconstruction's polynomials at the nodes of VTK "
+     "Lagrange cells, as [[write_data]] high_order does (docs/guide/output.md#high-order-view); the whole mesh "
+     "only. Default: on."},
     {"--steps", "", "LIST",
      "Extract the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
     {"--times", "", "T|T1:T2",
@@ -261,6 +265,10 @@ constexpr Option DERIVE_OPTIONS[] = {
      "The format of the snapshots: OUTPUT/NAME.vtkhdf, the series of a file per snapshot, or .vtu files with a "
      ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
     {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
+    {"--high-order", "", "on|off",
+     "With a TENO input, also write NAME_high_order: the reconstruction's polynomials at the nodes of VTK "
+     "Lagrange cells, as [[write_data]] high_order does (docs/guide/output.md#high-order-view); the whole mesh "
+     "only. Default: on."},
     {"--steps", "", "LIST",
      "Derive the snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
     {"--times", "", "T|T1:T2",

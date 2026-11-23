@@ -30,6 +30,8 @@
 constexpr double SIZING_MARGIN = 0.05;
 /** @brief The halo, as a share of the owned cells, that the ranks sizing recommends stay below. */
 constexpr double SIZING_HALO_FRACTION = 0.1;
+/** @brief A snapshot's high-order view above this many bytes is a warning (W-OUTPUT-SIZE). */
+constexpr double OUTPUT_SIZE_WARNING = 10.0e9;
 
 /** @brief Fields of the owned cells by name, written with the mesh-quality fields (--mesh-fields). */
 using CheckFields = std::vector<std::pair<std::string, std::vector<double>>>;
@@ -161,6 +163,14 @@ struct CheckEnvironment {
     bool nccl_used = false;             // halo exchanges by NCCL (several ranks, [parallel] halo_exchange)
 };
 
+/** @brief A [[write_data]] entry's projected size per snapshot. */
+struct CheckOutput {
+    std::string prefix, format;
+    double bytes = 0.0;             // the snapshot's cell values, and its mesh where each snapshot repeats it
+    double high_order_bytes = 0.0;  // its high-order view's, 0 without one
+    uint32_t high_order_order = 0;
+};
+
 struct CheckReport {
     std::vector<CheckDiagnostic> diagnostics;
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
@@ -173,6 +183,7 @@ struct CheckReport {
     std::vector<CheckUnassigned> unassigned;
     std::vector<CheckPeriodic> periodic;
     std::vector<CheckRegion> regions;
+    std::vector<CheckOutput> outputs;
     std::vector<double> face_y_plus;  // per local face: first-cell y+ of wall faces, NaN elsewhere (the view's walls)
     std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty

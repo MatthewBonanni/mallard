@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -91,18 +92,24 @@ void expect_derived_as_written(const std::string & name, const std::string & phy
     ASSERT_EQ(derive({run + "/restart_000000.restart", run + "/restart_000002.restart", run + "/restart_000004.restart",
                       "--fields", list, "--snapshot", "vtu", "-o", out}),
               0);
-    const output::Contents written = output::open(run + "/flow.pvd");
-    const output::Contents derived = output::open(out + "/derived.pvd");
-    ASSERT_EQ(derived.snapshots.size(), 3u);
-    ASSERT_EQ(written.snapshots.size(), 3u);
-    for (size_t k = 0; k < 3; k++) {
-        EXPECT_EQ(derived.snapshots[k].t, written.snapshots[k].t);
-        for (const std::string & f : fields) {
-            const std::vector<double> a = output::read(written, f, k), b = output::read(derived, f, k);
-            ASSERT_EQ(a.size(), b.size()) << f;
-            size_t differ = 0;
-            for (size_t i = 0; i < a.size(); i++) differ += a[i] != b[i];
-            EXPECT_EQ(differ, 0u) << f << " at snapshot " << k;
+    // And their high-order views, where a field has values at the nodes (MACH, not the mixture's)
+    const bool nodes = std::find(fields.begin(), fields.end(), "MACH") != fields.end();
+    EXPECT_EQ(fs::exists(run + "/flow_high_order.pvd"), nodes);
+    for (const std::string view : {"", "_high_order"}) {
+        if (!view.empty() && !nodes) continue;
+        const output::Contents written = output::open(run + "/flow" + view + ".pvd");
+        const output::Contents derived = output::open(out + "/derived" + view + ".pvd");
+        ASSERT_EQ(derived.snapshots.size(), 3u);
+        ASSERT_EQ(written.snapshots.size(), 3u);
+        for (size_t k = 0; k < 3; k++) {
+            EXPECT_EQ(derived.snapshots[k].t, written.snapshots[k].t);
+            for (const std::string & f : fields) {
+                const std::vector<double> a = output::read(written, f, k), b = output::read(derived, f, k);
+                ASSERT_EQ(a.size(), b.size()) << f << view;
+                size_t differ = 0;
+                for (size_t i = 0; i < a.size(); i++) differ += a[i] != b[i];
+                EXPECT_EQ(differ, 0u) << f << view << " at snapshot " << k;
+            }
         }
     }
 }

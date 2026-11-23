@@ -27,6 +27,7 @@
 #include "file_format.h"
 #include "hdf5_util.h"
 #include "json.h"
+#include "lagrange.h"
 #include "provenance.h"
 
 namespace {
@@ -121,134 +122,6 @@ using curved::Vec3;
 // The VTKHDF version whose features the files use (temporal data): ParaView 5.12 reads it
 const std::vector<int64_t> VTKHDF_VERSION = {2, 0};
 
-constexpr uint8_t VTK_LAGRANGE_TRIANGLE = 69, VTK_LAGRANGE_QUADRILATERAL = 70, VTK_LAGRANGE_TETRAHEDRON = 71,
-                  VTK_LAGRANGE_HEXAHEDRON = 72, VTK_LAGRANGE_WEDGE = 73, VTK_QUADRATIC_PYRAMID = 27;
-
-using Pairs = std::vector<std::array<uint8_t, 2>>;
-using Quads = std::vector<std::array<uint8_t, 4>>;
-
-/** @brief A curved cell as a quadratic VTK cell: its edges and quadrilateral faces with a middle node. */
-struct Quadratic {
-    uint8_t type;
-    Pairs edges;
-    Quads faces;
-    bool body;
-};
-
-const Quadratic & quadratic(uint32_t n_corners) {
-    static const Quadratic triangle{VTK_LAGRANGE_TRIANGLE, {{0, 1}, {1, 2}, {2, 0}}, {}, false};
-    static const Quadratic quad{VTK_LAGRANGE_QUADRILATERAL, {{0, 1}, {1, 2}, {3, 2}, {0, 3}}, {}, true};
-    static const Quadratic tetrahedron{
-        VTK_LAGRANGE_TETRAHEDRON, {{0, 1}, {1, 2}, {0, 2}, {0, 3}, {1, 3}, {2, 3}}, {}, false};
-    static const Quadratic pyramid{
-        VTK_QUADRATIC_PYRAMID, {{0, 1}, {1, 2}, {2, 3}, {3, 0}, {0, 4}, {1, 4}, {2, 4}, {3, 4}}, {}, false};
-    static const Quadratic wedge{VTK_LAGRANGE_WEDGE,
-                                 {{0, 1}, {1, 2}, {2, 0}, {3, 4}, {4, 5}, {5, 3}, {0, 3}, {1, 4}, {2, 5}},
-                                 {{0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}},
-                                 false};
-    static const Quadratic hexahedron{
-        VTK_LAGRANGE_HEXAHEDRON,
-        {{0, 1}, {1, 2}, {3, 2}, {0, 3}, {4, 5}, {5, 6}, {7, 6}, {4, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}},
-        {{0, 3, 7, 4}, {1, 2, 6, 5}, {0, 1, 5, 4}, {3, 2, 6, 7}, {0, 1, 2, 3}, {4, 5, 6, 7}},
-        true};
-    if (N_DIM == 2) return n_corners == 3 ? triangle : quad;
-    switch (n_corners) {
-        case 4: return tetrahedron;
-        case 5: return pyramid;
-        case 6: return wedge;
-        default: return hexahedron;
-    }
-}
-
-/** @brief Reference coordinates of node k of a face with n nodes (curved::Geometry::eval). */
-std::array<double, 2> face_reference(uint32_t n, uint32_t k) {
-    static constexpr double TRIANGLE[3][2] = {{0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}};
-    static constexpr double QUAD[4][2] = {{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}};
-    if (n == 2) return {k == 0 ? -1.0 : 1.0, 0.0};
-    if (n == 3) return {TRIANGLE[k][0], TRIANGLE[k][1]};
-    return {QUAD[k][0], QUAD[k][1]};
-}
-
-/**
- * @brief The point of cell c's curved geometry at the centroid of these
- *        nodes (an edge's two or a quadrilateral face's four): on a face of the
- *        cell holding them all (a curved one where there is one), else their
- *        average.
- */
-Vec3 face_point(const Mesh & mesh, const curved::Geometry & geometry, uint32_t c, const std::vector<uint32_t> & nodes,
-                const Vec3 & average) {
-    int64_t chosen = -1;
-    std::array<double, 2> xi = {0.0, 0.0};
-    for (uint32_t j = 0; j < mesh.h_n_faces_of_cell(c); j++) {
-        const uint32_t f = mesh.h_face_of_cell(c, j);
-        if (chosen >= 0 && !geometry.face_is_curved(f)) continue;
-        const uint32_t n = mesh.h_n_nodes_of_face(f);
-        std::array<double, 2> sum = {0.0, 0.0};
-        uint32_t found = 0;
-        for (uint32_t k = 0; k < n; k++) {
-            if (std::find(nodes.begin(), nodes.end(), mesh.h_node_of_face(f, k)) == nodes.end()) continue;
-            const auto r = face_reference(n, k);
-            sum = {sum[0] + r[0], sum[1] + r[1]};
-            found++;
-        }
-        if (found != nodes.size()) continue;
-        chosen = f;
-        xi = {sum[0] / double(found), sum[1] / double(found)};
-        if (geometry.face_is_curved(f)) break;
-    }
-    if (chosen < 0) return average;
-    Vec3 x;
-    geometry.eval(static_cast<uint32_t>(chosen), xi.data(), x, nullptr);
-    return x;
-}
-
-/**
- * @brief The nodes of curved cell c after its corners (in VTK order) as a
- *        quadratic VTK cell: middles of the edges, of the quadrilateral faces
- *        and of the body (by transfinite interpolation of its boundary).
- */
-std::vector<Vec3> quadratic_nodes(const Mesh & mesh, const curved::Geometry & geometry, uint32_t c,
-                                  const std::vector<uint32_t> & corners) {
-    const Quadratic & q = quadratic(uint32_t(corners.size()));
-    std::vector<Vec3> x(corners.size());
-    for (size_t k = 0; k < corners.size(); k++) {
-        x[k] = {0.0, 0.0, 0.0};
-        FOR_I_DIM x[k][i] = double(mesh.h_node_coords(corners[k], i));
-    }
-    auto average = [&](const auto & local) {
-        Vec3 sum = {0.0, 0.0, 0.0};
-        for (uint8_t k : local) {
-            for (size_t i = 0; i < 3; i++) sum[i] += x[k][i];
-        }
-        for (double & v : sum) v /= double(local.size());
-        return sum;
-    };
-    auto nodes_of = [&](const auto & local) {
-        std::vector<uint32_t> nodes;
-        for (uint8_t k : local) nodes.push_back(corners[k]);
-        return nodes;
-    };
-    std::vector<Vec3> out;
-    Vec3 body = {0.0, 0.0, 0.0};
-    auto accumulate = [&](const Vec3 & p, double w) {
-        for (size_t i = 0; i < 3; i++) body[i] += w * p[i];
-    };
-    const bool solid = N_DIM == 3;
-    for (const auto & e : q.edges) {
-        out.push_back(face_point(mesh, geometry, c, nodes_of(e), average(e)));
-        accumulate(out.back(), solid ? -0.25 : 0.5);
-    }
-    for (const auto & f : q.faces) {
-        out.push_back(face_point(mesh, geometry, c, nodes_of(f), average(f)));
-        accumulate(out.back(), 0.5);
-    }
-    if (q.body) {
-        for (const Vec3 & corner : x) accumulate(corner, solid ? 0.125 : -0.25);
-        out.push_back(body);
-    }
-    return out;
-}
-
 /** @brief This rank's offset in a sum over the ranks (in rank order), and the sum. */
 std::pair<uint64_t, uint64_t> scan(uint64_t value, bool distributed) {
     if (!distributed) return {0, value};
@@ -316,8 +189,8 @@ void DataWriter::build_vtkhdf_cells() {
             used[corners[k]] = true;
         }
         const bool curved = curves && curves->cell_is_curved(i);
-        const std::vector<Vec3> extra = curved ? quadratic_nodes(*mesh, *curves, i, corners) : std::vector<Vec3>{};
-        records.push_back(curved ? quadratic(n).type : vtk_cell_type(N_DIM, n));
+        const std::vector<Vec3> extra = curved ? lagrange::quadratic_nodes(*mesh, *curves, i, corners) : std::vector<Vec3>{};
+        records.push_back(curved ? lagrange::quadratic_vtk_type(n) : vtk_cell_type(N_DIM, n));
         records.push_back(n);
         for (uint32_t node : corners) records.push_back(global_node(node));
         records.push_back(extra.size());
@@ -378,10 +251,67 @@ void DataWriter::build_vtkhdf_cells() {
     m.built = true;
 }
 
+namespace {
+
+/** @brief Values as the raw bits of doubles, for GlobalOrder::gather_csr. */
+std::vector<uint64_t> as_bits(const rtype * values, size_t n) {
+    std::vector<uint64_t> out(n);
+    for (size_t i = 0; i < n; i++) out[i] = std::bit_cast<uint64_t>(static_cast<double>(values[i]));
+    return out;
+}
+
+} // namespace
+
+void DataWriter::build_vtkhdf_view() {
+    const bool distributed = mesh->n_global_cells > 0;
+    const uint32_t n_out = mesh->n_owned();
+    // Each cell's record: its type, then its nodes' coordinates as raw bits
+    std::vector<uint64_t> ids(n_out), offsets{0}, records;
+    for (uint32_t k = 0; k < n_out; k++) {
+        ids[k] = mesh->h_global_cell(owned_by_id[k]);
+        records.push_back(view->types[k]);
+        const std::vector<uint64_t> bits = as_bits(view->points.data() + 3 * view->first_node[k],
+                                                   3 * (view->first_node[k + 1] - view->first_node[k]));
+        records.insert(records.end(), bits.begin(), bits.end());
+        offsets.push_back(records.size());
+    }
+    VtkhdfMesh & m = vtkhdf;
+    m.order = GlobalOrder(ids, distributed ? mesh->n_global_cells : mesh->n_cells, distributed);
+    const auto [block_offsets, block] = m.order.gather_csr(offsets, records);
+    const uint64_t n_block = m.order.size();
+    const auto [first, total] = scan((block.size() - n_block) / 3, distributed);
+    m.connectivity.clear();
+    m.offsets.clear();
+    m.types.clear();
+    m.points.clear();
+    int64_t at = static_cast<int64_t>(first);
+    for (uint64_t c = 0; c < n_block; c++) {
+        const uint64_t * r = &block[block_offsets[c]];
+        const uint64_t n = (block_offsets[c + 1] - block_offsets[c] - 1) / 3;
+        m.types.push_back(static_cast<uint8_t>(r[0]));
+        m.offsets.push_back(at);
+        for (uint64_t k = 0; k < n; k++) m.connectivity.push_back(at + static_cast<int64_t>(k));
+        for (uint64_t i = 0; i < 3 * n; i++) m.points.push_back(static_cast<rtype>(std::bit_cast<double>(r[1 + i])));
+        at += static_cast<int64_t>(n);
+    }
+    if (last_rank(distributed)) m.offsets.push_back(static_cast<int64_t>(total));
+    m.n_cells = m.order.n_global();
+    m.n_ids = m.n_points = total;
+    m.first_cell = m.order.first();
+    m.first_id = m.first_point = first;
+    m.built = true;
+}
+
 void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapshot, const Values & values) {
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const bool distributed = mesh->n_global_cells > 0;
-    if (!vtkhdf.built) build_vtkhdf_cells();
+    if (!vtkhdf.built) {
+        if (view) {
+            build_vtkhdf_view();
+        } else {
+            build_vtkhdf_cells();
+        }
+    }
     const VtkhdfMesh & m = vtkhdf;
     const bool deflate = compression == Compression::ZLIB;
     const bool serial = !distributed;
@@ -497,6 +427,24 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         annotate(cell_data, fields[f].name, fields[f].description);
         h5::cell_methods(cell_data, fields[f].name, cell_methods(fields[f].name));
     }
+    if (node_fields.empty()) return;
+    Handle point_data(H5Gopen2(top, "PointData", H5P_DEFAULT), H5Gclose, "opening PointData");
+    for (size_t f = 0; f < node_fields.size(); f++) {
+        const Field & field = node_fields[f];
+        const uint32_t n_comp = LagrangeView::components(field.name);
+        local = values[fields.size() + f];
+        if (relative_error > 0.0) compression::round_to_relative_error(local, relative_error);
+        std::vector<uint64_t> offsets(view->first_node.size());
+        for (size_t k = 0; k < offsets.size(); k++) offsets[k] = view->first_node[k] * n_comp;
+        const auto [block_offsets, bits] = m.order.gather_csr(offsets, as_bits(local.data(), local.size()));
+        std::vector<rtype> block(bits.size());
+        for (size_t i = 0; i < bits.size(); i++) block[i] = static_cast<rtype>(std::bit_cast<double>(bits[i]));
+        write_dataset(point_data, field.name.c_str(), m.n_points, int(n_comp), m.first_point, block.size() / n_comp,
+                      block.data(), dxpl, deflate, serial, io_threads);
+        annotate(point_data, field.name, field.description);
+        snapshot_block::Field point{field.name, "", "", "", 0.0, snapshot_block::value::POINT_VALUE, {}};
+        if (snapshot_blocks) h5::cell_methods(point_data, field.name, snapshot_block::cell_methods(point));
+    }
 }
 
 #else
@@ -506,5 +454,7 @@ void DataWriter::write_vtkhdf(const std::string &, const Block &, const Values &
 }
 
 void DataWriter::build_vtkhdf_cells() {}
+
+void DataWriter::build_vtkhdf_view() {}
 
 #endif

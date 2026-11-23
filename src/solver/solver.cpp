@@ -2103,11 +2103,13 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
+    high_order_output.init(mesh, face_reconstruction.get(), is_mixture(), lagrange_view);
     if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
             add_data_writers(output, regions, async_output, io_threads);
         }
     }
+    high_order_output.setup();
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
         viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
         viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
@@ -2126,7 +2128,8 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                               uint32_t io_threads) {
     auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
         data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix,
+                                  subset ? nullptr : &lagrange_view);
         data_writers.back()->set_async(async_output, io_threads);
     };
     const bool one = output.contains("region"), several = output.contains("regions");
@@ -3538,11 +3541,15 @@ void Solver::write_data(bool force) {
     if (!any_due) {
         return;
     }
-    if (std::any_of(data_writers.begin(), data_writers.end(),
-                    [&](const auto & w) { return w->follows_solution() && (force || w->due(step, t)); })) {
+    const bool high_order = std::any_of(data_writers.begin(), data_writers.end(),
+                                        [&](const auto & w) { return w->high_order_due(step, t, force); });
+    if (high_order || std::any_of(data_writers.begin(), data_writers.end(), [&](const auto & w) {
+            return w->follows_solution() && (force || w->due(step, t));
+        })) {
         update_cell_W();
     }
     update_primitives();
+    if (high_order) high_order_output.update(*face_reconstruction, W_cells, physics);
     copy_device_to_host();
     write_outputs(force);
     if (snapshots) {

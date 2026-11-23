@@ -258,6 +258,21 @@ struct Plan {
     std::vector<std::string> conditional;  // the conditional statistics files
 };
 
+/** @brief Whether a whole-mesh snapshot entry of post also writes its high-order view (--high-order), and its files. */
+void high_order_option(Input::table_type & entry, const cli::Args & args, const std::string & format, Plan & plan) {
+    const std::string value = args.value_or("--high-order", "on");
+    if (value != "on" && value != "off") throw UsageError("--high-order takes on or off, not " + value);
+    if (args.has("--region")) {
+        if (args.has("--high-order") && value == "on") throw UsageError("--high-order applies to the whole mesh, not --region");
+        return;
+    }
+    entry["high_order"] = Input(value == "on");
+    if (value == "off") return;
+    const std::string view = plan.snapshot_prefix + "_high_order";
+    plan.files.push_back(view + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
+    plan.files.push_back(view + ".vtkhdf");
+}
+
 /**
  * @brief The case input of a run made to write only what is extracted: the probes chosen, written
  *        every time to the output directory, and the snapshots of --snapshot; no other output, no
@@ -362,9 +377,10 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
         entry["interval"] = Input(1);
         entry["format"] = Input(format);
         if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
-        top["write_data"] = Input(Input::array_type{Input(entry)});
         plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
         plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
+        high_order_option(entry, args, format, plan);
+        top["write_data"] = Input(Input::array_type{Input(entry)});
     }
     return plan;
 }
@@ -455,9 +471,10 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
     entry["interval"] = Input(1);
     entry["format"] = Input(format);
     if (args.has("--region")) entry["region"] = region_value(args.value_or("--region", ""));
-    top["write_data"] = Input(Input::array_type{Input(entry)});
     plan.files.push_back(plan.snapshot_prefix + (format == "vtkhdf" ? ".vtkhdf.series" : ".pvd"));
     plan.files.push_back(plan.snapshot_prefix + ".vtkhdf");
+    high_order_option(entry, args, format, plan);
+    top["write_data"] = Input(Input::array_type{Input(entry)});
     return plan;
 }
 

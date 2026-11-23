@@ -12,6 +12,7 @@
 #ifndef DATA_WRITER_H
 #define DATA_WRITER_H
 
+#include <algorithm>
 #include <deque>
 #include <functional>
 #include <future>
@@ -201,6 +202,32 @@ struct CellSubset {
 };
 
 /**
+ * @brief The high-order view of the snapshots (docs/design/high_order_output.md):
+ *        every owned cell as a VTK Lagrange cell of the reconstruction's
+ *        order with nodes of its own, and the fields that are functions of
+ *        the state at those nodes, from the reconstruction polynomials. The
+ *        solver sets order and fields, the writers add the fields they write
+ *        to requested, and the solver then fills the rest; the values before
+ *        each snapshot whose writer writes a view.
+ */
+struct LagrangeView {
+    uint32_t order = 0;                   // 0: the reconstruction has no polynomials, no view
+    std::string method;                   // the reconstruction, as snapshot blocks name it
+    std::vector<std::string> fields;      // those that can be written at the nodes
+    std::vector<std::string> requested;   // those the writers write there
+    std::vector<uint64_t> first_node;     // [owned cell in global-id order + 1]: where its nodes start
+    std::vector<rtype> points;            // [node][3]
+    std::vector<uint8_t> types;           // [owned cell in global-id order]: VTK cell type
+    /** @brief A requested field's values at the nodes, [node][1 or 3 components]. */
+    std::function<const rtype *(const std::string &)> values;
+
+    bool can_write(const std::string & name) const { return std::find(fields.begin(), fields.end(), name) != fields.end(); }
+    uint64_t n_nodes() const { return first_node.empty() ? 0 : first_node.back(); }
+    /** @brief Components of a field at the nodes: 3 for the vectors U and RHOU (z zero in 2D), else 1. */
+    static uint32_t components(const std::string & name) { return name == "U" || name == "RHOU" ? 3 : 1; }
+};
+
+/**
  * @brief Writes snapshots either every `interval` steps or every
  *        `time_interval` units of simulation time. Time-based writers also
  *        constrain the time step so that snapshots land exactly on output times.
@@ -224,13 +251,17 @@ class DataWriter {
          *        (default: CONSERVATIVE_NAMES); ignored for other formats.
          * @param subset Only these cells (vtkhdf and vtu), with their fractions as REGION_FRACTION.
          * @param prefix The files' prefix, if not the entry's.
+         * @param view The high-order view (vtkhdf and vtu of the whole mesh, with high_order): its
+         *        fields this writer writes are added to its requested ones, and each snapshot then
+         *        also writes the view as <prefix>_high_order.
          */
         void init(const Input & input,
                   std::vector<Data> & data,
                   std::shared_ptr<Mesh> mesh,
                   const std::vector<std::string> & restart_variables = {},
                   const CellSubset * subset = nullptr,
-                  const std::string & prefix = "");
+                  const std::string & prefix = "",
+                  LagrangeView * view = nullptr);
 
         /**
          * @brief Write files on a background thread ([output] async), and
@@ -239,6 +270,7 @@ class DataWriter {
         void set_async(bool async_in, unsigned n_threads = 1) {
             async = async_in;
             io_threads = n_threads;
+            if (high_order) high_order->set_async(async_in, n_threads);
         }
         bool is_async() const { return async; }
 
@@ -309,6 +341,19 @@ class DataWriter {
         /** @brief The output as the setup banner lists it. */
         OutputSummary summary() const;
 
+        /**
+         * @brief Bytes of a snapshot, uncompressed: its values, and its mesh where each snapshot repeats it
+         *        (collective on a distributed mesh).
+         */
+        double snapshot_bytes() const;
+
+        /** @brief Whether a write at (step, t) also writes the high-order view, whose values must then be current. */
+        bool high_order_due(uint64_t step, rtype t, bool force) const {
+            return high_order && (force || due(step, t)) && step != step_last;
+        }
+        /** @brief The writer of the high-order view, or null. */
+        const DataWriter * high_order_writer() const { return high_order.get(); }
+
         DataFormat get_format() const { return format; }
         /** @brief Whether its region follows the solution: a write reads the solution's cell values. */
         bool follows_solution() const { return subset_solution; }
@@ -324,13 +369,13 @@ class DataWriter {
         std::string set_time_interval(rtype value, rtype t, bool apply = true);
 
         /** @brief Seconds the run waited for output: copying snapshots, and for the previous one to be written. */
-        double blocking_seconds() const { return t_blocking; }
+        double blocking_seconds() const { return t_blocking + (high_order ? high_order->blocking_seconds() : 0.0); }
         /** @brief Seconds spent writing files (in the background when asynchronous); call after finish(). */
-        double writing_seconds() const { return t_writing; }
+        double writing_seconds() const { return t_writing + (high_order ? high_order->writing_seconds() : 0.0); }
         /** @brief Seconds spent hashing this rank's files for the run log, off the main thread; call after finish(). */
-        double hashing_seconds() const { return t_hashing; }
+        double hashing_seconds() const { return t_hashing + (high_order ? high_order->hashing_seconds() : 0.0); }
         /** @brief Seconds the run waited for room in the hashing queue: hashing falling behind writing. */
-        double hash_queue_seconds() const { return t_hash_queue; }
+        double hash_queue_seconds() const { return t_hash_queue + (high_order ? high_order->hash_queue_seconds() : 0.0); }
         /** @brief A file of this writer with its output record: complete. */
         struct Recorded {
             uint64_t step = 0;
@@ -340,7 +385,7 @@ class DataWriter {
         /** @brief The last file this writer recorded complete, if any. */
         const std::optional<Recorded> & last_recorded() const { return last_record; }
         /** @brief Bytes of this rank's snapshot files; call after finish(). */
-        uint64_t bytes_written() const { return n_bytes; }
+        uint64_t bytes_written() const { return n_bytes + (high_order ? high_order->bytes_written() : 0); }
 
     protected:
         /** @brief A snapshot's cell values: per field, its cells' components interleaved. */
@@ -362,6 +407,12 @@ class DataWriter {
 
         /** @brief The values of the first n_cells cells (by_id: of the owned cells by global id), or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;
+        /** @brief The high-order view's values: the cell fields' of the owned cells by global id, then the node fields'. */
+        Values capture_view() const;
+        /** @brief Set up as the writer of main's high-order view. */
+        void init_view(const DataWriter & main, LagrangeView & view_in);
+        /** @brief The VTKHDF mesh of the high-order view's cells, in global order (collective). */
+        void build_vtkhdf_view();
         /** @brief Run a write: in the background if async and allowed. @return whether in the background */
         bool run(std::function<void()> job, bool allow_async = true);
         /** @brief Start the output record of the snapshot about to be written. */
@@ -438,6 +489,11 @@ class DataWriter {
                 return i_comp < components.size() ? (*components[i_comp])[i_cell] : rtype(0);
             }
         };
+
+        // The high-order view: its writer, or as that writer the view and its fields at the nodes
+        std::unique_ptr<DataWriter> high_order;
+        const LagrangeView * view = nullptr;
+        std::vector<Field> node_fields;  // no components: their values come from view
 
         std::string prefix;
         uint64_t interval = 0;

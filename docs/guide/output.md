@@ -394,6 +394,75 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
 
+### High-order view
+
+A TENO run knows more than its cell averages: inside each cell, the
+reconstruction's central polynomial of degree `order - 1`. Each whole-mesh
+`vtkhdf` or `vtu` snapshot writer of a TENO run also writes that, as the
+**high-order view** `PREFIX_high_order...`, beside its own files, in the same
+format and layout (`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and
+its `.vtu` files). Each cell is a VTK Lagrange cell of the polynomials'
+degree (order 3: quadratic, order 5: quartic), and its nodes hold the fields
+the entry writes from the polynomial: `RHO`, `RHOU`, `RHOE`, `U`, `P`, `T`,
+`H`, `MACH` and their components, from the point values of the conservative
+variables. Other fields (`TENO_SIGMA`, `CFL`, statistics, ...) are cell data
+of the view, so one file shows them all. Open `PREFIX_high_order.vtkhdf` (or
+`.pvd`) in ParaView and raise **Nonlinear Subdivision Level** (Properties,
+advanced) to 2 or 3 to draw each cell's polynomial instead of its corners.
+
+![The same TENO order 5 snapshot of a density bump on a coarse mesh of quadrilaterals and triangles: flat cell averages, and the high-order view, smooth inside each cell](../images/guide/high-order-view-light.svg#gh-light-mode-only)
+![The same TENO order 5 snapshot of a density bump on a coarse mesh of quadrilaterals and triangles: flat cell averages, and the high-order view, smooth inside each cell](../images/guide/high-order-view-dark.svg#gh-dark-mode-only)
+
+The solution files are unchanged, byte for byte, and restart files stay cell
+averages: nothing reads the view back. Its nodes are not shared between
+cells, so the jumps between neighbors' polynomials, the scheme's own
+discontinuities, stay visible. Troubled cells, and cells whose polynomial
+leaves the admissible states, hold their averages at every node, as
+[probes](probes.md) with `sampling = "point"` do; the view's
+[snapshot block](#snapshot-metadata) says so (`value = "point_value"`, with
+the reconstruction and its fallback). Triangles, quadrilaterals,
+tetrahedra, hexahedra and prisms are Lagrange cells of their shape; pyramids
+are Lagrange hexahedra with their top face collapsed to the apex, which every
+VTK reader draws (VTK 9 has no Lagrange pyramid); VTK's point location is
+unreliable in such degenerate cells, so probing and resampling filters miss
+or misplace points inside pyramids. On straight cells the drawn field is the polynomial
+exactly; on curved cells it is exact at the nodes. Rationale, node orderings
+and costs: [design note](../design/high_order_output.md).
+
+**Use it to look, not to measure.** ParaView's filters on the view (contours,
+slices, integrals, plots over lines) act on the values at the nodes and VTK's
+interpolation between them, not on the cell averages the solver conserves;
+take quantitative results from [probes](probes.md) (`sampling = "point"` for
+the same point values), [`[integrals]`](statistics.md) and
+[statistics](statistics.md), or from the solution files.
+
+**Size.** The view holds `(p+1)^2` (2D quadrilaterals) or `(p+1)^3` (hexahedra)
+nodes per cell for degree `p`, each with its coordinates: at order 5 about 25
+times a 2D snapshot of the same fields, 125 times in 3D. `mallard check`
+prints each entry's bytes per snapshot, with and without the view, in its
+**Output** section, and warns (`W-OUTPUT-SIZE`) above 10 GB per snapshot.
+`high_order = false` in an entry writes the cell values alone:
+
+```toml
+[[write_data]]
+prefix = "solut/flow"
+interval = 500
+fields = ["RHO", "U", "P"]
+high_order = false   # cell values only
+```
+
+For a run written with it off, `mallard post derive` writes the view
+afterwards (on by default; `--high-order off` leaves it out). From restart
+files, which hold the cell averages, it is the view the run would have
+written:
+
+```sh
+mallard post derive solut/restart_000500.restart --fields MACH --with-state -o view
+```
+
+MUSCL and first-order runs have no polynomial beyond the average and write no
+view; nor do `xdmf`, restart, region and boundary writers.
+
 ### Snapshots of regions
 
 Large runs need the whole field rarely and a few planes, a near field or the

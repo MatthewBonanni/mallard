@@ -139,7 +139,8 @@ void DataWriter::init(const Input & input,
                       std::shared_ptr<Mesh> mesh_in,
                       const std::vector<std::string> & restart_variables,
                       const CellSubset * cell_subset,
-                      const std::string & prefix_in) {
+                      const std::string & prefix_in,
+                      LagrangeView * view_in) {
     if (!input.contains("prefix")) {
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
@@ -358,7 +359,53 @@ void DataWriter::init(const Input & input,
         }
     }
 
+    const bool whole_mesh = !cell_subset && (format == DataFormat::VTU || format == DataFormat::VTKHDF);
+    if (input.contains("high_order") && !whole_mesh) {
+        throw InputError({.key = "write_data.high_order",
+                          .line = line_of(input, "high_order"),
+                          .message = "is for vtkhdf and vtu snapshots of the whole mesh",
+                          .fix = "Remove high_order here: restart and xdmf files and regions hold cell values",
+                          .docs = "docs/guide/output.md#high-order-view"});
+    }
+    if (whole_mesh && find_value_or<bool>(input, "high_order", true) && view_in && view_in->order > 0 &&
+        std::ranges::any_of(fields, [&](const Field & f) { return view_in->can_write(f.name); })) {
+        high_order = std::make_unique<DataWriter>();
+        high_order->init_view(*this, *view_in);
+    }
+
     if (output_files_enabled()) create_parent_directories("the output", prefix);
+}
+
+void DataWriter::init_view(const DataWriter & main, LagrangeView & view_in) {
+    view = &view_in;
+    prefix = main.prefix + "_high_order";
+    interval = main.interval;
+    time_interval = main.time_interval;
+    format = main.format;
+    mesh = main.mesh;
+    owned_by_id = main.owned_by_id;
+    one_file = main.one_file;
+    compression = main.compression;
+    relative_error = main.relative_error;
+    for (const Field & field : main.fields) {
+        if (!view_in.can_write(field.name)) {
+            fields.push_back(field);
+            continue;
+        }
+        node_fields.push_back(Field{field.name, {}, field.description});
+        if (std::ranges::find(view_in.requested, field.name) == view_in.requested.end()) {
+            view_in.requested.push_back(field.name);
+        }
+    }
+}
+
+DataWriter::Values DataWriter::capture_view() const {
+    Values values = capture(mesh->n_owned(), false, true);
+    for (const Field & field : node_fields) {
+        const rtype * v = view->values(field.name);
+        values.emplace_back(v, v + view->n_nodes() * LagrangeView::components(field.name));
+    }
+    return values;
 }
 
 void DataWriter::stage_subset(const Kokkos::View<const rtype> & time) {
@@ -401,6 +448,9 @@ OutputSummary DataWriter::summary() const {
         for (const auto & field : fields) names += (names.empty() ? "" : ", ") + field.name;
         parts.push_back(names);
     }
+    if (high_order) {
+        parts.push_back("high-order view " + high_order->index_file() + " (order " + std::to_string(high_order->view->order) + ")");
+    }
     std::string contents;
     for (const std::string & part : parts) contents += (contents.empty() ? "" : "; ") + part;
     return {.kind = FORMAT_NAMES.at(format),
@@ -408,6 +458,23 @@ OutputSummary DataWriter::summary() const {
             .steps = interval,
             .seconds = interval > 0 ? 0.0 : double(time_interval),
             .contents = contents};
+}
+
+double DataWriter::snapshot_bytes() const {
+    const uint32_t n_out = subset ? static_cast<uint32_t>(subset_cells.size()) : mesh->n_owned();
+    uint64_t ids = 0;
+    for (uint32_t k = 0; k < n_out; k++) ids += mesh->h_n_nodes_of_cell(subset ? subset_cells[k] : k);
+    const bool distributed = mesh->n_global_cells > 0;
+    std::array<uint64_t, 2> counts = {n_out, view ? view->n_nodes() : ids};
+    if (distributed && comm::size() > 1) counts = comm::allreduce(counts, comm::Op::SUM);
+    const double cells = double(counts[0]);
+    const double points = view ? double(counts[1]) : double(distributed ? mesh->n_global_nodes : mesh->n_nodes);
+    double values = 0.0;
+    for (const Field & field : fields) values += cells * (format == DataFormat::RESTART ? 1 : field.n_vtk_components());
+    for (const Field & field : node_fields) values += points * LagrangeView::components(field.name);
+    const double mesh_bytes = 3.0 * points * sizeof(rtype) + double(counts[1]) * 8.0 + cells * 9.0;
+    const bool repeated = format == DataFormat::VTU || (format == DataFormat::VTKHDF && !one_file);
+    return values * sizeof(rtype) + (repeated ? mesh_bytes : 0.0);
 }
 
 std::string DataWriter::index_file() const {
@@ -571,6 +638,7 @@ void DataWriter::finish() {
     hash_written();
     record_hashed(true);
     t_blocking += seconds_since(start);
+    if (high_order) high_order->finish();
 }
 
 void DataWriter::publish_restart(bool wait) {
@@ -716,8 +784,8 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
                 if (mesh_file) in_flight->hash.push_back({vtkhdf_mesh_file(), vtkhdf_mesh_file(), true, collective});
                 in_flight->hash.push_back({filename, filename, true, collective});
             }
-            auto job = [this, filename, block, root, mesh_file, values = capture(mesh->n_owned(), subset),
-                        list = history]() {
+            auto job = [this, filename, block, root, mesh_file,
+                        values = view ? capture_view() : capture(mesh->n_owned(), subset), list = history]() {
                 write_vtkhdf(filename, block, values);
                 if (root) {
                     publish_file("the VTKHDF file", filename);
@@ -746,7 +814,8 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             in_flight->hash.push_back({piece.str() + ".vtu", piece.str() + ".vtu"});
             if (distributed && root) in_flight->hash.push_back({filename, filename});
             auto job = [this, piece = piece.str() + ".vtu", filename, stem, block, root, distributed, n_ranks,
-                        values = capture(mesh->n_owned(), subset, true), series = history]() mutable {
+                        values = view ? capture_view() : capture(mesh->n_owned(), subset, true),
+                        series = history]() mutable {
                 write_vtu(partial_name(piece), block, values);
                 publish_file("the snapshot", piece);
                 n_bytes += file_bytes(piece);
@@ -767,6 +836,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
     t_last = t;
     n_files++;
     t_blocking += seconds_since(start);
+    if (high_order) high_order->write(step, t, force);
 }
 
 DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) const {
@@ -783,12 +853,18 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
         }
         list.push_back(std::move(f));
     }
+    for (const auto & field : node_fields) {
+        list.push_back({field.name, field.description.units(), field.description.long_name, stored, relative_error,
+                        snapshot_block::value::POINT_VALUE, {}});
+    }
     const int64_t version = format == DataFormat::RESTART  ? file_format::RESTART.version
                             : format == DataFormat::HDF5   ? file_format::HDF5_OUTPUT.version
                             : format == DataFormat::VTKHDF ? file_format::VTKHDF_OUTPUT.version
                                                            : file_format::VTU_OUTPUT.version;
-    return snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
-                                version, std::move(list));
+    Block block = snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
+                                       version, std::move(list));
+    if (view) block.reconstruction = {view->method, int(view->order) + 1, {"cell_average"}};
+    return block;
 }
 
 std::string DataWriter::cell_methods(const std::string & name) const {
@@ -804,6 +880,7 @@ std::string DataWriter::set_interval(uint64_t steps, const bool apply) {
     if (steps == 0) return "interval must be positive";
     if (!apply) return "";
     interval = steps;
+    if (high_order) high_order->interval = steps;
     return "";
 }
 
@@ -813,6 +890,7 @@ std::string DataWriter::set_time_interval(rtype value, rtype t, const bool apply
     if (!apply) return "";
     time_interval = value;
     n_written = static_cast<uint64_t>(std::floor(t / time_interval + precision_tol(1e-9, 1e-5))) + 1;
+    if (high_order) high_order->set_time_interval(value, t);
     return "";
 }
 
@@ -839,6 +917,11 @@ void DataWriter::resume(uint64_t step, rtype t, const double * n_before) {
         resume_pvd(t);
     }
     n_snapshots = history.size();
+    if (high_order) {
+        // Numbered with the snapshots, whose count the restart files keep
+        high_order->resume(step, t);
+        high_order->n_snapshots = std::max(n_snapshots, n_before ? static_cast<uint64_t>(*n_before) : 0);
+    }
     if (!n_before || static_cast<uint64_t>(*n_before) <= n_snapshots) return;
     // The index lost entries: never overwrite a snapshot still on disk
     n_snapshots = static_cast<uint64_t>(*n_before);
@@ -1686,6 +1769,15 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
     out << "<VTKFile type=\"PUnstructuredGrid\" version=\"1.0\" byte_order=\"" << endianness()
         << "\" header_type=\"UInt64\">\n";
     out << "  <PUnstructuredGrid GhostLevel=\"0\">\n";
+    if (!node_fields.empty()) {
+        out << "    <PPointData>\n";
+        for (const auto & field : node_fields) {
+            out << "      <PDataArray type=\"" << vtk_float_type() << "\" Name=\"" << field.name << "\"";
+            if (LagrangeView::components(field.name) > 1) out << " NumberOfComponents=\"3\"";
+            out << "/>\n";
+        }
+        out << "    </PPointData>\n";
+    }
     out << "    <PCellData>\n";
     for (const auto & field : fields) {
         out << "      <PDataArray type=\"" << vtk_float_type() << "\" Name=\"" << field.name << "\"";
@@ -1704,9 +1796,11 @@ void DataWriter::write_pvtu(const std::string & filename, const std::string & st
 std::string DataWriter::vtu_field_data(const Block & block) const {
     std::vector<std::string> names;
     std::vector<FieldDescription> descriptions;
-    for (const auto & field : fields) {
-        names.push_back(field.name);
-        descriptions.push_back(field.description);
+    for (const auto & list : {&fields, &node_fields}) {
+        for (const auto & field : *list) {
+            names.push_back(field.name);
+            descriptions.push_back(field.description);
+        }
     }
     std::ostringstream out;
     out << std::setprecision(17);
@@ -1787,6 +1881,16 @@ void DataWriter::write_vtu(const std::string & filename, const Block & block, Va
     // every snapshot, so compressed ones are kept
     std::vector<std::vector<char>> mesh_arrays;
     std::vector<std::vector<char>> & arrays = zlib ? vtu_mesh : mesh_arrays;
+    if (arrays.empty() && view) {
+        // The high-order view: every cell's nodes its own, in the cells' order
+        std::vector<int64_t> connectivity(view->n_nodes()), offsets(view->first_node.begin() + 1, view->first_node.end());
+        std::iota(connectivity.begin(), connectivity.end(), int64_t(0));
+        vtu_points = view->n_nodes();
+        arrays = {as_bytes(view->points), as_bytes(connectivity), as_bytes(offsets), as_bytes(view->types)};
+        if (zlib) {
+            for (auto & array : arrays) array = vtu_zlib_array(array.data(), array.size(), io_threads);
+        }
+    }
     if (arrays.empty()) {
         // A subset's points are the nodes of its cells
         std::vector<int64_t> point_of(mesh->n_nodes, subset ? -1 : 0);
@@ -1851,6 +1955,14 @@ void DataWriter::write_vtu(const std::string & filename, const Block & block, Va
     out << "  <UnstructuredGrid>\n";
     out << vtu_field_data(block);
     out << "    <Piece NumberOfPoints=\"" << vtu_points << "\" NumberOfCells=\"" << n_out << "\">\n";
+    if (!node_fields.empty()) {
+        out << "      <PointData>\n";
+        for (size_t f = 0; f < node_fields.size(); f++) {
+            data_array(vtk_float_type(), node_fields[f].name, LagrangeView::components(node_fields[f].name),
+                       appended_size(fields.size() + f, nullptr));
+        }
+        out << "      </PointData>\n";
+    }
     out << "      <CellData>\n";
     for (size_t f = 0; f < fields.size(); f++) {
         data_array(vtk_float_type(), fields[f].name, fields[f].n_vtk_components(), appended_size(f, nullptr));
@@ -1872,13 +1984,15 @@ void DataWriter::write_vtu(const std::string & filename, const Block & block, Va
         if (!zlib) out.write(reinterpret_cast<const char *>(&n_bytes_in), sizeof(header_t));
         out.write(static_cast<const char *>(data), static_cast<std::streamsize>(n_bytes_in));
     };
-    for (size_t f = 0; f < fields.size(); f++) {
+    const auto append_field = [&](size_t f) {
         if (zlib) {
             append(field_arrays[f].data(), field_arrays[f].size());
         } else {
             append(values[f].data(), values[f].size() * sizeof(rtype));
         }
-    }
+    };
+    for (size_t f = 0; f < node_fields.size(); f++) append_field(fields.size() + f);
+    for (size_t f = 0; f < fields.size(); f++) append_field(f);
     for (const auto & array : arrays) append(array.data(), array.size());
 
     out << "\n  </AppendedData>\n";
