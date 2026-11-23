@@ -421,7 +421,41 @@ void Mesh::make_axisymmetric() {
         for (uint32_t f = 0; f < n_faces; f++) {
             h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
         }
+        if (curved_geometry) revolve_curved();
         axisymmetric = true;
+    }
+}
+
+void Mesh::revolve_curved() {
+    const curved::Geometry & geometry = *curved_geometry;
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        if (!geometry.cell_is_curved(c)) continue;
+        // Second moments times r: cubic integrands
+        geometry.cell_rule(c, 3, x, w);
+        double I_y = 0.0, m[2] = {0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1];
+            I_y += wr;
+            m[0] += wr * x[q][0];
+            m[1] += wr * x[q][1];
+        }
+        const double xc = m[0] / I_y, yc = m[1] / I_y;
+        double C[3] = {0.0, 0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1], dx = x[q][0] - xc, dy = x[q][1] - yc;
+            C[0] += wr * dx * dx;
+            C[1] += wr * dx * dy;
+            C[2] += wr * dy * dy;
+        }
+        h_cell_measure(c) = rtype(I_y);
+        h_cell_coords(c, 0) = rtype(xc);
+        h_cell_coords(c, 1) = rtype(yc);
+        for (int k = 0; k < 3; k++) h_cell_covariance(c, k) = rtype(C[k] / I_y);
+    }
+    for (uint32_t f = 0; f < n_faces; f++) {
+        if (geometry.face_is_curved(f)) h_face_measure(f) = rtype(geometry.revolved_area(f));
     }
 }
 
@@ -736,7 +770,28 @@ void Mesh::copy_host_to_device() {
     }
 }
 
+namespace {
+
+/**
+ * @brief Bytes of v that a device build frees when the mesh drops it but a
+ *        host build keeps: there its host mirror h is the same allocation, and
+ *        no kernel holds a view of its own (the two handles are all there are).
+ */
+template <typename View, typename Mirror>
+uint64_t kept_on_the_host(const View & v, const Mirror & h) {
+    if (!v.is_allocated() || v.data() != h.data() || v.use_count() != 2) return 0;
+    return uint64_t(v.span()) * sizeof(typename View::value_type);
+}
+
+} // namespace
+
 void Mesh::release_setup_data() {
+    released_on_devices = kept_on_the_host(node_coords, h_node_coords) +
+                          kept_on_the_host(nodes_of_cell, h_nodes_of_cell) +
+                          kept_on_the_host(offsets_nodes_of_cell, h_offsets_nodes_of_cell) +
+                          kept_on_the_host(nodes_of_face, h_nodes_of_face) +
+                          kept_on_the_host(offsets_nodes_of_face, h_offsets_nodes_of_face);
+    for (const auto & zone : m_face_zones) released_on_devices += kept_on_the_host(zone.faces, zone.h_faces);
     node_coords = {};
     nodes_of_cell = {};
     offsets_nodes_of_cell = {};
