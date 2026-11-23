@@ -928,6 +928,12 @@ class Solver {
 
     protected:
         void init_mesh();
+        /**
+         * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
+         *        covariances. A curved cell's rule sums over its faces as the local mesh orients them, which
+         *        differs in the outermost halo layer, and so rounds differently (collective among neighbors).
+         */
+        void exchange_halo_geometry();
         /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);
@@ -1224,6 +1230,8 @@ class Solver {
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
+        void revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights);
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
@@ -1408,6 +1416,9 @@ class Solver {
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
         FaceWeights<> flux_weights;
+        // Unit normals of the convective flux points, (face, q, dim): curved meshes, else empty.
+        // The face reconstruction's, but r-weighted on curved faces of axisymmetric runs
+        Kokkos::View<rtype ***> flux_normals;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
