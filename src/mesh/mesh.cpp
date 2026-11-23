@@ -753,7 +753,28 @@ void Mesh::copy_host_to_device() {
     }
 }
 
+namespace {
+
+/**
+ * @brief Bytes of v that a device build frees when the mesh drops it but a
+ *        host build keeps: there its host mirror h is the same allocation, and
+ *        no kernel holds a view of its own (the two handles are all there are).
+ */
+template <typename View, typename Mirror>
+uint64_t kept_on_the_host(const View & v, const Mirror & h) {
+    if (!v.is_allocated() || v.data() != h.data() || v.use_count() != 2) return 0;
+    return uint64_t(v.span()) * sizeof(typename View::value_type);
+}
+
+} // namespace
+
 void Mesh::release_setup_data() {
+    released_on_devices = kept_on_the_host(node_coords, h_node_coords) +
+                          kept_on_the_host(nodes_of_cell, h_nodes_of_cell) +
+                          kept_on_the_host(offsets_nodes_of_cell, h_offsets_nodes_of_cell) +
+                          kept_on_the_host(nodes_of_face, h_nodes_of_face) +
+                          kept_on_the_host(offsets_nodes_of_face, h_offsets_nodes_of_face);
+    for (const auto & zone : m_face_zones) released_on_devices += kept_on_the_host(zone.faces, zone.h_faces);
     node_coords = {};
     nodes_of_cell = {};
     offsets_nodes_of_cell = {};
