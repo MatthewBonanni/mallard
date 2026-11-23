@@ -122,29 +122,48 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     Variance variance = Variance::NONE;
     double C_Z = 0.1, C_chi = 2.0;
     if (les) {
-        const std::string name = find_value_or<std::string>(physics, "variance", "algebraic");
-        if (name != "algebraic" && name != "transported") {
-            throw not_accepted(physics, "physics.variance", name, {"algebraic", "transported"});
+        // A thickened flame resolves the flame on the mesh: its lookups are at zero subgrid variance
+        const bool thickened = input.at("les").contains("combustion");
+        const std::string name = thickened && !physics.contains("variance")
+                                     ? "none"
+                                     : find_value_or<std::string>(physics, "variance", "algebraic");
+        if (name != "none" && name != "algebraic" && name != "transported") {
+            throw not_accepted(physics, "physics.variance", name, {"none", "algebraic", "transported"});
+        }
+        if (thickened && name != "none") {
+            throw InputError({.key = "physics.variance",
+                              .line = line_of(physics, "variance"),
+                              .message = "variance = \"" + name + "\" does not combine with [les.combustion]: the "
+                                         "thickened flame is resolved on the mesh, so the table is looked up at zero "
+                                         "subgrid variance of Z",
+                              .fix = "Remove variance (\"none\" is the default with [les.combustion]), or remove "
+                                     "[les.combustion]",
+                              .docs = "docs/guide/flamelet.md#thickened-flames"});
         }
         const bool transported = name == "transported";
-        const char * other = transported ? "C_Z" : "C_chi";
-        if (physics.contains(other)) {
-            throw InputError({.key = std::string("physics.") + other,
-                              .line = line_of(physics, other),
-                              .message = std::string("is a constant of variance = \"") +
-                                         (transported ? "algebraic" : "transported") + "\", not of \"" + name + "\"",
-                              .fix = std::string("Remove ") + other,
-                              .docs = "docs/guide/flamelet.md"});
+        for (const char * key : {"C_Z", "C_chi"}) {
+            const bool own = std::string(key) == (transported ? "C_chi" : "C_Z");
+            if ((name == "none" || !own) && physics.contains(key)) {
+                throw InputError({.key = std::string("physics.") + key,
+                                  .line = line_of(physics, key),
+                                  .message = std::string("is a constant of variance = \"") +
+                                             (std::string(key) == "C_Z" ? "algebraic" : "transported") +
+                                             "\", not of \"" + name + "\"",
+                                  .fix = std::string("Remove ") + key,
+                                  .docs = "docs/guide/flamelet.md"});
+            }
         }
-        variance = transported ? Variance::TRANSPORTED : Variance::ALGEBRAIC;
-        const char * key = transported ? "C_chi" : "C_Z";
-        double & constant = transported ? C_chi : C_Z;
-        constant = static_cast<double>(find_real_or(physics, key, dim::none, static_cast<rtype>(constant)));
-        if (!(transported ? constant > 0.0 : constant >= 0.0)) {
-            throw InputError({.key = std::string("physics.") + key,
-                              .line = line_of(physics, key),
-                              .message = transported ? "must be positive" : "must not be negative",
-                              .docs = "docs/guide/flamelet.md"});
+        if (name != "none") {
+            variance = transported ? Variance::TRANSPORTED : Variance::ALGEBRAIC;
+            const char * key = transported ? "C_chi" : "C_Z";
+            double & constant = transported ? C_chi : C_Z;
+            constant = static_cast<double>(find_real_or(physics, key, dim::none, static_cast<rtype>(constant)));
+            if (!(transported ? constant > 0.0 : constant >= 0.0)) {
+                throw InputError({.key = std::string("physics.") + key,
+                                  .line = line_of(physics, key),
+                                  .message = transported ? "must be positive" : "must not be negative",
+                                  .docs = "docs/guide/flamelet.md"});
+            }
         }
     }
     std::shared_ptr<const Table> table;
@@ -162,6 +181,7 @@ FlameletModel FlameletModel::from_input(const Input & input) {
     FlameletModel model(table, type == "navier_stokes");
     model.m_file = file;
     model.m_variance = variance;
+    model.m_les = les;
     model.m_C_Z = C_Z;
     model.m_C_chi = C_chi;
     model.gas.second_moment = model.host_gas.second_moment = variance == Variance::TRANSPORTED;
@@ -220,6 +240,8 @@ report::Summary FlameletModel::summary() const {
     } else if (m_variance == Variance::TRANSPORTED) {
         s.setting("Subgrid variance", "transported second moment Z2, chi_sgs = C_chi (D + D_t) Zvar / Delta^2 with "
                                       "C_chi = " + logging::real(m_C_chi));
+    } else if (m_les) {
+        s.setting("Subgrid variance", "none: lookups at zero variance of Z (Sz = 0)");
     }
     return s;
 }
