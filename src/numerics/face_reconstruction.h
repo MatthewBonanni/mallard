@@ -215,19 +215,22 @@ class FaceReconstruction {
          *        offsets.extent(0) / cells.extent(0) points per cell, for cells
          *        the scheme deems smooth and where the value is admissible;
          *        out(i) of other points is left as it is.
+         * @param select_troubled Output (probes, snapshots): troubled cells too, from the
+         *        polynomial the scheme's stencil selection would choose for the
+         *        whole cell, except where that falls back to the cell mean.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
         virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                   Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, bool /*select_troubled*/) {
             return false;
         }
 
         /**
-         * @brief As point_values, with the gradients of W at the points from
-         *        the derivatives of the same polynomials: where point_values
-         *        writes out(i), also gradients(i) and exact(i) = 1; other
+         * @brief As point_values for output (select_troubled), with the gradients
+         *        of W at the points from the derivatives of the same polynomials:
+         *        where point_values writes out(i), also gradients(i) and exact(i) = 1; other
          *        points are left as they are.
          * @return Whether the scheme has such polynomials (nothing written otherwise).
          */
@@ -477,7 +480,8 @@ class TENO : public FaceReconstruction {
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                          bool select_troubled) override;
         bool point_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                              Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
                              Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients,
@@ -692,8 +696,8 @@ class TENO : public FaceReconstruction {
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                            Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
-                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients = {},
-                           Kokkos::View<uint8_t *> exact = {});
+                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact,
+                           bool select_troubled);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);

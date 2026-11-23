@@ -2346,8 +2346,10 @@ struct TENOFunctor {
         store_gradients(i_cell, dU);
     }
 
-    // PointPass (probes, transmissive boundaries)
+    // PointPass (transmissive boundaries, particles) and OutputPointPass (output: probes, the high-order
+    // view), which also gives troubled cells a polynomial (troubled_point_polynomial)
     struct PointPass {};
+    struct OutputPointPass {};
     Kokkos::View<uint32_t *> point_cells{};
     uint32_t n_direct_rows = 0;            // TENO::n_direct_rows
     Kokkos::View<uint32_t *> extra_cells{};  // TENO::extra_cells
@@ -2357,12 +2359,20 @@ struct TENOFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> point_dW{};
     Kokkos::View<uint8_t *> point_exact{};
 
-    /**
-     * @brief W at the points of a cell from its central polynomial, if the
-     *        cell is smooth by SmoothPass's measure and the value admissible.
-     */
     KOKKOS_INLINE_FUNCTION
-    void operator()(PointPass, const uint32_t k) const {
+    void operator()(PointPass, const uint32_t k) const { cell_points<false>(k); }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(OutputPointPass, const uint32_t k) const { cell_points<true>(k); }
+
+    /**
+     * @brief W at the points of a cell from its central polynomial, if the cell is smooth by
+     *        SmoothPass's measure (with TROUBLED, troubled cells from troubled_point_polynomial),
+     *        where the value is admissible.
+     */
+    template <bool TROUBLED>
+    KOKKOS_INLINE_FUNCTION
+    void cell_points(const uint32_t k) const {
         const uint32_t i_cell = point_cells(k);
         uint32_t i_row = i_cell;
         if (i_cell >= n_direct_rows) {
@@ -2401,7 +2411,13 @@ struct TENOFunctor {
             }
         }
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
-        if (sigma >= sigma_threshold) return;
+        if (sigma >= sigma_threshold) {
+            if constexpr (!TROUBLED) {
+                return;
+            } else {
+                if (i_row != i_cell || !troubled_point_polynomial(k, i_cell, sigma, U0, aK)) return;
+            }
+        }
         const rtype h = scale(i_row);
         const uint32_t row = cell_shape(i_row);
         const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
@@ -2447,6 +2463,99 @@ struct TENOFunctor {
             }
             point_exact(p) = 1;
         }
+    }
+
+    /**
+     * @brief For output, the polynomial of troubled cell i_cell (the points of point_cells(k)), whose
+     *        central coefficients aK holds, into aK: per conservative variable, the one TENO's
+     *        selection would choose for the whole cell, by the flux's smoothness indicators, weights
+     *        and cutoff: the central polynomial where it passes the cutoff, else the mean of the
+     *        sectors that do. The flux selects per face and per characteristic variable, so this
+     *        is exact wherever the central polynomial passes. With bound_preserving, the deviation
+     *        from the mean is scaled as the flux's is, by the values at the points. False where the
+     *        polynomial is not admissible at a face point, where the flux falls back to the mean,
+     *        and without sector stencils.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool troubled_point_polynomial(const uint32_t k, const uint32_t i_cell, const rtype sigma, const rtype * U0,
+                                   rtype (&aK)[NK][N_CONSERVATIVE]) const {
+        if (stencil_small_size.extent(0) == 0) return false;
+        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
+        bool valid[teno::MAX_FACES] = {};
+        rtype aS[teno::MAX_FACES][teno::NK_SMALL][N_CONSERVATIVE];
+        for (uint8_t s = 0; s < n_faces; s++) {
+            valid[s] = stencil_small_size(i_cell, s) > 0;
+            if (valid[s]) sector_coefficients(i_cell, s, U0, aS[s]);
+        }
+        const uint32_t row = cell_shape(i_cell);
+        const rtype cutoff = cutoff_of(sigma);
+        auto choose = [&](const auto & S) {
+            for (uint8_t v = 0; v < N_CONSERVATIVE; v++) {
+                rtype c[NK];
+                for (uint8_t l = 0; l < NK; l++) c[l] = aK[l][v];
+                const rtype si_K = smoothness<NK>(c, S) + SI_EPS;
+                rtype si_small[teno::MAX_FACES] = {};
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (!valid[s]) continue;
+                    for (uint8_t l = 0; l < teno::NK_SMALL; l++) c[l] = aS[s][l][v];
+                    si_small[s] = smoothness<teno::NK_SMALL>(c, S) + SI_EPS;
+                }
+                rtype w_small[teno::MAX_FACES];
+                if (select_stencils(si_K, si_small, valid, n_faces, cutoff, ANY_FACE, w_small)) continue;
+                for (uint8_t l = 0; l < NK; l++) aK[l][v] = 0.0;
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (w_small[s] == 0.0_r) continue;
+                    for (uint8_t l = 0; l < teno::NK_SMALL; l++) aK[l][v] = fmadd(w_small[s], aS[s][l][v], aK[l][v]);
+                }
+            }
+        };
+        if constexpr (N_DIM == 2) {
+            choose([&](const uint32_t e) { return si_matrix(row, e); });
+        } else {
+            rtype S[N_SI];
+            for (uint32_t e = 0; e < N_SI; e += SI_GROUP) si_terms.entries<SI_GROUP>(e, N_SI, &moments(row, 0), S);
+            choose([&](const uint32_t e) { return S[e]; });
+        }
+        auto value_at = [&](const rtype * psi, rtype * U) {
+            FOR_I_CONSERVATIVE U[i] = U0[i];
+            for (uint8_t l = 0; l < NK; l++) {
+                FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l], U[i]);
+            }
+        };
+        if (bound_preserving) {
+            rtype W0[N_CONSERVATIVE], lo[2], hi[2];
+            FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
+            bound_range(i_cell, W0, lo, hi);
+            rtype theta = 1.0;
+            const rtype h = scale(i_cell);
+            const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
+            for (uint32_t p = k * m; p < (k + 1) * m; p++) {
+                rtype xi[N_DIM], psi[NK], U[N_CONSERVATIVE], Wq[N_CONSERVATIVE];
+                FOR_I_DIM xi[i] = point_offsets(p, i) / h;
+                teno::monomials(DEG, xi, psi);
+                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
+                value_at(psi, U);
+                to_primitives(U, Wq);
+                bound_theta(Wq, W0, lo, hi, theta);
+            }
+            if (theta < 1.0_r) {
+                theta = Kokkos::fmax(0.0_r, theta);
+                for (uint8_t l = 0; l < NK; l++) FOR_I_CONSERVATIVE aK[l][i] *= theta;
+            }
+        }
+        const uint8_t n_quad = this->n_quad();
+        for (uint8_t j = 0; j < n_faces; j++) {
+            const uint32_t f = faces_of_cell(f_begin + j);
+            for (uint8_t q = 0; q < n_quad; q++) {
+                rtype psi[NK], U[N_CONSERVATIVE], Wq[N_CONSERVATIVE];
+                if (!face_point_basis(f, q, i_cell, psi)) continue;
+                value_at(psi, U);
+                to_primitives(U, Wq);
+                if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) return false;
+            }
+        }
+        return true;
     }
 
     // Block shapes of the cells of structured blocks: their central stencils by offsets
@@ -2885,21 +2994,16 @@ struct TENOFunctor {
         return si;
     }
 
-    /** @brief Coefficients of the sector stencil s of queued cell j. */
+    /** @brief Coefficients aS of the sector stencil s of the cell of table row i_row, whose conservatives are U0. */
     KOKKOS_INLINE_FUNCTION
-    void troubled_sector(const uint32_t j, const uint8_t s) const {
-        const uint32_t i_cell = troubled_cells(j);
-        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
-        if (s >= offsets_faces_of_cell(i_cell + 1) - f_begin) return;
-        const uint16_t n_small = stencil_small_size(i_cell, s);
-        if (n_small == 0) return;
-        rtype U0[N_CONSERVATIVE];
-        conservatives(i_cell, U0);
-        rtype aS[teno::NK_SMALL][N_CONSERVATIVE] = {};
+    void sector_coefficients(const uint32_t i_row, const uint8_t s, const rtype * U0,
+                             rtype (&aS)[teno::NK_SMALL][N_CONSERVATIVE]) const {
+        for (uint8_t l = 0; l < teno::NK_SMALL; l++) FOR_I_CONSERVATIVE aS[l][i] = 0.0;
+        const uint16_t n_small = stencil_small_size(i_row, s);
         // The cell's sector stencils are stored one after another
         uint16_t start = 0;
-        for (uint8_t t = 0; t < s; t++) start += stencil_small_size(i_cell, t);
-        const auto stencil = stencil_small.template row<TABLE>(i_cell);
+        for (uint8_t t = 0; t < s; t++) start += stencil_small_size(i_row, t);
+        const auto stencil = stencil_small.template row<TABLE>(i_row);
         for (uint16_t e = 0; e < n_small; e++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(start + e), stencil.face(start + e), U);
@@ -2908,9 +3012,84 @@ struct TENOFunctor {
                 FOR_I_CONSERVATIVE aS[l][i] = fmadd(P, U[i] - U0[i], aS[l][i]);
             }
         }
+    }
+
+    /** @brief Coefficients of the sector stencil s of queued cell j. */
+    KOKKOS_INLINE_FUNCTION
+    void troubled_sector(const uint32_t j, const uint8_t s) const {
+        const uint32_t i_cell = troubled_cells(j);
+        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
+        if (s >= offsets_faces_of_cell(i_cell + 1) - f_begin) return;
+        if (stencil_small_size(i_cell, s) == 0) return;
+        rtype U0[N_CONSERVATIVE];
+        conservatives(i_cell, U0);
+        rtype aS[teno::NK_SMALL][N_CONSERVATIVE];
+        sector_coefficients(i_cell, s, U0, aS);
         for (uint8_t l = 0; l < teno::NK_SMALL; l++) {
             FOR_I_CONSERVATIVE small_coeffs(j - round_begin, s, l, i) = aS[l][i];
         }
+    }
+
+    static constexpr rtype SI_EPS = 1.0e-12_r;  // added to every smoothness indicator
+    static constexpr uint8_t ANY_FACE = 0xFF;
+
+    /** @brief The cutoff C_T of a cell of troubled-cell measure sigma: the fixed one, or the adaptive one. */
+    KOKKOS_INLINE_FUNCTION
+    rtype cutoff_of(const rtype sigma) const {
+        return (C_T > 0.0_r) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
+    }
+
+    /**
+     * @brief TENO's choice among the central polynomial, of smoothness indicator si_K, and the
+     *        valid sectors, of si_small: true for the central one, else the sectors' weights w_small
+     *        (equal over those that pass the cutoff, zero elsewhere). face: the face the choice is
+     *        for, which order 4's rule (#977) reads, or ANY_FACE for a choice that holds for the
+     *        whole cell, which that rule then rejects if it would on any face.
+     */
+    KOKKOS_INLINE_FUNCTION
+    static bool select_stencils(const rtype si_K, const rtype * si_small, const bool * valid, const uint8_t n_faces,
+                                const rtype cutoff, const uint8_t face, rtype * w_small) {
+        rtype si_min = si_K;
+        for (uint8_t s = 0; s < n_faces; s++) {
+            if (valid[s]) si_min = Kokkos::fmin(si_min, si_small[s]);
+        }
+        // gamma_k = 1 / (SI_k + eps)^6, normalized by the largest one so that
+        // the weights cannot overflow (even in single precision)
+        const rtype gK = Kokkos::pow(si_min / si_K, 6.0_r);
+        rtype g_small[teno::MAX_FACES] = {};
+        rtype sum_small = 0.0;
+        for (uint8_t s = 0; s < n_faces; s++) {
+            if (!valid[s]) continue;
+            g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
+            sum_small += g_small[s];
+        }
+        bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
+        if constexpr (DEG == 3) {
+            // A face whose own sector is the smoothest candidate while another is cut looks away from a
+            // discontinuity in or next to the cell; the cubic passes the cutoff there but overshoots (#977).
+            // Mirror-image sectors tie to round-off, and both of their faces must decide alike
+            constexpr rtype tie = (sizeof(rtype) == sizeof(double)) ? 1.0e-8_r : 1.0e-4_r;
+            bool own = false;
+            for (uint8_t s = 0; s < n_faces; s++) {
+                if ((face == ANY_FACE || s == face) && valid[s] && si_small[s] <= si_min * (1.0_r + tie)) own = true;
+            }
+            if (use_large && own) {
+                for (uint8_t s = 0; s < n_faces; s++) {
+                    if (valid[s] && g_small[s] / sum_small < cutoff) use_large = false;
+                }
+            }
+        }
+        for (uint8_t s = 0; s < n_faces; s++) w_small[s] = 0.0;
+        if (!use_large) {
+            rtype n_kept = 0.0;
+            for (uint8_t s = 0; s < n_faces; s++) {
+                const bool keep = valid[s] && (g_small[s] / sum_small >= cutoff);
+                w_small[s] = keep ? 1.0 : 0.0;
+                n_kept += w_small[s];
+            }
+            for (uint8_t s = 0; s < n_faces; s++) w_small[s] /= n_kept;
+        }
+        return use_large;
     }
 
     /**
@@ -2926,7 +3105,6 @@ struct TENOFunctor {
         const uint32_t f_begin = offsets_faces_of_cell(i_cell);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
         if (k >= n_faces) return;
-        constexpr rtype eps = 1.0e-12_r;
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
@@ -2953,14 +3131,10 @@ struct TENOFunctor {
             }
         }
 
-        // gamma_k = 1 / (SI_k + eps)^6, normalized by the largest one so that
-        // the weights cannot overflow (even in single precision)
-        const rtype sigma = sigma_out(i_cell);
-        const rtype cutoff = (C_T > 0.0_r) ? C_T : teno::adaptive_CT(sigma, sigma_threshold, sigma_upper);
-        rtype si_K = smoothness<NK>(cK, S) + eps;
+        rtype si_K = smoothness<NK>(cK, S) + SI_EPS;
         rtype si_small[teno::MAX_FACES] = {};
         for (uint8_t s = 0; s < n_faces; s++) {
-            if (valid[s]) si_small[s] = smoothness<teno::NK_SMALL>(cS[s], S) + eps;
+            if (valid[s]) si_small[s] = smoothness<teno::NK_SMALL>(cS[s], S) + SI_EPS;
         }
         // The two shear waves of a 3D face select together, on the sum of their
         // indicators, which does not depend on the choice of tangents
@@ -2983,40 +3157,8 @@ struct TENOFunctor {
                 si_small[s] += smoothness<teno::NK_SMALL>(c, S);
             }
         }
-        rtype si_min = si_K;
-        for (uint8_t s = 0; s < n_faces; s++) {
-            if (valid[s]) si_min = Kokkos::fmin(si_min, si_small[s]);
-        }
-        const rtype gK = Kokkos::pow(si_min / si_K, 6.0_r);
-        rtype g_small[teno::MAX_FACES] = {};
-        rtype sum_small = 0.0;
-        for (uint8_t s = 0; s < n_faces; s++) {
-            if (!valid[s]) continue;
-            g_small[s] = Kokkos::pow(si_min / si_small[s], 6.0_r);
-            sum_small += g_small[s];
-        }
-        bool use_large = (sum_small == 0.0_r) || (gK / (gK + sum_small) >= cutoff);
-        if constexpr (DEG == 3) {
-            // A face whose own sector is the smoothest candidate while another is cut looks away from a
-            // discontinuity in or next to the cell; the cubic passes the cutoff there but overshoots (#977).
-            // Mirror-image sectors tie to round-off, and both of their faces must decide alike
-            constexpr rtype tie = (sizeof(rtype) == sizeof(double)) ? 1.0e-8_r : 1.0e-4_r;
-            if (use_large && valid[k] && si_small[k] <= si_min * (1.0_r + tie)) {
-                for (uint8_t s = 0; s < n_faces; s++) {
-                    if (valid[s] && g_small[s] / sum_small < cutoff) use_large = false;
-                }
-            }
-        }
-        rtype w_small[teno::MAX_FACES] = {};
-        if (!use_large) {
-            rtype n_kept = 0.0;
-            for (uint8_t s = 0; s < n_faces; s++) {
-                const bool keep = valid[s] && (g_small[s] / sum_small >= cutoff);
-                w_small[s] = keep ? 1.0 : 0.0;
-                n_kept += w_small[s];
-            }
-            for (uint8_t s = 0; s < n_faces; s++) w_small[s] /= n_kept;
-        }
+        rtype w_small[teno::MAX_FACES];
+        const bool use_large = select_stencils(si_K, si_small, valid, n_faces, cutoff_of(sigma_out(i_cell)), k, w_small);
 
         const uint8_t side = side_of(f, i_cell);
         if constexpr (PRIM) {
@@ -3326,6 +3468,48 @@ struct TENOFunctor {
     }
 
     /**
+     * @brief The range [lo, hi] of density and pressure that bound_preserving keeps the values of
+     *        cell i_cell, of state W0, within: that of the cell and its face neighbors, widened by
+     *        teno::BOUND_SLACK of the cell's value.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void bound_range(const uint32_t i_cell, const rtype * W0, rtype (&lo)[2], rtype (&hi)[2]) const {
+        constexpr uint8_t P = N_DIM + 1;
+        lo[0] = hi[0] = W0[0];
+        lo[1] = hi[1] = W0[P];
+        const uint32_t f_begin = offsets_faces_of_cell(i_cell);
+        const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
+        for (uint8_t k = 0; k < n_faces; k++) {
+            const uint32_t f = faces_of_cell(f_begin + k);
+            const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
+            const int32_t nb = (c0 == static_cast<int32_t>(i_cell)) ? c1 : c0;
+            if (nb < 0) continue;
+            lo[0] = Kokkos::fmin(lo[0], W(nb, 0));
+            hi[0] = Kokkos::fmax(hi[0], W(nb, 0));
+            lo[1] = Kokkos::fmin(lo[1], W(nb, P));
+            hi[1] = Kokkos::fmax(hi[1], W(nb, P));
+        }
+        for (uint8_t v = 0; v < 2; v++) {
+            const rtype slack = teno::BOUND_SLACK * Kokkos::fabs(v == 0 ? W0[0] : W0[P]);
+            lo[v] -= slack;
+            hi[v] += slack;
+        }
+    }
+
+    /** @brief theta, lowered so that W0 + theta (Wq - W0) keeps density and pressure within [lo, hi]. */
+    KOKKOS_INLINE_FUNCTION
+    static void bound_theta(const rtype * Wq, const rtype * W0, const rtype (&lo)[2], const rtype (&hi)[2], rtype & theta) {
+        constexpr uint8_t P = N_DIM + 1;
+        const rtype vals[2] = {Wq[0], Wq[P]};
+        const rtype centers[2] = {W0[0], W0[P]};
+        for (uint8_t v = 0; v < 2; v++) {
+            const rtype d = vals[v] - centers[v];
+            if (d > 0.0_r) theta = Kokkos::fmin(theta, (hi[v] - centers[v]) / d);
+            if (d < 0.0_r) theta = Kokkos::fmin(theta, (lo[v] - centers[v]) / d);
+        }
+    }
+
+    /**
      * @brief Admissibility check and optional bound-preserving limiting of
      *        queued cell j over all its faces, then the primitive face states.
      */
@@ -3360,26 +3544,9 @@ struct TENOFunctor {
 
         rtype theta = 1.0;
         if (bound_preserving) {
-            // Scale the high-order deviation so density and pressure at every face
-            // point stay within the range of the cell and its face neighbors,
-            // widened by teno::BOUND_SLACK of the cell's value
             constexpr uint8_t P = N_DIM + 1;
-            rtype lo[2] = {W0[0], W0[P]}, hi[2] = {W0[0], W0[P]};
-            for (uint8_t k = 0; k < n_faces; k++) {
-                const uint32_t f = faces_of_cell(f_begin + k);
-                const int32_t c0 = cells_of_face(f, 0), c1 = cells_of_face(f, 1);
-                const int32_t nb = (c0 == static_cast<int32_t>(i_cell)) ? c1 : c0;
-                if (nb < 0) continue;
-                lo[0] = Kokkos::fmin(lo[0], W(nb, 0));
-                hi[0] = Kokkos::fmax(hi[0], W(nb, 0));
-                lo[1] = Kokkos::fmin(lo[1], W(nb, P));
-                hi[1] = Kokkos::fmax(hi[1], W(nb, P));
-            }
-            for (uint8_t v = 0; v < 2; v++) {
-                const rtype slack = teno::BOUND_SLACK * Kokkos::fabs(v == 0 ? W0[0] : W0[P]);
-                lo[v] -= slack;
-                hi[v] += slack;
-            }
+            rtype lo[2], hi[2];
+            bound_range(i_cell, W0, lo, hi);
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
                 const uint8_t side = side_of(f, i_cell);
@@ -3388,13 +3555,7 @@ struct TENOFunctor {
                     rtype U_f[N_CONSERVATIVE], Wq[N_CONSERVATIVE];
                     troubled_face_U(f, q, side, U0, U_f);
                     to_primitives(U_f, Wq);
-                    const rtype vals[2] = {Wq[0], Wq[P]};
-                    const rtype centers[2] = {W0[0], W0[P]};
-                    for (uint8_t v = 0; v < 2; v++) {
-                        const rtype d = vals[v] - centers[v];
-                        if (d > 0.0_r) theta = Kokkos::fmin(theta, (hi[v] - centers[v]) / d);
-                        if (d < 0.0_r) theta = Kokkos::fmin(theta, (lo[v] - centers[v]) / d);
-                    }
+                    bound_theta(Wq, W0, lo, hi, theta);
                 }
             }
             if (theta < 1.0_r) {
@@ -3551,7 +3712,8 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
-                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact) {
+                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact,
+                         const bool select_troubled) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -3569,8 +3731,13 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     functor.point_W = out;
     functor.point_dW = gradients;
     functor.point_exact = exact;
-    gated::parallel_for("teno_point_values", Kokkos::RangePolicy<typename Functor::PointPass>(0, cells.extent(0)),
-                         functor);
+    if (select_troubled) {
+        gated::parallel_for("teno_output_point_values",
+                             Kokkos::RangePolicy<typename Functor::OutputPointPass>(0, cells.extent(0)), functor);
+    } else {
+        gated::parallel_for("teno_point_values", Kokkos::RangePolicy<typename Functor::PointPass>(0, cells.extent(0)),
+                             functor);
+    }
 }
 
 template <uint8_t DEG, bool PRIM, typename TABLE>
@@ -3651,29 +3818,30 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 }
 
 bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                        const bool select_troubled) {
     if (cells.extent(0) == 0) return true;
 #if N_DIM == 3
     if (single_tables) {
         switch (degree) {
-            case 2: launch_points<2, false, float>(solution, cells, offsets, out); break;
-            case 3: launch_points<3, false, float>(solution, cells, offsets, out); break;
-            case 4: launch_points<4, false, float>(solution, cells, offsets, out); break;
-            case 5: launch_points<5, false, float>(solution, cells, offsets, out); break;
+            case 2: launch_points<2, false, float>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+            case 3: launch_points<3, false, float>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+            case 4: launch_points<4, false, float>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+            case 5: launch_points<5, false, float>(solution, cells, offsets, out, {}, {}, select_troubled); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
         return true;
     }
 #endif
     switch (degree * 2 + primitive) {
-        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out); break;
-        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out); break;
-        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out); break;
-        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out); break;
-        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out); break;
-        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out); break;
-        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out); break;
-        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out); break;
+        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
+        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, {}, {}, select_troubled); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
     return true;
@@ -3686,24 +3854,24 @@ bool TENO::point_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokko
 #if N_DIM == 3
     if (single_tables) {
         switch (degree) {
-            case 2: launch_points<2, false, float>(solution, cells, offsets, out, gradients, exact); break;
-            case 3: launch_points<3, false, float>(solution, cells, offsets, out, gradients, exact); break;
-            case 4: launch_points<4, false, float>(solution, cells, offsets, out, gradients, exact); break;
-            case 5: launch_points<5, false, float>(solution, cells, offsets, out, gradients, exact); break;
+            case 2: launch_points<2, false, float>(solution, cells, offsets, out, gradients, exact, true); break;
+            case 3: launch_points<3, false, float>(solution, cells, offsets, out, gradients, exact, true); break;
+            case 4: launch_points<4, false, float>(solution, cells, offsets, out, gradients, exact, true); break;
+            case 5: launch_points<5, false, float>(solution, cells, offsets, out, gradients, exact, true); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
         return true;
     }
 #endif
     switch (degree * 2 + primitive) {
-        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
-        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, gradients, exact); break;
+        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
+        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, gradients, exact, true); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
     return true;

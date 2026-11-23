@@ -28,9 +28,12 @@ not only the cell averages. Issue
 3. **Point values where the reconstruction has them.** Nodes of smooth cells
    with admissible values take the central polynomial of the conservative
    variables, the derived fields (`U`, `P`, `T`, `H`, `MACH`, ...) from those
-   point values; troubled cells, and cells where the polynomial leaves the
-   admissible set, take their averages at every node, exactly as the probes'
-   `point_value` sampling does. Fields without a polynomial (indicators,
+   point values. Troubled cells take the polynomial the flux's stencil
+   selection chooses for the whole cell (`TENOFunctor::troubled_point_polynomial`),
+   below; nodes outside the admissible set, and troubled cells whose
+   polynomial leaves it at a face point (where the flux falls back to first
+   order), take their averages, exactly as the probes' `point_value`
+   sampling does. Fields without a polynomial (indicators,
    sources, statistics, `CFL`, ...) are written as cell data of the view, so
    one file shows them all. The view's snapshot block names node fields
    `point_value` with the reconstruction and its fallback.
@@ -86,6 +89,35 @@ not only the cell averages. Issue
   faces edge direction fastest), then the body. All five shapes at orders 1
   to 6 were compared with VTK 9.7.1's parametric coordinates; the tests keep
   the orders where each rule first differs from its alternatives.
+
+## Troubled cells
+
+The flux of a troubled cell selects stencils per face and per characteristic
+variable, so the cell has no one polynomial. Its average (a flat cell) or
+linear least squares (a straight one) is not what the scheme used either:
+just above `troubled_threshold` the adaptive cutoff is `1e-10`, so the flux
+almost always keeps the central polynomial, and on coarse meshes of smooth
+fields most cells can be troubled (64% of a 6 x 6 mesh of a 0.3 amplitude
+Gaussian). Output therefore gives the cell the polynomial the selection would
+choose for the whole cell, `troubled_point_polynomial`, from the flux's own
+functions (`smoothness`, `select_stencils`, `cutoff_of`, `bound_range`,
+`bound_theta`), decided on each conservative variable instead of each face's
+characteristic ones. That is the one approximation: it is exact wherever the
+central polynomial passes, and without characteristic variables the decision
+does not depend on the face, so it is the flux's (order 4's face rule aside,
+which here rejects the central polynomial if it would on any face).
+Bound-preserving scaling takes theta from the output points, since those are
+the values shown; a cell whose chosen polynomial is inadmissible at a face
+point, where the flux falls back to first order, keeps its average.
+
+Only output takes this path (`point_values(..., select_troubled = true)`:
+the view, probes, sampled surfaces): it is its own kernel
+(`OutputPointPass`), so the per-step point values of transmissive boundaries
+and particles keep `PointPass` unchanged. It recomputes the sector
+coefficients and, in 3D, forms the smoothness matrix from the cell's moments
+per cell, in the same single launch as before, with no host synchronization.
+`mallard post` keeps the sector stencils when its output samples points (a
+view or point probes), which costs their setup.
 
 ## Writers
 

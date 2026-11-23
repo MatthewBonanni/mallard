@@ -958,6 +958,8 @@ class Solver {
         stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
         /** @brief Whether the setup writes STENCIL_* fields or the stencil file of [output] write_stencils. */
         bool writes_stencils() const;
+        /** @brief Whether output evaluates the polynomials at points: probes with sampling = "point" or a high-order view. */
+        bool samples_points() const;
         /**
          * @brief The mesh and stencil fields [[write_data]] asks for, once, and
          *        the stencil file of [output] write_stencils.

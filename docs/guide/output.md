@@ -430,9 +430,11 @@ advanced) to 2 or 3 to draw each cell's polynomial instead of its corners.
 The solution files are unchanged, byte for byte, and restart files stay cell
 averages: nothing reads the view back. Its nodes are not shared between
 cells, so the jumps between neighbors' polynomials, the scheme's own
-discontinuities, stay visible. Troubled cells, and cells whose polynomial
-leaves the admissible states, hold their averages at every node, as
-[probes](probes.md) with `sampling = "point"` do; the view's
+discontinuities, stay visible. Troubled cells take the polynomial the
+stencil selection chooses for the whole cell ([below](#troubled-cells)), as
+[probes](probes.md) with `sampling = "point"` do; nodes whose values leave
+the admissible states, and troubled cells whose polynomial does at a face
+point, hold the cell's average; the view's
 [snapshot block](#snapshot-metadata) says so (`value = "point_value"`, with
 the reconstruction and its fallback). Triangles, quadrilaterals,
 tetrahedra, hexahedra and prisms are Lagrange cells of their shape; each
@@ -443,6 +445,27 @@ shape: nodes on a curved face lie on the exact curve or surface, the others
 on the cell's quadratic geometry. On straight cells the drawn field is the
 polynomial exactly; on curved cells it is exact at the nodes. Rationale, node orderings and costs: [design
 note](../design/high_order_output.md).
+
+#### Troubled cells
+
+A troubled cell (`TENO_SIGMA` at or above `troubled_threshold`) has no single
+polynomial in the flux, which selects among the central and sector stencils
+face by face and per characteristic variable
+([TENO-E](../theory/finite_volume.md#teno-e), "Smooth and troubled cells").
+Output gives it the polynomial that selection would choose for the whole
+cell, with the flux's smoothness indicators, weights and adaptive cutoff
+`C_T`: per variable, the central polynomial where it passes the cutoff, else
+the mean of the sector polynomials that do (at order 4 the face rule
+counts if it would reject the central polynomial on any face). With
+`bound_preserving = true` its deviation from the mean is scaled as the
+flux's is, by the values at the output points. Just above
+`troubled_threshold` the cutoff is `1e-10`, so a smooth feature flagged on a
+coarse mesh almost always keeps its central polynomial: its cells curve like
+their neighbors. The one approximation is that the choice is made on each
+output variable (the conservative ones) rather than on the flux's
+characteristic variables of each face; it is exact wherever the central
+polynomial passes, and with `characteristic = false` it is the flux's own
+choice (at order 4 except on faces the face rule decides).
 
 **Use it to look, not to measure.** ParaView's filters on the view (contours,
 slices, integrals, plots over lines) act on the values at the nodes and VTK's
@@ -1276,9 +1299,10 @@ says which of three kinds of value each field holds, as `value` in its
 | `point_value` | The reconstruction evaluated at the sample | [Probes](probes.md) with `sampling = "point"` and [snapshots of regions](#snapshots-of-regions) of lower dimension, except mass fractions and the cell fields they copy |
 
 Point values are a snapshot's `reconstruction`: with TENO its polynomials
-at the scheme's `order`, falling back to linear least squares in troubled
-cells and to the cell average where neither gives a positive density and
-energy
+at the scheme's `order` (in troubled cells the one the stencil selection
+chooses for the whole cell, [below](#troubled-cells)), falling back to linear
+least squares where the polynomial gives a nonpositive density or energy and
+to the cell average where neither gives a positive one
 (`{"method": "TENO", "order": 5, "fallback": ["linear_least_squares", "cell_average"]}`);
 with MUSCL or first order, linear least squares (order 2). The same
 distinction is in the format's own metadata where it has a slot: the

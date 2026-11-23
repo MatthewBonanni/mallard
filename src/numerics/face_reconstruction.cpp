@@ -147,7 +147,7 @@ void FaceReconstruction::image_point_values(Kokkos::View<rtype *[N_CONSERVATIVE]
     gated::parallel_for("image_point_averages", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE W(p, i) = solution(cells(p / n_quad), i);
     });
-    point_values(solution, cells, image_point_offsets, W);
+    point_values(solution, cells, image_point_offsets, W, false);
     gated::parallel_for("image_point_values", W.extent(0), KOKKOS_LAMBDA(const uint32_t p) {
         FOR_I_CONSERVATIVE face_solution(faces(p / n_quad), p % n_quad, 1, i) = W(p, i);
     });

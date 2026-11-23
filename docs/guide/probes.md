@@ -216,10 +216,14 @@ cell, centroid, distance) and how: [Probe sampling](output.md#probe-sampling).
 
 Pitfalls:
 
-- Point values fall back to the linear least-squares reconstruction in cells
-  the TENO indicator flags troubled (shocks, and coarse meshes of smooth
-  fields), and to the cell average where neither gives a positive density
-  and energy. VTP and VTKHDF
+- In cells the TENO indicator flags troubled (shocks, and coarse meshes of
+  smooth fields) point values come from the polynomial the stencil selection
+  chooses for the whole cell, decided on each variable rather than on the
+  flux's characteristic ones
+  ([Troubled cells](output.md#troubled-cells)). They fall back to the linear
+  least-squares reconstruction where the polynomial gives a nonpositive
+  density or energy, and to the cell average where neither gives a positive
+  one. VTP and VTKHDF
   probe files record the method and each variable's kind of value
   ([Cell averages and point values](output.md#cell-averages-and-point-values)).
 - Mass fractions are cell averages in both modes; `T` and `H` follow the

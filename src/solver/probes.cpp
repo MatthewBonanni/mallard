@@ -1445,7 +1445,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             gated::fill(inside_exact, uint8_t(0));
             fields.reconstruction->point_gradients(Wc, in_cells, in_offsets, in_W, inside_dW, inside_exact);
         } else if (fields.reconstruction) {
-            fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
+            fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W, true);
         }
         const auto in = inside;
         gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
