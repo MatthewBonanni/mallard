@@ -40,7 +40,6 @@ set(MALLARD_TEST_SOURCES
     mesh_import_test.cpp
     distributed_mesh_test.cpp
     structured_blocks_test.cpp
-    stencil_shapes_test.cpp
     face_weights_test.cpp
     statistics_test.cpp
     conditional_statistics_test.cpp

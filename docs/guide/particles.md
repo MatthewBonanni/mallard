@@ -21,16 +21,18 @@ in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291))
 - [Per-particle quantities](#per-particle-quantities) and [particle probes](#particle-probes)
 - [Accuracy](#accuracy), [performance](#performance) and a [checklist](#checklist)
 
-The equations and methods are in the theory manual's
-[Lagrangian particles](../theory/particles.md); the measured orders of
-accuracy in the [verification manual](../verification/index.md#lagrangian-particles).
+The models are in the theory manual's
+[Lagrangian particles](../theory/particles.md), their discretization and its
+accuracy in [Numerical methods for particles](../numerics/particles.md); the
+measured orders of accuracy in the
+[verification manual](../verification/index.md#lagrangian-particles).
 
 ## Which particles?
 
 The particles are *point particles*: each is much smaller than the cells and
 the smallest eddies around it, sees the gas as undisturbed at its center, and
-moves on its own, without collisions with other particles and without acting
-on the gas (one-way coupling). That describes dilute suspensions, with a
+moves on its own, without collisions with other particles and, unless coupled
+[two-way](#two-way-coupling), without acting on the gas (one-way coupling). That describes dilute suspensions, with a
 volume fraction of particles below about 10⁻⁶ (a mass loading of 0.2% for
 glass beads in air), and every tracer study.
 
