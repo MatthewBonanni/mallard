@@ -565,8 +565,12 @@ class TENO : public FaceReconstruction {
         // Vertex-neighbor layers each table row's stencil search visited (host);
         // a distributed run needs this many complete layers around the row's cell
         std::vector<uint8_t> gather_depth;
-        // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
+        // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source,
+        // and the curved cells' own rules (q, [x, y, w]), cell c's from curved_rule_start(c)
         Kokkos::View<rtype *[3]> cell_rule;
+        Kokkos::View<uint32_t *> curved_rule_start;
+        Kokkos::View<rtype *[3]> curved_rule;
+        void init_curved_source_rules();
         // 2D: the faces' nodes, from which the kernels place the face points of
         // straight faces, and (axisymmetric runs) the cells' nodes; the mesh's
         // own views are released after setup
