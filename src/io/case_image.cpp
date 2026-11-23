@@ -317,7 +317,7 @@ Shape shape_of(const Block & b) {
     // Filled regions: their boundary (exact where their shapes give it, else extracted below the cell size)
     if (!b.outline.empty()) add_cells(s, b.outline[0], true);
     add_cells(s, b, false);
-    const Block::Field * normal = find_field(b, "normal");
+    const Block::Field * normal = find_field(b, "NORMAL");
     std::vector<size_t> lines;
     for (size_t c = 0; c < b.n_cells(); c++) {
         if (b.types[c] == case_view::LINE) lines.push_back(c);

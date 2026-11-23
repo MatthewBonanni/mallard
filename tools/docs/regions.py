@@ -647,7 +647,7 @@ type = "symmetry"
             b = f["VTKHDF"][f'probes[name = "c{i}"].region']
             pts, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
             segs = np.array([pts[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
-            out[i] = (segs, b["CellData"]["normal"][:, :2], b["CellData"]["length"][:])
+            out[i] = (segs, b["CellData"]["NORMAL"][:, :2], b["CellData"]["LENGTH"][:])
     pts, cells, _ = fractions(mallard, mesh.name, '"domain"', work, "dom", 2, zones=("outer", "hole"))
     return out, pts, cells
 
@@ -790,7 +790,7 @@ fields = ["SOURCE_RHOE"]
         b = h["VTKHDF"]['probes[name = "surface"].region']
         p, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
         segs = np.array([p[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
-        normals = b["CellData"]["normal"][:, :2]
+        normals = b["CellData"]["NORMAL"][:, :2]
     return pts, cells, f, sampling, surface, segs, normals
 
 
@@ -1098,7 +1098,7 @@ fields = ["SOURCE_RHOE"]
         b = h["VTKHDF"]['probes[name = "surface"].region']
         p, conn, offs = b["Points"][:], b["Connectivity"][:], b["Offsets"][:]
         polys = [p[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)]
-        normals = b["CellData"]["normal"][:]
+        normals = b["CellData"]["NORMAL"][:]
     return pts, cells, f, sampling, surface, polys, normals
 
 
