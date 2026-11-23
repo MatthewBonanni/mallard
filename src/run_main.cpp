@@ -229,6 +229,7 @@ int check_main(const cli::Args & args) {
     options.catalog_file = args.value_or("--catalog", "");
     options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
+    options.initial = args.value_or("--initial", "");
     if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
         return cli::usage_error(command, "--format takes text or json, not " + f);
     }

@@ -1,0 +1,3 @@
+- `mallard check --initial PREFIX` writes the initial state (`RHO`, `U`, `P`, `T`, and `Y_*` for mixtures) as a snapshot, with `[initialize]`'s regions and data applied, so it can be seen on the mesh before a run.
+- The check report's JSON gains `periodic` (each pair's map, faces joined, area and largest node offset), `unassigned` (the zones without a condition, with their faces) and a `histogram` with `min` for every mesh-quality metric (also in `mallard info MESH --format json`).
+- The case view's walls carry `y_plus`, the first cell's y+ of each face as the resolution report estimates it; a setup that stops still draws the mesh, its zones and periodic pairs with `--view`.

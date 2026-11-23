@@ -92,15 +92,19 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
+    {"--initial", "", "PREFIX",
+     "Write the initial state, as the run would start from it (initialize, its regions and data, or a restart), "
+     "to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), the default snapshot format: RHO, U, P, "
+     "T and, for mixtures, Y_*. Default: none."},
     {"--partial", "", "",
      "The input is still being written: exit with 0 when the only errors are missing pieces (a required key "
      "or table, or a mesh file, not there yet), which the JSON marks \"missing\": true. Default: every error "
      "fails."},
     {"--view", "", "DIR",
      "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
-     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone (walls with their first cells' y+ as the field y_plus once it is estimated), region the case uses (filled regions as "
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
-     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
      "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
     KOKKOS,
@@ -247,7 +251,7 @@ constexpr Option DERIVE_OPTIONS[] = {
      "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
      "table, as [[write_data]] region takes it. Default: the whole mesh."},
     {"--snapshot", "", "vtkhdf|vtu",
-     "The format of the snapshots: OUTPUT/NAME.vtkhdf, every snapshot in one file, or .vtu files with a "
+     "The format of the snapshots: OUTPUT/NAME.vtkhdf, the series of a file per snapshot, or .vtu files with a "
      ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
     {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
     {"--steps", "", "LIST",
@@ -1232,7 +1236,7 @@ constexpr Command COMMANDS[] = {
             "print, so it knows every command, key and field of this build; templates come from mallard new when "
             "completing.\n"
             "\n"
-            "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
+            "An install (cmake --install, Spack, the containers, the archives) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
             "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
             "shell does not search, load it from the shell's startup file, as the examples show.",

@@ -22,6 +22,7 @@
 
 #include "common.h"
 #include "inflow.h"
+#include "mixture.h"
 #include "physics.h"
 #include "thermo.h"
 
@@ -345,7 +346,7 @@ struct BoundaryData {
     // prescribed state (INLET_STATE); empty for a single gas
     Kokkos::View<rtype **, Kokkos::LayoutRight> bc_Y;
     Kokkos::View<rtype *[2]> bc_thermo;
-    chemistry::ThermoTable<> thermo;  // Gas mixtures: species thermodynamics
+    Mixture mixture_gas;  // Gas mixtures: their thermodynamics (species or a flamelet table)
 
     /** @brief Transmissive face i_face's interior image cell, else -1. */
     KOKKOS_INLINE_FUNCTION
@@ -421,7 +422,7 @@ struct BoundaryData {
         constexpr uint8_t E = N_DIM + 1;
         const BoundaryCondition & bc = bcs(i_bc);
         const BoundaryComposition y{bc_Y, i_bc};
-        const double R_b = thermo.gas_constant(y);
+        const double R_b = mixture_gas.gas_constant(y);
         if (bc.type == BoundaryType::INLET_MASS_FLOW) {
             inflow::mass_flow_state(double(bc_thermo(i_bc, 0)), R_b, double(bc.data[0]), double(bc.data[E]), bc.data + 1,
                                     W_i, n, W_g);
@@ -430,11 +431,11 @@ struct BoundaryData {
             return;
         }
         double T_b;
-        const inflow::ThermallyPerfectGas<chemistry::ThermoTable<>, BoundaryComposition> isentrope{thermo, y, R_b};
+        const inflow::ThermallyPerfectGas<Mixture, BoundaryComposition> isentrope{mixture_gas, y, R_b};
         inflow::stagnation_state(isentrope, double(bc_thermo(i_bc, 0)), double(bc.data[0]), double(bc.data[E]),
                                  bc.data + 1, W_i, n, W_g, T_b);
         double e, cv;
-        thermo.e_cv(T_b, y, e, cv);
+        mixture_gas.e_cv(T_b, y, e, cv);
         th_g[0] = static_cast<rtype>((cv + R_b) / cv);
         th_g[1] = static_cast<rtype>(e - cv * T_b);
     }

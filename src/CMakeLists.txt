@@ -24,6 +24,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
+    common/file_hash.cpp
     common/provenance.cpp
     common/sha256_hw.cpp
     common/snapshot_block.cpp
@@ -45,7 +46,6 @@ add_library(MallardCore STATIC
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
-    mesh/stencil_shapes.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp
@@ -58,19 +58,23 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
+    numerics/face_weights.cpp
     numerics/overlap.cpp
     numerics/cut_quadrature.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
     numerics/teno_setup.cpp
+    numerics/teno_shapes.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
+    physics/flamelet.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -108,6 +112,7 @@ add_library(MallardCore STATIC
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
+    solver/solver_flamelet.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
@@ -130,6 +135,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
@@ -236,6 +242,32 @@ foreach(source ${mallard_sources})
                             "find_value_or<T>.")
     endif()
 endforeach()
+# Top-level kernels launch through gated.h, so that a step graph's launches after a stop do nothing
+foreach(source ${mallard_sources})
+    file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+    if(path MATCHES "^test/" OR path STREQUAL "src/common/gated.h")
+        continue()
+    endif()
+    file(STRINGS ${source} launches REGEX "Kokkos::parallel_(for|reduce|scan)")
+    if(NOT launches)
+        continue()
+    endif()
+    file(READ ${source} content)
+    if(content MATCHES "using[ \t\r\n]+Kokkos::parallel_(for|reduce|scan)")
+        message(FATAL_ERROR "${path} names Kokkos::parallel_${CMAKE_MATCH_1} with using: launch kernels with "
+                            "gated::parallel_${CMAKE_MATCH_1} (src/common/gated.h), whose kernels do nothing in a "
+                            "step graph's launches after a stop.")
+    endif()
+    string(REGEX MATCHALL "Kokkos::parallel_(for|reduce|scan)[ \t\r\n]*(<[^;()]*>)?[ \t\r\n]*\\([ \t\r\n]*[A-Za-z_:]*"
+           calls "${content}")
+    foreach(call ${calls})
+        if(NOT call MATCHES "(Team|Thread)[A-Za-z]*Range$")
+            string(REGEX REPLACE "^Kokkos::([a-z_]*).*" "\\1" name "${call}")
+            message(FATAL_ERROR "${path} launches a kernel with Kokkos::${name}: use gated::${name} (src/common/gated.h), "
+                                "whose kernels do nothing in a step graph's launches after a stop.")
+        endif()
+    endforeach()
+endforeach()
 # The expression and geometry engines know nothing of inputs or of each other:
 # what they need from them (unit hints, implicit shapes) is passed in
 foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
@@ -260,9 +292,10 @@ endforeach()
 # face kernels, which nvcc would fuse differently in each, so that file does not
 # contract either. [statistics.convergence] updates its estimate on the device
 # as the host does, bit for bit, and the device cuts isosurfaces into the host's
-# quadrature points (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
-                       solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp)
+# quadrature points (region_motion.cpp, as region_mesh.cpp cuts them on the host)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno_shapes.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+                       solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp
+                       common/region_mesh.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
@@ -376,11 +409,22 @@ add_executable(mallard main.cpp)
 target_link_libraries(mallard PRIVATE MallardCommands)
 set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
-if(Mallard_ENABLE_PYTHON)
-    add_library(MallardReader SHARED io/reader_c_api.cpp)
-    target_link_libraries(MallardReader PRIVATE MallardCore)
-    set_target_properties(MallardReader PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
-    mallard_target_warnings(MallardReader)
+# The C++ library API (include/mallard), compiled once for libmallard2d/3d and the test suite
+add_library(MallardApi OBJECT api/mallard_api.cpp)
+target_include_directories(MallardApi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
+target_include_directories(MallardApi PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(MallardApi PUBLIC MallardCore)
+mallard_target_warnings(MallardApi)
+# libmallard2d/3d: the C++ library API, and the C interface of the reader that the Python package loads
+if(Mallard_ENABLE_LIBRARY)
+    add_library(MallardLibrary SHARED io/reader_c_api.cpp)
+    target_link_libraries(MallardLibrary PRIVATE MallardApi MallardCore)
+    target_include_directories(MallardLibrary INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_features(MallardLibrary INTERFACE cxx_std_17)
+    set_target_properties(MallardLibrary PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d EXPORT_NAME mallard${Mallard_DIM}d)
+    add_library(Mallard::mallard${Mallard_DIM}d ALIAS MallardLibrary)
+    mallard_target_warnings(MallardLibrary)
 endif()
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)
 add_custom_command(TARGET mallard POST_BUILD

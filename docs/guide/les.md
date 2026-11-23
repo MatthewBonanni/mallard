@@ -151,6 +151,7 @@ shock sensor (restricted to compressions) fires:
 |---|---|---|
 | `sensor_threshold` | 0.65 | Sensor value above which a compressing cell is a shock (1 disables the Riemann solver) |
 | `upwind_floor` | 0 | Upwind fraction everywhere else; 0.05 damps grid-scale noise on very irregular meshes |
+| `dilatation_scale` | 1e-5 | `kappa` in the sensor's `eps = (kappa c / h)^2` (sound speed `c`, cell size `h`): round-off compressions of uniform flow are not shocks. 0.01 also keeps a freestream's acoustic noise central, but the noise is then no longer damped (Sod's problem: 25% larger error) ([design](../design/les.md#43-low-dissipation-convective-flux-decision-7)) |
 | `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy, and so do MUSCL's with no viscosity or model to remove it (Euler: set `cell_averages`) ([design](../design/les.md#44-central-flux-for-teno-689)) |
 
 `[integrals] budget = true` adds the kinetic-energy budget to
@@ -186,7 +187,10 @@ by `E F` and reaction rates by `E / F` inside the flame, so it spans `n_res`
 cells at the right speed; the efficiency `E` restores the subgrid wrinkling:
 by default `E = F^beta` (Charlette et al. 2002) with `beta` computed each step
 by a dynamic procedure (Wang et al. 2011) from how much resolved flame surface
-a test filter removes, so there is no model constant. A sensor `Ω` confines it to the flame:
+a test filter removes, so there is no model constant. A sensor `Ω` confines it to the flame.
+With tabulated chemistry (`gas = "flamelet"`) the same model thickens the
+equations of `Z` and `C`, its sensor on the table's progress variable and the
+table read at zero subgrid variance: [thickened flamelets](flamelet.md#thickened-flames).
 
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-light.svg#gh-light-mode-only)
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-dark.svg#gh-dark-mode-only)
@@ -195,7 +199,7 @@ a test filter removes, so there is no model constant. A sensor `Ω` confines it 
 |---|---|---|
 | `model` | required | `tfles` (or the experimental `pasr`, below) |
 | `delta_L`, `s_L` | required | Laminar thermal thickness [m] and speed [m/s] |
-| `T_unburnt`, `T_burnt` | required | Temperatures of fresh and burnt gas [K], for the progress variable |
+| `T_unburnt`, `T_burnt` | required | Temperatures of fresh and burnt gas [K], for the progress variable (not with `gas = "flamelet"`) |
 | `n_res` | 5 | Cells across the thickened flame |
 | `efficiency` | `dynamic` | `dynamic` (`E = F^beta`, `beta` from the flow), `charlette` (efficiency function of a subgrid velocity `u'`) or `none` (`E = 1`) |
 | `beta` | 0.5 | `charlette` only: exponent of the efficiency |
