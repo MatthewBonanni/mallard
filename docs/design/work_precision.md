@@ -150,26 +150,26 @@ the defaults of `[numerics.face_reconstruction]` apart from `order`.
   2 units, with a smooth cutoff at $R = 5$, half the box: $r^2$ in the exponent
   of Shu's vortex becomes $r^2 / (1 - r^2/R^2)$,
 
-  $$f = \exp\left(\tfrac12\left(1 - \frac{r^2}{1 - r^2/R^2}\right)\right), \quad
-  u_\theta = \frac{\beta}{2\pi} \frac{r f}{1 - r^2/R^2}, \quad
-  T = \frac{p}{\rho} = 1 - \frac{(\gamma - 1)\beta^2}{8\gamma\pi^2} f^2,$$
+    $$f = \exp\left(\tfrac12\left(1 - \frac{r^2}{1 - r^2/R^2}\right)\right), \quad
+    u_\theta = \frac{\beta}{2\pi} \frac{r f}{1 - r^2/R^2}, \quad
+    T = \frac{p}{\rho} = 1 - \frac{(\gamma - 1)\beta^2}{8\gamma\pi^2} f^2,$$
 
-  and $f = u_\theta = 0$ for $r \ge R$. It is still an exact isentropic
-  vortex ($dp/dr = \rho u_\theta^2 / r$, $p = \rho^\gamma$), so convected
-  it is the exact solution, and it vanishes with all its derivatives at
-  $r = R$: the field is smooth across the periodic sides. Shu's vortex itself
-  has a velocity of $2.4 \times 10^{-5}$ at the sides, so its periodic
-  extension jumps by $4.9 \times 10^{-5}$ there, and the sound that jump sends
-  out holds the error on irregular triangles at about $10^{-8}$
-  ([#1175](https://github.com/MatthewBonanni/mallard/issues/1175)). The
-  cutoff vortex peaks at the same radius, with a 2% higher swirl, and
-  differs from Shu's by at most 10% of the peak swirl (at $r \approx 2.3$).
-  In 3D it is a tube along z, so the exact solution does not vary along z;
-  the box keeps cubic cells and at least 8 of them along z, so that stencils
-  of every order fit without wrapping onto themselves. The error is
-  `mallard post convergence --field RHO --exact ...` on the run's final restart
-  file: the volume-weighted $L_2$ norm against the exact cell averages
-  (quadrature exact to degree 6).
+    and $f = u_\theta = 0$ for $r \ge R$. It is still an exact isentropic
+    vortex ($dp/dr = \rho u_\theta^2 / r$, $p = \rho^\gamma$), so convected
+    it is the exact solution, and it vanishes with all its derivatives at
+    $r = R$: the field is smooth across the periodic sides. Shu's vortex itself
+    has a velocity of $2.4 \times 10^{-5}$ at the sides, so its periodic
+    extension jumps by $4.9 \times 10^{-5}$ there, and the sound that jump sends
+    out holds the error on irregular triangles at about $10^{-8}$
+    ([#1175](https://github.com/MatthewBonanni/mallard/issues/1175)). The
+    cutoff vortex peaks at the same radius, with a 2% higher swirl, and
+    differs from Shu's by at most 10% of the peak swirl (at $r \approx 2.3$).
+    In 3D it is a tube along z, so the exact solution does not vary along z;
+    the box keeps cubic cells and at least 8 of them along z, so that stencils
+    of every order fit without wrapping onto themselves. The error is
+    `mallard post convergence --field RHO --exact ...` on the run's final restart
+    file: the volume-weighted $L_2$ norm against the exact cell averages
+    (quadrature exact to degree 6).
 - **The Shu-Osher problem** ([Shu & Osher 1989](../references.md#shu-osher-1989)),
   as the [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher)
   example: a Mach 3 shock running into an entropy wave, with RHLL because HLLC
