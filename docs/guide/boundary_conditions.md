@@ -547,6 +547,18 @@ whatever the inlet's size; a normalized one (`n`, `u`, `v`, from 0 to 1)
 stretches the table over the boundary, so `at = ["u"]` with a table from 0 to
 1 fits a profile across an inlet of any width.
 
+![One table on a 30 mm and a 50 mm inlet: read at n_m, both take the same 10 mm boundary layers on their walls; read at u, the profile stretches across each](../images/guide/boundary_data-light.svg#gh-light-mode-only)
+![One table on a 30 mm and a 50 mm inlet: read at n_m, both take the same 10 mm boundary layers on their walls; read at u, the profile stretches across each](../images/guide/boundary_data-dark.svg#gh-dark-mode-only)
+
+*Two inlets of one `inlet_state` entry each, split by `where` (30 mm and 50
+mm, walls between and around them), with `u = "10 * prof_u"`, from a
+boundary probe on that side after one step. Left: a Pohlhausen boundary layer
+tabulated every 1 mm up to 10 mm, `at = ["n_m"]`, `units = { d = "mm" }`:
+each inlet takes the same 10 mm layer at both its walls and the table's end
+value, 10 m/s, in between. Right: a channel profile tabulated from 0 to 1,
+`at = ["u"]`: stretched across each inlet. Both cubic
+(`tools/docs/boundary_data.py`).*
+
 **Names.** A column's name belongs to its table: expressions see a value
 column only as `<name>_<column>`, and a coordinate column is filled only by
 `at`, from the boundary's quantities. So any column may be named like a
