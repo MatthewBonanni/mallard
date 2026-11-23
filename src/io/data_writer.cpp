@@ -367,8 +367,12 @@ void DataWriter::init(const Input & input,
                           .fix = "Remove high_order here: restart and xdmf files and regions hold cell values",
                           .docs = "docs/guide/output.md#high-order-view"});
     }
-    if (whole_mesh && find_value_or<bool>(input, "high_order", false)) {
-        const uint32_t max_degree = views && !views->empty() ? static_cast<uint32_t>(views->size() - 1) : 0;
+    const uint32_t max_degree = views && !views->empty() ? static_cast<uint32_t>(views->size() - 1) : 0;
+    const auto has_node_field = [&](const LagrangeView & v) {
+        return std::ranges::any_of(fields, [&](const Field & f) { return v.can_write(f.name); });
+    };
+    const bool applies = whole_mesh && max_degree > 0 && has_node_field((*views)[max_degree]);
+    if (whole_mesh && find_value_or<bool>(input, "high_order", applies)) {
         if (max_degree == 0) {
             throw InputError({.key = "write_data.high_order",
                               .line = line_of(input, "high_order"),
@@ -386,7 +390,7 @@ void DataWriter::init(const Input & input,
                               .docs = "docs/guide/output.md#high-order-view"});
         }
         LagrangeView & v = (*views)[size_t(degree)];
-        if (std::ranges::none_of(fields, [&](const Field & f) { return v.can_write(f.name); })) {
+        if (!has_node_field(v)) {
             throw InputError({.key = "write_data.high_order",
                               .line = line_of(input, "high_order"),
                               .message = "needs a field with values at the nodes; none of fields has",

@@ -555,6 +555,22 @@ TEST(InputUpgradeTest, VtkhdfOutputWithoutSeriesGetsANotice) {
     }
 }
 
+TEST(InputUpgradeTest, TenoSnapshotsWithoutHighOrderGetANotice) {
+    const std::string entry = "[[write_data]]\nprefix = \"flow\"\ninterval = 10\nseries = true\n";
+    const std::vector<std::string> notes = input_upgrade::notices(entry);
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("flow_high_order"), std::string::npos) << notes[0];
+    EXPECT_NE(notes[0].find("high_order = false"), std::string::npos) << notes[0];
+    EXPECT_EQ(input_upgrade::notices("[numerics.face_reconstruction]\ntype = \"TENO\"\n" + entry + "format = \"vtu\"\n").size(),
+              1u);
+    // high_order set, a region, a format without the view, or no TENO gets none
+    for (const std::string & other :
+         {entry + "high_order = true\n", entry + "region = \"wall\"\n", entry + "format = \"xdmf\"\n",
+          "[numerics]\npreset = \"second_order\"\n" + entry, "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n" + entry}) {
+        EXPECT_TRUE(input_upgrade::notices(other).empty()) << other;
+    }
+}
+
 TEST(InputUpgradeTest, TheLesPresetsIntegratorGetsANotice) {
     const std::vector<std::string> notes = input_upgrade::notices("[run]\nt_stop = 1.0\n[numerics]\npreset = \"les\"\n");
     ASSERT_EQ(notes.size(), 1u);

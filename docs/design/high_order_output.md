@@ -8,8 +8,8 @@ not only the cell averages. Issue
 ## What is written
 
 1. **A companion view, the solution files unchanged.** Each whole-mesh
-   `[[write_data]]` entry in `vtkhdf` or `vtu` with `high_order = true` (off
-   by default: the view is 9 to 125 times the snapshot) writes
+   `[[write_data]]` entry in `vtkhdf` or `vtu` of a TENO run (on by default,
+   so ParaView shows what the scheme computes; `high_order = false` opts out) writes
    `PREFIX_high_order...` beside its own files, at the
    same steps, in the same format and series layout. The solution files stay
    cell averages byte for byte, so restarts, `mallard post`, statistics and
@@ -24,7 +24,8 @@ not only the cell averages. Issue
    tensor cell), the polynomial then sampled at fewer nodes and drawn as its
    degree-`q` interpolant. The nodes of each degree are built once, for the
    degrees some writer asks for. MUSCL and first order have no polynomial
-   beyond the average: `high_order = true` is an error there.
+   beyond the average: they write no view, and `high_order = true` is an
+   error there.
 3. **Point values where the reconstruction has them.** Nodes of smooth cells
    with admissible values take the central polynomial of the conservative
    variables, the derived fields (`U`, `P`, `T`, `H`, `MACH`, ...) from those

@@ -123,9 +123,11 @@ def series(directory, pattern="*"):
     order of the step and time they record (files of Mallard before 0.10 by
     time alone): the VTKHDF snapshots (each snapshot of a series file),
     else the PVTU files of an MPI run (not their pieces), else the VTU, VTP
-    (or HDF5) files."""
+    (or HDF5) files; not high-order views (PREFIX_high_order...) unless
+    pattern names them."""
     import glob
-    files = sorted(glob.glob(os.path.join(directory, pattern)))
+    from .reader import is_high_order_view
+    files = sorted(f for f in glob.glob(os.path.join(directory, pattern)) if not is_high_order_view(f, pattern))
     vtkhdf = [f for f in files if f.endswith(".vtkhdf")]
     parallel = [f for f in files if f.endswith(".pvtu")]
     if vtkhdf:

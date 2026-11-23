@@ -397,21 +397,25 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 ### High-order view
 
 A TENO run knows more than its cell averages: inside each cell, the
-reconstruction's central polynomial of degree `order - 1`. With
-`high_order = true`, a whole-mesh `vtkhdf` or `vtu` snapshot writer of a TENO
-run also writes that, as the **high-order view** `PREFIX_high_order...`,
-beside its own files, in the same format and layout
-(`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and its `.vtu`
-files):
+reconstruction's central polynomial of degree `order - 1`. Every whole-mesh
+`vtkhdf` or `vtu` snapshot writer of a TENO run also writes that, as the
+**high-order view** `PREFIX_high_order...`, beside its own files, in the same
+format and layout (`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and
+its `.vtu` files). `high_order = false` writes the cell values alone, and
+`high_order_degree` lowers the view's degree:
 
 ```toml
 [[write_data]]
 prefix = "solut/flow"
 interval = 500
 fields = ["RHO", "U", "P", "MACH"]
-high_order = true
 high_order_degree = 2   # optional: quadratic cells; default order - 1
+# high_order = false    # the cell values alone
 ```
+
+The run's **Output** table lists the view and its degree with the entry, and
+the resolved input of every output file's [run block](#run-block) holds the
+`high_order` value the entry used.
 
 Each cell is a VTK Lagrange cell of the polynomials' degree (order 3:
 quadratic, order 5: quartic), or of the lower `high_order_degree`, and its
@@ -453,11 +457,15 @@ the same point values), [`[integrals]`](statistics.md) and
 
 **Size.** The view holds `(p+1)^2` (2D quadrilaterals) or `(p+1)^3` (hexahedra)
 nodes per cell for degree `p`, each with its coordinates: at order 5 about 25
-times a 2D snapshot of the same fields, 125 times in 3D, hence off by
-default; `high_order_degree = 2` brings that to 9 and 27 times. `mallard
-check` prints each entry's bytes per snapshot, with and without the view,
-and the view's degree in its **Output** section, and warns
-(`W-OUTPUT-SIZE`) above 10 GB per snapshot.
+times a 2D snapshot of the same fields, 125 times in 3D;
+`high_order_degree = 2` brings that to 9 and 27 times. On 32 x 32 x 32 hexahedra (TENO order 5,
+fields `RHO`, `U`, `P`, `T`, 2 CPU threads), each 1.7 MB snapshot comes with
+a 197 MB view, and the view's mesh file is 131 MB; writing the view adds
+about 0.1 s of wall time per snapshot. Where that is too much, lower
+`high_order_degree`, write the view less often in an entry of its own, or set
+`high_order = false`. `mallard check` prints each entry's bytes per snapshot,
+with and without the view, and the view's degree in its **Output** section,
+and warns (`W-OUTPUT-SIZE`) above 10 GB per snapshot.
 
 For a run written without it, `mallard post derive --high-order on` writes
 the view afterwards. From restart files, which hold the cell averages, it is
@@ -468,8 +476,10 @@ mallard post derive solut/restart_000500.restart --fields MACH --with-state --hi
 ```
 
 MUSCL and first-order runs have no polynomial beyond the average, and
-`high_order = true` is an error there, as it is on `xdmf`, restart, region and
-boundary writers.
+entries without a field of the state have nothing to put at the nodes: they
+write no view, and `high_order = true` is an error there. `xdmf`, restart,
+region and boundary writers hold cell values or samples of their own and take
+no `high_order` key.
 
 ### Snapshots of regions
 
