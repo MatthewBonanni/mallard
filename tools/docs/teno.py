@@ -1,6 +1,8 @@
 """Figures of the TENO-E implementation reference (docs/numerics/teno_e.md),
 drawn into docs/images/theory/: the Lebesgue-bound growth of a central
-stencil on a mixed mesh, and the stencil selection at a discontinuity.
+stencil on a mixed mesh, the stencil selection at a discontinuity, and the
+growth rates of the 3D stability study (teno_3d_stability, from the tables of
+the page's "3D stability" section, measured on the linearized operator).
 
 Both come from a small Python model of Mallard's 2D setup and selection
 (src/numerics/teno.cpp): the zero-mean monomial basis in the cell-scaled
@@ -362,7 +364,64 @@ def selection(P):
     return fig
 
 
-FIGURES = {"teno_lebesgue": lebesgue, "teno_selection": selection}
+# ------------------------------------------------------------------- 3D stability
+# Largest real part of the eigenvalues of the linearized operator (acoustics at rest, HLLC), from the tables of
+# docs/numerics/teno_e.md, "3D stability": (case, Lebesgue bound 10, bound 4, bound 4 is an upper limit)
+BOUND_CASES = [
+    ("prisms AR 2, walls, order 4", 1.9, 1e-8, True),
+    ("prisms AR 2, side walls, order 4", 2.5, 1e-8, True),
+    ("prisms AR 2, walls, order 6", 0.50, 1e-8, True),
+    ("prisms AR 2, side walls, order 6", 2.5, 1e-8, True),
+    ("periodic prisms with a seam, order 4", 3.5, 1e-7, True),
+    ("jittered prisms, periodic, order 6", 3.4, 1.4e-7, False),
+    ("jittered prisms AR 1.5, side walls, order 6", 0.32, 7e-6, False),
+    ("Kuhn tetrahedra AR 25, order 4", 1.1, 8e-8, False),
+    ("Kuhn tetrahedra AR 25, order 6", 0.27, 0.022, False),
+    ("mixed tilings, walls, order 4", 0.19, 8e-4, False),
+    ("mixed tilings, walls, order 6", 0.08, 1e-7, False),
+]
+# The cartesian_pyramid lattice: central stencil entries, largest real part (None: below 1e-8)
+PYRAMIDS = {4: [(57, 6.8e-3), (65, 8.8e-3), (77, 9.2e-4), (85, None), (89, None)],
+            6: [(145, 2.1e-3), (165, 1.1e-3), (205, None), (209, None)]}
+DEFAULT_ENTRIES = {4: 85, 6: 209}
+
+
+def stability(P):
+    fig, (a, b) = plt.subplots(1, 2, figsize=(13, 5.2), gridspec_kw=dict(width_ratios=[1.35, 1], wspace=0.55))
+    y = np.arange(len(BOUND_CASES))[::-1]
+    for yi, (name, b10, b4, upper) in zip(y, BOUND_CASES):
+        a.barh(yi + 0.19, b10, height=0.36, left=1e-9, color=P["red"])
+        a.barh(yi - 0.19, b4, height=0.36, left=1e-9, color=P["teal"], alpha=0.45 if upper else 1.0,
+               hatch="//" if upper else None)
+    from matplotlib.patches import Patch
+    handles = [Patch(color=P["red"], label="Lebesgue bound 10"), Patch(color=P["teal"], label="Lebesgue bound 4"),
+               Patch(facecolor=P["teal"], alpha=0.45, hatch="//", label="bound 4, below this value")]
+    a.set_yticks(y, [c[0] for c in BOUND_CASES], fontsize=11)
+    a.set_xscale("log")
+    a.set_xlim(1e-9, 10)
+    a.set_xlabel("largest growth rate (sound speed / box size)")
+    a.legend(handles=handles, loc="lower left", bbox_to_anchor=(-0.02, 1.0), ncol=2, fontsize=10.5)
+
+    for order, color in ((4, P["flame"]), (6, P["plum"])):
+        n = np.array([e for e, _ in PYRAMIDS[order]], float)
+        g = np.array([r if r is not None else 1e-8 for _, r in PYRAMIDS[order]])
+        below = np.array([r is None for _, r in PYRAMIDS[order]])
+        b.plot(n, g, color=color, lw=1.4, label=f"order {order}")
+        b.plot(n[~below], g[~below], "o", color=color, ms=6)
+        b.plot(n[below], g[below], "v", color=color, ms=8)
+        d = DEFAULT_ENTRIES[order]
+        label(b, d, 3e-9, f"default\n{d}", P, size=10.5, color=color, va="top")
+    b.set_yscale("log")
+    b.set_ylim(1e-10, 3e-2)
+    b.set_xlabel("central stencil entries")
+    b.set_ylabel("largest growth rate (sound speed / block size)")
+    b.set_title("Pyramid lattice, odd degrees", loc="left", fontsize=13)
+    b.legend(loc="upper right", fontsize=11)
+    label(b, 120, 1.6e-8, "▼ below 1e-8", P, size=10.5, color=P["muted"])
+    return fig
+
+
+FIGURES = {"teno_lebesgue": lebesgue, "teno_selection": selection, "teno_3d_stability": stability}
 
 
 def figures(names=None):
