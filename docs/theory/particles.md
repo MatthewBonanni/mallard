@@ -328,5 +328,35 @@ $$
 
 with $\mathbf{r}_\perp$ the part of $\mathbf{r}$ normal to $\mathbf{a}$, so the
 turns are unwrapped by construction. Both converge at the integrator's order.
+
+**Crossings** (`[[particles.crossings]]`) are located within the step on the
+particle's straight path from its position $\mathbf{x}_0$ at the step's start
+to its end position $\mathbf{x}_1$ before relocation, which is continuous
+across periodic faces (`Particles::detect_crossings`,
+`src/particles/particle_crossings.cpp`). A surface is the zero of a region's
+signed distance $\phi$; a particle with $\phi(\mathbf{x}_0)$ and
+$\phi(\mathbf{x}_1)$ of opposite signs crosses it at the fraction $\alpha$ of
+the step where
+
+$$
+\begin{equation}
+\phi\left(\mathbf{x}_0 + \alpha\,(\mathbf{x}_1 - \mathbf{x}_0)\right) = 0,
+\label{eq:crossing}
+\end{equation}
+$$
+
+found by the Illinois variant of regula falsi in at most 12 iterations (to
+$10^{-15}$ of the step), and is recorded at time $t_n + \alpha\,\Delta t$ if the
+point lies on the surface's piece (inside or outside each clipping region),
+with the direction of the sign change. A particle removed at a recorded
+boundary zone is recorded where its path meets the face's plane,
+$\alpha = \delta_0 / (\delta_0 - \delta_1)$ from its signed distances to the
+plane at the two ends; after a periodic face or a bounce within the step, at
+the point of the plane nearest its end position, $\alpha = 1$. The straight
+path is the chord of the trajectory over the step: a particle accelerating at
+$\mathbf{a}$ strays from it by up to $\lvert\mathbf{a}\rvert\Delta t^2 / 8$, so
+the crossing point and time are second order in the step, and a path that
+crosses a surface twice within a step (a grazing pass) is not recorded.
+
 Extrema and first times sample the accepted state at the start of every step
 ([Per-particle quantities](../guide/particles.md#per-particle-quantities)).
