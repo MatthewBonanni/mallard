@@ -1027,6 +1027,7 @@ std::string uppercase_monitors(const std::string & text, std::vector<Finding> & 
                                 .line = line_of(*at(expected, c)),
                                 .message = to_string(c) + ": " + list + ": monitored values and output columns are " +
                                            "uppercase, like field names",
+                                .suggestion = "",
                                 .removed = true});
         }
     };
