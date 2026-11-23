@@ -895,15 +895,15 @@ match what the GUI needs:
     1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
        scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
        for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
-    2. **Choose**, in this order: a prebuilt relocatable archive for the
-       architecture and backend (CPU, CUDA, HIP; a new release artifact; built
-       against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
-       `module load`),
+    2. **Choose**, in this order: prebuilt portable binaries for the
+       architecture, backend (CPU, CUDA, HIP; a new release artifact) and MPI
+       family (MPICH ABI or Open MPI), so they run with the site's MPI through
+       `module load`,
        downloaded by the login node from the GitHub release with its SHA-256
        checked; the release's container image through Apptainer (`apptainer pull`)
        for single-node runs; a Spack build in user space with the detected
        compilers, MPI and GPU toolkits as externals, run as a batch job: the
-       fallback for clusters that need their own MPI (Open MPI); slow.
+       fallback for clusters with neither family's MPI; slow.
     3. **Install** into `<root>/mallard/<version>-<variant>/` with an
        `install.toml` (version, variant, artifact and SHA-256, how it was
        installed), recorded in the global remote config. Versions live side by
@@ -937,7 +937,7 @@ tests the Spack package. For the GUI it must also produce:
 
 - `mallard-python` wheels with the `mallard` executables (CPU), for macOS arm64
   and manylinux x86-64 and arm64 (extends #792);
-- relocatable archives per architecture and backend (CPU, CUDA 12 and 13, ROCm)
+- portable binaries per architecture, backend (CPU, CUDA 12 and 13, ROCm) and MPI family
   with SHA-256 sums, as release assets;
 - immutable version tags for every image variant (`:<version>-cpu-amd64`
   exists; `:<version>-cuda` too), with digests published;
@@ -1224,7 +1224,7 @@ Filed, each part of #346.
 | What | Issue |
 |---|---|
 | `mallard-python` wheels with the CPU `mallard` executables (extends #792) | [#1321](https://github.com/MatthewBonanni/mallard/issues/1321) |
-| Relocatable archives per architecture and backend, against the MPICH ABI | [#1322](https://github.com/MatthewBonanni/mallard/issues/1322) |
+| Portable binaries per architecture and backend, against the MPICH and Open MPI ABIs | [#1322](https://github.com/MatthewBonanni/mallard/issues/1322) |
 | `release-manifest.json` of artifacts, digests and interface versions | [#1323](https://github.com/MatthewBonanni/mallard/issues/1323) |
 
 **Website**: the builder generated from the exported catalog, without its

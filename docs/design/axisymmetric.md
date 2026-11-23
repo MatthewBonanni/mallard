@@ -284,3 +284,11 @@ Examples:
   Cantera's flame and run for $4/K_\mathrm{ox}$): the peak temperature is within 0.4%
   ($U_o$ = 2 m/s) and 0.7% (4 m/s) of Cantera's axisymmetric similarity solution
   at the same local strain rate $K_\mathrm{ox}$ measured on the axis, as in the 3D runs.
+
+![Wall entropy error of inviscid flow over a sphere at Mach 0.3, TENO3: along the wall at 128 x 64 cells, and its mean against the mesh, converging at order 1.3 with straight walls and 2.8 with curved ones](../images/guide/axisymmetric_curved_sphere-light.svg#gh-light-mode-only)
+![Wall entropy error of inviscid flow over a sphere at Mach 0.3, TENO3: along the wall at 128 x 64 cells, and its mean against the mesh, converging at order 1.3 with straight walls and 2.8 with curved ones](../images/guide/axisymmetric_curved_sphere-dark.svg#gh-dark-mode-only)
+
+*The Mach 0.3 runs (`python tools/docs/axisymmetric_curved.py`): at L = 4
+curved walls keep the error 1.5 to 6.6 times below the straight walls'
+along the whole wall: 1.7 near the front stagnation point, 5 to 6.6 past
+the equator.*
