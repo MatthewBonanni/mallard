@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def read_particles(prefix):
-    """id, x, y, v_x, v_y of the particles of the run's last snapshot, PREFIX_particles_<n>.vtkhdf."""
+    """id, x, y, V_X, V_Y of the particles of the run's last snapshot, PREFIX_particles_<n>.vtkhdf."""
     import h5py
 
     path = Path(prefix)
@@ -35,7 +35,7 @@ def read_particles(prefix):
     with h5py.File(files[-1], "r") as f:
         g = f["VTKHDF"]
         points, ids, v = g["Points"][:], g["PointData/ID"][:], g["PointData/V"][:]
-    return [{"id": int(i), "x": float(p[0]), "y": float(p[1]), "v_x": float(u[0]), "v_y": float(u[1])}
+    return [{"id": int(i), "x": float(p[0]), "y": float(p[1]), "V_X": float(u[0]), "V_Y": float(u[1])}
             for i, p, u in zip(ids, points, v)]
 
 
