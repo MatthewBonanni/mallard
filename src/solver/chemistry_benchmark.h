@@ -45,7 +45,8 @@ struct ChemistryBenchmark {
  *        trajectory of [reactor] (fresh, igniting and burnt), replicated
  *        over the cells and advanced over each splitting step dt, every call
  *        from the sampled states; logs and returns cells per second and the
- *        sub-step distribution.
+ *        sub-step distribution. Before the timed calls, an InputError for the
+ *        keys of input unread by then (by it or, before, by its caller).
  */
 ChemistryBenchmark run_chemistry_benchmark(const Input & input);
 

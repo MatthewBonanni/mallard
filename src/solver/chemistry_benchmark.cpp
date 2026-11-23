@@ -126,6 +126,7 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     if (threads < 0) throw InputError("benchmark.threads must not be negative.");
     cell_options.threads = static_cast<uint32_t>(threads);
     cell_options.shared = static_cast<int>(find_value_or<int64_t>(bench, "shared", -1));
+    reject_unused_keys(input);
     CellChemistry cells;
     cells.init(model.device(), mech, chemistry::make_kinetics_table(mech, options.C_reg), cell_options, n_cells);
 
