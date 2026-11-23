@@ -2264,15 +2264,13 @@ std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool 
 }
 
 std::string Solver::progress_units() const {
-    const bool si = units::system() == units::System::SI;
-    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
-    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+    auto object = [](const std::vector<std::pair<std::string, Dimension>> & columns) {
         json::Object o;
-        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        for (const auto & [name, dimension] : columns) o.add(name, units::of(dimension));
         return o.str();
     };
     json::Object u;
-    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("t", units::of(dim::time)).add("dt", units::of(dim::time)).add("cfl", "1").add("progress", "1");
     u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
     for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
         u.add(memory, "B");

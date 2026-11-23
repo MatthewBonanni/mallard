@@ -964,8 +964,8 @@ units by definition, for Mallard to read back.
 | VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres); `cell_methods` for [cell averages and point values](#cell-averages-and-point-values) |
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
-| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column) |
-| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
+| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column, and for every column of a nondimensional case) |
+| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` (`1` in a nondimensional case) |
 
 ```python
 import mallard                                     # the Python package: any file Mallard writes

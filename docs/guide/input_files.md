@@ -202,7 +202,8 @@ in an expression that fails to parse is pointed out in the error.
 (`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Say so with
 `units = "nondimensional"` in `[physics]`: the terminal output then states it
 and labels no number with an SI unit (the progress table's units row shows
-`-`), instead of calling a time of 0.2 "0.2 s". Units in the input make no
+`-`, and the units lines of the CSV files and the run log say `1`), instead
+of calling a time of 0.2 "0.2 s". Units in the input make no
 sense then; write them only in dimensional inputs. Gas mixtures read real
 thermochemistry and are always dimensional, so `units = "nondimensional"` is
 an error with `gas = "mixture"`.
