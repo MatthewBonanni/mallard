@@ -340,6 +340,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
             o.error = e.what();
         }
         const bool captures = c.capture_fault == Solver::CaptureFault::NONE ||
+                              c.capture_fault == Solver::CaptureFault::LEGACY_STREAM_ONCE ||
                               c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES;
         if (depth > 0 && captures) expect_capturable(guard, solver);
         solver.copy_device_to_host();
@@ -1977,6 +1978,24 @@ TEST(StepQueueTest, AFailedStepGraphCaptureFallsBackToStepsKernelByKernel) {
         EXPECT_NE(fallback.warnings[0].find("no CUDA graph of the step"), std::string::npos) << fallback.warnings[0];
         EXPECT_NE(fallback.warnings[0].find(reported_by), std::string::npos) << fallback.warnings[0];
     }
+#endif
+}
+
+TEST(StepQueueTest, ACaptureThatAUnitsFirstKernelLaunchFailsIsTriedAgain) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "step graphs are captured in CUDA builds only";
+#else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
+    // A unit's first kernel launch inside the capture copies its lock arrays on the legacy stream, which fails the
+    // capture at cudaStreamEndCapture: tried again after every unit's copy, the step graph is captured, unreported
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    const Outcome host = run_case("first_launch_capture", c, 0);
+    c.capture_fault = Solver::CaptureFault::LEGACY_STREAM_ONCE;
+    const Outcome queued = run_case("first_launch_capture", c, 3);
+    expect_same(host, queued, "capture tried again");
+    EXPECT_GT(queued.graph_steps, 0u);
+    EXPECT_TRUE(queued.warnings.empty()) << queued.warnings[0];
 #endif
 }
 

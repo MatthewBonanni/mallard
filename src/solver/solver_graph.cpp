@@ -833,7 +833,8 @@ void Solver::captured_launch(const bool gated) {
             if (capture_fault == CaptureFault::FENCE) Kokkos::fence("capture_fault");
             device_step_body();
 #ifdef KOKKOS_ENABLE_CUDA
-            if (capture_fault == CaptureFault::LEGACY_STREAM) {
+            if (capture_fault == CaptureFault::LEGACY_STREAM || capture_fault == CaptureFault::LEGACY_STREAM_ONCE) {
+                if (capture_fault == CaptureFault::LEGACY_STREAM_ONCE) capture_fault = CaptureFault::NONE;
                 // Last in the body, so that no checked call reports it before cudaStreamEndCapture
                 const uint32_t zero = 0;
                 (void)cudaMemcpy(&step_loop.data()->active, &zero, sizeof(zero), cudaMemcpyHostToDevice);
@@ -1068,32 +1069,50 @@ void Solver::step_prologue() {
 void Solver::capture_step_graph() {
 #ifdef KOKKOS_ENABLE_CUDA
     Kokkos::fence("step_graph");
-    lock_arrays::copy_all();
-    cudaGraph_t graph = nullptr;
-    std::string failure;
-    try {
-        cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
-        capture_graph = graph;
-        begin_capture(graph, nullptr, 0);
-        captured_launch(gate_steps);
-        graph = static_cast<cudaGraph_t>(capture_graph);
-        end_capture(graph);
-        capture_graph = nullptr;
-        cudaGraphExec_t exec = nullptr;
-        // Without the flag, every node runs at the launch stream's priority, also those captured from comm_space
-        cuda_check(cudaGraphInstantiate(&exec, graph, cudaGraphInstantiateFlagUseNodePriority), "cudaGraphInstantiate");
-        step_graph_exec = exec;
-        cudaGraphDestroy(graph);
-    } catch (const std::exception & e) {
-        if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
-        capture_graph = nullptr;
-        failure = e.what();
-    }
+    const auto capture = [&] {
+        cudaGraph_t graph = nullptr;
+        try {
+            cuda_check(cudaGraphCreate(&graph, 0), "cudaGraphCreate");
+            capture_graph = graph;
+            begin_capture(graph, nullptr, 0);
+            captured_launch(gate_steps);
+            graph = static_cast<cudaGraph_t>(capture_graph);
+            end_capture(graph);
+            capture_graph = nullptr;
+            cudaGraphExec_t exec = nullptr;
+            // Without the flag, every node runs at the launch stream's priority, also those captured from comm_space
+            cuda_check(cudaGraphInstantiate(&exec, graph, cudaGraphInstantiateFlagUseNodePriority),
+                       "cudaGraphInstantiate");
+            step_graph_exec = exec;
+            cudaGraphDestroy(graph);
+        } catch (const std::exception & e) {
+            if (!abandon_capture(e) && graph) cudaGraphDestroy(graph);
+            capture_graph = nullptr;
+            halo_current = false;
+            recording_step = false;
+            return std::string(e.what());
+        }
+        return std::string();
+    };
     // Every rank takes its steps alike: by the graph only where every rank captured it
-    if (is_distributed() && comm::allreduce(static_cast<int>(failure.empty()), comm::Op::MIN) == 0 && failure.empty()) {
-        failure = "another rank could not capture it";
-        cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(step_graph_exec));
+    const auto everywhere = [&](const std::string & failure) {
+        return is_distributed() ? comm::allreduce(static_cast<int>(failure.empty()), comm::Op::MIN) > 0
+                                : failure.empty();
+    };
+    const auto drop_graph = [&] {
+        if (step_graph_exec) cudaGraphExecDestroy(static_cast<cudaGraphExec_t>(step_graph_exec));
         step_graph_exec = nullptr;
+    };
+    std::string failure = capture();
+    if (!everywhere(failure)) {
+        // A unit's first kernel launch inside the capture fails it (lock_arrays.h)
+        drop_graph();
+        lock_arrays::copy_all();
+        failure = capture();
+        if (!everywhere(failure) && failure.empty()) {
+            failure = "another rank could not capture it";
+            drop_graph();
+        }
     }
     if (!failure.empty()) {
         halo_current = false;
