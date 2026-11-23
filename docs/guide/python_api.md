@@ -282,8 +282,9 @@ key it holds is set, in the order of its class's keywords (case.set(config.Run(d
 mallard check on the case, as a CheckReport (status, ok, diagnostics, unused_keys, boundaries,
 time_step, resolution, memory, cost, resolved, keys, and the whole report as text and json): its setup
 without the run. keys is the resolved input as InputKey records: each key's path, value, whether the input
-sets it, and its catalog record (type, dimension, unit, required, default, accepted values). An invalid input gives a report of its errors, not an exception. ranks, throughput, steps and
-memory are mallard check's options; log, a function of a LogMessage, takes the setup's console output
+sets it, and its catalog record (type, dimension, unit, required, default, accepted values). An invalid
+input gives a report of its errors, not an exception. ranks, throughput, steps and memory are mallard
+check's options; log, a function of a LogMessage, takes the setup's console output
 (as Solver.set_log). Starts a session if none is started.
 
 #### `case.save(path)`
