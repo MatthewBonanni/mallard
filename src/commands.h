@@ -19,6 +19,9 @@
 /** @brief `mallard -i input.toml`: runs a case. */
 int run_main(const cli::Args & args);
 
+/** @brief `mallard install verify`: the environment check and a quick run of every solver installed, with a verdict. */
+int install_verify_main(const cli::Args & args);
+
 /** @brief `mallard check input.toml`: sets up a case and reports on it. */
 int check_main(const cli::Args & args);
 

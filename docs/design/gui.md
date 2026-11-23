@@ -1095,7 +1095,7 @@ tested like any other.
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
 | Write-once outputs | done ([#1326](https://github.com/MatthewBonanni/mallard/issues/1326)): snapshots, series and rewinds; probe HDF5 and VTKHDF files stay live | none |
-| Install verification | missing | `mallard install verify` |
+| Install verification | done: `mallard install verify --format json` (#1320) | none |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
 ## Prototype findings
