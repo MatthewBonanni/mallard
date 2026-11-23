@@ -39,17 +39,38 @@ KOKKOS_INLINE_FUNCTION rtype & column(const StateView & flow, const SpeciesView 
     return k < N_CONSERVATIVE ? flow(c, k) : species(c, k - N_CONSERVATIVE);
 }
 
-/** @brief Term k of slot s in cell c: its column k, then column j times its offset from c's center along d, k = n (1 + d) + j. */
+/** @brief Independent components of a symmetric N_DIM x N_DIM tensor. */
+constexpr uint32_t N_PAIRS = N_DIM * (N_DIM + 1) / 2;
+
+/** @brief Component p of a symmetric tensor: (a, b), a <= b, row by row. */
+KOKKOS_INLINE_FUNCTION void pair(const uint32_t p, uint32_t & a, uint32_t & b) {
+    a = 0;
+    uint32_t first = 0;
+    while (p >= first + N_DIM - a) first += N_DIM - a++;
+    b = a + p - first;
+}
+
+/**
+ * @brief Term k of slot s in cell c, for its offset d from c's center: its column k, then column j times d_i
+ *        (k = n (1 + i) + j), then column j times d_a d_b (k = n (1 + N_DIM + p) + j, (a, b) = pair(p)).
+ */
 struct Term {
     Kokkos::View<double **, Kokkos::LayoutRight> v;
     ParticleView positions;
     Kokkos::View<rtype *[N_DIM]> coords;
     uint32_t stride, n;
 
+    KOKKOS_INLINE_FUNCTION double offset(const uint32_t s, const uint32_t c, const uint32_t i) const {
+        return static_cast<double>(positions(size_t(stride) * s + i) - coords(c, i));
+    }
+
     KOKKOS_INLINE_FUNCTION double operator()(const uint32_t s, const uint32_t c, const uint32_t k) const {
         if (k < n) return v(s, k);
-        const uint32_t d = (k - n) / n, j = (k - n) % n;
-        return v(s, j) * static_cast<double>(positions(size_t(stride) * s + d) - coords(c, d));
+        const uint32_t i = (k - n) / n, j = (k - n) % n;
+        if (i < N_DIM) return v(s, j) * offset(s, c, i);
+        uint32_t a, b;
+        pair(i - N_DIM, a, b);
+        return v(s, j) * offset(s, c, a) * offset(s, c, b);
     }
 };
 
@@ -62,10 +83,11 @@ void Deposition::init(const Mesh & mesh, const Walker & walker, const std::vecto
     width = width_in;
     const uint32_t n_cells = mesh.n_cells;
     values = Kokkos::View<double **, Kokkos::LayoutRight>("particle_deposit_values", n_slots, n_columns);
-    // With a width, each column's first moments about the cell centers too
-    const uint32_t n_sums = width > 0.0_r ? (1 + N_DIM) * n_columns : n_columns;
-    largest = Kokkos::View<double **, Kokkos::LayoutRight>("particle_deposit_largest", n_cells, n_sums);
-    fixed = Kokkos::View<int64_t **, Kokkos::LayoutRight>("particle_deposit_fixed", n_cells, n_sums);
+    // With a width, each column's first and second moments about the cell centers too, summed half at a time
+    n_sums = width > 0.0_r ? (1 + N_DIM + N_PAIRS) * n_columns : n_columns;
+    const uint32_t chunk = width > 0.0_r ? (n_sums + 1) / 2 : n_sums;
+    largest = Kokkos::View<double **, Kokkos::LayoutRight>("particle_deposit_largest", n_cells, chunk);
+    fixed = Kokkos::View<int64_t **, Kokkos::LayoutRight>("particle_deposit_fixed", n_cells, chunk);
     count = Kokkos::View<uint32_t *>("particle_deposit_count", n_cells);
     sums = State("particle_deposit", n_cells, n_species);
     measure = mesh.cell_measure;
@@ -146,6 +168,7 @@ void Deposition::init(const Mesh & mesh, const Walker & walker, const std::vecto
     gated::parallel_for("particle_spread_scale", wt.extent(0), KOKKOS_LAMBDA(const uint32_t k) { wt(k) *= step; });
     density = State("particle_spread_density", n_cells, n_species);
     moments = State("particle_spread_moments", n_cells, N_DIM * n_columns - N_CONSERVATIVE);
+    second_moments = State("particle_spread_second_moments", n_cells, N_PAIRS * n_columns - N_CONSERVATIVE);
     faces_of_neighbor = faces;
     maps = mesh.periodic_maps();
 }
@@ -154,47 +177,58 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
                          const ParticleView & positions, const uint32_t stride,
                          const std::function<void(const State &)> & exchange) {
     const Kokkos::DefaultExecutionSpace exec;
-    gated::fill(exec, largest, 0.0);
-    gated::fill(exec, fixed, int64_t(0));
     gated::fill(exec, count, 0u);
     const uint32_t n_slots = static_cast<uint32_t>(values.extent(0));
-    const uint32_t n = n_columns, n_sums = static_cast<uint32_t>(largest.extent(1));
+    const uint32_t n = n_columns, chunk = static_cast<uint32_t>(largest.extent(1)), all = n_sums;
     const auto v = values;
     const auto m = largest;
     const auto f = fixed;
     const auto counts = count;
     const auto coords = cell_coords;
     const Term term{v, positions, coords, stride, n};
-    gated::parallel_for("particle_deposit_largest", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
-        if (ids(s) == EMPTY) return;
-        const uint32_t c = cells(s);
-        Kokkos::atomic_inc(&counts(c));
-        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_max(&m(c, k), exact_sums_magnitude(term(s, c, k)));
-    });
-    gated::parallel_for("particle_deposit_fixed", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
-        if (ids(s) == EMPTY) return;
-        const uint32_t c = cells(s);
-        const double unit = cell_unit(counts(c));
-        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_add(&f(c, k), exact_sums_fixed(term(s, c, k), unit, m(c, k)));
+    gated::parallel_for("particle_deposit_count", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+        if (ids(s) != EMPTY) Kokkos::atomic_inc(&counts(cells(s)));
     });
     const StateView flow = sums.flow;
     const SpeciesView species = sums.species;
     const StateView moment_flow = moments.flow;
     const SpeciesView moment_species = moments.species;
+    const StateView second_flow = second_moments.flow;
+    const SpeciesView second_species = second_moments.species;
     const auto V = measure;
     const uint32_t n_flow = std::min<uint32_t>(n, N_CONSERVATIVE);
-    gated::parallel_for("particle_deposit_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
-        const double unit = cell_unit(counts(c));
-        for (uint32_t k = 0; k < n_sums; k++) {
-            const rtype total = static_cast<rtype>(exact_sums_total(f(c, k), unit, m(c, k)));
-            if (k < n) {
-                column(flow, species, c, k) = total;
-            } else {
-                column(moment_flow, moment_species, c, k - n) = total / V(c);
+    for (uint32_t k0 = 0; k0 < all; k0 += chunk) {
+        const uint32_t k1 = std::min(all, k0 + chunk);
+        gated::fill(exec, largest, 0.0);
+        gated::fill(exec, fixed, int64_t(0));
+        gated::parallel_for("particle_deposit_largest", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+            if (ids(s) == EMPTY) return;
+            const uint32_t c = cells(s);
+            for (uint32_t k = k0; k < k1; k++) Kokkos::atomic_max(&m(c, k - k0), exact_sums_magnitude(term(s, c, k)));
+        });
+        gated::parallel_for("particle_deposit_fixed", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
+            if (ids(s) == EMPTY) return;
+            const uint32_t c = cells(s);
+            const double unit = cell_unit(counts(c));
+            for (uint32_t k = k0; k < k1; k++) {
+                Kokkos::atomic_add(&f(c, k - k0), exact_sums_fixed(term(s, c, k), unit, m(c, k - k0)));
             }
-        }
-        for (uint32_t k = n_flow; k < N_CONSERVATIVE; k++) flow(c, k) = 0.0_r;
-    });
+        });
+        gated::parallel_for("particle_deposit_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            const double unit = cell_unit(counts(c));
+            for (uint32_t k = k0; k < k1; k++) {
+                const rtype total = static_cast<rtype>(exact_sums_total(f(c, k - k0), unit, m(c, k - k0)));
+                if (k < n) {
+                    column(flow, species, c, k) = total;
+                } else if (k < (1 + N_DIM) * n) {
+                    column(moment_flow, moment_species, c, k - n) = total / V(c);
+                } else {
+                    column(second_flow, second_species, c, k - (1 + N_DIM) * n) = total / V(c);
+                }
+            }
+            if (k0 == 0) for (uint32_t k = n_flow; k < N_CONSERVATIVE; k++) flow(c, k) = 0.0_r;
+        });
+    }
     if (steps == 0) return;
     const auto off = offsets;
     const auto nb = neighbors;
@@ -205,6 +239,48 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     const auto shift = face_shift;
     const PeriodicMaps periodic = maps;
     const uint32_t n_species = static_cast<uint32_t>(species.extent(1));
+    // The second moments add -div Pi / 2 to the first moments' density mu (Pi the second moments' density,
+    // face averaged as below), so the move by -div mu below is q - div mu + div div Pi / 2: the deposit then has
+    // the particles' second moments too, and the spread's covariance is width^2 I wherever they sit in their cells
+    exchange(second_moments);
+    gated::parallel_for("particle_deposit_second_moments", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        const auto tensor = [&](const uint32_t cell, const uint32_t j, rtype (*t)[N_DIM]) {
+            for (uint32_t p = 0; p < N_PAIRS; p++) {
+                uint32_t a, b;
+                pair(p, a, b);
+                t[a][b] = t[b][a] = column(second_flow, second_species, cell, p * n + j);
+            }
+        };
+        for (uint32_t j = 0; j < n; j++) {
+            rtype own[N_DIM][N_DIM], div[N_DIM] = {};
+            tensor(c, j, own);
+            for (uint32_t k = off(c); k < off(c + 1); k++) {
+                rtype pi[N_DIM][N_DIM];
+                tensor(nb(k), j, pi);
+                if (turn(k) != 0) {
+                    // Q Pi Q^T (or Q^T Pi Q): its columns, then its rows
+                    for (uint32_t pass = 0; pass < 2; pass++) {
+                        for (uint32_t b = 0; b < N_DIM; b++) {
+                            rtype col[N_DIM];
+                            FOR_I_DIM col[i] = pi[i][b];
+                            if (turn(k) > 0) periodic.rotate(shift(face(k)), col);
+                            if (turn(k) < 0) periodic.unrotate(shift(face(k)), col);
+                            FOR_I_DIM pi[i][b] = col[i];
+                        }
+                        for (uint32_t a = 0; a < N_DIM; a++) {
+                            for (uint32_t b = a + 1; b < N_DIM; b++) {
+                                const rtype t = pi[a][b];
+                                pi[a][b] = pi[b][a];
+                                pi[b][a] = t;
+                            }
+                        }
+                    }
+                }
+                FOR_I_DIM for (uint32_t b = 0; b < N_DIM; b++) div[i] += 0.5_r * (own[i][b] + pi[i][b]) * av(k, b);
+            }
+            FOR_I_DIM column(moment_flow, moment_species, c, i * n + j) -= 0.5_r * div[i] / V(c);
+        }
+    });
     // The first moments move each sum by -div of its moment density, face averaged: the deposit then has the
     // particles' first moments, not the cell centers', so the spread converges at second order, not first
     exchange(moments);

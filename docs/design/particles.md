@@ -380,8 +380,30 @@ the particle sat in its cell. Across rotational periodic faces the
 neighbor's mu turns into the cell's frame as in `Walker::cross`. With width 0
 neither moments nor spreading run.
 
-**Cost.** Per stage, three kernels over the slots and one over the cells, then
-with a width one moment pass and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
+**Second moments** (#1478). First moments alone leave a particle at offset d
+from its cell's center with covariance -d d^T before the spread, so the spread
+kernel's is sigma^2 I - d d^T: an O(h^2) error whose constant depends on the
+offset (8 h^2 at a cell's center to 37 h^2 near a corner, sigma = 0.08), so a
+study at a fixed position converges unevenly (#1457). The cells also sum the
+second moments M = sum q (x_p - x_c)(x_p - x_c)^T (N_DIM (N_DIM + 1) / 2 more
+columns per value), and add -div Pi / 2 to mu before the move above, Pi = M /
+V and the divergence the same face average, so the move is q - div mu + div div
+Pi / 2: the next term of the Taylor series of a point source about the cell
+center, and a discrete Hessian built from the divergence the first moments
+already use, so it needs no new mesh data and works on any mesh. On a uniform
+Cartesian mesh the pre-spread deposit then has the particle's integral, first
+and second moments exactly, and since the face-flux Laplacian adds exactly 2
+per unit time per direction to the second moment there, the spread has
+covariance sigma^2 I wherever the particle sits; elsewhere the correction is
+consistent and the offset dependence drops to higher order. Pi turns as Q Pi
+Q^T across rotational periodic faces. It costs one more cell kernel and halo
+exchange per deposit, and the exact sums run in two passes of half the columns
+each, so their buffers grow only from (1 + N_DIM) to (1 + N_DIM + N_DIM (N_DIM +
+1) / 2) / 2 columns per value (unchanged in 2D, 20 to 25 in 3D).
+
+**Cost.** Per stage, three kernels over the slots and one over the cells (five
+and two with a width, for the two passes of exact sums), then
+with a width two moment passes and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
 the owned cells and (distributed) a halo exchange. A width of two cells is
 16 steps in 2D and 24 in 3D.
 

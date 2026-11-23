@@ -405,6 +405,77 @@ TEST(ParticleCouplingTest, DepositionConvergesToTheGaussianUnderRefinement) {
     EXPECT_LT(fine, 0.01);
 }
 
+namespace {
+
+struct Moments {
+    double total = 0.0;
+    std::array<double, 3> mean{};
+    std::array<std::array<double, 3>, 3> covariance{};
+};
+
+/** @brief Integral, mean and covariance of the volume fraction of one particle at p spread over sigma on box(n). */
+Moments deposit_moments(uint32_t n, double sigma, const std::array<double, 3> & p) {
+    const double weight = 1e3, density = 1000.0, tau = 0.1;
+    std::ostringstream keys;
+    keys.precision(17);
+    keys << "deposition_width = " << sigma << "\npoints = [" << numbers(p[0], p[1], p[2]) << "]\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(box(n, strings("0.0", "0.0", "0.0"), run(0, 0.01), sphere(density, tau, weight, keys.str()),
+                               "type = \"FO\"\n")));
+    solver.update_particle_fields();
+    const auto fields = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.get_particle_fields());
+    const Mesh & mesh = *solver.get_mesh();
+    Moments m;
+    std::vector<std::array<double, 3>> offsets(mesh.n_owned());
+    std::vector<double> q(mesh.n_owned());
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        q[c] = static_cast<double>(fields(c, 0)) * static_cast<double>(mesh.h_cell_measure(c));
+        for (size_t d = 0; d < N_DIM; d++) {
+            const double length = d == 2 ? 0.5 : 1.0;
+            double dx = static_cast<double>(mesh.h_cell_coords(c, d)) - p[d];
+            offsets[c][d] = dx - length * std::round(dx / length);
+        }
+        m.total += q[c];
+        for (size_t a = 0; a < N_DIM; a++) m.mean[a] += q[c] * offsets[c][a];
+    }
+    for (size_t a = 0; a < N_DIM; a++) m.mean[a] /= m.total;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        for (size_t a = 0; a < N_DIM; a++) {
+            for (size_t b = 0; b < N_DIM; b++) {
+                m.covariance[a][b] += q[c] * (offsets[c][a] - m.mean[a]) * (offsets[c][b] - m.mean[b]) / m.total;
+            }
+        }
+    }
+    return m;
+}
+
+} // namespace
+
+TEST(ParticleCouplingTest, DepositedSpreadIsIndependentOfTheParticlesPlaceInItsCell) {
+    // The deposit keeps the particle's integral, is centered on it and has the Gaussian's covariance sigma^2 I,
+    // whether the particle sits at its cell's center or near a corner: the moment corrections give the
+    // pre-spread deposit the particle's first and second moments, and the spread adds sigma^2 I exactly
+    const uint32_t n = 32;
+    const double h = 1.0 / n, sigma = 0.045;
+    const double volume = 1e3 * PI / 6.0 * std::pow(diameter_for(0.1, 1000.0), 3);
+    // The Gaussian's tail beyond the nearest periodic half-length, 0.25, changes its moments by under 1e-6
+    const double tolerance = std::max(1e-6, roundoff(1e-12)) * sigma * sigma;
+    for (const std::array<double, 3> & offset : {std::array<double, 3>{0.0, 0.0, 0.0}, {0.45, 0.45, 0.45},
+                                                 {0.45, -0.3, 0.2}, {-0.4, 0.1, -0.45}}) {
+        const std::array<double, 3> p = {(12.5 + offset[0]) * h, (14.5 + offset[1]) * h, (5.5 + offset[2]) * h};
+        const Moments m = deposit_moments(n, sigma, p);
+        EXPECT_NEAR(m.total, volume, roundoff(1e-12) * volume);
+        for (size_t a = 0; a < N_DIM; a++) {
+            EXPECT_NEAR(m.mean[a], 0.0, roundoff(1e-12)) << "offset " << offset[0] << ", " << offset[1];
+            for (size_t b = 0; b < N_DIM; b++) {
+                EXPECT_NEAR(m.covariance[a][b], a == b ? sigma * sigma : 0.0, tolerance)
+                    << "offset " << offset[0] << ", " << offset[1] << ", component " << a << b;
+            }
+        }
+    }
+}
+
 TEST(ParticleCouplingTest, DispersedPhaseFieldsOfAUniformSuspension) {
     // One particle per cell: volume fraction w V_p / V, number density w / V, mean velocity the particles',
     // and the source the opposite of their drag

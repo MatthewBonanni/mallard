@@ -668,22 +668,33 @@ over a Gaussian of standard deviation $\sigma$
     each sum is exact to $2^{-60}$ of its largest term, whatever the order of
     the slots, which differs between rank counts and migrations. The start
     cell is always owned, so no deposit lands in a halo.
-2. **First moments** (with a width). Spreading from the cell centers would
-    place every particle at its cell's center, an error of half a cell in the
-    kernel's center. The cells also sum each source's first moment about
-    their centers, $\mathbf{m}_c = \sum_p q_p(\mathbf{x}_p - \mathbf{x}_c)$, and
-    move each sum by minus the divergence of the moment density
-    $\boldsymbol{\mu} = \mathbf{m} / V$, face averaged, in flux form,
+2. **First and second moments** (with a width). Spreading from the cell
+    centers would place every particle at its cell's center, an error of half
+    a cell in the kernel's center. The cells also sum each source's first and
+    second moments about their centers, $\mathbf{m}_c = \sum_p q_p(\mathbf{x}_p - \mathbf{x}_c)$
+    and $\mathbf{M}_c = \sum_p q_p(\mathbf{x}_p - \mathbf{x}_c)(\mathbf{x}_p - \mathbf{x}_c)^T$,
+    and correct each sum by the next two terms of the Taylor series of a point
+    source about the cell center,
+    $q\,\delta(\mathbf{x} - \mathbf{x}_c - \mathbf{d}) \approx q\,\delta - \nabla\cdot(q\mathbf{d}\,\delta) + \tfrac12\nabla\nabla : (q\mathbf{d}\mathbf{d}^T\delta)$,
+    with the moment densities $\boldsymbol{\mu} = \mathbf{m} / V$ and
+    $\boldsymbol{\Pi} = \mathbf{M} / V$ and one face-averaged divergence in
+    flux form, applied once to $\boldsymbol{\Pi}$ and once to the corrected
+    first moments,
 
     $$
     \begin{equation}
-    q_c \leftarrow q_c - \sum_{f} \tfrac12\left(\boldsymbol{\mu}_c + \boldsymbol{\mu}_n\right)\cdot\mathbf{n}_f A_f,
+    \tilde{\boldsymbol{\mu}}_c = \boldsymbol{\mu}_c - \frac{1}{2 V_c}\sum_{f} \tfrac12\left(\boldsymbol{\Pi}_c + \boldsymbol{\Pi}_n\right)\mathbf{n}_f A_f,
+    \qquad
+    q_c \leftarrow q_c - \sum_{f} \tfrac12\left(\tilde{\boldsymbol{\mu}}_c + \tilde{\boldsymbol{\mu}}_n\right)\cdot\mathbf{n}_f A_f,
     \label{eq:coupling-moments}
     \end{equation}
     $$
 
-    which gives the deposit the particles' first moments: the spread then
-    converges at second order in the cell size rather than first.
+    so that $q - \nabla\cdot\boldsymbol{\mu} + \tfrac12\nabla\cdot\nabla\cdot\boldsymbol{\Pi}$
+    is discretized with a Hessian built from the same divergence, on any mesh.
+    The deposit then has the particles' first and second moments: the spread
+    converges at second order in the cell size rather than first, and its
+    error does not depend on where the particles sit in their cells.
 3. **Spreading by diffusion**, following
     [Capecelatro & Desjardins 2013](../references.md#capecelatro-desjardins-2013):
     $\sigma^2 / 2$ of diffusion with unit diffusivity, whose continuum limit
