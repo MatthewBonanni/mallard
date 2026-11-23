@@ -698,11 +698,11 @@ std::string settling(double tau, double g, const std::string & drag, uint32_t n_
 
 /**
  * @brief Solid particles of relaxation time 0.05 in the vortex, which flings them out across the partitions,
- *        starting hotter than the gas, whose temperature they relax to in about a step.
+ *        starting hotter than the gas, whose temperature they relax to in about a step, with the history force.
  */
 std::string solid_vortex(uint32_t n_steps, const std::string & init = "", const std::string & extra = "") {
     return solid(vortex(16, 0.01, n_steps, TENO4, "SSPRK3", init, extra), 1000.0, diameter_for(0.05, 1000.0),
-                 "schiller_naumann", "specific_heat = 1.0\ntemperature = 1.5\n");
+                 "schiller_naumann", "specific_heat = 1.0\ntemperature = 1.5\nforces = [\"basset_history\"]\n");
 }
 
 } // namespace
@@ -845,7 +845,7 @@ TEST(SolidParticlesTest, TrajectoriesAreBitwiseIndependentOfTheRankCount) {
 }
 
 TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
-    // A restart's particles keep their velocities and temperatures instead of starting at the gas's
+    // A restart's particles keep their velocities, temperatures and histories instead of starting at the gas's
     const std::string dir = (scratch_dir() / "mallard_solid_particles_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 20\n";
     Solver straight;
@@ -872,6 +872,135 @@ TEST(SolidParticlesTest, RestartedRunContinuesTheVelocitiesExactly) {
         EXPECT_EQ(records[k].T, expected[k].T) << "particle " << k;
     }
     EXPECT_EQ(second.get_particles()->removed(), removed);
+}
+
+namespace {
+
+/**
+ * @brief Velocity and displacement at time t of a sphere in gas at rest under drag, an acceleration a_g and the
+ *        Basset force, starting at v0 (the slip jumps there): with p1, p2 the real roots of
+ *        p^2 + beta sqrt(pi) p + 1 / tau, beta = 9 sqrt(rho mu / pi) / (d m), the Laplace transform
+ *        V = [v0 + a_g / s] / ((sqrt(s) - p1)(sqrt(s) - p2)) inverts with E(p) = e^{p^2 t} erfc(-p sqrt(t)).
+ */
+std::array<double, 2> basset_motion(double tau, double beta, double v0, double a_g, double t) {
+    const double b = beta * std::sqrt(std::numbers::pi), disc = b * b - 4.0 / tau;
+    EXPECT_GE(disc, 0.0);
+    const double p1 = 0.5 * (-b + std::sqrt(disc)), p2 = 0.5 * (-b - std::sqrt(disc));
+    const auto E = [&](double p) { return std::exp(p * p * t) * std::erfc(-p * std::sqrt(t)); };
+    const auto F = [&](double p) { return (E(p) - 1.0) / p; };
+    const auto G = [&](double p) { return ((F(p) - 2.0 * std::sqrt(t / std::numbers::pi)) / p - t) / p; };
+    const double v = (v0 * (p1 * E(p1) - p2 * E(p2)) + a_g * (F(p1) - F(p2))) / (p1 - p2);
+    const double x = (v0 * (F(p1) - F(p2)) + a_g * (G(p1) - G(p2))) / (p1 - p2);
+    return {v, x};
+}
+
+/** @brief beta of basset_motion for particles of mass m per volume and diameter d in the gas of solid(). */
+double basset_beta(double m, double d) { return 9.0 * std::sqrt(MU / std::numbers::pi) / (d * m); }
+
+/** @brief One particle at (0.5, 0.5) in gas at rest, for t = 0.3 in n_steps, with the [particles] keys. */
+std::string basset_box(double density, double diameter, uint32_t n_steps, const std::string & keys) {
+    std::ostringstream run;
+    run.precision(17);
+    run << "n_steps = " << n_steps << "\ndt = " << 0.3 / n_steps << "\n";
+    return solid(box(12, vec("0.0", "0.0", "0.0"), "xy", "", run.str(), "points = [" + numbers(0.5, 0.5, 0.25) + "]\n"),
+                 density, diameter, "stokes", "forces = [\"basset_history\"]\n" + keys);
+}
+
+/** @brief The velocity and position of the one particle of a run. */
+particles::Record only_particle(const std::string & input) {
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    EXPECT_EQ(records.size(), 1u);
+    return records.empty() ? particles::Record{} : records[0];
+}
+
+} // namespace
+
+TEST(ParticleForcesTest, BassetKernelExponentialsApproximateTheKernel) {
+    // sum_k a_k e^{-lambda_k t} against 1 / sqrt(t), in units of t_ref, over the nine decades they cover
+    particles::Solid solid;
+    solid.enable_history();
+    for (double e = -6.0; e <= 3.0; e += 0.01) {
+        const double t = std::pow(10.0, e);
+        double sum = 0.0;
+        for (uint32_t k = 0; k < particles::BASSET_MODES; k++) {
+            sum += static_cast<double>(solid.history_weight[k]) * std::exp(-static_cast<double>(solid.history_rate[k]) * t);
+        }
+        EXPECT_NEAR(sum * std::sqrt(t), 1.0, 7.5e-4) << "t = " << t;
+    }
+}
+
+TEST(SolidParticlesTest, BassetForceOnAnImpulsivelyStartedSphere) {
+    // A sphere as dense as the gas thrown at v0 through gas at rest: the history force of the slip's jump,
+    // v0 / sqrt(t) at first, stops it in half the distance drag alone would, v0 tau (1 - e^{-t/tau})
+    const double tau = 0.1, v0 = 0.4, t = 0.3, d = diameter_for(tau, 1.0), beta = basset_beta(1.0, d);
+    const std::string keys = "velocity = " + numbers(v0, 0.0, 0.0) + "\ngravity = " + numbers(0.0, 0.0, 0.0) + "\n";
+    const std::array<double, 2> exact = basset_motion(tau, beta, v0, 0.0, t);
+    const auto error = [&](uint32_t n_steps) {
+        const particles::Record r = only_particle(basset_box(1.0, d, n_steps, keys));
+        EXPECT_NEAR(r.v[1], 0.0, roundoff(1e-14));
+        return std::array<double, 2>{std::abs(r.v[0] - exact[0]), std::abs(r.x[0] - 0.5 - exact[1])};
+    };
+    const std::array<double, 2> coarse = error(75), fine = error(150);
+    EXPECT_LT(fine[0], 5e-4 * v0);
+    EXPECT_LT(fine[1], 2.5e-4 * v0);
+    EXPECT_GT(std::abs(exact[1] - v0 * tau * (1.0 - std::exp(-t / tau))), 100.0 * fine[1]);
+    // The scheme is of order 3/2 in the step, the order of the kernel's singularity
+    EXPECT_GT(std::log2(coarse[0] / fine[0]), 1.4);
+    EXPECT_GT(std::log2(coarse[1] / fine[1]), 1.4);
+    if (comm::size() == 1) {
+        expect_matches_serial_with_and_without_step_graphs(basset_box(1.0, d, 75, keys));
+    } else {
+        expect_matches_serial(basset_box(1.0, d, 75, keys));
+    }
+}
+
+TEST(SolidParticlesTest, BassetForceOnASphereRisingFromRest) {
+    // A sphere of half the gas's density with added mass, m = rho_p + rho / 2 = 1, released at the gas's
+    // velocity: buoyancy lifts it at (rho - rho_p) g / m against drag and the history of its slip
+    const double tau = 0.1, g = 1.0, t = 0.3, m = 1.0, d = diameter_for(tau, m);
+    const double a_g = 0.5 * g / m;
+    const std::string keys = "gravity = " + numbers(0.0, -g, 0.0) + "\nforces = [\"basset_history\", \"added_mass\"]\n";
+    std::string input = basset_box(0.5, d, 150, keys);
+    input.replace(input.find("forces = [\"basset_history\"]\n"), 28, "");
+    const particles::Record r = only_particle(input);
+    const std::array<double, 2> exact = basset_motion(tau, basset_beta(m, d), 0.0, a_g, t);
+    EXPECT_NEAR(r.v[1], exact[0], 2e-3 * exact[0]);
+    EXPECT_NEAR(r.x[1] - 0.5, exact[1], 2e-3 * exact[1]);
+    EXPECT_GT(a_g * tau * (1.0 - std::exp(-t / tau)) - exact[0], 0.1 * exact[0]);
+}
+
+TEST(SolidParticlesTest, BassetHistoryTurnsAcrossRotationalPeriodicSides) {
+    // As in VelocitiesTurnAcrossRotationalPeriodicSides, with the history force on a sphere as dense as the
+    // gas: its history turns with it, so it slows along its turned direction as the impulsively started sphere
+    const double tau = 5.0, t = 0.5, s0 = 0.5, theta0 = 85.0 * std::numbers::pi / 180.0, d = diameter_for(tau, 1.0);
+    std::ostringstream input;
+    input.precision(17);
+    input << "[run]\nn_steps = 50\ndt = 0.01\n"
+          << "[mesh]\ntype = \"annulus\"\nNtheta = 12\nNr = 6\nNz = 3\nr_inner = 1.0\nr_outer = 2.0\nLz = 0.6\n"
+          << "angle = 90.0\n[[periodic]]\nzones = [\"start\", \"end\"]\n"
+          << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+          << "[initialize]\ntype = \"constant\"\nu = " << numbers(0.0, 0.0, 0.0) << "\np = 1.0\nT = 1.0\n"
+          << "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+          << "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"RK4\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n" << PHYSICS
+          << "[output]\ncheck_interval = 1000000\n[particles]\ntype = \"tracer\"\n"
+          << "points = [" << numbers(1.5 * std::cos(theta0), 1.5 * std::sin(theta0), 0.3) << "]\n"
+          << "velocity = " << numbers(-s0 * std::sin(theta0), s0 * std::cos(theta0), 0.0) << "\n";
+    const particles::Record r = only_particle(solid(input.str(), 1.0, d, "stokes", "forces = [\"basset_history\"]\n"));
+    const std::array<double, 2> exact = basset_motion(tau, basset_beta(1.0, d), s0, 0.0, t);
+    const double L = exact[1], s = exact[0];
+    const double x = 1.5 * std::cos(theta0) - L * std::sin(theta0), y = 1.5 * std::sin(theta0) + L * std::cos(theta0);
+    ASSERT_GT(std::atan2(y, x), std::numbers::pi / 2.0);
+    EXPECT_NEAR(r.x[0], y, 1e-3 * L);
+    EXPECT_NEAR(r.x[1], -x, 1e-3 * L);
+    EXPECT_NEAR(r.v[0], s * std::cos(theta0), 1e-3 * s);
+    EXPECT_NEAR(r.v[1], s * std::sin(theta0), 1e-3 * s);
+    EXPECT_GT(s0 * std::exp(-t / tau) - s, 0.05 * s);
 }
 
 TEST(SolidParticlesTest, SolidParticlesNeedAViscousGas) {

@@ -63,7 +63,7 @@ A solid particle has a velocity $\mathbf{v}$ of its own, set by the forces
 on it. Of the Maxey-Riley equation for a small sphere in a nonuniform flow
 ([Maxey & Riley 1983](../references.md#maxey-riley-1983)), Mallard keeps the
 drag, gravity and buoyancy always, and adds the pressure-gradient,
-added-mass and Saffman lift forces on request (`forces`). Per unit particle
+added-mass, Saffman lift and Basset history forces on request (`forces`). Per unit particle
 volume $V_p = \pi d^3 / 6$,
 
 $$
@@ -73,7 +73,8 @@ $$
 + \underbrace{\rho_p\,\mathbf{g}}_{\text{gravity}}
 + \underbrace{\mathbf{f}_b}_{\text{buoyancy}}
 + \underbrace{C_A\left(\rho\,\mathbf{g}_s - \nabla p\right)}_{\text{added mass}}
-+ \underbrace{\mathbf{f}_L}_{\text{lift}}, \qquad
++ \underbrace{\mathbf{f}_L}_{\text{lift}}
++ \underbrace{\mathbf{f}_H}_{\text{history}}, \qquad
 \frac{\mathrm{d}\mathbf{x}_p}{\mathrm{d}t} = \mathbf{v},
 \label{eq:momentum}
 \end{equation}
@@ -104,7 +105,7 @@ $$
 \frac{\mathrm{d}\mathbf{v}}{\mathrm{d}t} = \frac{\mathbf{u}(\mathbf{x}_p, t) - \mathbf{v}}{\tau} + \mathbf{a},
 \qquad
 \tau = \frac{(\rho_p + C_A\rho)\, d^2}{18\,\mu f(Re_p, \dots)}, \qquad
-\mathbf{a} = \frac{\rho_p\,\mathbf{g} + \mathbf{f}_b + C_A(\rho\,\mathbf{g}_s - \nabla p) + \mathbf{f}_L}{\rho_p + C_A\rho},
+\mathbf{a} = \frac{\rho_p\,\mathbf{g} + \mathbf{f}_b + C_A(\rho\,\mathbf{g}_s - \nabla p) + \mathbf{f}_L + \mathbf{f}_H}{\rho_p + C_A\rho},
 \label{eq:solid}
 \end{equation}
 $$
@@ -367,12 +368,63 @@ scales as $(\rho/\rho_p)^{1/2}$ relative to the drag at fixed $Re_G$, so it
 matters for particles near walls in boundary layers and in strong shear
 layers.
 
+### Basset history force
+
+When the slip $\mathbf{w} = \mathbf{u} - \mathbf{v}$ changes, the vorticity
+it sheds diffuses away from the sphere over the viscous time $d^2 / \nu$,
+and the drag lags behind its quasi-steady value. In creeping flow this
+memory is the force of
+[Boussinesq 1885](../references.md#boussinesq-1885) and
+[Basset 1888](../references.md#basset-1888), the last term of the
+Maxey-Riley equation
+([Maxey & Riley 1983](../references.md#maxey-riley-1983)):
+
+$$
+\begin{equation}
+\mathbf{f}_H = \frac{9}{d}\sqrt{\frac{\rho\,\mu}{\pi}}\;\mathbf{I}(t), \qquad
+\mathbf{I}(t) = \int_{t_0^-}^{t} \frac{\mathrm{d}\mathbf{w}(s)}{\sqrt{t - s}},
+\label{eq:basset}
+\end{equation}
+$$
+
+per particle volume ($\tfrac{3}{2} d^2 \sqrt{\pi\rho\mu}$ times
+$\mathbf{I}$ per particle), with $\mathrm{d}\mathbf{w}/\mathrm{d}s$ taken
+along the particle's path, $\rho$ and $\mu$ of the gas at the particle, and
+the history starting at the particle's first step $t_0$. A particle seeded
+with a `velocity` other than the gas's starts impulsively: its slip jumps from
+0 at $t_0$, and $\mathbf{I}$ holds $\mathbf{w}(t_0) / \sqrt{t - t_0}$.
+`"basset_history"` adds it. Relative to the drag it scales as
+$(\rho / \rho_p)^{1/2} (\tau / T)^{1/2}$ for a slip that changes over a time
+$T$: it matters for $\rho_p / \rho$ of order 1 and in rapid accelerations
+(shocks, impulsive starts), and changes the settling of heavy particles in
+gas by a few percent at most
+([Crowe et al. 2011](../references.md#crowe-2011)). The kernel
+$1 / \sqrt{t - s}$ is that of creeping flow, $Re_p \ll 1$; at finite $Re_p$
+the memory decays faster at long times
+([Mei & Adrian 1992](../references.md#mei-adrian-1992)), so the force is an
+upper bound there, as for the Stokes drag it accompanies.
+
+The kernel is a sum of exponentials,
+$1 / \sqrt{t} \approx \sum_k a_k e^{-\lambda_k t}$, the trapezoidal rule on
+$1/\sqrt{t} = \pi^{-1/2} \int e^{s/2} \exp(-e^s t)\,\mathrm{d}s$
+([Beylkin & Monzón 2010](../references.md#beylkin-monzon-2010)): 29 rates,
+two per decade, within $7.3 \times 10^{-4}$ of $1/\sqrt{t}$ from
+$10^{-6}\,t_{ref}$ to $10^{3}\,t_{ref}$, with $t_{ref}$ the particle's
+Stokes relaxation time at its first step. Then
+$\mathbf{I} = \sum_k a_k \mathbf{z}_k$ with
+$\mathbf{z}_k = \int e^{-\lambda_k (t - s)}\,\mathrm{d}\mathbf{w}(s)$,
+which each particle carries in place of its whole path: the cost and memory
+per particle are bounded, and restarts and migration carry the history. The
+memory older than $10^{3}\,t_{ref}$ fades, and the last $10^{-6}\,t_{ref}$
+is missed, an error of about $10^{-3}\,\lvert\mathbf{I}\rvert$. How the
+$\mathbf{z}_k$ advance in time:
+[numerics](../numerics/particles.md#integration-in-time).
+
 ### Forces left out
 
-- The **Basset history force**, the viscous memory of the particle's past
-  accelerations, a convolution over its path: it matters for $\rho_p / \rho$
-  of order 1 and rapidly accelerating particles, and is small for heavy
-  particles in gas ([Crowe et al. 2011](../references.md#crowe-2011)).
+- The **compressible unsteady force** of a shock passing a particle, which
+  dominates its first few acoustic times $d / c$, and the history force at
+  finite $Re_p$ ([#1462](https://github.com/MatthewBonanni/mallard/issues/1462)).
 - The **Magnus lift** of a rotating sphere: particles have no rotation.
 - **Thermophoresis**, **Brownian motion** and electrostatic forces, which
   matter for sub-micron particles.

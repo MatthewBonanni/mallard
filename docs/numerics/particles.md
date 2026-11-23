@@ -22,7 +22,7 @@ rank can hold every particle), as separate arrays of one entry per slot
 | Array | Per slot | Holds |
 |---|---|---|
 | `x` | `width` reals, contiguous | the integrated block: position, then for solid particles the velocity and, with heat transfer, the temperature, then the integrated quantities |
-| `aux` | `n_aux` reals | extrema and first times of the quantities, which an integrator cannot combine linearly |
+| `aux` | `n_aux` reals | extrema and first times of the quantities, which an integrator cannot combine linearly; with the Basset force, its history ($29 N_{DIM} + N_{DIM} + 2$ reals: [below](#the-basset-history-force)) |
 | `id` | `uint64_t` | the global id; `EMPTY` (all bits set) marks a free slot |
 | `cell` | `uint32_t` | the local cell holding the particle at the start of the step |
 | `step_start` | `n_start` reals | solid particles: $\mathbf{v}$, $\mathbf{u}$, $\mathbf{a}$, $\tau$, $\Delta t$ (and $T_p$, $T$, $\tau_T$) at the step's start |
@@ -327,6 +327,71 @@ captured step the device scalar the step graph computes it in
 (`step_dt_device`); the first stage stores it in `step_start`, since the step
 controller overwrites the device's step size before relocation.
 
+### The Basset history force
+
+The history integral of the [theory](../theory/particles.md#basset-history-force),
+$\mathbf{I} = \sum_k a_k \mathbf{z}_k$, needs the slip
+$\mathbf{w} = \mathbf{u} - \mathbf{v}$ along the path. Mallard takes
+$\mathbf{w}$ linear in time over each step, between its values at the step
+starts, for which every $\mathbf{z}_k$ advances exactly
+(`particles::Solid::history_integral`). Each particle keeps in `aux` the
+$\mathbf{z}_k$ at the start of its last step $t_l$, $\mathbf{w}(t_l)$, $t_l$
+and $t_{ref}$. The first stage of the next step, at $t_n$ with slip
+$\mathbf{w}_n$, advances them over $\delta = t_n - t_l$,
+
+$$
+\begin{equation}
+\mathbf{z}_k \leftarrow e^{-\lambda_k \delta}\,\mathbf{z}_k + \varphi_1(\lambda_k \delta)\,(\mathbf{w}_n - \mathbf{w}(t_l)),
+\label{eq:history-advance}
+\end{equation}
+$$
+
+and sets $t_l = t_n$; a rejected step's retry starts at the same $t_n$ and
+advances nothing, and a particle's first step starts its history
+($\mathbf{z}_k = \mathbf{w}$, the slip's jump from 0). A stage at time
+$t_n + \tau_s$ of a step $\Delta t$ then evaluates
+
+$$
+\begin{equation}
+\mathbf{I} = \sum_k a_k \left[\varphi_1(\lambda_k \Delta t)\,\mathbf{z}_k
++ \varphi_1(\lambda_k \tau_s)\,(\mathbf{w} - \mathbf{w}_n)\right]
+\label{eq:history-stage}
+\end{equation}
+$$
+
+with the stage's slip $\mathbf{w}$. The second term is the step's own slip
+change up to the stage, exact for $\mathbf{w}$ linear over
+$[t_n, t_n + \tau_s]$. The first is the history before the step, which
+decays over the step as $\sum_k a_k e^{-\lambda_k s} \mathbf{z}_k$, by its
+mean over the step: the stages see a constant, which every integrator
+integrates into $\mathbf{v}$ exactly. Sampling the decay at the stages
+instead would integrate the fast rates, $\lambda_k \Delta t \gg 1$, with
+an error of order one: right after an impulsive start the force is
+$\mathbf{w}_0 / \sqrt{t}$, whose mean over the first step,
+$2 \mathbf{w}_0 / \sqrt{\Delta t}$, is finite while its value at the start
+is not. The position takes the mean's integral at second order.
+
+The second term's weight $\sum_k a_k \varphi_1(\lambda_k \tau_s) \approx 2 / \sqrt{\tau_s}$
+acts on the stage velocity like an extra, explicit drag, of
+$(18 \rho \Delta t / (\pi m \tau c))^{1/2}$ per step for a stage at
+$\tau_s = c\,\Delta t$ ($m = \rho_p + C_A \rho$). Particles with
+$\Delta t \le \tau$ keep it below 1 for $\rho_p / \rho \gtrsim 20$, which
+covers particles and droplets in gas; stiff particles ($\Delta t > \tau$)
+take the history force into $\mathbf{a}$, and so into their equilibrium
+velocity, where its weight falls as $(\tau / \Delta t)^{1/2}$. For
+$\rho_p / \rho$ of order 1 the step must stay below about $\tau / 10$.
+
+The slip linear over a step makes $\mathbf{I}$ accurate to order
+$\Delta t^{3/2}$, the order of the kernel's singularity, whatever the
+integrator; so are the velocity and position of particles with the history
+force (measured: 1.5 for an impulsively started sphere with RK4). The
+history's state is part of the particle: it migrates with it bit for bit,
+turns across rotational periodic sides (relocation turns the axes with the
+particle and applies their turn to the $\mathbf{z}_k$ and $\mathbf{w}(t_l)$),
+and restart files carry it (`PARTICLE_HISTORY`). A bounce changes
+$\mathbf{v}$ within a step; the history sees the change spread over that
+step.
+
 ## Bounces within a step
 
 A solid particle found a depth $\delta$ past a reflecting face at the end of
@@ -399,7 +464,7 @@ bitwise identical on any rank count (tested on 1, 2 and 3 ranks, tracers and
 solid particles, across periodic sides and partitions). Single-rank runs are
 bitwise identical with and without step graphs, since a captured step runs
 the same kernels on the same device step size. Restart files carry the
-positions, velocities, temperatures and quantities in double precision with
+positions, velocities, temperatures, quantities and histories in double precision with
 the global cell of each particle, so a restarted run, on any rank count,
 continues bit for bit. The only shared counters (particles removed, by
 cause) are integer atomics, and the statistics of particle probes are
@@ -417,3 +482,6 @@ fixed-point sums, which are associative.
   travel; in strongly varying gas, and for $\tau < \Delta t$, at first order.
 - Kernels run over every slot, live or not; the particles are not sorted by
   cell for memory locality.
+- With the Basset force, trajectories converge at order 3/2 in the step, and
+  each particle carries $31 N_{DIM} + 2$ more reals (the history) and
+  evaluates 58 exponentials per stage.

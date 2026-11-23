@@ -235,9 +235,40 @@ mass), the viscosity at the particle's temperature and the drag correlation f.
 The force per volume is rho_p g, then -rho g (buoyancy) or -grad p, then
 (rho g - grad p) / 2 for added mass, then Saffman lift, all divided by m.
 Pressure and velocity gradients come from the cell's LSQ gradient, which the
-gas evaluation copies per particle only when a force reads it. The Basset
-force needs the history of the slip, a convolution over the path, and is left
-out.
+gas evaluation copies per particle only when a force reads it.
+
+**History force.** The Basset force is a convolution of the slip over the
+path. Its kernel 1 / sqrt(t) is a sum of 29 exponentials (trapezoidal rule on
+its integral representation, two rates per decade from 1e-7 to 1e7 / t_ref,
+t_ref the particle's Stokes time at its first step), so the history is 29
+vectors z_k per particle, kept in `aux` after the quantities' columns with
+the slip and time of the last step start and t_ref. Three choices shape it:
+
+- *Advanced once per step, not integrated by the stages.* As stage
+  components the z_k would put 29 N_DIM values into every stage buffer of
+  every integrator, and their fast rates (lambda dt up to 1e7) would need the
+  exponential path. Instead the slip is linear in time over a step, so the
+  first stage of the next step advances every z_k exactly from the slips at
+  the two step starts. That stage writes aux, like the extrema: a retried
+  step starts at the same time and advances nothing (the time it last
+  advanced to is kept), so rejection needs no restore.
+- *The pre-step history by its mean over the step.* Each stage sees
+  sum a_k phi1(lambda_k dt) z_k, a constant the integrators put into v
+  exactly. The value at the stage time would sample e^{-lambda_k tau_s}, of
+  order-one error for lambda_k dt >> 1, and is unbounded at an impulsive
+  start's first stage.
+- *The step's own slip change by the stage's slip*, sum a_k phi1(lambda_k
+  tau_s) (w - w_0): no derivative of the gas velocity along the path (which
+  Du/Dt ~ g - grad p / rho would get wrong in viscous flow, by a force
+  growing with the memory's length), and the force stays explicit with a gain
+  of (18 rho dt / (pi m tau c))^(1/2), small for particles in gas.
+
+The cost is 58 exponentials per stage and 31 N_DIM + 2 values per particle,
+only with the force. The history is a vector field carried by the particle:
+migration moves it as bits with aux, restart files carry it
+(`PARTICLE_HISTORY`), and across rotational periodic sides relocation walks
+the N_DIM axes with the particle and turns the history by them. An injector
+(#759) must clear the history of a reused slot (t_ref = 0 starts it anew).
 
 **Drag.** Stokes and Schiller-Naumann are functions of Re_p.
 Singh et al. (2022, Appendix C) also reads the slip Mach number, the Knudsen
@@ -325,7 +356,7 @@ every few steps of a large run.
 Restart files carry the particles as named arrays (version 6), written by rank
 0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
 holding each particle), `PARTICLE_X` (positions, exact in double precision),
-`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_Q_<name>` (quantities)
+`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_Q_<name>` (quantities), `PARTICLE_HISTORY` (the Basset history, 31 N_DIM + 2 values per particle)
 and `PARTICLE_REMOVED` (the counts of particles that left the domain, that
 were lost, and that stuck to walls). The device copies them into pinned host mirrors with the other restart
 data (`Particles::stage_output`, capturable), so a restart staged by the step
@@ -356,7 +387,8 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   particles (or sorting them by cell, for memory locality) matters at the
   scale of #291 and comes with injection.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
-- **Further models** (#757 follow-ups): thermophoresis, the Basset force,
+- **Further models** (#757 follow-ups): thermophoresis, the compressible
+  unsteady force and the history force at finite Re_p (#1462),
   splashing, mass transfer (evaporation), drag and heat transfer in mixtures,
   and validation against DNS of particle-laden flow.
 - **Two-way coupling** (#758): the particles' forces on the gas.

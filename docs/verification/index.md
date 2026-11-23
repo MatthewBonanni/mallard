@@ -422,6 +422,18 @@ their inertial trajectories, lag behind the gas included, at orders 2.90
 (position) and 2.79 (velocity) on the finest pair. A bounce is located within the step, and is exact to round-off
 for drag in gas at rest and constant acceleration (`test/particles_test.cpp`).
 
+The **Basset history force** against the closed-form motion of a sphere in gas
+at rest with Stokes drag and the history force, from the Laplace transform of
+the Maxey-Riley equation (real roots of $p^2 + \beta\sqrt{\pi}\,p + 1/\tau$
+for $\rho_p + C_A\rho \le 9\rho/8$): a sphere as dense as the gas thrown at
+$v_0$, whose slip jumps at its first step, is within 0.6% in velocity and
+0.4% in position after $3\tau$ at $\Delta t = \tau/50$, converging at
+orders 1.73 (velocity) and 1.77 (position) with RK4, the kernel's order 3/2
+or better; a sphere of half the gas's density with added mass rising from
+rest, within 0.2%; and the impulsively started sphere crossing a rotational
+periodic side, its history turned with it. The sum of exponentials is within
+$7.3 \times 10^{-4}$ of $1/\sqrt{t}$ over nine decades (`test/particles_test.cpp`).
+
 ![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-light.svg#gh-light-mode-only)
 ![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-dark.svg#gh-dark-mode-only)
 

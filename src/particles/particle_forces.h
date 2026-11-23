@@ -2,8 +2,8 @@
  * @file particle_forces.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Forces on and heat transfer to solid particles: drag correlations,
- *        gravity and buoyancy, the pressure-gradient, added-mass and Saffman
- *        lift forces, Ranz-Marshall heat transfer, and the exponential
+ *        gravity and buoyancy, the pressure-gradient, added-mass, Saffman
+ *        lift and Basset history forces, Ranz-Marshall heat transfer, and the exponential
  *        integration of the relaxations stiffer than the step. Design:
  *        docs/design/particles.md.
  * @version 0.1
@@ -16,7 +16,9 @@
 #ifndef PARTICLE_FORCES_H
 #define PARTICLE_FORCES_H
 
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 
 #include <Kokkos_Core.hpp>
 
@@ -124,6 +126,31 @@ struct Exponential {
     }
 };
 
+/** @brief phi1(x) = (1 - e^{-x}) / x, 1 at x = 0. */
+KOKKOS_INLINE_FUNCTION rtype phi1(const rtype x) { return x > 0.0_r ? -Kokkos::expm1(-x) / x : 1.0_r; }
+
+/**
+ * @brief Exponentials of the sum that approximates the Basset kernel,
+ *        1 / sqrt(t) = sum_k a_k e^{-lambda_k t}, the trapezoidal rule on
+ *        1 / sqrt(t) = pi^{-1/2} int e^{s/2} exp(-e^s t) ds at the nodes
+ *        s_k = (k / 2 - 7) ln 10, the slowest weighted with the integral
+ *        below it. In units of a time t_ref, within 7.3e-4 of 1 / sqrt(t)
+ *        from t = 1e-6 to 1e3.
+ */
+inline constexpr uint32_t BASSET_MODES = 29;
+
+/**
+ * @brief Rates lambda_k t_ref and weights a_k sqrt(t_ref) of the Basset kernel's exponentials (BASSET_MODES).
+ */
+inline void basset_exponentials(rtype * rate, rtype * weight) {
+    const double h = 0.5 * std::log(10.0), root_pi = std::sqrt(std::numbers::pi);
+    for (uint32_t k = 0; k < BASSET_MODES; k++) {
+        const double s = (0.5 * k - 7.0) * std::log(10.0);
+        rate[k] = static_cast<rtype>(std::exp(s));
+        weight[k] = static_cast<rtype>((k == 0 ? 0.5 * h + 2.0 : h) * std::exp(0.5 * s) / root_pi);
+    }
+}
+
 /**
  * @brief The step dt / tau above which a relaxation is integrated
  *        exponentially, and at or below which explicitly, at the integrator's order.
@@ -143,6 +170,19 @@ inline constexpr rtype EXPONENTIAL_ABOVE = 1.0_r;
  * EXPONENTIAL_ABOVE is integrated at the integrator's order; above, it is
  * integrated exponentially (Exponential) toward its equilibrium u + tau a
  * (respectively T), so that the flow's step never depends on tau.
+ *
+ * The Basset history force per volume is (9 / d) sqrt(rho mu / pi) I, with
+ * I = int dw(s) / sqrt(t - s) over the path of the slip w = u - v, from the
+ * particle's first step (where w jumps from 0 to its starting slip). With the
+ * kernel's exponentials (basset_exponentials), I = sum_k a_k z_k, z_k =
+ * int e^{-lambda_k (t - s)} dw(s), which each particle keeps (History) at the
+ * start of its last step, the slip there, and t_ref, its Stokes relaxation
+ * time at its first step. w is taken linear in time over each step, so
+ * z_k advances exactly. Within a step, I at a stage a time tau_s past the
+ * step's start is sum_k a_k [phi1(lambda_k dt) z_k + phi1(lambda_k tau_s)
+ * (w - w_0)]: the history before the step, decaying over the step, by its
+ * mean over the step, which every integrator integrates exactly into v and
+ * which stays bounded in the impulsive start, and the step's own slip change.
  */
 struct Solid {
     rtype diameter = 0.0;
@@ -154,7 +194,22 @@ struct Solid {
     bool added_mass = false;
     bool lift = false;
     rtype specific_heat = 0.0;  // 0: no heat transfer
+    bool history = false;
+    rtype history_rate[BASSET_MODES] = {};    // lambda_k t_ref
+    rtype history_weight[BASSET_MODES] = {};  // a_k sqrt(t_ref)
     Euler gas;
+
+    /** @brief The values each particle keeps for the history force: z_k (N_DIM each), w at T_LAST, T_LAST, t_ref (0 before the first step). */
+    enum History : uint32_t { Z = 0, W_LAST = N_DIM * BASSET_MODES, T_LAST = W_LAST + N_DIM, T_REF = T_LAST + 1 };
+
+    /** @brief Add the Basset history force. */
+    void enable_history() {
+        history = true;
+        basset_exponentials(history_rate, history_weight);
+    }
+
+    /** @brief Values per particle the history force keeps. */
+    KOKKOS_INLINE_FUNCTION uint32_t n_history() const { return history ? T_REF + 1 : 0; }
 
     /**
      * @brief The values the first stage of a step keeps per particle: its
@@ -184,7 +239,42 @@ struct Solid {
      *        the gas state W = [rho, u, p] with gradients G (G[k N_DIM + d] =
      *        dW_k/dx_d), which only the forces of reads_gradients() read.
      */
-    KOKKOS_INLINE_FUNCTION Response response(const rtype * W, const rtype * G, const rtype * v, const rtype Tp) const {
+    /**
+     * @brief The history integral I (N_DIM) at a stage at time t of a step of
+     *        dt, of a particle at velocity v in gas W, from its History h, which
+     *        the first stage of a step advances to the step's start.
+     */
+    KOKKOS_INLINE_FUNCTION void history_integral(const rtype * W, const rtype * v, const rtype dt, const bool first,
+                                                 const rtype t, rtype * h, rtype * I) const {
+        rtype w[N_DIM];
+        FOR_I_DIM w[i] = W[1 + i] - v[i];
+        if (first && !(h[T_REF] > 0.0_r)) {
+            const rtype mu = gas.viscosity(W[N_DIM + 1] / (W[0] * gas.R));
+            h[T_REF] = density * diameter * diameter / (18.0_r * mu);
+            for (uint32_t k = 0; k < BASSET_MODES; k++) FOR_I_DIM h[Z + N_DIM * k + i] = w[i];
+            FOR_I_DIM h[W_LAST + i] = w[i];
+            h[T_LAST] = t;
+        } else if (first && t != h[T_LAST]) {
+            const rtype elapsed = (t - h[T_LAST]) / h[T_REF];
+            for (uint32_t k = 0; k < BASSET_MODES; k++) {
+                const rtype x = history_rate[k] * elapsed, decay = Kokkos::exp(-x), ramp = phi1(x);
+                FOR_I_DIM h[Z + N_DIM * k + i] = decay * h[Z + N_DIM * k + i] + ramp * (w[i] - h[W_LAST + i]);
+            }
+            FOR_I_DIM h[W_LAST + i] = w[i];
+            h[T_LAST] = t;
+        }
+        const rtype t_ref = h[T_REF], step = dt / t_ref, since = (t - h[T_LAST]) / t_ref;
+        FOR_I_DIM I[i] = 0.0_r;
+        for (uint32_t k = 0; k < BASSET_MODES; k++) {
+            const rtype before = phi1(history_rate[k] * step), recent = phi1(history_rate[k] * since);
+            FOR_I_DIM I[i] += history_weight[k] * (before * h[Z + N_DIM * k + i] + recent * (w[i] - h[W_LAST + i]));
+        }
+        const rtype scale = 1.0_r / Kokkos::sqrt(t_ref);
+        FOR_I_DIM I[i] *= scale;
+    }
+
+    KOKKOS_INLINE_FUNCTION Response response(const rtype * W, const rtype * G, const rtype * v, const rtype Tp,
+                                             const rtype * basset = nullptr) const {
         const rtype rho = W[0], p = W[N_DIM + 1];
         const rtype T_gas = p / (rho * gas.R);
         const rtype mu = gas.viscosity(T_gas);
@@ -231,6 +321,10 @@ struct Solid {
                 FOR_I_DIM force[i] += k * cross[i];
             }
         }
+        if (basset) {
+            const rtype k = 9.0_r / diameter * Kokkos::sqrt(rho * mu / pi);
+            FOR_I_DIM force[i] += k * basset[i];
+        }
         FOR_I_DIM r.a[i] = force[i] / mass;
         r.tau_T = 0.0_r;
         if (heated()) {
@@ -247,13 +341,17 @@ struct Solid {
      *        y, in gas W with gradients G, for a step dt. The first stage of a
      *        step (its start) writes start (n_start() values), which every
      *        stage reads: the relaxation times there decide which relaxations
-     *        are exponential over the step.
+     *        are exponential over the step. With the history force, history
+     *        is the particle's History and t the stage time.
      */
     KOKKOS_INLINE_FUNCTION void rates(const rtype * W, const rtype * G, const rtype * y, const rtype dt, const bool first,
-                                      rtype * start, rtype * rate) const {
+                                      rtype * start, rtype * rate, rtype * history_values = nullptr,
+                                      const rtype t = 0.0_r) const {
         const rtype T_gas = W[N_DIM + 1] / (W[0] * gas.R);
         const rtype Tp = heated() ? y[N_DIM] : T_gas;
-        const Response r = response(W, G, y, Tp);
+        rtype basset[N_DIM];
+        if (history) history_integral(W, y, dt, first, t, history_values, basset);
+        const Response r = response(W, G, y, Tp, history ? basset : nullptr);
         const rtype * u = W + 1;
         if (first) {
             FOR_I_DIM {

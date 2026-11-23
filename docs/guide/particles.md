@@ -209,9 +209,36 @@ through shear, `forces` adds the forces of
 | `"pressure_gradient"` | `-grad p / rho_p` in place of the buoyancy `-g rho / rho_p` (equal in a gas at rest) | the gas accelerates: `rho / rho_p` is not small and the flow has strong pressure gradients (shocks, nozzles, vortex cores) |
 | `"added_mass"` | half the displaced gas mass, accelerated with the gas: `rho_p` becomes `rho_p + rho / 2` in `tau` and the inertia, and `(rho g - grad p) / 2` is added to the force | `rho / rho_p` is not small (bubbles, light particles in dense gas) |
 | `"saffman_lift"` | the shear lift of [Saffman (1965)](../references.md#saffman-1965), `1.615 (6 / (pi d)) sqrt(rho mu / abs(w)) (u - v) x w` per volume, `w` the vorticity | particles slip through shear layers and boundary layers |
+| `"basset_history"` | the history force of [Boussinesq (1885)](../references.md#boussinesq-1885) and [Basset (1888)](../references.md#basset-1888), `(9 / d) sqrt(rho mu / pi)` times the integral of `dw(s) / sqrt(t - s)` over the path, `w = u - v` the slip | the slip changes in less than `tau`: impulsive starts, shocks, `rho / rho_p` not small; a few percent of the drag for heavy particles in gas |
 
-The gradients come from the cell's least-squares gradient. The Basset history
-force is not included.
+The gradients come from the cell's least-squares gradient.
+
+**The history force.** When the slip changes, the drag lags behind it while
+the shed vorticity diffuses away: `"basset_history"` adds that memory, a
+force set by the whole path since the particle's first step. A particle
+seeded with a `velocity` other than the gas's starts impulsively, as if
+thrown in at its first step, and feels the history of that jump (`w_0 /
+sqrt(t)`, large at first); a particle seeded at the gas velocity starts with
+none. The kernel `1 / sqrt(t - s)` is that of creeping flow ($Re_p \ll 1$),
+represented to 0.07% by 29 exponentials from $10^{-6}$ to $10^{3}$ times the
+particle's relaxation time, so the cost and memory per particle are bounded:
+about 90 more values per particle in 3D, and the step's work on the
+particles grows several times. Restart files carry the history, and particles
+restarted from a file without it start theirs anew, impulsively.
+
+```toml
+[particles]
+type = "solid"
+diameter = 50e-6
+density = 2500.0
+forces = ["basset_history", "added_mass", "pressure_gradient"]
+```
+
+With the history force, trajectories converge at order 3/2 in the step
+rather than the integrator's order, the order of the kernel's singularity
+([numerics](../numerics/particles.md#the-basset-history-force)). For particles
+about as dense as the gas, keep the step below about `tau / 10`; particles
+and droplets in gas ($\rho_p / \rho \gtrsim 20$) need no smaller step.
 
 **Heat transfer.** With `specific_heat`, each particle carries a temperature
 `T_p`, which convection relaxes toward the gas temperature at the rate of the
@@ -231,14 +258,14 @@ small) and does not heat the gas. Particle expressions read it as `T_P`, the
 | `density` | required | Material density `rho_p` |
 | `drag` | `"schiller_naumann"` | `"stokes"`, `"schiller_naumann"` or `"singh"` |
 | `gravity` | `[source] gravity`, else none | Gravity on the particles |
-| `forces` | `[]` | Further forces: `"pressure_gradient"`, `"added_mass"`, `"saffman_lift"` |
+| `forces` | `[]` | Further forces: `"pressure_gradient"`, `"added_mass"`, `"saffman_lift"`, `"basset_history"` |
 | `specific_heat` | none (no heat transfer) | Particle specific heat `c_p`: tracks the particle temperature |
 | `velocity` | the gas velocity at each seed | Velocity of every seeded particle |
 | `temperature` | the gas temperature at each seed | Temperature of every seeded particle (with `specific_heat`) |
 
 The other keys of [`[particles]`](#tracers-particles) (seeds, `file`,
 `capacity`) are the same. Particle expressions read the particle velocity as
-`V_X`, `V_Y`, `V_Z`. Restart files carry the velocities and temperatures;
+`V_X`, `V_Y`, `V_Z`. Restart files carry the velocities, temperatures and histories;
 tracers restarted as solid particles start at the gas velocity, and particles
 restarted with heat transfer from a file without temperatures at the gas
 temperature.
