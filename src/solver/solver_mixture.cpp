@@ -333,7 +333,8 @@ class CompositionExpressions {
                     }
                     listed.push_back(k);
                     texts.push_back(given ? quantity_or_expression(table.at(keys[k]), keys[k], dim::none) : "0");
-                    values.emplace_back(where + "." + keys[k], texts.back(), variables, shadowable);
+                    values.emplace_back(where + "." + keys[k], line_of(table, keys[k]), texts.back(), variables,
+                                        shadowable);
                 }
                 return;
             }

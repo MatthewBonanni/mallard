@@ -1325,7 +1325,8 @@ struct InitialState::Impl {
                 const std::string text = t.contains(keys[k]) && !(k == 1 && L.burnt)
                                              ? quantity_or_expression(t.at(keys[k]), keys[k], dim::none)
                                              : std::string("0");
-                fractions.push_back({k, static_cast<uint32_t>(add_program(where + "." + keys[k], text, names))});
+                const int32_t slot = add_program(where + "." + keys[k], line_of(t, keys[k]), text, names);
+                fractions.push_back({k, static_cast<uint32_t>(slot)});
             }
             L.n_fractions = 2;
             return;
