@@ -249,7 +249,8 @@ A `[benchmark]` table turns the run into a chemistry benchmark: states sampled
 along the reactor's trajectory, replicated over many cells and advanced by the
 solver's chemistry kernels, which prints cells per second (see
 `benchmarks/README.md`; keys `cells`, `samples`, `dt`, `repeats`,
-`igniting_fraction`, `lanes`, `threads`, `shared`, `bin_by_cost`, `output`).
+`igniting_fraction`, `lanes`, `threads`, `shared`, `bin_by_cost`, `output`;
+`[chemistry]` `explicit_step` and `T_frozen` apply as in the solver).
 
 ## Flame speed and thickness
 

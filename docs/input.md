@@ -2070,6 +2070,7 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] atol` | Absolute tolerance on `Y` (default `1e-10`) |
 | `[chemistry] max_steps` | Sub-steps allowed per output interval (default 100000) |
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
+| `[chemistry] explicit_step`, `T_frozen` | In the `[benchmark]` only, as in the solver's `[chemistry]` (defaults `false`, `0`) |
 | `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`, with results in `output` (default `benchmark.csv`); see `benchmarks/README.md` |
 
 It prints the ignition delay, the time of the maximum of `dT/dt`, once

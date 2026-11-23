@@ -26,6 +26,7 @@ struct ChemistryBenchmarkStep {
     double dt = 0.0;
     double seconds = 0.0;
     uint64_t active = 0;
+    uint64_t explicit_cells = 0;  // active cells whose explicit step was accepted ([chemistry] explicit_step)
     double mean_substeps = 0.0;
     double max_substeps = 0.0;
     std::string histogram;  // cells per bin of sub-steps, e.g. "1:960 65-128:64"
@@ -37,6 +38,7 @@ struct ChemistryBenchmark {
     uint32_t threads = 0, lanes = 0;
     size_t shared_bytes = 0;
     uint32_t cells = 0, igniting = 0;
+    bool explicit_step = false;
     std::vector<ChemistryBenchmarkStep> steps;
 };
 
