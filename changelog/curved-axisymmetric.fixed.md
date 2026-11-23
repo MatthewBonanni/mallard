@@ -1,0 +1,1 @@
+- Distributed runs on curved meshes: halo cells take their owners' centroids, volumes and axisymmetric moments, so results no longer differ from the serial run in the last bits with some partitions. A curved cell's quadrature summed its faces as each rank orients them.
