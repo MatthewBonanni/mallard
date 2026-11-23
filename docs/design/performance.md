@@ -1160,6 +1160,32 @@ the base on the A100, on OpenMP (orders 3, 5 and 6; hexahedra, tetrahedra and pr
 the tables in the caches the A100 and OpenMP write are the same bytes. What remains: the decode's search of
 every layer (#1178), the per-cell geometry (#1166) and the keys (#1167).
 
+### 21. Lock arrays copied after a failed capture only
+
+Without relocatable device code every translation unit holds its own copy of the pointers to desul's lock
+arrays, which Kokkos sets at the unit's first kernel launch with a copy on the legacy stream; made inside a
+stream capture, that copy invalidates it (`lock_arrays.h`). Every step graph's capture used to copy them to
+every unit first. Under CUDA's lazy loading (the default since CUDA 12.2) a copy to a unit's symbols loads all
+of its device code, so the first capture loaded the code of every source file, also of features a run does not
+use. On an A100 (CUDA 13.5) at main, `air_3d` (MUSCL) spent 160 ms there: `cell_chemistry` 59 ms,
+`region_motion` 51 ms, `teno` 13 ms and 50 smaller units, against about 70 ms at 0.10.0, as those units grew
+(fat binaries 45.5 MB at 0.10.0, 69.6 MB at main). It is the second time step's wall time
+(`CUDA_MODULE_LOADING=EAGER` moves it to the process's start), so over the 100 steps of `air_3d` and
+`sphere_3d` main was 13 to 14% slower than 0.10.0, while its steps themselves are faster.
+
+The capture now runs first, and only a capture that fails (on any rank) copies every unit's lock arrays and is
+tried again: the units whose kernels a step graph captures have launched them in the first steps, which run
+kernel by kernel, except kernels only in conditional bodies none of those steps took. Second step, ms:
+
+| one A100 | 0.10.0 | main | this change |
+|---|---:|---:|---:|
+| `air_3d` | 72 | 173 | 5.8 |
+| `sphere_3d` | 89 | 195 | 8.9 |
+
+Results are bitwise those of main (snapshots after 100 steps of `air_3d`, `sphere_3d`, `teno5_3d` and
+`flame_3d`). `StepQueueTest.ACaptureThatAUnitsFirstKernelLaunchFailsIsTriedAgain` makes the first capture fail
+as such a launch does.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
