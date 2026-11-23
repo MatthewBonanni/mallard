@@ -7,7 +7,7 @@ straight and with curved (P2) walls.
 
     python tools/docs/axisymmetric_curved.py [--compute --mallard build/src/mallard [--runs DIR]]
 
---compute runs the six cases (about 15 min on 2 threads) and writes
+--compute runs the six cases (about 30 min on 2 threads) and writes
 axisymmetric_curved.json next to this script; without it the figure reads
 that file, so drawing it needs NumPy and Matplotlib only.
 """
