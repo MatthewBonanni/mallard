@@ -25,6 +25,7 @@
 #include "device_comm.h"
 #include "exact_sums.h"
 #include "scratch.h"
+#include "step_graph_guard.h"
 
 TEST(CommTest, RanksAreNumberedFromZero) {
     EXPECT_GE(comm::rank(), 0);
@@ -126,6 +127,20 @@ Kokkos::View<double *[2]> padded(const Kokkos::View<double *[2]> & terms, const 
     return out;
 }
 
+}
+
+TEST(ExactSumsTest, SumsAllocateNothingOnceConstructed) {
+    // As in a step graph's capture, before any other sum: 7 columns take the windows of 4, 2 and 1 columns
+    const uint32_t n = 1000;
+    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 7);
+    Kokkos::deep_copy(columns, 1.0);
+    const ExactSums sums(7, n, false, false);
+    const StepGraphGuard guard;
+    Kokkos::Profiling::ProfilingSection section("step_graph_capture");
+    section.start();
+    sums.sum(columns);
+    section.stop();
+    for (const std::string & v : guard.violations()) ADD_FAILURE() << v;
 }
 
 TEST(ExactSumsTest, UnitLeavesRoomForEveryRow) {
