@@ -492,6 +492,15 @@ ids, and halo values come from their owners before each step, so the
 deposit, like the particles, is bitwise independent of the rank count; on
 one rank its kernels are captured in the step graph.
 
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32 and 64 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-light.svg#gh-light-mode-only)
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32 and 64 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-dark.svg#gh-dark-mode-only)
+
+*The volume fraction of one particle off the cell centers, deposited with
+$\sigma = 0.08$ on Cartesian meshes of a periodic unit box (Mallard runs):
+along the particle's row of cells (left), and the $L_1$ error of the whole
+deposit against the Gaussian about the particle, relative to the particle's
+volume (right).*
+
 ### Dispersed-phase fields
 
 At output the same deposition gives the fields of the dispersed phase: the
