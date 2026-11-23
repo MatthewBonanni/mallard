@@ -2986,7 +2986,8 @@ void Solver::advance_once() {
     // The first step runs kernel by kernel, which also sets up what the
     // kernels allocate on first use
     if (use_device_steps && step > step_run_start) {
-        Kokkos::Timer step_timer;
+        const Kokkos::Timer step_timer;
+        const double capture_before = t_wall_capture;
         if (n_launched == n_taken) resume_device_steps();
         while (n_launched - n_taken < queue_depth) {
             post_requests();
@@ -2998,12 +2999,12 @@ void Solver::advance_once() {
         if (record.reasons != 0) {
             // The steps enqueued after this one do nothing
             drain_device_steps();
-            after_step(step_timer, &record);
+            after_step(step_timer, capture_before, &record);
             if (record.reasons & step_queue::PROBES) destroy_step_graph();
             return;
         }
         n_queued_steps++;
-        t_wall_stepping += step_timer.seconds();
+        t_wall_stepping += step_timer.seconds() - (t_wall_capture - capture_before);
         Kokkos::Timer output_timer;
         if (record.spectra) statistics.write_staged_spectra(step, t, (record.seq - 1) % step_records.extent(0));
         write_staged_monitors(record);
@@ -3025,10 +3026,10 @@ void Solver::advance_once() {
     }
     // Acted on by every rank after the next step, whose time-step reduction carries it
     if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
-    Kokkos::Timer step_timer;
+    const Kokkos::Timer step_timer;
     calc_dt();
     take_step();
-    after_step(step_timer, nullptr);
+    after_step(step_timer, t_wall_capture, nullptr);
 }
 
 int Solver::finish_run() {
@@ -3071,7 +3072,7 @@ int Solver::finish_run() {
     });
 }
 
-void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * record) {
+void Solver::after_step(const Kokkos::Timer & step_timer, const double capture_before, const step_queue::Record * record) {
     act_on_requests();
     check_fields();
     // Steps on the device update p_max themselves
@@ -3083,7 +3084,7 @@ void Solver::after_step(Kokkos::Timer & step_timer, const step_queue::Record * r
         sample_statistics();
     }
     if (probes.averages_due(step, t)) sample_probe_averages();
-    t_wall_stepping += step_timer.seconds();
+    t_wall_stepping += step_timer.seconds() - (t_wall_capture - capture_before);
     Kokkos::Timer output_timer;
     write_forces();
     write_integrals();
@@ -3416,6 +3417,7 @@ void Solver::print_summary(const RunEnd & end) const {
                  .total = total,
                  .setup = t_wall_setup,
                  .stepping = t_wall_stepping,
+                 .capture = t_wall_capture,
                  .diagnostics = t_wall_checks,
                  .output = t_wall_output,
                  .reacting = reacting,
@@ -3494,6 +3496,7 @@ void Solver::write_end_record(const RunEnd & how) {
         .add("wall_stepping", t_wall_stepping)
         .add("wall_diagnostics", t_wall_checks)
         .add("wall_output", t_wall_output);
+    if (t_wall_capture > 0.0) end.add("wall_capture", t_wall_capture);
     if (reacting) end.add("wall_chemistry", t_wall_chemistry);
     if (step_controller.enabled()) end.add("rejected_steps", n_rejected);
     end.add_known("cells_per_second", steps > 0 && t_wall_stepping > 0.0

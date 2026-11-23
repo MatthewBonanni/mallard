@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -1069,6 +1070,8 @@ void Solver::step_prologue() {
 void Solver::capture_step_graph() {
 #ifdef KOKKOS_ENABLE_CUDA
     Kokkos::fence("step_graph");
+    const Kokkos::Timer capture_timer;
+    if (capture_fault == CaptureFault::SLOW) std::this_thread::sleep_for(std::chrono::seconds(1));
     const auto capture = [&] {
         cudaGraph_t graph = nullptr;
         try {
@@ -1121,6 +1124,7 @@ void Solver::capture_step_graph() {
         queue_depth = 1;
         logging::warning(diagnostic_code::CUDA_GRAPH, "no CUDA graph of the step (" + failure + "); steps run kernel by kernel");
     }
+    t_wall_capture += capture_timer.seconds();
 #endif
 }
 

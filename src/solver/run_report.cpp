@@ -271,6 +271,9 @@ void summary_section(report::Text & text, const RunSummary & s) {
                                              of(waiting, s.total), of(waiting, s.stepping)}});
         }
     }
+    if (s.capture > 0.0) {
+        phases.push_back({Status::NONE, {"step graph capture", wall(s.capture), of(s.capture, s.total), ""}});
+    }
     phases.push_back({Status::NONE, {"diagnostics", wall(s.diagnostics), of(s.diagnostics, s.total), ""}});
     phases.push_back({Status::NONE, {"output", wall(s.output), of(s.output, s.total), ""}});
     phases.push_back({Status::NONE, {"total", wall(s.total), "100.0", ""}});

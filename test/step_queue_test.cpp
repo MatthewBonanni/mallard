@@ -298,6 +298,7 @@ struct Outcome {
     std::map<std::string, std::string> files;
     std::vector<std::string> log;
     std::vector<std::string> warnings;
+    double wall_stepping = 0.0, wall_capture = 0.0;  // the end record's
 };
 
 /** @brief Distributed runs with particles step on the host, which moves the particles between ranks. */
@@ -341,6 +342,7 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         }
         const bool captures = c.capture_fault == Solver::CaptureFault::NONE ||
                               c.capture_fault == Solver::CaptureFault::LEGACY_STREAM_ONCE ||
+                              c.capture_fault == Solver::CaptureFault::SLOW ||
                               c.capture_fault == Solver::CaptureFault::CONDITIONAL_NODES;
         if (depth > 0 && captures) expect_capturable(guard, solver);
         solver.copy_device_to_host();
@@ -374,6 +376,10 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
                 const json::Value v = json::parse(line);
                 if (v["type"].string == "progress" || v["type"].string == "event") o.log.push_back(strip(without_timing(v)));
                 if (v["type"].string == "warning") o.warnings.push_back(v["message"].string);
+                if (v["type"].string == "end") {
+                    o.wall_stepping = v["wall_stepping"].number;
+                    if (const json::Value * capture = v.find("wall_capture")) o.wall_capture = capture->number;
+                }
             }
         } else if (file.find(".csv") != std::string::npos || file.find(".restart") != std::string::npos ||
                    file.find(".vtu") != std::string::npos) {
@@ -1996,6 +2002,23 @@ TEST(StepQueueTest, ACaptureThatAUnitsFirstKernelLaunchFailsIsTriedAgain) {
     expect_same(host, queued, "capture tried again");
     EXPECT_GT(queued.graph_steps, 0u);
     EXPECT_TRUE(queued.warnings.empty()) << queued.warnings[0];
+#endif
+}
+
+TEST(StepQueueTest, TheStepGraphsCaptureIsLeftOutOfTimeStepping) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "step graphs are captured in CUDA builds only";
+#else
+    if (Solver::are_cuda_graphs_off()) GTEST_SKIP() << "MALLARD_TEST_CUDA_GRAPHS=off";
+    // Loading device code can make a capture take longer than all the steps: the throughput leaves it out
+    Case c;
+    c.run = "n_steps = 12\ncfl = 0.5\n";
+    const Outcome quick = run_case("capture_timed", c, 3);
+    c.capture_fault = Solver::CaptureFault::SLOW;
+    const Outcome slow = run_case("capture_timed_slow", c, 3);
+    ASSERT_GT(slow.graph_steps, 0u);
+    EXPECT_GE(slow.wall_capture, 1.0);
+    EXPECT_LT(slow.wall_stepping, quick.wall_stepping + 0.5);
 #endif
 }
 
