@@ -950,7 +950,8 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -981,6 +982,8 @@ class Solver {
         /** @brief W-PARTICLE-SIZE and W-PARTICLE-VOLUME-FRACTION where the point-particle model is invalid. */
         void check_particles(CheckReport & report);
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The initial state's primitive fields as a snapshot (check --initial). */
+        void check_initial(CheckReport & report, const CheckOptions & options);
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
         void init_run_parameters();
