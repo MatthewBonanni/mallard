@@ -36,6 +36,7 @@ import run_report
 import runs
 import schematics
 import teno
+import thickened_flames
 import theory
 import time_integrators
 import viscous_gradients
@@ -60,6 +61,7 @@ def main():
     particles.figures(args.mallard)
     schematics.figures()
     teno.figures()
+    thickened_flames.figures()
     theory.figures()
     time_integrators.figures()
     viscous_gradients.figures()
