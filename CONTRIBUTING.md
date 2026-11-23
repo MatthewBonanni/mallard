@@ -64,7 +64,9 @@ cmake --build build -j
   aborts a test that runs longer, naming it, as CI does for the MPI runs.
   Ranks on several machines need `TMPDIR` on a filesystem they all share: the
   tests' files live there, and the suite stops at once, saying so, when a rank
-  cannot see rank 0's temporary directory.
+  cannot see rank 0's temporary directory. A test fails, and keeps its
+  directory, when a file in it is still open or mapped at its end, since shared
+  storage cannot remove such a file.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
