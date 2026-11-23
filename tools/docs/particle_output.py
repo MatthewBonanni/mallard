@@ -81,7 +81,7 @@ def particle_snapshots(P, args):
     fig, axes = plt.subplots(1, len(snaps), figsize=(11.0, 4.3), gridspec_kw=dict(wspace=0.06))
     vmax = max(s.max() for _, _, s, _ in snaps)
     for ax, (t, polys, speed, parts) in zip(axes, snaps):
-        ax.add_collection(PolyCollection(polys, array=speed, cmap="Greys" if P["name"] == "light" else "Greys_r",
+        ax.add_collection(PolyCollection(polys, array=speed, cmap="gray_r" if P["name"] == "light" else "gray",
                                          clim=(0, 1.6 * vmax), edgecolors="face", linewidths=0.2, rasterized=True))
         sc = ax.scatter(parts["x"][:, 0], parts["x"][:, 1], c=parts["T_P"], s=9, cmap="plasma", vmin=0.4,
                         vmax=1 / 1.4, linewidths=0)
