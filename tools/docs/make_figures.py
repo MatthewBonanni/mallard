@@ -42,6 +42,7 @@ import structured_blocks
 import teno
 import theory
 import time_integrators
+import triple_flame_sensor
 import viscous_gradients
 import work_precision
 
@@ -69,6 +70,7 @@ def main():
     teno.figures()
     theory.figures()
     time_integrators.figures()
+    triple_flame_sensor.figures()
     viscous_gradients.figures()
     work_precision.figures()
     if args.mallard:
