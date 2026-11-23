@@ -48,6 +48,36 @@ and `Lambda = (C - C_min) / (C_max - C_min)` the normalized progress variable
 at `(Z, Sz)`. Mallard finds `Lambda` from the transported `C`, exactly,
 because the format requires `C` to be linear in `Lambda`.
 
+A table starts from the S-curve of steady counterflow flamelets: from low
+strain to extinction (the stable branch), then back along the unstable branch,
+and closed by the mixing solution at `C = 0`. Each flamelet is a profile in
+`Z`; at each `Z` the flamelets, ordered by their progress variable, become the
+`Lambda` axis. The figures on this page come from a sample table built that way
+(`tools/docs/flamelet.py`): Cantera flamelets of H2/N2 (1:1 by mole) against
+air, both at 300 K and 1 atm, with `mechanisms/h2o2.yaml`, unity Lewis number
+and `C = Y_H2O`.
+
+![S-curve of the sample table's counterflow flamelets, peak temperature against the stoichiometric scalar dissipation rate, and the temperature of nine of them against the mixture fraction](../images/guide/flamelet_s_curve-light.svg#gh-light-mode-only)
+![S-curve of the sample table's counterflow flamelets, peak temperature against the stoichiometric scalar dissipation rate, and the temperature of nine of them against the mixture fraction](../images/guide/flamelet_s_curve-dark.svg#gh-dark-mode-only)
+
+At zero variance the table's fields over `(Z, Lambda)` are the flamelets'
+states. The source of `C` peaks near the stoichiometric `Z` at intermediate
+`Lambda`, on the unstable branch; `Lambda = 1` is the most burning flamelet,
+where `T_TABLE` is highest and the source small. Below the coolest flamelet the
+sample's unstable branch reaches (`Lambda = 0.42` at `Z_st`), the table
+interpolates linearly to the mixing solution.
+
+![Temperature, density, source of C, heat release rate, C and OH mass fraction of the sample table at zero variance, over the mixture fraction Z and the normalized progress variable Lambda](../images/guide/flamelet_table-light.svg#gh-light-mode-only)
+![Temperature, density, source of C, heat release rate, C and OH mass fraction of the sample table at zero variance, over the mixture fraction Z and the normalized progress variable Lambda](../images/guide/flamelet_table-dark.svg#gh-dark-mode-only)
+
+A lookup maps the transported `(Z, C)` to `Lambda` with the table's bounds of
+`C` at that `(Z, Sz)`, then interpolates multilinearly between the `2^3`
+nodes of the table cell around `(Z, Sz, Lambda)`
+([design](../design/flamelet.md#4-lookup-on-the-device)).
+
+![Bounds of C against Z at three normalized variances, with a transported state mapped to Lambda = 0.6, and the eight corners of a table cell around a query point](../images/guide/flamelet_lookup-light.svg#gh-light-mode-only)
+![Bounds of C against Z at three normalized variances, with a transported state mapped to Lambda = 0.6, and the eight corners of a table cell around a query point](../images/guide/flamelet_lookup-dark.svg#gh-dark-mode-only)
+
 - **Thermodynamics** (Saghafian et al. 2015): the table holds, per node, `T0`,
   `e0 = e(T0)`, `R`, `gamma0` and `a_gamma`, with `gamma(T) = gamma0 +
   a_gamma (T - T0)`. The temperature follows from the transported energy in
@@ -151,6 +181,16 @@ with `Delta` the LES filter width (`filter_width`) and the least-squares
 gradient of the viscous fluxes. The table maps it to its normalized axis
 `Sz = Zvar / (Z (1 - Z))`, so the clip is the table's edge.
 
+The variance smooths the flamelets over a beta distribution of `Z`: the peak
+temperature and the source of `C` fall and spread with `Sz`, and `Sz = 1`
+leaves only the two pure streams.
+
+![Temperature at Lambda = 1 and source of C at Lambda = 0.7 of the sample table against the mean mixture fraction, at five normalized variances Sz](../images/guide/flamelet_variance-light.svg#gh-light-mode-only)
+![Temperature at Lambda = 1 and source of C at Lambda = 0.7 of the sample table against the mean mixture fraction, at five normalized variances Sz](../images/guide/flamelet_variance-dark.svg#gh-dark-mode-only)
+
+On the rich side, `Lambda = 1` at `Sz = 0` is not one flamelet: at each `Z` it
+is the flamelet with the most `C` there, hence the kinks of the laminar curve.
+
 The eddy viscosity adds `mu_t / Sc_t` to the diffusivity of `Z` and `C`, and
 `mu_t / Pr_t` to the conductivity of the enthalpy (`h` is conducted with
 `kappa / cp`, so its eddy part is `mu_t / Pr_t`, not `cp mu_t / Pr_t`). With
@@ -231,6 +271,12 @@ the laminar flame speed times the efficiency `E` and spans `n_res` cells.
 - `delta_L` and `s_L`, the thickness and speed of the laminar flame that `F`
   and the efficiency scale with, are required, as with `sensor =
   "temperature"`.
+
+The sensor is 1 wherever the table's source of `C` is (the sample table at
+three mixture fractions):
+
+![The thickened flame's sensor against Lambda, with the source of C of the sample table at three mixture fractions, each normalized by its peak](../images/guide/flamelet_tfles_sensor-light.svg#gh-light-mode-only)
+![The thickened flame's sensor against Lambda, with the source of C of the sample table at three mixture fractions, each normalized by its peak](../images/guide/flamelet_tfles_sensor-dark.svg#gh-dark-mode-only)
 
 ```toml
 [physics]

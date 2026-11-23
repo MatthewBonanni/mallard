@@ -206,6 +206,13 @@ solver scales it to the local state (stage 2 decides the scaling, for example
 `(rho / rho0)^2` for a source that is second order in density). That is why
 `rho0` is required.
 
+The fields of an `fpv` table at `Sz = 0` over `(Z, Lambda)`, from the sample
+flamelets of the documentation (H2/N2 against air, `C = Y_H2O`,
+`tools/docs/flamelet.py`; [flamelet.md](flamelet.md#2-table-generation-external)):
+
+![Temperature, density, source of C, heat release rate, C and OH mass fraction of a sample fpv table at zero variance, over Z and Lambda](../images/guide/flamelet_table-light.svg#gh-light-mode-only)
+![Temperature, density, source of C, heat release rate, C and OH mass fraction of a sample fpv table at zero variance, over Z and Lambda](../images/guide/flamelet_table-dark.svg#gh-dark-mode-only)
+
 `/model_data`:
 
 | Object | Kind | Meaning |

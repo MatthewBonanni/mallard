@@ -21,6 +21,7 @@ import boundary_coordinates
 import case_view
 import domains
 import effective_resolution
+import flamelet
 import geometry
 import gui_mockups
 import high_order_cost
@@ -51,6 +52,7 @@ def main():
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     domains.figures()
     effective_resolution.figures()
+    flamelet.figures()
     geometry.figures(args.mallard, args.mallard3d)
     gui_mockups.figures()
     high_order_cost.figures()
