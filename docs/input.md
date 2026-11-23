@@ -2073,13 +2073,15 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] rtol` | Relative tolerance on `Y` and `T` (default `1e-6`) |
 | `[chemistry] atol` | Absolute tolerance on `Y` (default `1e-10`) |
 | `[chemistry] max_steps` | Sub-steps allowed per output interval (default 100000) |
-| `[chemistry] integrator`, `sparse`, `C_reg` | The integrator, the linear solver and the regularization of fractional reaction orders, as in the solver's `[chemistry]` |
-| `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`, with results in `output` (default `benchmark.csv`); see `benchmarks/README.md`. It does not read `[reactor] output_interval` or `output` |
-
-Keys it does not read are errors, as in a run ([unknown and unused
-keys](guide/input_files.md#unknown-and-unused-keys)).
+| `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
+| `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`, with results in `output` (default `benchmark.csv`); see `benchmarks/README.md` |
 
 It prints the ignition delay, the time of the maximum of `dT/dt`, once
 `dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
 however small the temperature rise of a lean mixture), and otherwise none.
 Example: `examples/h2_ignition`.
+
+It also reads `[chemistry] integrator` and `C_reg`, as the solver does; the
+`[benchmark]` mode does not read `[reactor] output_interval` or `output`. Keys
+it does not read are errors, as in a run ([unknown and unused
+keys](guide/input_files.md#unknown-and-unused-keys)).
