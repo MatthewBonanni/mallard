@@ -11,11 +11,14 @@
 
 #include "case_view.h"
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <set>
 #include <stdexcept>
+#include <string_view>
 
 #include "case_image.h"
 #include "comm.h"
@@ -111,6 +114,50 @@ void write_vtu(const std::string & path, const Block & b) {
     out << "</CellData>\n</Piece>\n</UnstructuredGrid>\n</VTKFile>\n";
     if (!out) throw cannot_write("the case view", path);
 }
+
+/** @brief The name with the characters Windows forbids in a file name as '_', and '_' before a device name (CON, ...). */
+std::string portable_name(std::string name) {
+    for (char & c : name) {
+        if (static_cast<unsigned char>(c) < 0x20 || std::string_view("<>:\"/\\|?*").find(c) != std::string_view::npos) {
+            c = '_';
+        }
+    }
+    if (name.empty()) return "_";
+    std::string device = name.substr(0, name.find('.'));
+    while (!device.empty() && device.back() == ' ') device.pop_back();
+    for (char & c : device) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    static const std::set<std::string> reserved = {"CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4",
+                                                   "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+                                                   "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    return reserved.count(device) ? "_" + name : name;
+}
+
+/**
+ * @brief The file name of each block: its name where Windows allows that, else portable_name's,
+ *        made unique (Windows ignores case) with "~2", "~3", ... in block order; names that need
+ *        no change keep them.
+ */
+std::vector<std::string> piece_names(const std::vector<Block> & blocks) {
+    const auto key = [](std::string s) {
+        for (char & c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::vector<std::string> names(blocks.size());
+    std::set<std::string> used;
+    for (size_t i = 0; i < blocks.size(); i++) {
+        if (portable_name(blocks[i].name) == blocks[i].name && used.insert(key(blocks[i].name)).second) {
+            names[i] = blocks[i].name;
+        }
+    }
+    for (size_t i = 0; i < blocks.size(); i++) {
+        if (!names[i].empty()) continue;
+        const std::string base = portable_name(blocks[i].name);
+        names[i] = base;
+        for (int n = 2; !used.insert(key(names[i])).second; n++) names[i] = base + "~" + std::to_string(n);
+    }
+    for (std::string & n : names) n += ".vtu";
+    return names;
+}
 #endif
 
 /** @brief The ParaView file of blocks gathered on rank 0 (which calls it). */
@@ -168,8 +215,9 @@ std::string write_gathered(const std::string & path, const std::vector<Block> & 
     std::filesystem::create_directories(dir);
     std::ofstream out(vtm);
     out << "<?xml version=\"1.0\"?>\n<VTKFile type=\"vtkMultiBlockDataSet\" version=\"1.0\">\n<vtkMultiBlockDataSet>\n";
+    const std::vector<std::string> pieces = piece_names(blocks);
     for (size_t i = 0; i < blocks.size(); i++) {
-        const std::string piece = blocks[i].name + ".vtu";
+        const std::string & piece = pieces[i];
         write_vtu((dir / piece).string(), blocks[i]);
         out << "<DataSet index=\"" << i << "\" name=\"" << case_image::xml_text(blocks[i].name) << "\" file=\""
             << case_image::xml_text(dir.filename().string() + "/" + piece) << "\"/>\n";

@@ -701,7 +701,8 @@ at a glance. It writes, without running the case:
   curved by [curved boundaries](meshes.md#curved-boundaries) are drawn on
   their curved geometry, in the ParaView file too.
 - `view/case.vtkhdf` (builds without HDF5: `view/case.vtm` with its `.vtu`
-  files) for ParaView 5.12 or later: one named block each for the mesh's cells
+  files, each named after its block with the characters Windows forbids as
+  `_` and made unique, the `.vtm` keeping the block's name) for ParaView 5.12 or later: one named block each for the mesh's cells
   (`domain`), every boundary zone and cell zone, every region the case uses
   (as [Checking regions](geometry.md#checking-regions) describes), every probe
   on points, lines or surfaces of its own, and every periodic pair (each face
