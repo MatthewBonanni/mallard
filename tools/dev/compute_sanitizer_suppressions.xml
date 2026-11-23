@@ -2,7 +2,8 @@
 <ComputeSanitizerOutput>
   <!-- Fields are regexes, but compute-sanitizer 2026.4 matches nothing whose regex has a backslash escape:
        [.] stands for a literal dot -->
-  <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back -->
+  <!-- NCCL asks for driver entry points of a newer CUDA than the driver's, then falls back (in initOnceFunc, called
+       from NCCL itself or, on a communicator's first init, from libc's pthread_once) -->
   <record>
     <kind>Api</kind>
     <what>
@@ -14,7 +15,7 @@
         <module>.*lib(cuda|nccl)[.]so.*</module>
       </frame>
       <frame>
-        <module>.*libnccl[.]so.*</module>
+        <module>.*lib(nccl|c)[.]so.*</module>
       </frame>
     </hostStack>
   </record>
