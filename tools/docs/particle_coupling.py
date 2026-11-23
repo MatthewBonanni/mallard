@@ -6,7 +6,7 @@ guide (docs/images/guide/) and the theory manual (docs/images/theory/).
 From short Mallard runs (a 2D build, seconds each on 2 CPU threads): the
 cloud of examples/particle_cloud falling through gas at rest, coupled one way and
 two ways (particle_cloud_coupling), and the deposit of one particle's volume
-fraction over a Gaussian of deposition_width on meshes of 16, 32 and 64 cells per
+fraction over a Gaussian of deposition_width on meshes of 16 to 128 cells per
 side against the Gaussian itself (particle_deposition). Particle positions
 are read from restart files (tools/mallard/restart.py), fields from VTU
 snapshots.
@@ -115,7 +115,10 @@ def particle_cloud_coupling(P, args):
 
 # ------------------------------------------------------------ deposition
 
-SIGMA, POINT, DIAMETER, DENSITY = 0.08, (0.4137, 0.5862), 1e-3, 1000.0
+# The error's constant depends on where the particle sits in its cell (the deposit's covariance is short by
+# d d^T, d its offset from the cell center), so the particle sits a third of a cell from a corner, the same
+# |d| = h / 6 on every mesh of 16 * 2^k cells per side: then the study measures the order, not the offset
+SIGMA, POINT, DIAMETER, DENSITY = 0.08, ((6 + 1 / 3) / 16, (9 + 2 / 3) / 16), 1e-3, 1000.0
 
 
 def single_particle(n, sigma):
@@ -188,8 +191,8 @@ def particle_deposition(P, args):
     peak = gaussian(np.array(POINT[0]), np.array(POINT[1]), SIGMA)
     xs = np.linspace(0, 1, 400)
     a.plot(xs, gaussian(xs, POINT[1], SIGMA) / peak, color=P["fg"], lw=1.4, label=rf"Gaussian, $\sigma$ = {SIGMA:g}")
-    ns = [16, 32, 64]
-    colors = [P["flame"], P["teal"], P["blue"]]
+    ns = [16, 32, 64, 128]
+    colors = [P["flame"], P["teal"], P["blue"], P["plum"]]
     errors = []
     for n, color in zip(ns, colors):
         c, area, _, alpha = deposit(args.mallard, n, SIGMA)
