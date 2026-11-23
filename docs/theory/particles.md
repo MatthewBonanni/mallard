@@ -328,5 +328,178 @@ $$
 
 with $\mathbf{r}_\perp$ the part of $\mathbf{r}$ normal to $\mathbf{a}$, so the
 turns are unwrapped by construction. Both converge at the integrator's order.
+
+**Crossings** (`[[particles.crossings]]`) are located within the step on the
+particle's straight path from its position $\mathbf{x}_0$ at the step's start
+to its end position $\mathbf{x}_1$ before relocation, which is continuous
+across periodic faces (`Particles::detect_crossings`,
+`src/particles/particle_crossings.cpp`). A surface is the zero of a region's
+signed distance $\phi$; a particle with $\phi(\mathbf{x}_0)$ and
+$\phi(\mathbf{x}_1)$ of opposite signs crosses it at the fraction $\alpha$ of
+the step where
+
+$$
+\begin{equation}
+\phi\left(\mathbf{x}_0 + \alpha\,(\mathbf{x}_1 - \mathbf{x}_0)\right) = 0,
+\label{eq:crossing}
+\end{equation}
+$$
+
+found by the Illinois variant of regula falsi in at most 12 iterations (to
+$10^{-15}$ of the step), and is recorded at time $t_n + \alpha\,\Delta t$ if the
+point lies on the surface's piece (inside or outside each clipping region),
+with the direction of the sign change. A particle removed at a recorded
+boundary zone is recorded where its path meets the face's plane,
+$\alpha = \delta_0 / (\delta_0 - \delta_1)$ from its signed distances to the
+plane at the two ends; after a periodic face or a bounce within the step, at
+the point of the plane nearest its end position, $\alpha = 1$. The straight
+path is the chord of the trajectory over the step: a particle accelerating at
+$\mathbf{a}$ strays from it by up to $\lvert\mathbf{a}\rvert\Delta t^2 / 8$, so
+the crossing point and time are second order in the step, and a path that
+crosses a surface twice within a step (a grazing pass) is not recorded.
+
 Extrema and first times sample the accepted state at the start of every step
 ([Per-particle quantities](../guide/particles.md#per-particle-quantities)).
+
+## Two-way coupling
+
+With `coupling = "two-way"` the solid particles act on the gas
+(`src/particles/particle_coupling.cpp`, `Solid::exchange` in
+`src/particles/particle_forces.h`). The suspension is still dilute: the
+gas equations keep their form, without the volume the particles take from the
+gas or collisions between particles, and gain per-volume sources
+$\mathbf{S} = [0, \mathbf{S}_{\rho\mathbf{u}}, S_{\rho E}]$ in momentum and
+total energy, with no mass source. This regime of two-way coupling spans
+particle volume fractions from about $10^{-6}$ to $10^{-3}$
+([Elghobashi 1994](../references.md#elghobashi-1994)); above it collisions
+matter (four-way coupling), which Mallard does not model.
+
+### Source terms
+
+A computational particle, a *parcel*, stands for $w$ identical physical
+particles (`weight`; in 2D, particles per unit depth). Each gives the gas the
+opposite of its own change of momentum and energy, less the part gravity on
+the particle accounts for:
+
+$$
+\begin{equation}
+\mathbf{S}_{\rho\mathbf{u}} = -\frac{1}{V}\sum_{p} w\,m_p\left(\frac{\mathrm{d}\mathbf{v}_p}{\mathrm{d}t} - \mathbf{g}\right), \qquad
+S_{\rho E} = -\frac{1}{V}\sum_{p} w\,m_p\left(\frac{\mathrm{d}e_p}{\mathrm{d}t} - \mathbf{g}\cdot\mathbf{v}_p\right), \qquad
+e_p = c_p T_p + \tfrac12\lvert\mathbf{v}_p\rvert^2,
+\label{eq:coupling-sources}
+\end{equation}
+$$
+
+with $m_p = \rho_p \pi d^3 / 6$, $V$ the volume the source is deposited over
+(below), $\mathbf{g}$ the particles' gravity and, without heat transfer,
+$e_p = \tfrac12\lvert\mathbf{v}_p\rvert^2$. Gravity on the particles is the
+earth's force, not the gas's, so it does not act back. Everything else does,
+as the reaction to the forces of eq. $\eqref{eq:solid}$: the drag, which for
+drag alone gives the familiar
+$\mathbf{S}_{\rho\mathbf{u}} = \frac{1}{V}\sum_p w\,m_p(\mathbf{v}_p - \mathbf{u})/\tau$,
+the buoyancy or pressure-gradient force, the added mass and the lift. The
+energy source is the heat the particles take from the gas,
+$w\,\pi d\,k\,Nu\,(T_p - T)$ per particle, plus the work of those forces on
+the particle, $-w\,m_p(\mathrm{d}\mathbf{v}_p/\mathrm{d}t - \mathbf{g})\cdot\mathbf{v}_p$.
+
+### Conservation
+
+The sources are computed from the very stage rates the integrator advances
+the particles with, explicit or exponential, and every Runge-Kutta method
+updates the gas and the particles by the same linear combination of stage
+rates. Whatever the gas loses, the particles therefore gain, to round-off, at
+every stage and step (rejected steps included), however stiff the particles:
+the total momentum and energy of gas and particles change only by gravity's
+force and work on the particles.
+
+That holds for the energy only if the particle's energy is itself an
+integrated value: its kinetic energy $\tfrac12\lvert\mathbf{v}\rvert^2$ is
+quadratic in the integrated velocity, and no linear combination of stages
+reproduces it exactly. With heat transfer, two-way coupled particles
+therefore integrate $e_p$ in place of $T_p$, with the rate
+$c_p\,\mathrm{d}T_p/\mathrm{d}t + \mathbf{v}\cdot\mathrm{d}\mathbf{v}/\mathrm{d}t$,
+and read $T_p = (e_p - \tfrac12\lvert\mathbf{v}\rvert^2) / c_p$: the
+truncation error of the kinetic energy shows in $T_p$, where it is of order
+$(\delta v)^2 / c_p$, rather than in the total. Without heat transfer the
+kinetic energy is conserved to the integrator's order. Restart files carry
+$e_p$ (`PARTICLE_E`) beside $T_p$, so restarts continue bit for bit.
+
+### Deposition
+
+The sources of the particles in a stage are summed into the cells holding
+them at the step's start and, with `deposition_width` $\sigma > 0$, spread
+over a Gaussian of standard deviation $\sigma$
+(`particles::Deposition`):
+
+1. **Exact sums per cell.** Each cell sums its particles' sources in fixed
+    point, in units of its largest term over $2^{62 - \lceil\log_2(n + 1)\rceil}$
+    for $n$ particles in the cell (`exact_sums.h`), with integer atomics:
+    each sum is exact to $2^{-60}$ of its largest term, whatever the order of
+    the slots, which differs between rank counts and migrations. The start
+    cell is always owned, so no deposit lands in a halo.
+2. **First moments** (with a width). Spreading from the cell centers would
+    place every particle at its cell's center, an error of half a cell in the
+    kernel's center. The cells also sum each source's first moment about
+    their centers, $\mathbf{m}_c = \sum_p q_p(\mathbf{x}_p - \mathbf{x}_c)$, and
+    move each sum by minus the divergence of the moment density
+    $\boldsymbol{\mu} = \mathbf{m} / V$, face averaged, in flux form,
+
+    $$
+    \begin{equation}
+    q_c \leftarrow q_c - \sum_{f} \tfrac12\left(\boldsymbol{\mu}_c + \boldsymbol{\mu}_n\right)\cdot\mathbf{n}_f A_f,
+    \label{eq:coupling-moments}
+    \end{equation}
+    $$
+
+    which gives the deposit the particles' first moments: the spread then
+    converges at second order in the cell size rather than first.
+3. **Spreading by diffusion**, following
+    [Capecelatro & Desjardins 2013](../references.md#capecelatro-desjardins-2013):
+    $\sigma^2 / 2$ of diffusion with unit diffusivity, whose continuum limit
+    is the convolution with a Gaussian of standard deviation $\sigma$, by
+    explicit steps of the face-flux Laplacian,
+
+    $$
+    \begin{equation}
+    q_c \leftarrow q_c + \Delta s \sum_{f} \frac{A_f}{\delta_f}\left(\frac{q_n}{V_n} - \frac{q_c}{V_c}\right),
+    \qquad \Delta s \le \frac{1}{2}\left(\max_c \frac{1}{V_c}\sum_f \frac{A_f}{\delta_f}\right)^{-1},
+    \label{eq:coupling-spread}
+    \end{equation}
+    $$
+
+    with $\delta_f$ the distance between the two centroids along the face
+    normal, over $\lceil \sigma^2 \max_c (\sum_f A_f / \delta_f) / V_c\rceil$
+    equal steps (about $2d\,\sigma^2 / h^2$ on a Cartesian mesh of spacing
+    $h$). The weights stay positive, so the spread deposit keeps the sign of
+    the sources. A face moves exactly the opposite amount out of one cell and
+    into the other, so the sums are conserved to round-off, and walls and
+    other boundaries have no flux, so no source leaves the domain or crosses
+    a wall.
+
+The gas receives $q_c / V_c$ in each owned cell. With $\sigma = 0$ (the
+default) each particle's source stays in its cell: a point source of the
+mesh's size, which concentrates as the mesh is refined, so coupled results do
+not converge under refinement and, with cells comparable to the particles,
+the gas a particle reads carries its own disturbance, which the point-particle
+drag does not expect. A width in physical units makes the deposit independent
+of the mesh, so it converges as the mesh is refined at fixed $\sigma$: the
+volume fraction of a single particle against the Gaussian of $\sigma = 0.08$
+has L1 errors $5.3 \times 10^{-2}$, $2.3 \times 10^{-2}$ and
+$4.3 \times 10^{-3}$ on 16, 32 and 64 cells per side (orders 1.2 and 2.4,
+the first at $\sigma / h = 1.3$), where the cell-center deposit's error did
+not converge. Each cell adds its faces in the order of its neighbors' global
+ids, and halo values come from their owners before each step, so the
+deposit, like the particles, is bitwise independent of the rank count; on
+one rank its kernels are captured in the step graph.
+
+### Dispersed-phase fields
+
+At output the same deposition gives the fields of the dispersed phase: the
+volume fraction $\alpha = \sum_p w V_p / V$, the number density
+$n = \sum_p w / V$, the particles' mean velocity
+$\mathbf{U}_p = \sum_p w\,m_p\mathbf{v}_p / (\rho_p \sum_p w V_p)$
+(mass weighted), and with two-way coupling the sources of
+eq. $\eqref{eq:coupling-sources}$ at the written state, from the explicit
+rates of the particles there (`Particles::fields`). `mallard check` warns
+where a particle is larger than a tenth of its cell or the volume fraction
+exceeds 1%, where the point-particle and dilute assumptions fail.
