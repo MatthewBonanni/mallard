@@ -437,6 +437,28 @@ bool writes_variable(const Input & input, const std::string & name) {
     return false;
 }
 
+bool Solver::samples_points() const {
+    if (contains_optional(input, "probes")) {
+        for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
+            if (entry.contains("sampling") && entry.at("sampling").is_string() &&
+                entry.at("sampling").as_string() == "point") {
+                return true;
+            }
+        }
+    }
+    if (contains_optional(input, "write_data")) {
+        // Every entry that can write a high-order view and does not turn it off
+        for (const auto & entry : find_value<std::vector<Input>>(input, "write_data")) {
+            const bool off = entry.contains("high_order") && entry.at("high_order").is_boolean() &&
+                             !entry.at("high_order").as_boolean();
+            const std::string format =
+                entry.contains("format") && entry.at("format").is_string() ? entry.at("format").as_string() : "";
+            if (!off && format != "restart" && format != "xdmf") return true;
+        }
+    }
+    return false;
+}
+
 void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     // Read in every run, so that an input runs unchanged on any number of ranks
@@ -1699,8 +1721,9 @@ void Solver::init_numerics() {
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         teno->partition_faces_exchanged = exchanges_partition_faces();
         teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
-        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
-        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
+        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors,
+        // and point values of troubled cells select among them
+        if (state_reader && !writes_stencils() && !samples_points()) teno->sector_stencils = false;
     }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
