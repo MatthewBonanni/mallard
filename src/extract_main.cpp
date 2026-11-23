@@ -285,6 +285,7 @@ Plan prepare(Input & input, const cli::Args & args, const std::string & dir) {
     if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
+    output["report"] = Input("");  // Nor its setup check, which only the report shows
     output["health"] = Input(false);  // Its ledger and repair audit follow time steps
     output.erase("write_stencils");    // The run's stencils, not output of its states
 
@@ -412,6 +413,7 @@ Plan prepare_derive(Input & input, const cli::Args & args, const std::string & d
     if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
+    output["report"] = Input("");
     output["health"] = Input(false);
     output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
@@ -990,6 +992,7 @@ Plan prepare_average(Input & input, const cli::Args & args, const std::string & 
     if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
     auto & output = top.at("output").as_table().entries();
     output["run_log"] = Input("");
+    output["report"] = Input("");
     output["health"] = Input(false);
     output.erase("write_stencils");
     if (args.has("--reference")) output["reference"] = inline_table(args.value_or("--reference", ""), "--reference");
@@ -2115,6 +2118,7 @@ int flame(const cli::Args & args) {
         if (!top.contains("output") || !top.at("output").is_table()) top["output"] = Input(Input::table_type{});
         auto & output = top.at("output").as_table().entries();
         output["run_log"] = Input("");
+        output["report"] = Input("");
         output["health"] = Input(false);
         Input::table_type statistics;
         statistics["fields"] = string_array({"HRR"});
