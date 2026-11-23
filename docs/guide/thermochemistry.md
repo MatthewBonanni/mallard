@@ -144,7 +144,7 @@ Chemistry and flow are split:
 | `rtol`, `atol` | 1e-6, 1e-10 | Integrator tolerances (relative on Y and T, absolute on Y) |
 | `max_steps` | 100000 | Sub-steps allowed per cell and call; more stop the run |
 | `T_frozen` | 0 | No chemistry in cells below this temperature |
-| `explicit_step` | `false` | First try one explicit step (no Jacobian, no factorization) in cells whose chemistry is not stiff over the call, kept only where it passes RODAS's error test; results change within the tolerances. Faster for flames of detailed mechanisms at small time steps (H2/air: chemistry 1.8 times faster); a cell whose step failed stops trying it while it stays stiff, so cases where most cells are (`flame_3d`) run as fast as without it |
+| `explicit_step` | `false` | First try one explicit step (no Jacobian, no factorization) in cells whose chemistry is not stiff over the call, kept only where it passes RODAS's error test; results change within the tolerances. Faster for flames of detailed mechanisms at small time steps (H2/air: chemistry 1.8 times faster); a cell whose step failed stops trying it while it stays stiff, so cases where most cells are (`flame_3d`) run as fast as without it. The H2/air examples where it takes at least 5% off the step set it (chemistry 1.4 to 1.8 times faster on CPUs, validation unchanged); detonations and GRI-3.0 flames gain nothing ([measurements](../design/chemistry.md#explicit-steps-in-the-examples-issue-1090)) |
 | `fuse_half_steps` | `true` | Strang: one chemistry call per step, the closing half step fused with the next opening one; output still shows the state at the step's end, and results do not depend on output or restarts. `false` takes the two half steps separately |
 | `C_reg` | 1e-12 | Concentration [kmol/m³] below which orders between 0 and 1 are regularized; 1e-10 speeds up trace-fuel burnout at a small cost in accuracy |
 | `load_balance` | `false` | MPI: move chemistry work from loaded to idle ranks, bitwise the same results ([performance](performance.md#chemistry-load-balancing)) |
@@ -272,6 +272,9 @@ fresh gas at its colder end, and reports:
 | `S_c` | Consumption speed −∫ ω_k dx / (ρ_u (Y_k,u − Y_k,b)) of the deficient reactant k: in a steady flame the flame speed, in any frame |
 | `S_d` | Displacement speed: the speed of `x_f` relative to the fresh gas |
 
+![The last profile of the premixed flame tutorial with what post flame reads from it: the fresh temperature T_u at the colder end and the peak T_b, the flame position x_f where T is midway between them, the tangent at the steepest gradient whose span from T_u to T_b is delta_T, and the consumption of H2 whose integral gives S_c](../images/guide/post_flame_profile-light.svg#gh-light-mode-only)
+![The last profile of the premixed flame tutorial with what post flame reads from it: the fresh temperature T_u at the colder end and the peak T_b, the flame position x_f where T is midway between them, the tangent at the steepest gradient whose span from T_u to T_b is delta_T, and the consumption of H2 whose integral gives S_c](../images/guide/post_flame_profile-dark.svg#gh-dark-mode-only)
+
 The production rates ω_k are the run's own: the `OMEGA_*` fields of snapshots
 that hold them with `T`, `RHO`, the velocity and `Y_*` (read on the mesh
 alone), else computed from each stored state by the case's `[chemistry]`
@@ -286,14 +289,20 @@ snapshots of a settled flame with `--times`. The table, with a row per
 snapshot, goes to `flame/flame.csv` (`-o`, `--name`); `--format json` gives the
 report to scripts.
 
+![S_c and S_d of every snapshot of the premixed flame tutorial against time: both settle on Cantera's flame speed after the start from a tanh profile; the summary averages S_c over the last third of the series and fits x_f over its last half](../images/guide/post_flame_speeds-light.svg#gh-light-mode-only)
+![S_c and S_d of every snapshot of the premixed flame tutorial against time: both settle on Cantera's flame speed after the start from a tanh profile; the summary averages S_c over the last third of the series and fits x_f over its last half](../images/guide/post_flame_speeds-dark.svg#gh-dark-mode-only)
+
+*The [premixed flame tutorial](../tutorials/premixed_flame.md) at φ = 1, 300 cells, four flame times
+(`python tools/docs/post_flame.py`).*
+
 `delta_T` depends on T_b. The burnt gas of a short domain is often still below
 its adiabatic equilibrium temperature, so with the peak as T_b the thickness
 falls short of a reference flame's while the slope agrees: in the premixed
 flame tutorial the burnt gas reaches 2231 K against Cantera's 2379 K, and
-`delta_T` is 6.8% below Cantera's thickness while max |dT/dx| is within 0.4%:
+`delta_T` is 6.7% below Cantera's thickness while max |dT/dx| is within 0.6%:
 the gap is the burnt gas's, not the flame's. Compare `dTdx_max`, or give the
 reference's T_b with `--burnt-temperature` (`2379.43` there brings `delta_T`
-within 0.4% of Cantera's).
+within 0.6% of Cantera's).
 
 On a mesh whose cells do not line up in rows normal to `--direction`, each
 cell is a row of its own and the profile is not a flame's: the command is for

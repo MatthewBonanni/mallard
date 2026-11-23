@@ -402,6 +402,19 @@ revolved volumes and face areas, and the radial momentum source
 least squares fit r-weighted averages, and second-order operators work at
 r-weighted centroids. See [the design notes](../design/axisymmetric.md).
 
+## Lagrangian particles
+
+Particles are a block of the integrator's state, advanced by every
+Runge-Kutta method at its order with the flow. The gas at a particle is the
+TENO polynomial of its cell (order $k$ for TENO of order $k$, a linear
+least-squares fit elsewhere), every stage reading the cell the particle
+started the step in; relaxations faster than the step are integrated
+exponentially, exactly for a gas velocity linear in time over it; particles
+are located by walking across face planes, bounce at the time within the
+step at which they reach a wall, and migrate between ranks bit for bit. See
+[Numerical methods for particles](particles.md), and the measured orders in
+the [verification manual](../verification/index.md#lagrangian-particles).
+
 ## Known limitations
 
 - The scheme is not exactly well balanced: hydrostatic states carry small spurious velocities, which vanish at second order under refinement (wall ghosts continue the hydrostatic pressure gradient).
