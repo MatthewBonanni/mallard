@@ -1,1 +1,0 @@
-- `mallard check` sizes the cells per rank within the entries a multi-dimensional Kokkos View addresses as well as the memory: `--memory` no longer suggests a partition that stops at setup, the sizing says which limit binds, and `--ranks N` reports `E-VIEW-ENTRIES` when the largest part would not fit (#991).

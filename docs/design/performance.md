@@ -846,6 +846,12 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
     | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
     | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
 
+    Remeasured for 0.11.0 on the A100 (`mallard check --memory a100-80 --steps 1`, $16^3$ hexahedra, periodic,
+    Euler density wave), after the quarter-capacity troubled scratch (#978) and the shared face weights (#1354):
+    630 B / 22.5M at TENO3, 845 B / 20.7M at TENO4, 1.05 kB / 13.7M at TENO5 and 1.50 kB / 12.3M at TENO6. The
+    setup's peak now sets the limit (5.70 kB per cell at TENO5). General mixed meshes fit 12.15M hexahedra and
+    12.23M tetrahedra at TENO5.
+
     The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
     8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
     against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at

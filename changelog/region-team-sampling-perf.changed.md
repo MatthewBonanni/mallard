@@ -1,1 +1,0 @@
-- Moving regions sample faster on GPUs, with the same fractions bit for bit: on an A100, a sphere moving through air_3d takes 248 ms per update instead of 380 ms with a smooth edge, and 87 ms instead of 97 ms with a sharp one.

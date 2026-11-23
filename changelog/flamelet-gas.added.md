@@ -1,1 +1,0 @@
-- Tabulated chemistry (#631): the flamelet gas library, which looks up thermodynamics (Saghafian's compressible FPV, with the closed-form temperature from the energy), transport and the progress-variable source in a flamelet table on the device, from float64 or float32 tables. Not yet reachable from the input; see the [design notes](docs/design/flamelet.md).

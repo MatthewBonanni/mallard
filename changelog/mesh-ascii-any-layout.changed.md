@@ -1,1 +1,0 @@
-- The ranks of a distributed run find the faces of binary Fluent sections of mixed faces together, each in its share of the section, instead of rank 0 stepping through every face; ASCII Fluent sections and ASCII OpenFOAM lists may again have any layout (several items on a line, items split over lines), each rank finding the items of its share of the bytes (#1156, #1157).

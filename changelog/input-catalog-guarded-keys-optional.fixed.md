@@ -1,1 +1,0 @@
-- The key catalog (`mallard list keys`, `--catalog`, the website's input builder) no longer marks optional keys that the setup reads only when present as required, such as the `[[boundaries]]`, `[[write_data]]` and `[[probes]]` tables, `run.cfl`, `source.gravity`, `write_data.format`, `write_data.interval`, `statistics.batch` and `probes.moment_center` (#1128).

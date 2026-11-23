@@ -1,1 +1,0 @@
-- `mallard list fields --format json` no longer carries `post_derive`, which repeated whether `available` lists `post derive`; `available` now lists it for `VORTICITY` too, which `mallard post derive` writes (#941).

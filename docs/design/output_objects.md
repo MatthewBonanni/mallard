@@ -33,8 +33,8 @@ move outputs as objects while the run goes on.
    copy of anything and is not hashed. VDS and external links name files
    relative to the index's directory (HDF5 resolves them from the opening
    file's directory first), so the directory can move as a whole.
-3. **Continuations and 0.11 series.** A restarted run reads the index (or,
-   for a series written in one file by 0.11 and earlier, renames it
+3. **Continuations and 0.10 series.** A restarted run reads the index (or,
+   for a series written in one file by 0.10 and earlier, renames it
    `PREFIX_legacy.vtkhdf` and describes its steps) and keeps the steps up to
    the restart time; the mesh file is checked against the run's mesh rather
    than rewritten. An XDMF series likewise keeps its `_mesh.h5`.

@@ -1,1 +1,0 @@
-- Transported subgrid variance for flamelet LES (#287): `physics.variance = "transported"` transports the second moment `Z2` of the mixture fraction (written as `Y_Z2`). Its sink is the resolved and subgrid dissipation, `chi_sgs = C_chi (D + D_t) Zvar / Delta^2` with `C_chi` defaulting to 2.

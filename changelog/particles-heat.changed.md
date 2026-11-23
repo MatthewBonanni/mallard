@@ -1,2 +1,0 @@
-- Solid particles whose relaxation time is below the step integrate their relaxation exponentially over the step instead of moving at their equilibrium velocity: still unconditionally stable, and particles with relaxation times near the step keep their inertia at the integrator's order (over 200 times smaller trajectory errors at `tau = 0.8 dt` with RK4) (#757).
-- Solid particles rebound off walls at the time within the step at which they reach them rather than at the end of the step, so bounce timing does not depend on the step (#757).

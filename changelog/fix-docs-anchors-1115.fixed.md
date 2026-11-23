@@ -1,1 +1,0 @@
-- Errors in a CSV data file (`[[initialize.data]]`, a synthetic turbulence `table` spectrum) link the docs of the data files instead of an anchor named after the file, and unused keys under `[reactor]` and `[benchmark]` link `docs/input.md#mallard-reactor` instead of a missing anchor (#1115).

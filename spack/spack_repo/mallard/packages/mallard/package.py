@@ -35,6 +35,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     license("Apache-2.0", checked_by="MatthewBonanni")
 
     version("main", branch="main", submodules=_submodules)
+    version("0.10.0", tag="v0.10.0", commit="0d4d1990838e0ac21d4182c8d8dc979c2c5b9ff6", submodules=_submodules)
     version("0.9.1", tag="v0.9.1", commit="254f9792e79530cb4391a701265aacf8356518ab", submodules=_submodules)
     version("0.9.0", tag="v0.9.0", commit="4bdd93261bc4f6de6885b83c120856c7dc4be9dc", submodules=_submodules)
 

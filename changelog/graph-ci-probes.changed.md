@@ -1,1 +1,0 @@
-- Probes reading `[statistics]` confidence intervals (`CI_<average>`), and triggers on them, no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at their writes: the step graph computes the half widths at the probes' cells with the host's arithmetic and Student's t quantiles. Results are the same bit for bit (#1013).

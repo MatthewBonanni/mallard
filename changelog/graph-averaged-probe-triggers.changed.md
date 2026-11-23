@@ -1,2 +1,0 @@
-- Triggers that read time-averaged probes (`average = true`) or probes of `[statistics]` outputs (`MEAN_`, `COV_`, `PHASE_`) no longer stop the steps enqueued ahead of the GPU (`[run] step_queue`) at their writes: the step graph keeps the probes' running means and samples the statistics before the triggers. Results are the same bit for bit (#1061).
-- Time-averaged probes round each mean update's product on its own, so their means can differ from earlier versions' in the last digit where the compiler fused it into a multiply-add (#1061).

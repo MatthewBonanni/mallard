@@ -327,7 +327,7 @@ after each snapshot, that ParaView, h5py and Mallard read as one temporal VTKHDF
 file. Keep the files together: the index and the links name them relative to
 their directory, so the directory can move as a whole. A restarted run keeps
 the snapshots up to its restart time and continues the index; a series written
-in one file by Mallard 0.11 or earlier is renamed `PREFIX_legacy.vtkhdf` and
+in one file by Mallard 0.10 or earlier is renamed `PREFIX_legacy.vtkhdf` and
 indexed as the series' first snapshots. Every rank writes its part with collective I/O (parallel HDF5 on several
 ranks), each array in global cell order, so the files are the same on any
 number of ranks. Cells touching a curved wall are written as quadratic Lagrange

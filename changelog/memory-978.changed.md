@@ -1,1 +1,0 @@
-- 3D TENO's troubled-cell passes take a quarter of the cells per round by default (`troubled_capacity = 0.25`, was 0.5): 880 bytes less device memory per cell at TENO5 (630 at TENO3, 1,090 at TENO6), 13% more cells per A100-80GB for a perfect gas at TENO5, for under 0.3 ms per step on an A100; results are bitwise unchanged, as they do not depend on the capacity (#978).

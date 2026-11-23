@@ -1,2 +1,0 @@
-- Thickened flames for non-premixed and partially premixed combustion: `[les.combustion] sensor = "reaction"` detects the flame by the consumption rate of a species over the largest rate in the premixed flame of the cell's mixture fraction, where the flame is premixed (Takeno's flame index), filtered, and thickens with that flame's `s_L` and `delta_L` from a `flame_table` (built by `tools/setup/flame_table.py`); mixtures outside the table's flammable range are not thickened (#754).
-- `[les.combustion] efficiency_max` caps the thickened flame's efficiency (#754).

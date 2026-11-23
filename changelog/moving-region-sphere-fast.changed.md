@@ -1,1 +1,0 @@
-- Sharp-edged moving regions recompute their cell fractions faster, with unchanged results: the kept simplices of each subdivided simplex are summed a subtree at a time instead of one at a time on GPUs, the deepest level of the subdivision skips the bound it never uses, and straight and curved cells are sampled by separate kernels.

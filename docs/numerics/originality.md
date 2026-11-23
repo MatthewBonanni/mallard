@@ -38,6 +38,7 @@ Mallard; their class says only whether we found them published.
 | Double flux with TENO on unstructured meshes | Original extension (narrow) | Double flux (Abgrall & Karni 2001; Billet & Abgrall 2003); with WENO on structured grids (Houim & Kuo 2011); in DG on unstructured meshes (Lv & Ihme 2014; Johnson & Kercher 2020) | The combination with high-order TENO finite volumes on mixed meshes, and wave speeds from each side's own frozen pair so both fluxes carry the same mass flux | [Double flux](#double-flux) |
 | SIMPLER splitting with an explicit integrator: stability polynomial, and the instability of non-dissipative fluxes | Original (analysis) | SIMPLER (Wu, Ma & Ihme 2019) and balanced splitting (Speth et al. 2013), analyzed with exact substeps | The composite polynomial with SSPRK3, which exceeds 1 everywhere on the imaginary axis, so a central flux is unstable at any step | [SIMPLER stability](#simpler-stability) |
 | RHLL blended toward HLL by a pressure-jump weight | Original extension (minor) | Rotated hybrid (Nishikawa & Kitamura 2008); the weight of AUSMPW+ (Kim, Kim & Rho 2001); pressure-based shock sensing in RoeM (Kim, Kim & Rho 2003); Rotated-RoeM with a Mach-number weight (Choi et al. 2024) | The blend of the rotated flux with face-normal HLL by `min(p_L/p_R, p_R/p_L)^3`, which removes the stagnation-line carbuncle on tetrahedra | [RHLL blend](#rhll-blend) |
+| Unstructured solver with an automatic structured fast path | Original extension | Zonal structured/unstructured solvers on zones the user or mesh generator designates (Cambier, Heib & Plot 2013); structure from refining a coarse unstructured mesh (Bergen & Hülsemann 2004) | Structured blocks found in any mesh from its nodes alone, numbered along their axes, one TENO table per stencil shape and TENO and MUSCL stencils read by index, with results bitwise independent of the numbering and partition | [Structured fast path](#structured-fast-path) |
 | Mirror-image stencil entries at straight boundaries | Adapted | Mirrored ghost cells in high-order unstructured stencils (Yang, Pan & Xu 2023) | Coplanar faces as one plane with several conditions, moments reflected degree by degree, images not counted toward the candidate search's limit | [Mirror images](#mirror-images) |
 | Curved boundaries for k-exact reconstruction | Adapted | Ollivier-Gooch & Van Altena 2002; Krivodonova & Berger 2006 | Quadrature area vectors shifted to sum exactly to the face's; degree cap 3 next to curved walls | [Curved boundaries](#curved-boundaries) |
 | Hybrid KEEP / Riemann flux with a Ducros sensor | Standard | Kuya, Totani & Kawai 2018; Ducros et al. 1999; Bhagatwala & Lele 2009; Ma, Lv & Ihme 2017; central flux on cell values (Subbareddy & Candler 2009) | Upwind floor, the rule for wall faces, and the central flux on the cells' values under TENO's upwind part | [Hybrid flux](#hybrid-flux) |
@@ -210,6 +211,42 @@ Pressure-based shock sensing already controls the dissipation of Roe-type
 fluxes (RoeM, Kim, Kim & Rho 2003), and the rotated hybrid has been
 combined with RoeM through a Mach-number weight (Choi et al. 2024); the blend
 with the rotated hybrid is the only new part, and it is small.
+
+### Structured fast path
+
+Mallard is an unstructured solver with an automatic structured fast path.
+Solvers that combine structured and unstructured meshes run structured
+zones that the user or the mesh generator designates (as in elsA; Cambier,
+Heib & Plot 2013), and hierarchical hybrid grids get their structure by
+refining a coarse unstructured mesh (Bergen & Hülsemann 2004). Mallard finds
+the structure in any mesh itself, with no input: every rank labels the
+quadrilaterals or hexahedra that meet face to face (across periodic
+boundaries too) with (i, j, k) indices
+from their nodes alone, carrying each cell's frame across shared faces,
+cuts the labeled region into boxes and numbers their cells first, along
+their axes. The TENO tables of a lattice differ from cell to cell only in
+the order of their entries and at round-off; ranked on a grid of $2^{-30}$
+of their magnitude, the cells of one stencil shape read one table, that of
+the shape's cell with the lowest global id, agreed over the ranks, so
+results do not depend on the numbering, partition or rank count. TENO's
+smooth pass reads the central stencil of a block cell as the cell plus its
+block shape's offsets; only the source of the indices changes, so the result
+is bitwise that of the unstructured path; MUSCL reads the face neighbors of
+block cells the same way
+([TENO-E](teno_e.md), [structured blocks](../design/structured_blocks.md)).
+
+**Evidence.** On the meshes measured, 83-100% of the cells have their whole
+TENO5 stencil in one structured block (88% on the 96³ Taylor-Green
+performance case, 95% on the graded Volvo combustor). TENO5 tables take
+1.05 kB per hexahedron of a uniform box instead of 32.0 kB, so an A100-80GB
+holds 13.7M cells instead of 2.08M. The speedup is modest: on an A100 the
+96³ Taylor-Green vortex runs 1.4% faster at order 5 and 6.4% at order 6
+with shared basis means and moments, and reading block stencils by index adds 2.3% at order 5
+with symmetry walls (88% of the cells on the block path) and 4.4% periodic
+(100%). Meshes are bitwise the
+same by global id in every cell numbering, and shared tables on 1 and 3
+ranks are bitwise equal
+([performance](../guide/performance.md#structured-fast-path)).
 
 ## Adapted and standard items
 
@@ -427,8 +464,6 @@ performance set ([performance](../design/performance.md#cell-numbering)).
 Sums written only to output files, such as wall forces, can differ in the
 last digits.
 
-<!-- The structured fast path (#440) gets its summary row and section here once it lands. -->
-
 ### Exchange point
 
 Wall-modeled LES takes the model's input at a height of several cells, which
@@ -455,7 +490,9 @@ of Lee & Moser (2015).
 - R. Abgrall and S. Karni, *J. Comput. Phys.* 169, 594–623 (2001). [doi:10.1006/jcph.2000.6685](https://doi.org/10.1006/jcph.2000.6685)
 - T. J. Barth and P. O. Frederickson, AIAA Paper 90-0013 (1990). [doi:10.2514/6.1990-13](https://doi.org/10.2514/6.1990-13)
 - A. Bhagatwala and S. K. Lele, *J. Comput. Phys.* 228, 4965–4969 (2009). [doi:10.1016/j.jcp.2009.04.009](https://doi.org/10.1016/j.jcp.2009.04.009)
+- B. Bergen and F. Hülsemann, *Numer. Linear Algebra Appl.* 11, 279–291 (2004). [doi:10.1002/nla.382](https://doi.org/10.1002/nla.382)
 - G. Billet and R. Abgrall, *Comput. Fluids* 32, 1473–1495 (2003). [doi:10.1016/S0045-7930(03)00004-5](https://doi.org/10.1016/S0045-7930%2803%2900004-5)
+- L. Cambier, S. Heib and S. Plot, *Mech. Ind.* 14, 159–174 (2013). [doi:10.1051/meca/2013056](https://doi.org/10.1051/meca/2013056)
 - F. Charlette, C. Meneveau and D. Veynante, *Combust. Flame* 131, 181–197 (2002). [doi:10.1016/S0010-2180(02)00401-7](https://doi.org/10.1016/S0010-2180%2802%2900401-7)
 - Q.-Y. Chen, *J. Sci. Comput.* 29, 299–319 (2006; online 2005). [doi:10.1007/s10915-005-9009-0](https://doi.org/10.1007/s10915-005-9009-0)
 - S. Choi, D. Kim, J. Park and J. Park, *J. Comput. Phys.* 505, 112913 (2024). [doi:10.1016/j.jcp.2024.112913](https://doi.org/10.1016/j.jcp.2024.112913)

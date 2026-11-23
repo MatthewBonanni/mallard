@@ -1,1 +1,0 @@
-- The convective fluxes and the Riemann solvers are compiled without implicit FMA contraction and write their FMAs explicitly, as TENO does, so that they round alike in every kernel that inlines them; results change in the last bits (#1253).

@@ -1,1 +1,0 @@
-- Faces whose quadrature weights are bitwise equal share one stored row of them: 3D cells hold about 207 B less at TENO5 (TENO5 hexahedra in a 64³ box: mesh and geometry 2.01 to 1.80 kB per cell) and 84 B less at TENO3, with results bitwise unchanged ([#965](https://github.com/MatthewBonanni/mallard/issues/965)).

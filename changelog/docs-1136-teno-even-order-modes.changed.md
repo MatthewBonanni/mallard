@@ -1,1 +1,0 @@
-- Documentation: TENO-E's 3D stability notes now list the slow growing modes of the even orders on Kuhn tetrahedra, triangle lattices (order 4) and hexahedra (order 6), and explain them by the sign of the scheme's lowest even term rather than face symmetry (#1136).

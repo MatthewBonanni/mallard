@@ -1,1 +1,0 @@
-- CUDA runs where NCCL fails under a CUDA graph's conditional node (NCCL across a network) no longer sample `[statistics]`, flush fused chemistry and evaluate probes at every step instead of at their intervals (#1153).

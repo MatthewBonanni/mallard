@@ -14,6 +14,27 @@ At these rates the A100 advances the million-cell TENO-E 5 case by one time step
 
 Fifth-order TENO-E costs 4.7 times as much per step as third order on the CPU and 2.7 times on the A100; its central stencil has 28 neighbors of each cell, against 10 for third order.
 
+## Structured fast path {#structured-fast-path}
+
+Mallard is an unstructured solver with an automatic structured fast path. Where a mesh is structured, it finds the blocks, numbers their cells along the blocks' axes, lets the cells of each stencil shape share one set of TENO tables, and has TENO and MUSCL read the stencils of block cells by index arithmetic; walls, transitions and irregular cells keep the unstructured path. There is no input key, and results stay bitwise independent of the cell numbering, partition and rank count.
+
+**When it engages.** With the default `[mesh] cell_order = "auto"`, each rank finds the structured blocks among its owned cells from their nodes alone: boxes of quadrilaterals or hexahedra that meet face to face, at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers (two for TENO5). Detection uses the connectivity only, not the cells' shape, so it covers uniform, stretched, graded and warped blocks alike: generated `cartesian` boxes and the hexahedral bulk of mesh files, whatever their numbering or the cells' node order. Every block cell gets the block numbering and, where its stencil lies in the block, index-based stencil reads. TENO shares its tables wherever cells have the same stencil shape: lattices, and uniformly stretched or extruded directions, where a stretched channel has one shape per plane of cells.
+
+**Memory and speed.** TENO tables per hexahedron of a uniform periodic box and the most cells per A100-80GB (`mallard check --memory a100-80 --steps 1` on an A100, 16³ cells, Euler). In 0.11.0 the setup's peak sets the limit: 5.70 kB per cell at TENO5.
+
+| Order | 0.10.0: tables | cells per GPU | 0.11.0: tables | cells per GPU |
+|---|---:|---:|---:|---:|
+| TENO3 | 10.3 kB | 5.64M | 630 B | 22.5M |
+| TENO4 | 18.1 kB | 3.58M | 845 B | 20.7M |
+| TENO5 | 32.0 kB | 2.08M | 1.05 kB | 13.7M |
+| TENO6 | 65.1 kB | 1.10M | 1.50 kB | 12.3M |
+
+The smooth pass also reads fewer distinct rows: on one A100, the 96³ Taylor-Green vortex of `teno5_3d` runs at 8.20M cells per second against 8.08M with a row per cell at order 5, and 3.83M against 3.60M at order 6. The TENO block kernel ([#1034](https://github.com/MatthewBonanni/mallard/pull/1034)) then reads each block cell's central stencil as the cell plus its block shape's offsets, bitwise as the unstructured path does: on the same A100, the 96³ TENO5 Taylor-Green vortex runs 2.3% faster with symmetry walls (88% of the cells on the block path) and 4.4% faster when periodic (100%). The fast path is mostly a memory saving; its speedup is a few percent. Details: [design notes](../design/performance.md#14-teno-table-memory-431) and [structured blocks](../design/structured_blocks.md).
+
+**Checking it.** The log's Mesh section reports the blocks in its cell order, e.g. `structured blocks first (1 block, 100.0% of the cells)`, and its Numerics section the share of cells on TENO's block path, e.g. `Structured blocks  88.0% of the cells on the block path, 1 block shape`. `mallard check --memory` gives the tables per cell.
+
+**Limits.** Triangles, tetrahedra, prisms, pyramids and hexahedra that do not form a box stay on the unstructured path, as do blocks shorter than 2n + 1 cells and, with several ranks, cells near the partition. Block cells whose TENO stencil holds a mirror image (next to straight walls and symmetry planes) stay off the block path. A block continues across a periodic boundary where a rank owns the cells on both sides, but not across an O-grid's seam; a periodic box that is one block on its rank keeps the cells along its seams on the block path, their offsets wrapping. `cell_order = "hilbert"` or `"input"` numbers no blocks. MUSCL shares its table rows only on lattices (8 or more cells per row), and takes the block path only for cells with a neighbor across every face. Detection adds about 1 s per million cells to the mesh setup.
+
 ## Choosing a scheme for an accuracy target {#accuracy-target}
 
 What a given error costs with each scheme, measured on the isentropic vortex
@@ -80,7 +101,7 @@ On tetrahedra the least-squares fits are latency-bound under the bitwise constra
 
 ## Cell numbering {#cell-numbering}
 
-Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first: a box of quadrilaterals or hexahedra, whose cells meet face to face (across periodic boundaries too), at least 2n + 1 cells long along each axis when the reconstruction reads n vertex layers, numbered along its axes (a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
+Each rank (and a serial run) can number its cells along a Hilbert curve through their centroids, its owned cells and each layer of halo cells separately, so that memory locality does not depend on how a mesh file numbers its cells. The default, `[mesh] cell_order = "auto"`, counts the cache lines that blocks of consecutive cells read over the cells the reconstruction reads around each (one vertex layer; two for TENO5), in the input order and along the curve, and takes the curve when it reads a tenth fewer. It then numbers the cells of each structured block first, along its axes, blocks meeting across periodic boundaries too ([structured fast path](#structured-fast-path); a generated `cartesian` box is one block in its own numbering). The Mesh section of the log says which order it took, both counts, and the blocks' share of the cells. `hilbert` or `input` force either. Results and output files are bitwise the same with either numbering.
 
 The performance set on one A100, cells per second, best of six runs over two interleaved rounds, before 0.10.0 and with `auto`:
 

@@ -1,1 +1,0 @@
-- Probes over `where` regions (regions defined by the solution that are filled) are evaluated in the step graph: their fractions are computed on the device at each write, so the step queue no longer stops there. Isosurface probes still stop it.

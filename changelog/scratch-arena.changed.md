@@ -1,1 +1,0 @@
-- Gas mixtures keep the reconstruction's work memory, the face thermodynamics and mass fluxes, and the transport properties and their gradients in one shared allocation, since they are never needed at the same time: 4% more cells per GPU for the two-step propane flame at TENO5, 9% with MUSCL, 18% with GRI-Mech; results are bitwise unchanged (#552).

@@ -1,1 +1,0 @@
-- The input names deprecated in 0.10.0 are removed: `[[write_data]]` and `[[probes]]` `variables` (use `fields`), and `[numerics] preset = "robust"` and `"accurate"` (use `"second_order"` and `"high_order"`). A run (and `mallard check`) with one stops with an error naming its replacement, and `mallard input upgrade old.toml > new.toml` still rewrites them.

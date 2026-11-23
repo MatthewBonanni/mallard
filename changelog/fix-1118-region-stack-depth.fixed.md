@@ -1,1 +1,0 @@
-- Booleans of regions of the mesh or the solution nested as later parts 16 or more deep now fail at input with the stack they need, instead of overflowing the stack of moving and solution-dependent region fractions on the device (#1118).
