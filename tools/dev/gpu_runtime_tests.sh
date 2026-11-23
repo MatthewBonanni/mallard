@@ -41,6 +41,7 @@ sanitized+=':StepQueueTest.RestartedRunsCaptureTheStepGraphAgainAndContinueBitFo
 sanitized+=':StepQueueTest.DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice'
 sanitized+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 sanitized+=':IOTest.AsynchronousOutputWritesTheSameFiles'
+sanitized+=':TENOSetup.ShapeRecordsHoldWhatTheirSlotsSetUp'
 sanitized+=':MPITest.TENOOnQuadsMatchesSerial:MPITest.LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs'
 sanitized+=':MPITest.CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs'
 sanitized_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.DistributedRunsAsTheHostTakesThem'
