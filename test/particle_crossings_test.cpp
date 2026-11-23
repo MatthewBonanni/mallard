@@ -110,8 +110,8 @@ TEST(ParticleCrossingsTest, ExitsAndCrossingsOfAUniformFlowAtTheirTimesAndPlaces
     for (const bool graphs : {true, false}) {
         const std::string out = (dir / (graphs ? "graphs" : "plain")).string();
         const std::string entries =
-            "[[particles.quantities]]\nname = \"age\"\nintegral = \"1\"\n"
-            "[[particles.crossings]]\nname = \"outlet\"\nregion = \"right\"\nfields = [\"U\", \"age\"]\nfile = \"" +
+            "[[particles.quantities]]\nname = \"AGE\"\nintegral = \"1\"\n"
+            "[[particles.crossings]]\nname = \"outlet\"\nregion = \"right\"\nfields = [\"U\", \"AGE\"]\nfile = \"" +
             out + "_outlet.csv\"\n[[particles.crossings]]\nname = \"middle\"\nregion = {type = \"boundary\", of = "
             "{type = \"half_space\", point = " + numbers(0.5, 0.0, 0.0) + ", normal = " + numbers(-1.0, 0.0, 0.0) +
             "}}\nfile = \"" + out + "_middle.csv\"\n";

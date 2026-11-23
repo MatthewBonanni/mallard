@@ -676,7 +676,7 @@ of it into the strain between the vortices and heat from 0.4 toward the gas's
 [[particles.crossings]]        # each particle leaving through the outlet, once
 name = "outlet"
 region = "outlet"
-fields = ["V", "residence"]
+fields = ["V", "RESIDENCE"]
 
 [[particles.crossings]]        # each crossing of the plane x = 0.2, either way
 name = "station"
