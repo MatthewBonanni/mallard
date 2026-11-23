@@ -600,7 +600,7 @@ case.
 Each must fail under a plausible bug (CONTRIBUTING.md).
 
 - **Reader and lookup (C++, `test/flamelet_table_test.cpp`)**: the fixture
-  ([table_format.md](table_format.md#10-reference-fixture)), written by an
+  ([table_format.md](table_format.md#10-reference-fixtures)), written by an
   independent Python writer, reads with its tags, species, pressure and
   provenance. Every field looks up in a device kernel as the writer computed
   it, which catches node order, field order, stride and byte order.

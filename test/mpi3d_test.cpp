@@ -475,7 +475,10 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
             "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n";
-        expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & solver) {
+            EXPECT_TRUE(solver.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(solver);
+        });
     }
     comm::barrier();
 }

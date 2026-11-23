@@ -500,6 +500,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="w-probe-outside"></a>`W-PROBE-OUTSIDE` | Part of a probe lies outside the domain: samples of a line or surface outside the mesh, or part of a filled region, which it leaves out. The message gives how much and where | Move the probe inside the domain, or accept the part it samples ([Probes](probes.md#probes-probes)) |
 | <a id="w-quality-non-orthogonality"></a>`W-QUALITY-NON-ORTHOGONALITY`, <a id="w-quality-skewness"></a>`W-QUALITY-SKEWNESS`, <a id="w-quality-aspect-ratio"></a>`W-QUALITY-ASPECT-RATIO`, <a id="w-quality-volume-ratio"></a>`W-QUALITY-VOLUME-RATIO` | Cells above the metric's limit (70 deg, 0.5, 1000, 10). Such cells limit the time step and the accuracy, and can make a run diverge | Improve the mesh where they are: `--mesh-fields PREFIX` writes the metrics as fields ([Mesh quality](meshes.md#mesh-quality)) |
 | <a id="e-mesh-fields"></a>`E-MESH-FIELDS` | `--mesh-fields` could not write its files, or `--cells` or `--region` selects no cell: an id beyond the mesh's cells, a region that touches none | Check the path, the ids (global, from 0) and the region ([Mesh and stencil fields](output.md#mesh-and-stencil-fields)) |
+| <a id="e-initial-write"></a>`E-INITIAL-WRITE` | `--initial PREFIX` could not write the initial state | Check the path and its permissions ([The initial state](#the-initial-state-before-a-run)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
 | <a id="w-trigger-never"></a>`W-TRIGGER-NEVER` | A `[[triggers]]` entry cannot fire before `t_stop`: its `for` is longer than the run, or its condition reads only `t`, compared with numbers, and is false at every time to `t_stop` | Check the condition's numbers and their units (seconds), or `for`; raise `run.t_stop` if the run is too short ([Triggers](running.md#triggers)) |
 | <a id="w-tfles-thickening"></a>`W-TFLES-THICKENING` | TFLES thickens the flame by more than 5 (`F = n_res Delta / delta_L`). Beyond that the flame's response to turbulence is unreliable | Refine the mesh where the flame goes, or lower `les.combustion.n_res` ([LES](les.md#thickened-flames-lescombustion)) |
@@ -525,8 +526,10 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `diagnostics` | `[{severity, code, message, docs}]`, in the order found |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `regions`, `case_view`, `case_view_images` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)) |
-| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, max, mean, units, limit, above_limit, worst: [{value, cell, x}]}`; the files of `--mesh-fields` |
+| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
+| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
+| `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
+| `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak`, `steady` and `released_on_devices` (of `steady`, what GPU runs free after setup and this CPU build keeps) |
@@ -702,7 +705,15 @@ at a glance. It writes, without running the case:
   (`domain`), every boundary zone and cell zone, every region the case uses
   (as [Checking regions](geometry.md#checking-regions) describes), every probe
   on points, lines or surfaces of its own, and every periodic pair (each face
-  with `side` 0, its image on the partner zone with `side` 1).
+  with `side` 0, its image on the partner zone with `side` 1). Boundary zones
+  carry each face's `normal` and `area`; walls also carry `y_plus`, the first
+  cell's y+ of each face as the [resolution](#resolution) report estimates it,
+  once it estimates one (a viscous case with a friction velocity).
+
+A setup that stops (a boundary zone without a condition, a missing key) still
+draws the mesh alone, its zones and periodic pairs, so that what it stopped on
+can be seen; the JSON report's `unassigned` lists the zones without a
+condition.
 
 ```bash
 mallard check input.toml --view view
@@ -727,6 +738,19 @@ Pitfalls:
   in; a nondimensional case shows no units.
 
 Figures: [`tools/docs/case_view.py`](../../tools/docs/case_view.py).
+
+### The initial state before a run
+
+`--initial PREFIX` writes the initial state, as the run would start from it
+(`[initialize]` with its `regions` and `data`, or the restart of `--restart`),
+to `PREFIX_000000.vtkhdf` (`PREFIX_000000.vtu` in builds without HDF5): `RHO`,
+`U`, `P`, `T` and, for mixtures, `Y_*`, in the units of the run's snapshots.
+Open it with the case view to see that a region's override lands where it
+should before the run starts.
+
+```bash
+mallard check input.toml --initial initial --view view
+```
 
 ## The resolved input
 
