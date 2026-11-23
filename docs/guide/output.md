@@ -951,6 +951,18 @@ error, so neither is a repair.
 
 ## In every output file
 
+### Field names
+
+Every field, column and quantity Mallard writes or reads by name is an
+uppercase identifier: `RHO`, `U_X`, `MEAN_P`, a probe's `MEAN_T`, the
+`[integrals]` `KINETIC_ENERGY`, a particle quantity's `TURNS`. Names built
+on a species are an uppercase prefix and the species as its mechanism writes
+it: `Y_CH4`, `X_cC3H6`, `OMEGA_CH2(S)`. Coordinates and abscissae (`step`,
+`t`, `x`, `y`, `z`, `id`, a probe line's `s`, a spectrum's `f`) are not
+fields and stay lowercase, as do labels an input gives (probe, trigger and
+zone names), which keep their case inside the names built on them
+(`outlet_MEAN_T`, `forces_cylinder_F_X_PRESSURE`).
+
 ### Units
 
 Every value Mallard writes is in SI units (the mesh-quality angle

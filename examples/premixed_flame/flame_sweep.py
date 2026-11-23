@@ -75,7 +75,7 @@ def analyze(run_dir, mallard):
                  if os.path.exists(os.path.join(run_dir, "solut", "flame" + e)))
     out = subprocess.run([mallard, "post", "flame", index, "--format", "json", "-o", "flame"], cwd=run_dir,
                          check=True, capture_output=True, text=True).stdout
-    return np.array([(r["snapshot"]["t"], r["S_c"], r["x_f"], r["u_u"]) for r in json.loads(out)["snapshots"]])
+    return np.array([(r["snapshot"]["t"], r["S_C"], r["X_F"], r["U_U"]) for r in json.loads(out)["snapshots"]])
 
 
 def measure(run_dir, ref, mallard):

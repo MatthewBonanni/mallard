@@ -1093,7 +1093,7 @@ struct RegionColumn {
 /**
  * @brief Over a --region defined by the solution, from the time averages of its probe per cell
  *        (rank 0): its mean measure, the time averages of the integrals of the fields and of the
- *        products (integral_MEAN_), the means (mean_MEAN_: mean integral over mean measure), and the
+ *        products (INTEGRAL_MEAN_), the means (MEAN_MEAN_: mean integral over mean measure), and the
  *        covariances and Favre averages of these means, as the per-cell averages name them.
  */
 std::vector<RegionColumn> region_columns(const Averages & a, const Probes::CellAverages & c) {
@@ -1113,13 +1113,13 @@ std::vector<RegionColumn> region_columns(const Averages & a, const Probes::CellA
     for (size_t k = 0; k < n_fields; k++) mean[k] = integral[k] / measure;
     std::vector<RegionColumn> out = {{c.measure, c.measure_dimension, measure}};
     for (size_t k = 0; k < n_fields; k++) {
-        out.push_back({"integral_MEAN_" + a.fields[k], d[k].times(c.measure_dimension), integral[k]});
+        out.push_back({"INTEGRAL_MEAN_" + a.fields[k], d[k].times(c.measure_dimension), integral[k]});
     }
-    for (size_t k = 0; k < n_fields; k++) out.push_back({"mean_MEAN_" + a.fields[k], d[k], mean[k]});
+    for (size_t k = 0; k < n_fields; k++) out.push_back({"MEAN_MEAN_" + a.fields[k], d[k], mean[k]});
     std::vector<double> cov(a.products.size());
     for (size_t p = 0; p < a.products.size(); p++) {
         const auto [i, j] = a.products[p];
-        out.push_back({"integral_MEAN_" + a.product(a.products[p]), d[i].times(d[j]).times(c.measure_dimension),
+        out.push_back({"INTEGRAL_MEAN_" + a.product(a.products[p]), d[i].times(d[j]).times(c.measure_dimension),
                        product[p]});
         cov[p] = product[p] / measure - mean[i] * mean[j];
     }
@@ -1973,7 +1973,7 @@ FlameSummary summarize(const std::vector<FlameRow> & rows, double sense) {
 void write_flame_table(const std::vector<FlameRow> & rows, const std::string & species, const std::string & path) {
     fs::create_directories(fs::path(path).parent_path());
     std::ofstream out(path);
-    out << "step,t,x_f,delta_T,dTdx_max,S_c,S_d,u_u,T_u,T_b,rho_u,Y_" << species << "_u,Y_" << species << "_b\n"
+    out << "step,t,X_F,DELTA_T,DTDX_MAX,S_C,S_D,U_U,T_U,T_B,RHO_U,Y_" << species << "_U,Y_" << species << "_B\n"
         << field_units::csv_line({dim::none, dim::time, dim::length, dim::length, dim::of(0, -1, 0, 1), dim::velocity,
                                   dim::velocity,
                                   dim::velocity, dim::temperature, dim::temperature, dim::density, dim::none, dim::none})
@@ -2253,20 +2253,20 @@ int flame(const cli::Args & args) {
             const FlameRow & r = rows[k];
             json::Object row;
             row.raw("snapshot", snapshot_json(files[selected[k].file], selected[k]));
-            row.add("x_f", r.x_f).add("delta_T", r.delta).add("dTdx_max", r.gradient).add("S_c", r.S_c);
-            if (std::isfinite(r.S_d)) row.add("S_d", r.S_d);
-            row.add("u_u", r.u_u).add("T_u", r.T_u).add("T_b", r.T_b).add("rho_u", r.rho_u).add("Y_u", r.Y_u).add("Y_b", r.Y_b);
+            row.add("X_F", r.x_f).add("DELTA_T", r.delta).add("DTDX_MAX", r.gradient).add("S_C", r.S_c);
+            if (std::isfinite(r.S_d)) row.add("S_D", r.S_d);
+            row.add("U_U", r.u_u).add("T_U", r.T_u).add("T_B", r.T_b).add("RHO_U", r.rho_u).add("Y_U", r.Y_u).add("Y_B", r.Y_b);
             list += (list.size() > 1 ? "," : "") + row.str();
         }
         o.raw("snapshots", list + "]");
         json::Object summary;
-        summary.add("S_c", s.S_c).add("S_c_spread", s.S_c_spread).add("S_c_from", s.S_c_from).add("S_c_samples", s.S_c_samples);
-        summary.add("delta_T", s.delta).add("dTdx_max", s.gradient);
-        if (std::isfinite(s.S_d)) summary.add("S_d", s.S_d).add("drift", s.drift);
-        summary.add("S_d_from", s.S_d_from).add("S_d_samples", s.S_d_samples);
+        summary.add("S_C", s.S_c).add("S_C_SPREAD", s.S_c_spread).add("S_C_FROM", s.S_c_from).add("S_C_SAMPLES", s.S_c_samples);
+        summary.add("DELTA_T", s.delta).add("DTDX_MAX", s.gradient);
+        if (std::isfinite(s.S_d)) summary.add("S_D", s.S_d).add("DRIFT", s.drift);
+        summary.add("S_D_FROM", s.S_d_from).add("S_D_SAMPLES", s.S_d_samples);
         if (reference) {
-            summary.add("reference", S_ref).add("S_c_error_percent", error(s.S_c));
-            if (std::isfinite(s.S_d)) summary.add("S_d_error_percent", error(s.S_d));
+            summary.add("REFERENCE", S_ref).add("S_C_ERROR_PERCENT", error(s.S_c));
+            if (std::isfinite(s.S_d)) summary.add("S_D_ERROR_PERCENT", error(s.S_d));
         }
         o.raw("summary", summary.str()).raw("written", json_strings({path}));
         std::cout << o.str() << "\n";
@@ -2298,7 +2298,7 @@ int flame(const cli::Args & args) {
                          format("%.6g", r.x_f), format("%.6g", r.delta), format("%.6g", r.gradient), format("%.6g", r.S_c),
                          std::isfinite(r.S_d) ? format("%.6g", r.S_d) : "-", format("%.6g", r.u_u)});
     }
-    logging::table({"t [s]", "step", "x_f [m]", "delta_T [m]", "max dT/dx [K/m]", "S_c [m/s]", "S_d [m/s]", "u_u [m/s]"},
+    logging::table({"t [s]", "step", "X_F [m]", "DELTA_T [m]", "DTDX_MAX [K/m]", "S_C [m/s]", "S_D [m/s]", "U_U [m/s]"},
                    table);
     if (!selected.front().step_recorded) logging::line("  *: position in the files, which record no step.");
     logging::section("Speeds");
@@ -2306,7 +2306,7 @@ int flame(const cli::Args & args) {
                             " from t = " + seconds(s.S_c_from) + " s (spread " + format("%.3g", s.S_c_spread) + " m/s)" +
                             (reference ? format(", %+.3f%% from --reference-speed", error(s.S_c)) : ""));
     if (std::isfinite(s.S_d)) {
-        item("Displacement", format("%.6g", s.S_d) + " m/s, from x_f fitted over " + count(s.S_d_samples, "snapshot") +
+        item("Displacement", format("%.6g", s.S_d) + " m/s, from X_F fitted over " + count(s.S_d_samples, "snapshot") +
                                  " from t = " + seconds(s.S_d_from) + " s (the front moves at " +
                                  format("%.4g", s.drift) + " m/s)" +
                                  (reference ? format(", %+.3f%% from --reference-speed", error(s.S_d)) : ""));
@@ -2314,7 +2314,7 @@ int flame(const cli::Args & args) {
         item("Displacement", "needs two snapshots in the last half of the series");
     }
     item("Thermal thickness", format("%.6g", s.delta) + " m, from max |dT/dx| = " + format("%.6g", s.gradient) +
-                                  " K/m: the means over the snapshots of S_c");
+                                  " K/m: the means over the snapshots of S_C");
     item("Written", path);
     return 0;
 }

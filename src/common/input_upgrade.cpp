@@ -1062,6 +1062,10 @@ std::vector<std::string> notices(const std::string & text) {
         return input.contains(table) && input.at(table).is_table() && input.at(table).contains(key);
     };
     std::vector<std::string> out;
+    if (input.contains("reactor")) {
+        out.push_back("[reactor]: mallard reactor writes the pressure column as P, not p, as field names are uppercase; "
+                      "scripts reading its output by column name need the new name");
+    }
     if (input.contains("run") && !has("numerics", "preset") && !has("numerics", "face_reconstruction")) {
         out.push_back("no preset and no [numerics.face_reconstruction]: since 0.10.0 this runs the high_order "
                       "preset, not first order; add [numerics.face_reconstruction] type = \"FO\" to reproduce "

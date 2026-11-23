@@ -156,7 +156,7 @@ averaged directions together,
 
 adding the dispersive part (the spatial variation of the time means); Favre
 columns are weighted by volume times `MEAN_RHO`. The CSV, `average/average.csv`,
-holds the kept coordinates, `n_cells`, then each column, and is the `profile`
+holds the kept coordinates, `N_CELLS`, then each column, and is the `profile`
 [synthetic turbulence](boundary_conditions.md#synthetic-turbulence-turbulence)
 reads. `--statistics` does the same to the `MEAN_`, `COV_` (and
 `FAVRE_`) fields a snapshot of a run's `[statistics]` holds, pairing
@@ -170,9 +170,9 @@ own state, as `mallard post extract` places it, and the averages are over the
 region in space and time together: `average/average_reductions.csv` holds
 
 - the time-weighted mean measure of the region;
-- `integral_MEAN_<a>`, the time-weighted mean of the integral of each field
-  over it, and `integral_MEAN_<a>_<b>` of each product of `--products`;
-- `mean_MEAN_<a>`, the mean integral over the mean measure, and the
+- `INTEGRAL_MEAN_<a>`, the time-weighted mean of the integral of each field
+  over it, and `INTEGRAL_MEAN_<a>_<b>` of each product of `--products`;
+- `MEAN_MEAN_<a>`, the mean integral over the mean measure, and the
   covariances of these means, `COV_<a>_<b>` (mean integral of `a b` over the
   mean measure, less the product of the means), with `RMS_<a>`;
 - with `--favre`, `FAVRE_MEAN_<a>`, the mean integral of `RHO a` over the mean
@@ -189,7 +189,7 @@ With `--homogeneous`, a filled region gives a profile of the same averages per
 row: each cell weighs the time average of its measure in the region, so a
 row's `MEAN_<a>` is the time average of the integral of `a` over the region's
 cells in that row over the time average of their measure (a conditional
-average), and its `n_cells` counts the cells the region reached in some
+average), and its `N_CELLS` counts the cells the region reached in some
 snapshot. `--snapshot` and `--conditional` are errors with such a region: its
 averages are integrals, not fields on cells.
 
