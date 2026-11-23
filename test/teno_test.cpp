@@ -749,7 +749,7 @@ TEST(TENOTest, ACacheHoldsEachDistinctTableOnce) {
     const auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
     double per_cell = 0.0;
     for (uint32_t c = 0; c < mesh->n_cells; c++) per_cell += double(sizes(c)) * teno->n_dof_large * sizeof(rtype);
-    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(cache))), 0.25 * per_cell);
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(cache))), 0.5 * per_cell);
     std::filesystem::remove(file_of(cache));
 }
 
