@@ -278,6 +278,14 @@ Examples:
   entropy than the normal shock's (L = 2), relaxing to 1.5% at the wall
   (`p_0` scales as entropy to the power -2.5), where the planar cylinder's
   stay within 1% of it.
+
+  ![Wall entropy error of inviscid flow over a sphere at Mach 0.3, TENO3: along the wall at 128 x 64 cells, and its mean against the mesh, converging at order 1.3 with straight walls and 2.8 with curved ones](../images/guide/axisymmetric_curved_sphere-light.svg#gh-light-mode-only)
+  ![Wall entropy error of inviscid flow over a sphere at Mach 0.3, TENO3: along the wall at 128 x 64 cells, and its mean against the mesh, converging at order 1.3 with straight walls and 2.8 with curved ones](../images/guide/axisymmetric_curved_sphere-dark.svg#gh-dark-mode-only)
+
+  *The Mach 0.3 runs (`python tools/docs/axisymmetric_curved.py`): at L = 4
+  curved walls keep the error 1.5 to 6.6 times below the straight walls'
+  along the whole wall: 1.7 near the front stagnation point, 5 to 6.6 past
+  the equator.*
 - Counterflow diffusion flame (H2/N2 against air, 1 atm, 10 mm gap, the
   finite-jet setup of the 3D counterflow validation on the meridian plane, 20
   cells per flame width, MUSCL, mixture-averaged transport, started from

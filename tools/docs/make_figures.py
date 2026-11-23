@@ -17,6 +17,7 @@ Each module's figures are drawn by one call below, in alphabetical order.
 import argparse
 import sys
 
+import axisymmetric_curved
 import boundary_coordinates
 import case_view
 import domains
@@ -48,6 +49,7 @@ def main():
     ap.add_argument("--mallard3d", help="3D Mallard executable, for the 3D region, probe and mesh-field figures")
     ap.add_argument("--mpirun", default="mpirun")
     args = ap.parse_args()
+    axisymmetric_curved.figures()
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     domains.figures()
     effective_resolution.figures()
