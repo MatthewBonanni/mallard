@@ -29,7 +29,7 @@ step, at its first stage.
 
 `[numerics] time_integrator` (`src/numerics/time_integrator.cpp`):
 
-- **SSPRK3** (default), the three-stage, third-order strong-stability-preserving
+- <a id="ssprk3"></a>**SSPRK3** (default), the three-stage, third-order strong-stability-preserving
     scheme of [Shu & Osher 1988](../references.md#shu-osher-1988)
     ([Gottlieb & Shu 1998](../references.md#gottlieb-shu-1998)):
 
@@ -48,7 +48,7 @@ step, at its first stage.
     $\tfrac13\mathbf{U}^n + \tfrac23(\cdots)$, written as an interpolation so
     that its weights sum to one exactly in floating point.
 
-- **RK4**, the classical four-stage, fourth-order method
+- <a id="rk4"></a>**RK4**, the classical four-stage, fourth-order method
     ([Kutta 1901](../references.md#kutta-1901)):
 
     $$
@@ -64,15 +64,15 @@ step, at its first stage.
     \end{equation}
     $$
 
-- **FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
-- **SSPRK54**, the five-stage, fourth-order SSP method of
+- <a id="forward-euler"></a>**FE**, forward Euler: $\mathbf{U}^{n+1} = \mathbf{U}^n + \Delta t\,\mathbf{L}(\mathbf{U}^n, t_n)$.
+- <a id="ssprk54"></a>**SSPRK54**, the five-stage, fourth-order SSP method of
     [Kraaijevanger 1991](../references.md#kraaijevanger-1991) and
     [Spiteri & Ruuth 2002](../references.md#spiteri-ruuth-2002) (SSP
-    coefficient 1.508), and **RDPK3Sp35**, a five-stage, third-order method
+    coefficient 1.508), and <a id="rdpk3sp35"></a>**RDPK3Sp35**, a five-stage, third-order method
     with an embedded second-order error estimate for error-controlled steps
     ([Ranocha et al. 2022](../references.md#ranocha-2022)), both in the
     low-storage 3S\* form of [Ketcheson 2010](../references.md#ketcheson-2010).
-- **CK45**, the five-stage, fourth-order 2N-storage method of
+- <a id="ck45"></a>**CK45**, the five-stage, fourth-order 2N-storage method of
     [Carpenter & Kennedy 1994](../references.md#carpenter-kennedy-1994).
 
 Applied to $\mathrm{d}u/\mathrm{d}t = \lambda u$, each method advances

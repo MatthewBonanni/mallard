@@ -4,6 +4,31 @@
   2,
   3
  ],
+ "models": {
+  "CK45": {
+   "cite": "Carpenter & Kennedy 1994",
+   "docs": "docs/theory/time_integration.md#ck45"
+  },
+  "FE": {
+   "docs": "docs/theory/time_integration.md#forward-euler"
+  },
+  "RDPK3Sp35": {
+   "cite": "Ranocha et al. 2022",
+   "docs": "docs/theory/time_integration.md#rdpk3sp35"
+  },
+  "RK4": {
+   "cite": "Kutta 1901",
+   "docs": "docs/theory/time_integration.md#rk4"
+  },
+  "SSPRK3": {
+   "cite": "Shu & Osher 1988",
+   "docs": "docs/theory/time_integration.md#ssprk3"
+  },
+  "SSPRK54": {
+   "cite": "Spiteri & Ruuth 2002",
+   "docs": "docs/theory/time_integration.md#ssprk54"
+  }
+ },
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/cbc_les/input.toml",

@@ -458,6 +458,9 @@ MUSCL::~MUSCL() {
 void MUSCL::init(const Input & input) {
     const std::string limiter_str = find_value_or<std::string>(input, "limiter", "venkatakrishnan");
     auto it = find_option(LIMITER_TYPES, "numerics.face_reconstruction.limiter", limiter_str);
+    record_models("numerics.face_reconstruction.limiter",
+                  {{"barth_jespersen", "docs/theory/finite_volume.md#limiters", "Barth & Jespersen 1989"},
+                   {"venkatakrishnan", "docs/theory/finite_volume.md#limiters", "Venkatakrishnan 1995"}});
     limiter = it->second;
     venkat_K = find_real_or(input, "venkatakrishnan_K", dim::none, 5.0);
     gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);

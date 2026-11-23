@@ -13,7 +13,7 @@ merges what setup recorded into docs/input-keys/, one file per key path: its typ
 physical dimension (and the unit of a plain number, when not SI), default (as TOML
 text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
 read it, the inputs that set it, and what setup records besides (path, references,
-for_types, required_for, alternatives: docs/guide/input_files.md#the-key-catalog;
+for_types, required_for, alternatives, models: docs/guide/input_files.md#the-key-catalog;
 for_types and required_for only if every input read the key under a type). A key's file is its path, percent-encoded
 outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
 plus .json. With --check it compares with the committed files instead of writing
@@ -116,6 +116,8 @@ def merge(merged, keys, dim, source, untyped):
         for field in ("dimension", "unit", "references", "path"):
             if field in entry:
                 m[field] = entry[field]
+        if "models" in entry:
+            m["models"] = {**m.get("models", {}), **entry["models"]}
         for field in ("values", "for_types", "required_for"):
             if field in entry:
                 m[field] = sorted(set(m.get(field, [])) | set(entry[field]))

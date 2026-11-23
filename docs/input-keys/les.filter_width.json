@@ -7,6 +7,16 @@
   2,
   3
  ],
+ "models": {
+  "scotti": {
+   "cite": "Scotti, Meneveau & Lilly 1993",
+   "docs": "docs/theory/les.md#filter-width"
+  }
+ },
  "set_in": [],
- "type": "string"
+ "type": "string",
+ "values": [
+  "scotti",
+  "volume"
+ ]
 }

@@ -48,6 +48,10 @@ LES LES::from_input(const Input & input) {
     LES les;
     const std::string name = find_value_or<std::string>(table, "model", N_DIM == 3 ? "sigma" : "wale");
     const auto it = find_option(SGS_MODELS, "les.model", name, line_of(table, "model"));
+    record_models("les.model", {{"smagorinsky", "docs/theory/les.md#smagorinsky-model", "Smagorinsky 1963"},
+                                {"wale", "docs/theory/les.md#wale-model", "Nicoud & Ducros 1999"},
+                                {"vreman", "docs/theory/les.md#vreman-model", "Vreman 2004"},
+                                {"sigma", "docs/theory/les.md#sigma-model", "Nicoud et al. 2011"}});
     les.model = it->second;
     if (N_DIM == 2 && les.model == SGSModel::SIGMA) {
         throw InputError("les.model = \"sigma\" vanishes for every two-dimensional flow; use \"wale\" or \"vreman\" in "
@@ -57,6 +61,8 @@ LES LES::from_input(const Input & input) {
     les.Pr_t = find_real_or(table, "Pr_t", dim::none, 0.9_r);
     les.Sc_t = find_real_or(table, "Sc_t", dim::none, 0.9_r);
     const std::string width = find_value_or<std::string>(table, "filter_width", N_DIM == 3 ? "scotti" : "volume");
+    record_options("les.filter_width", {"scotti", "volume"});
+    record_models("les.filter_width", {{"scotti", "docs/theory/les.md#filter-width", "Scotti, Meneveau & Lilly 1993"}});
     if (width != "volume" && width != "scotti") {
         throw InputError("les.filter_width = \"" + width + "\" is not one of: volume, scotti.");
     }

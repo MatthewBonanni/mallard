@@ -4,11 +4,25 @@
   2,
   3
  ],
+ "models": {
+  "pasr": {
+   "cite": "Sabelnikov & Fureby 2013",
+   "docs": "docs/theory/les.md#partially-stirred-reactor"
+  },
+  "tfles": {
+   "cite": "Colin et al. 2000",
+   "docs": "docs/theory/les.md#thickened-flame-model"
+  }
+ },
  "set_in": [
   "examples/flame_turbulence/les.toml",
   "examples/triple_flame/tfles/input.toml",
   "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
   "tools/dev/catalog_inputs/3d/flamelet_tfles.toml"
  ],
- "type": "string"
+ "type": "string",
+ "values": [
+  "pasr",
+  "tfles"
+ ]
 }

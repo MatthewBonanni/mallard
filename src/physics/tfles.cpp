@@ -127,6 +127,10 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table, const bool flamel
     const bool reaction = tf.sensor_type == Sensor::REACTION;
     tf.n_res = find_double_or(table, "n_res", dim::none, 5.0);
     const std::string efficiency = find_value_or<std::string>(table, "efficiency", reaction ? "charlette" : "dynamic");
+    record_options("les.combustion.efficiency", {"charlette", "dynamic", "none"});
+    record_models("les.combustion.efficiency",
+                  {{"dynamic", "docs/theory/les.md#dynamic-efficiency", "Wang, Boileau & Veynante 2011"},
+                   {"charlette", "docs/theory/les.md#charlette-efficiency", "Charlette, Meneveau & Veynante 2002"}});
     if (efficiency == "charlette") {
         tf.efficiency = Efficiency::CHARLETTE;
     } else if (efficiency == "dynamic") {
@@ -153,6 +157,9 @@ ThickenedFlame ThickenedFlame::from_input(const Input & table, const bool flamel
     if (tf.efficiency != Efficiency::DYNAMIC) {
         tf.beta = find_double_or(table, "beta", dim::none, 0.5);
         const std::string velocity = find_value_or<std::string>(table, "subgrid_velocity", "colin");
+        record_options("les.combustion.subgrid_velocity", {"colin", "eddy_viscosity"});
+        record_models("les.combustion.subgrid_velocity",
+                      {{"colin", "docs/theory/les.md#subgrid-velocity", "Colin et al. 2000"}});
         if (velocity != "colin" && velocity != "eddy_viscosity") {
             throw InputError("les.combustion.subgrid_velocity = \"" + velocity + "\" is not one of: colin, eddy_viscosity.");
         }

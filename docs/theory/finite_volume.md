@@ -173,7 +173,7 @@ boundaries, whose zero-gradient ghosts would halve outgoing waves, use the
 linear fit over their vertex neighbors instead (the same fit as eq. $\eqref{eq:muscl-2}$
 over the vertex-neighbor stencil of [below](#gradients-for-the-viscous-terms)).
 
-**Limiters.** With $\Delta_{-} = \nabla W_i\cdot(\mathbf{x}_f - \mathbf{x}_i)$
+<a id="limiters"></a>**Limiters.** With $\Delta_{-} = \nabla W_i\cdot(\mathbf{x}_f - \mathbf{x}_i)$
 at each face centroid and $\Delta_{\max}$, $\Delta_{\min}$ the largest and
 smallest $W_j - W_i$ over the cell and its face neighbors (ghosts
 included), $\phi_i = \min_f\phi_f$ with

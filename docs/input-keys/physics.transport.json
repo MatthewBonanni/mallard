@@ -7,6 +7,18 @@
  "for_types": [
   "navier_stokes"
  ],
+ "models": {
+  "constant_lewis": {
+   "docs": "docs/theory/thermodynamics_transport.md#diffusion-coefficients"
+  },
+  "mixture_averaged": {
+   "cite": "Monchick & Mason 1961",
+   "docs": "docs/theory/thermodynamics_transport.md#transport"
+  },
+  "unity_lewis": {
+   "docs": "docs/theory/thermodynamics_transport.md#diffusion-coefficients"
+  }
+ },
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/flame_2d/input.toml",
@@ -23,5 +35,10 @@
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml"
  ],
- "type": "string"
+ "type": "string",
+ "values": [
+  "constant_lewis",
+  "mixture_averaged",
+  "unity_lewis"
+ ]
 }

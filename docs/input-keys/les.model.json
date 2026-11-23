@@ -7,6 +7,24 @@
   2,
   3
  ],
+ "models": {
+  "sigma": {
+   "cite": "Nicoud et al. 2011",
+   "docs": "docs/theory/les.md#sigma-model"
+  },
+  "smagorinsky": {
+   "cite": "Smagorinsky 1963",
+   "docs": "docs/theory/les.md#smagorinsky-model"
+  },
+  "vreman": {
+   "cite": "Vreman 2004",
+   "docs": "docs/theory/les.md#vreman-model"
+  },
+  "wale": {
+   "cite": "Nicoud & Ducros 1999",
+   "docs": "docs/theory/les.md#wale-model"
+  }
+ },
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_les/input.toml",

@@ -63,7 +63,7 @@ builds (`src/physics/les.h`). With $\mathbf{S} = \tfrac12(\mathbf{g} + \mathbf{g
 and $\mathbf{A} : \mathbf{B} = A_{ij}B_{ij}$, the operators $\mathcal{D}$ and
 the default constants (`[les] model`, `C`) are
 
-- **Smagorinsky** ([Smagorinsky 1963](../references.md#smagorinsky-1963);
+- <a id="smagorinsky-model"></a>**Smagorinsky** ([Smagorinsky 1963](../references.md#smagorinsky-1963);
     Lilly's constant $C_s = 0.17$):
 
     $$
@@ -73,7 +73,7 @@ the default constants (`[les] model`, `C`) are
     \end{equation}
     $$
 
-- **WALE** ([Nicoud & Ducros 1999](../references.md#nicoud-ducros-1999);
+- <a id="wale-model"></a>**WALE** ([Nicoud & Ducros 1999](../references.md#nicoud-ducros-1999);
     $C_w = 0.5$), with $\mathbf{S}^g$ the traceless symmetric part of $\mathbf{g}^2$:
 
     $$
@@ -84,7 +84,7 @@ the default constants (`[les] model`, `C`) are
     \end{equation}
     $$
 
-- **Vreman** ([Vreman 2004](../references.md#vreman-2004); $c = 0.07$),
+- <a id="vreman-model"></a>**Vreman** ([Vreman 2004](../references.md#vreman-2004); $c = 0.07$),
     with $\alpha_{ij} = \partial\widetilde{u}_j/\partial x_i$ and
     $\beta_{ij} = \alpha_{mi}\alpha_{mj}$:
 
@@ -96,7 +96,7 @@ the default constants (`[les] model`, `C`) are
     \end{equation}
     $$
 
-- **Sigma** ([Nicoud et al. 2011](../references.md#nicoud-2011);
+- <a id="sigma-model"></a>**Sigma** ([Nicoud et al. 2011](../references.md#nicoud-2011);
     $C_\sigma = 1.35$; the default in 3D), with $\sigma_1 \ge \sigma_2 \ge \sigma_3 \ge 0$
     the singular values of $\mathbf{g}$:
 
@@ -336,7 +336,7 @@ applied by integrating each cell's chemistry over $(\mathcal{E}/F)\,\tau$
 ([Chemistry and radiation](chemistry_radiation.md#strang-splitting)).
 
 The efficiency $\mathcal{E}$ restores the flame surface that thickening
-removes from the subgrid wrinkling. With `efficiency = "dynamic"` (the
+removes from the subgrid wrinkling. <a id="dynamic-efficiency"></a>With `efficiency = "dynamic"` (the
 default) it is the saturated power law of
 [Charlette, Meneveau & Veynante 2002](../references.md#charlette-2002) at
 the filter width $\Delta_e = F\delta_L$, with an exponent from the dynamic
@@ -367,7 +367,7 @@ average over the thickened cells (4 on cubes at $n_{res} = 5$, $\gamma =
 in fixed point, so $\beta$ does not depend on the rank count; $\beta$ is
 clipped to $[0, 1]$, and is 0 when the resolved surface
 $\sum_c\lvert\nabla\widehat{c}\rvert V_c$ is below $10^{-6}\sum_c V_c/\Delta_e$
-(no flame). With `efficiency = "charlette"` it is their efficiency function
+(no flame). <a id="charlette-efficiency"></a>With `efficiency = "charlette"` it is their efficiency function
 of a subgrid velocity at the filter width $F\delta_L$:
 
 $$
@@ -393,7 +393,7 @@ f_{Re} = \sqrt{\frac{9}{55}\exp\left(-\frac{3C_k\pi^{4/3}}{2\,Re_\Delta}\right)}
 $$
 
 $C_k = 1.5$ and $Re_\Delta = u'_\Delta F\delta_L/\nu$ ($\nu$ the molecular
-kinematic viscosity). The SGS velocity is Colin et al.'s operator,
+kinematic viscosity). <a id="subgrid-velocity"></a>The SGS velocity is Colin et al.'s operator,
 which ignores dilatation (`subgrid_velocity = "colin"`, the default), or a
 multiple of the eddy viscosity (`"eddy_viscosity"`):
 
@@ -498,3 +498,31 @@ Reynolds stress imposed as
 5. **Zero net flux.** With `zero_net_flux = true` (the default), the area
     mean of the normal fluctuation over the whole inlet is subtracted, so the
     inlet's mean mass flow is not perturbed.
+
+## Synthetic initial turbulence
+
+`[initialize.turbulence]` (and `turbulence` of an initial region) adds a
+divergence-free random velocity, a sum of Fourier modes
+$\mathbf{a}\cos(\mathbf{k}\cdot\mathbf{x} + \varphi)$ with
+$\mathbf{a}\perp\mathbf{k}$ ([Kraichnan 1970](../references.md#kraichnan-1970);
+`src/solver/synthetic_turbulence.cpp`), whose shells of wavenumber hold the
+energy of a model spectrum ([user guide](../guide/initialization.md#synthetic-turbulence)).
+Up to a constant set by `intensity`, `spectrum` is
+
+$$
+\begin{equation}
+E(k) \propto
+\begin{cases}
+\dfrac{(k/k_e)^4}{\left(1 + (k/k_e)^2\right)^{17/6}}\,e^{-2(k\eta)^2} & \texttt{von\_karman\_pao} \text{ (default)}, \\[10pt]
+(k/k_e)^4\,e^{-2(k/k_e)^2} & \texttt{passot\_pouquet},
+\end{cases}
+\label{eq:synthetic-initial-turbulence}
+\end{equation}
+$$
+
+the von Kármán-Pao spectrum of [Bailly & Juvé 1999](../references.md#bailly-juve-1999)
+with the dissipation range of $\eta$ = `kolmogorov_scale` (default none), and
+that of [Passot & Pouquet 1987](../references.md#passot-pouquet-1987). $k_e$
+follows from the integral length scale $L$ = `length_scale`,
+$L = C\int_0^\infty E/k\,\mathrm{d}k \big/ \int_0^\infty E\,\mathrm{d}k$ with
+$C = 3\pi/4$ in 3D and 2 in 2D ([Pope 2000](../references.md#pope-2000), §6.5).

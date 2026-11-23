@@ -68,7 +68,7 @@ law (below): the drag over Stokes drag
 ([Stokes 1851](../references.md#stokes-1851)). The pressure-gradient and
 added-mass forces, which scale with $\rho / \rho_p$, and the Saffman lift
 ([Saffman 1965](../references.md#saffman-1965)) are added by `forces`
-([user guide](../guide/particles.md#solid-particles)): they add to
+([below](#further-forces)): they add to
 $\mathbf{g}'$ and, with added mass, $\rho / 2$ to $\rho_p$ in $\tau$. The
 Basset history force and the Magnus lift are left out; see
 [Crowe et al. 2011](../references.md#crowe-2011) for their magnitudes. With
@@ -104,9 +104,9 @@ From rest, with Stokes drag, $\mathbf{v}(t) = \mathbf{v}_t (1 - e^{-t/\tau})$.
 
 `[particles] drag`:
 
-- **`stokes`**: $f = 1$, creeping flow around the sphere: the drag is 5% low
+- <a id="stokes-drag"></a>**`stokes`**: $f = 1$, creeping flow around the sphere: the drag is 5% low
   at $Re_p = 0.2$ and 13% at $Re_p = 1$ against Schiller-Naumann.
-- **`schiller_naumann`** (default): the correlation of
+- <a id="schiller-naumann-drag"></a>**`schiller_naumann`** (default): the correlation of
     [Schiller & Naumann 1933](../references.md#schiller-naumann-1933),
 
     $$
@@ -121,7 +121,7 @@ From rest, with Stokes drag, $\mathbf{v}(t) = \mathbf{v}_t (1 - e^{-t/\tau})$.
     above $Re_p = 1000$ the drag coefficient takes its Newton-regime
     value $C_D = 0.44$. The two branches meet within 0.4%.
 
-- **`singh`**: the correlation of
+- <a id="singh-drag"></a>**`singh`**: the correlation of
   [Singh et al. 2022](../references.md#singh-2022) (their Appendix C), of
   $Re_p$, the slip Mach number $M = \lvert\mathbf{u} - \mathbf{v}\rvert / c$,
   the Knudsen number $Kn = \lambda / d = \sqrt{\gamma\pi/2}\,M / Re_p$ and
@@ -147,6 +147,31 @@ drag below Stokes', and above Mach 1 the shock raises it.*
 Every law evaluates $Re_p$ (and $M$, $Kn$), and so $\tau$, from the slip
 velocity of each stage (`particles::Solid::response`,
 `src/particles/particle_forces.h`).
+
+### Further forces
+
+`[particles] forces` adds these forces per particle volume, which
+eq. $\eqref{eq:solid}$ divides by $\rho_p$ (`particles::Solid::response`):
+
+- <a id="pressure-gradient-force"></a>**`pressure_gradient`**: $-\nabla p$ in
+  place of the buoyancy $-\rho\mathbf{g}$, which it equals in a gas at rest
+  ([Maxey & Riley 1983](../references.md#maxey-riley-1983)).
+- <a id="added-mass-force"></a>**`added_mass`**: half the displaced gas mass,
+  accelerated with the gas: $\rho_p$ becomes $\rho_p + \rho/2$ in $\tau$ and
+  in the inertia, and $\tfrac12(\rho\mathbf{g} - \nabla p)$ is added to the
+  force ([Maxey & Riley 1983](../references.md#maxey-riley-1983)).
+- <a id="saffman-lift"></a>**`saffman_lift`**: the shear lift of
+  [Saffman 1965](../references.md#saffman-1965), with
+  $\boldsymbol{\omega} = \nabla\times\mathbf{u}$,
+
+    $$
+    \begin{equation}
+    \mathbf{f}_L = 1.615\,\frac{6}{\pi d}\sqrt{\frac{\rho\,\mu}{\lvert\boldsymbol{\omega}\rvert}}\;(\mathbf{u} - \mathbf{v})\times\boldsymbol{\omega}.
+    \label{eq:saffman-lift}
+    \end{equation}
+    $$
+
+The gradients are those of the cell's least-squares fit.
 
 ## The gas at a particle
 

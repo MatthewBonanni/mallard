@@ -44,6 +44,12 @@ class Merge(unittest.TestCase):
         self.assertEqual(out["m.file"]["path"], {"io": "input", "kind": "file"})
         self.assertEqual(out["m.zone"]["references"], "zones")
 
+    def test_models_merge_over_the_inputs(self):
+        # Each input's setup records the models it lists; the catalog keeps those of every input
+        a = {"les.filter_width": {"set": False, "models": {"scotti": {"docs": "docs/theory/les.md#filter-width"}}}}
+        b = {"les.filter_width": {"set": False, "models": {"volume": {"docs": "docs/theory/les.md#filter-width"}}}}
+        self.assertEqual(set(merged(a, b)["les.filter_width"]["models"]), {"scotti", "volume"})
+
 
 if __name__ == "__main__":
     unittest.main()

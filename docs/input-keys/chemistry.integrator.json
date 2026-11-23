@@ -4,6 +4,16 @@
   2,
   3
  ],
+ "models": {
+  "rosenbrock": {
+   "cite": "Hairer & Wanner 1996",
+   "docs": "docs/theory/chemistry_radiation.md#stiff-integration-rodas"
+  }
+ },
  "set_in": [],
- "type": "string"
+ "type": "string",
+ "values": [
+  "bdf",
+  "rosenbrock"
+ ]
 }

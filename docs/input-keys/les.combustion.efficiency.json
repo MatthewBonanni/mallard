@@ -7,8 +7,23 @@
   2,
   3
  ],
+ "models": {
+  "charlette": {
+   "cite": "Charlette, Meneveau & Veynante 2002",
+   "docs": "docs/theory/les.md#charlette-efficiency"
+  },
+  "dynamic": {
+   "cite": "Wang, Boileau & Veynante 2011",
+   "docs": "docs/theory/les.md#dynamic-efficiency"
+  }
+ },
  "set_in": [
   "examples/triple_flame/tfles/input.toml"
  ],
- "type": "string"
+ "type": "string",
+ "values": [
+  "charlette",
+  "dynamic",
+  "none"
+ ]
 }

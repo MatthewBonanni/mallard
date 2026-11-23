@@ -273,6 +273,9 @@ TEST(CheckKeys, TheCatalogOfACaseStatesWhatItsSetupReads) {
     EXPECT_EQ(run["keys"].array.at(0).array.at(0).string, "dt");
     EXPECT_EQ(run["keys"].array.at(1).array.at(0).string, "cfl");
     EXPECT_TRUE(run["required"].boolean);
+    const json::Value & hllc = catalog["numerics.riemann_solver"]["models"]["HLLC"];
+    EXPECT_EQ(hllc["docs"].string, "docs/theory/fluxes.md#hllc");
+    EXPECT_EQ(hllc["cite"].string, "Toro, Spruce & Speares 1994");
     // Looked up by the probes code only to reject it, write_data takes no boundary
     for (const char * key : {"write_data.boundary", "write_data.boundary_type"}) EXPECT_FALSE(catalog.has(key)) << key;
 }

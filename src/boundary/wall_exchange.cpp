@@ -35,6 +35,9 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
     WallModelSpec spec;
     const std::string model = find_value_or<std::string>(table, "model", "gfm");
     const auto it = find_option(WALL_MODEL_TYPES, where + ".model", model, line_of(table, "model"));
+    record_models(where + ".model",
+                  {{"equilibrium", "docs/theory/wall_models.md#equilibrium-ode-model", "Kawai & Larsson 2012"},
+                   {"gfm", "docs/theory/wall_models.md#griffin-fu-moin-model", "Griffin, Fu & Moin 2023"}});
     WallModelParameters & P = spec.parameters;
     P.type = it->second;
     P.kappa = static_cast<double>(find_real_or(table, "kappa", dim::none, rtype(P.kappa)));
