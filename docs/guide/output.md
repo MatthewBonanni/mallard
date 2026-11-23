@@ -615,11 +615,14 @@ At the nodes:
 - `RHO`, `RHOU`, `RHOE`, the primitives, `T`, `H`, `MACH`, `SOUND_SPEED` and
   `Y_<s>` are the polynomial's point values. Troubled cells (`TENO_SIGMA` at
   or above `troubled_threshold`), where the flux chooses among candidate
-  stencils face by face and the cell has no one polynomial, and cells whose
-  polynomial leaves the admissible states, take the linear least-squares
-  values instead, as [probes](probes.md) with `sampling = "point"` do: their
-  elements are straight. On a coarse mesh a smooth feature can be troubled,
-  since the sensor measures the spread of the density over the stencil.
+  stencils face by face, take the polynomial that selection chooses for the
+  whole cell, as in the [high-order view](#troubled-cells) and as
+  [probes](probes.md) with `sampling = "point"` do; on a coarse mesh, where a
+  smooth feature can be troubled (the sensor measures the spread of the
+  density over the stencil), that is almost always the central polynomial,
+  so those elements curve too. Nodes whose values leave the admissible
+  states, and troubled cells whose polynomial does at a face point, take the
+  linear least-squares values.
 - `VORTICITY` (`VORTICITY_X`, `_Y`, `_Z` and `HELICITY` in 3D),
   `Q_CRITERION`, `LAMBDA2`, `SCHLIEREN`, `DILATATION`, `ENSTROPHY` and
   `STRAIN_RATE` come from the polynomial's derivatives there, in place of the

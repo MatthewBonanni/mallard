@@ -22,9 +22,9 @@ POINT = np.array([0.5, 0.3])
 NORMAL = np.array([0.3, 1.0])
 CENTER = (0.45, 0.0)
 WIDTH = 0.08
-# Small enough that no cell is troubled (TENO_SIGMA < troubled_threshold) on this mesh: troubled cells take the
-# linear least-squares values, and their elements would be straight
-AMPLITUDE = 0.1
+# Most of the bump's cells are troubled (TENO_SIGMA >= troubled_threshold) on this mesh; their elements follow
+# the polynomial the stencil selection chooses, here the central one, and curve as the others do
+AMPLITUDE = 0.3
 
 
 def exact(x, y):
