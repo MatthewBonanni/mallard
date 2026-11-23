@@ -227,11 +227,11 @@ void regions_section(report::Text & text, const CheckReport & r) {
             lo += (i ? ", " : "(") + logging::real(g.box[0][i]);
             hi += (i ? ", " : "(") + logging::real(g.box[1][i]);
         }
-        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")", "m"}});
+        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")"}});
     }
     if (!boxes.empty()) {
         text.note("Regions from surface files (STL, OBJ): their bounding box, placed and in meters.");
-        text.table({"region", "from", "to", {"units", Kind::UNITS}}, boxes);
+        text.table({"region", "from (m)", "to (m)"}, boxes);
     }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
