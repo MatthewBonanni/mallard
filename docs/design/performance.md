@@ -984,6 +984,24 @@ row below.
 
     On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
     us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+
+    Since #1097 the sums need no maxima: each term is split into 32-bit limbs indexed by its exponent, added
+    exactly as integers, and the limbs go through one SUM all-reduce, after which the total is rounded once (so
+    sums are now exactly rounded, and their last bits differ from those of earlier versions). A window of four
+    limbs above the largest term of the rank, found without communication, stays in registers; the rest go to
+    the limbs by integer atomics. Alternated against main a7a5432e4 (old exact sums and plain sums), 400 steps,
+    median ms per step from step 300 with [min-max] over 5 reps on one node and 7 reps on 1 + 1 GPUs on two
+    nodes, old exact / new exact / plain:
+
+    | layout | `air_3d`, `les.dynamic`, 16k cells per GPU | `air_3d`, `les.dynamic`, 221k cells | `flame_3d`, `efficiency = "dynamic"` |
+    |---|---|---|---|
+    | 1 GPU | 1.022 [1.018-1.025] / 1.006 [1.003-1.016] / 1.001 | 5.265 [5.259-5.273] / 5.270 [5.266-5.276] / 5.243 | 27.65 [27.64-27.70] / 27.62 [27.57-27.64] / 27.57 |
+    | 2 GPUs | 1.193 [1.187-1.202] / 1.177 [1.173-1.184] / 1.170 | 3.248 [3.243-3.254] / 3.242 [3.236-3.254] / 3.216 | 21.08 [21.06-21.14] / 21.05 [21.03-21.09] / 21.03 |
+    | 1 + 1, two nodes | 1.336 [1.329-1.348] / 1.318 [1.291-1.330] / 1.296 | 3.477 [3.448-3.496] / 3.461 [3.443-3.483] / 3.452 | 21.80 [21.73-21.84] / 21.81 [21.08-21.99] / 21.75 |
+
+    New exact sums are faster than old ones in every alternated pair of the 16k case on two nodes (median -1.0%,
+    18 us per step) and by 16 us per step at 16k cells on one node; on the other cases the difference stays
+    within the run-to-run spread.
     The flame shows what the plain sums would cost: last
     bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
     or a restart on another partition, could no longer be checked against the original.
