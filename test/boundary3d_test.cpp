@@ -385,18 +385,21 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
     ASSERT_NO_THROW(solver.run());
     solver.update_primitives();
     solver.copy_device_to_host();
-    double max_speed = 0.0, mean_dp = 0.0;
+    double max_speed = 0.0, max_dp = 0.0, mean_dp = 0.0;
     const uint32_t n = solver.get_mesh()->n_owned();
     for (uint32_t c = 0; c < n; c++) {
         double speed2 = 0.0;
         for (int i = 0; i < N_DIM; i++) speed2 += std::pow(double(solver.h_primitives(c, i)), 2);
         max_speed = std::max(max_speed, std::sqrt(speed2));
-        mean_dp += (double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4) / n;
+        const double dp = double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4;
+        max_dp = std::max(max_dp, std::abs(dp));
+        mean_dp += dp / n;
     }
     // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) has settled by t = 18-24,
     // 0.14 above the target
     EXPECT_LT(max_speed, 0.6);
     EXPECT_LT(std::abs(mean_dp), 0.15);
+    EXPECT_LT(max_dp, 0.18);
 }
 
 TEST(Boundary3DTest, ExtrapolationKeepsAPerturbedUniformFlowOnTetrahedraWithTENO) {
