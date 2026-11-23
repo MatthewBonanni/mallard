@@ -23,6 +23,7 @@ import boundary_coordinates
 import boundary_data
 import case_view
 import check_resolution
+import chemistry
 import domains
 import effective_resolution
 import flamelet
@@ -60,6 +61,7 @@ def main():
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     boundary_data.figures()
     check_resolution.figures()
+    chemistry.figures()
     domains.figures()
     effective_resolution.figures()
     flamelet.figures()
