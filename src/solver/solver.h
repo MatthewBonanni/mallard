@@ -406,7 +406,8 @@ class Solver {
         void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
         void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
-        void calc_dt();
+        /** @brief The step's dt; with overlap, also starts the first stage's reconstruction where it can. */
+        void calc_dt(bool overlap = true);
         /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
         Kokkos::View<rtype> dt_reduce_slot();
         /** @brief The time step and run-control requests in step_reduce, reduced over the ranks. */
@@ -1234,7 +1235,7 @@ class Solver {
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
-        void exchange_for_first_stage();
+        void exchange_for_first_stage(bool overlap = true);
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /** @brief kinetic_energy_rate into *out on the device. */
