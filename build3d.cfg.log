@@ -1,0 +1,42 @@
+-- The CXX compiler identification is AppleClang 21.0.0.21000334
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Mallard: Double precision: ON
+-- Mallard: Dimension: 3
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Setting default Kokkos CXX standard to 20
+-- Kokkos version: 5.2.2
+-- The project name is: Kokkos
+-- Configured git information in /Users/mbonanni/local/mallard-work/fix-1179/build3d/external/kokkos/generated/Kokkos_Version_Info.cpp
+-- Kokkos is configured for CMake languages CXX compilation (using AppleClang version 21.0.0.21000334)
+-- Using -std=gnu++20 for C++20 extensions as feature
+-- Built-in Execution Spaces:
+--     Device Parallel: NoTypeDefined
+--     Host Parallel: Kokkos::Threads
+--       Host Serial: NONE
+-- 
+-- Architectures:
+-- Found TPLTHREADS: TRUE
+-- Using bundled desul_atomics copy (desul/desul@83d26f34db50b4fefe30ed4db38b10e04c7a9384)
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK - Success
+-- Using bundled mdspan copy (kokkos/mdspan@5d4eb209c77f4744980c0b0c2af44636cc81b08b)
+-- Kokkos Backends: THREADS
+Cloning into 'yaml-cpp-src'...
+HEAD is now at 56e3bb5 Update project version to 0.9.0
+Cloning into 'googletest-src'...
+HEAD is now at 063de7e9 Prepare for v1.18.0 (#5055)
+-- The C compiler identification is AppleClang 21.0.0.21000334
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Configuring done (13.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/mbonanni/local/mallard-work/fix-1179/build3d

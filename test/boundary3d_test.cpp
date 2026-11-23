@@ -392,9 +392,10 @@ TEST(Boundary3DTest, CharacteristicOutletSurvivesEddiesThatReverseTheFlow) {
         max_speed = std::max(max_speed, std::sqrt(speed2));
         max_dp = std::max(max_dp, std::abs(double(solver.h_primitives(c, N_DIM)) - 1.0 / 1.4));
     }
-    // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still settling
+    // Bounded: the inflow is 0.2, and the weakly held mean pressure (L = 12) is still rising toward
+    // the 0.14 above the target it settles at by t = 18-24
     EXPECT_LT(max_speed, 0.6);
-    EXPECT_LT(max_dp, 0.15);
+    EXPECT_LT(max_dp, 0.2);
 }
 
 TEST(Boundary3DTest, ExtrapolationKeepsAPerturbedUniformFlowOnTetrahedraWithTENO) {

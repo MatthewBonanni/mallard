@@ -192,6 +192,8 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the transverse terms and the treatment of multicomponent, reacting flows at characteristic boundaries.
 - <a id="lodato-2008"></a>G. Lodato, P. Domingo and L. Vervisch, Three-dimensional boundary conditions for direct and large-eddy simulation of compressible viscous flows, *J. Comput. Phys.* 227, 5105–5143 (2008). [doi:10.1016/j.jcp.2008.01.038](https://doi.org/10.1016/j.jcp.2008.01.038)
   Used in: the relaxation of the transverse terms with `beta` equal to the Mach number (`beta`).
+- <a id="marchal-2026"></a>T. Marchal, M. Ruello, H. Deniau and G. Daviller, Navier-Stokes characteristic boundary conditions for the Spectral Difference method on simplex elements (2026). [arXiv:2611.10839](https://arxiv.org/abs/2611.10839)
+  Used in: inlets leaving the transverse terms out of the velocity (`beta = 0` by default for `inlet_state` with `nscbc`).
 - <a id="granet-2010"></a>V. Granet, O. Vermorel, T. Leonard, L. Gicquel and T. Poinsot, Comparison of nonreflecting outlet boundary conditions for compressible solvers on unstructured grids, *AIAA J.* 48(10), 2348–2364 (2010). [doi:10.2514/1.J050391](https://doi.org/10.2514/1.J050391)
   Used in: the default `beta` and the vortex-outflow validation of `outlet_pressure` with `nscbc`.
 - <a id="moghadam-2011"></a>M. Esmaily Moghadam, Y. Bazilevs, T.-Y. Hsia, I. E. Vignon-Clementel and A. L. Marsden, A comparison of outlet boundary treatments for prevention of backflow divergence with relevance to blood flow simulations, *Comput. Mech.* 48, 277–291 (2011). [doi:10.1007/s00466-011-0599-0](https://doi.org/10.1007/s00466-011-0599-0)
