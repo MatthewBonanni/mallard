@@ -659,6 +659,16 @@ and later; `region` keeps the particles in a volume. Files, layout and
 pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
 carry every particle and quantity whatever the snapshots write.
 
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-light.svg#gh-light-mode-only)
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-dark.svg#gh-dark-mode-only)
+
+*Particle snapshots (`particle_fields = ["T_P", "slip_max"]`) of the
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example at `t` = 0, 3 and 6, over the gas speed of a mesh snapshot at the same
+times (a Mallard run): the heavy particles seeded in one vortex are flung out
+of it into the strain between the vortices and heat from 0.4 toward the gas's
+1/1.4.*
+
 ## Accuracy
 
 The particles read the gas from the reconstruction's polynomial at their

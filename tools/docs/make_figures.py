@@ -29,6 +29,7 @@ import les_models
 import limiters
 import mesh_fields
 import particle_coupling
+import particle_output
 import particles
 import probes
 import python
@@ -59,6 +60,7 @@ def main():
     les_models.figures()
     limiters.figures()
     particle_coupling.figures(args.mallard)
+    particle_output.figures(args.mallard)
     particles.figures(args.mallard)
     schematics.figures()
     teno.figures()
