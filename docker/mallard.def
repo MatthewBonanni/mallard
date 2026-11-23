@@ -7,7 +7,7 @@
 #
 # then `apptainer run mallard.sif -i input.toml` (add --nv for the CUDA image), or `apptainer exec mallard.sif
 # mallard ...`. The image's MPI is Open MPI: multi-node runs need the site's Open MPI of a compatible version
-# (the hybrid model, mpirun outside the container); the relocatable archives suit MPICH-based sites.
+# (the hybrid model, mpirun outside the container); the portable binaries suit sites with any MPICH- or Open MPI-based MPI.
 Bootstrap: {{ bootstrap }}
 From: {{ image }}
 
