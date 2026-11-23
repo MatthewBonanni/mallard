@@ -15,6 +15,7 @@
 #include "comm.h"
 #include "common_io.h"
 #include "data_writer.h"
+#include "json.h"
 #include "log.h"
 
 namespace {
@@ -134,12 +135,23 @@ std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, 
         QualitySummary & s = out[m];
         double sum = 0.0;
         uint64_t over = 0;
+        std::array<double, 2> range{std::numeric_limits<double>::infinity(), 0.0};  // -min, max
         for (const double v : values) {
-            s.max = std::max(s.max, v);
+            range = {std::min(range[0], v), std::max(range[1], v)};
             sum += v;
             over += v > MeshQuality::LIMITS[m];
         }
-        s.max = comm::allreduce(s.max, comm::Op::MAX);
+        range[0] = -range[0];
+        range = comm::allreduce(range, comm::Op::MAX);
+        s.min = std::isfinite(range[0]) ? -range[0] : 0.0;
+        s.max = range[1];
+        const size_t n_bins = s.max > s.min ? QualitySummary::N_BINS : 1;
+        s.counts.assign(n_bins, 0);
+        for (const double v : values) {
+            const double at = (v - s.min) / (s.max - s.min) * double(n_bins);
+            s.counts[n_bins == 1 ? 0 : std::min(n_bins - 1, static_cast<size_t>(std::max(at, 0.0)))]++;
+        }
+        comm::allreduce(std::span<uint64_t>(s.counts), comm::Op::SUM);
         const auto totals = comm::allreduce(std::array<double, 2>{sum, static_cast<double>(n_owned)}, comm::Op::SUM);
         s.mean = totals[1] > 0.0 ? totals[0] / totals[1] : 0.0;
         s.n_over_limit = comm::allreduce(over, comm::Op::SUM);
@@ -170,6 +182,17 @@ std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, 
         if (s.worst.size() > n_worst) s.worst.resize(n_worst);
     }
     return out;
+}
+
+std::string histogram_json(const QualitySummary & summary) {
+    const size_t n = summary.counts.size();
+    std::string edges = "[", counts = "[";
+    for (size_t k = 0; k <= n; k++) {
+        const double edge = n == 0 ? summary.min : summary.min + (summary.max - summary.min) * double(k) / double(n);
+        edges += (k ? ", " : "") + json::number(edge);
+    }
+    for (size_t k = 0; k < n; k++) counts += (k ? ", " : "") + std::to_string(summary.counts[k]);
+    return "{\"edges\": " + edges + "], \"counts\": " + counts + "]}";
 }
 
 std::string quality_point(const std::array<double, N_DIM> & x) {

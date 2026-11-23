@@ -1,0 +1,1 @@
+- Loading a TENO `cache_file` ranks each distinct table once instead of every cell's, with the same tables bit for bit: `mallard post derive` of the 64³ Taylor-Green vortex with the run's cache sets up about twice as fast (#1404).
