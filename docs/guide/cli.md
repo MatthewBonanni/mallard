@@ -519,11 +519,11 @@ Options:
                             regions, probes, snapshot regions and periodic
                             pairs, without the numerics (stencils), the initial
                             state and the checks of the run (time step,
-                            resolution, mesh quality, memory, cost); regions
-                            defined by the solution, which need the initial
-                            state, are left out, and keys are not checked for
-                            use. For previews that follow each edit of a large
-                            case. Default: the whole check.
+                            resolution, mesh quality, memory, cost); walls'
+                            y_plus and regions defined by the solution, which
+                            need the initial state, are left out, and keys are
+                            not checked for use. For previews that follow each
+                            edit of a large case. Default: the whole check.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).

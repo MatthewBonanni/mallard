@@ -108,8 +108,8 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--geometry-only", "", "",
      "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
      "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
-     "and the checks of the run (time step, resolution, mesh quality, memory, cost); regions defined by the "
-     "solution, which need the initial state, are left out, and keys are not checked for use. For previews "
+     "and the checks of the run (time step, resolution, mesh quality, memory, cost); walls' y_plus and regions "
+     "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
      "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
 };

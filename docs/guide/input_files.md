@@ -722,8 +722,9 @@ pairs. It skips the numerics (TENO's and MUSCL's stencils), the initial state
 and the checks of the run (time step, resolution, mesh quality, memory, cost),
 so a preview can follow each edit of a large case: on `examples/pulsed_jet`
 (442,368 cells, TENO), 2.4 s instead of 10.4 s on two CPU threads. Its blocks
-and images are the whole check's, byte for byte, but for regions defined by the
-solution, which need the initial state and are left out. Keys are not checked
+and images are the whole check's, byte for byte, but for what needs the
+initial state: walls' `y_plus` and regions defined by the solution are left
+out. Keys are not checked
 for use, since the keys of the numerics and the initial state go unread: run
 the whole check before the run.
 
