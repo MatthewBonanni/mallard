@@ -593,9 +593,9 @@ with those that left the domain, were lost or stuck (`PARTICLE_REMOVED`).
 | `antoine` | Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
 
 Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`
-and the gas temperature `T`; the CSV `file` adds the diameter `d` and mass `m`
-of each droplet. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>` writes
-the vapor source per volume and time.
+and the gas temperature `T`; the CSV `file` has the columns `T_P`, `D_P` and
+the droplet's mass `M_P`. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>`
+writes the vapor source per volume and time.
 
 ![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
 ![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-dark.svg#gh-dark-mode-only)
