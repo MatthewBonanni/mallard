@@ -11,7 +11,17 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 *A 2D Riemann problem on 16.8M quadrilaterals; a cellular detonation in 2H2-O2-7Ar on 19.2M hexahedra, front speed within 0.2% of Chapman-Jouguet; the Taylor-Green vortex at Re = 1600 on 256³ hexahedra, peak dissipation within 0.3% of the spectral DNS; autoignition of stratified lean H2/air at 41 atm ([`examples/`](https://matthewbonanni.github.io/mallard/docs/examples/)).*
 
-> **NOTE:** Mallard is under active development.
+<table><tr><td>
+
+**What's new**
+
+- **Automatic structured fast path** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/#cell-numbering)): Mallard finds the structured blocks in any mesh, uniform, stretched or warped, reads their stencils by index and shares TENO tables between cells of the same shape; one A100-80GB runs 13.1M TENO5 cells, where 0.10.0 ran out of memory above 2M, and `teno5_3d` steps 1.41x faster
+- **[Tabulated chemistry](https://matthewbonanni.github.io/mallard/docs/guide/flamelet/)**: flamelet/progress-variable (FPV) tables, with LES and thickened flames
+- **[Lagrangian particles](https://matthewbonanni.github.io/mallard/docs/guide/particles/)**: tracer and solid particles on the high-order reconstruction
+- **[C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/)** to run cases from your own program, and a **[Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/)** for output files and post-processing
+- **[Desktop GUI](https://github.com/MatthewBonanni/mallard-gui)**, in progress: case setup, runs and results
+
+</td></tr></table>
 
 ## Features
 
@@ -94,7 +104,6 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Initial-transient detection and confidence intervals (MSER-5, batch means): start statistics, stop at convergence
 - [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): step a case from your program, same results as `mallard -i`; CMake package (`find_package(Mallard)`)
 - [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): output files as numpy arrays via Mallard's reader; post-processing commands as functions
-- [Desktop GUI](https://github.com/MatthewBonanni/mallard-gui), in progress: case setup, runs, results
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 
