@@ -17,7 +17,6 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
