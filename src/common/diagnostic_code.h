@@ -69,7 +69,7 @@ inline constexpr const char * CONTROL_SOCKET = "W-CONTROL-SOCKET";
 inline constexpr const char * RUN_REPORT = "W-RUN-REPORT";
 inline constexpr const char * EXTRACT_AVERAGED = "W-EXTRACT-AVERAGED";
 inline constexpr const char * PACK_RERUN = "W-PACK-RERUN";
-inline constexpr const char * CONVERGENCE_SKIPPED = "W-CONVERGENCE-SKIPPED";  // a convergence sample not finite
+inline constexpr const char * CONVERGENCE_NONFINITE = "W-CONVERGENCE-NONFINITE";  // a convergence sample not finite
 
 // The other commands
 inline constexpr const char * USAGE = "E-USAGE";            // an unknown command or option, a missing or bad argument
@@ -112,7 +112,7 @@ inline constexpr std::array<Entry, 64> ALL = {{
     {MESH_DIFFERS, RUN_PAGE}, {SNAPSHOT_INDEX, RUN_PAGE}, {FORMAT_VTU, RUN_PAGE}, {KEY_IGNORED, RUN_PAGE},
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
     {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
-    {PACK_RERUN, RUN_PAGE}, {CONVERGENCE_SKIPPED, RUN_PAGE},
+    {PACK_RERUN, RUN_PAGE}, {CONVERGENCE_NONFINITE, RUN_PAGE},
     {USAGE, RUN_PAGE}, {DIMENSION, RUN_PAGE}, {EXECUTABLE, RUN_PAGE}, {ONE_RANK, RUN_PAGE}, {INFO, RUN_PAGE},
     {LIST, RUN_PAGE}, {DIFF, RUN_PAGE}, {MESH_CONVERT, RUN_PAGE}, {INPUT_UPGRADE, RUN_PAGE}, {EXTRACT, RUN_PAGE},
     {CONVERGENCE, RUN_PAGE}, {PACK, RUN_PAGE}, {OPTION_DEPRECATED, RUN_PAGE},

@@ -222,9 +222,10 @@ TEST(StatisticalConvergenceTest, RestartedHistoryContinuesBitwise) {
     }
 }
 
-TEST(StatisticalConvergenceTest, NonFiniteSamplesAreLeftOutAndCounted) {
+TEST(StatisticalConvergenceTest, NonFiniteSamplesAreReportedAndNeverConverge) {
     // Samples whose sums would not be finite, the first among them, between those of a signal that converges: the
-    // values are those without them, bitwise, besides the count; a restart carries the count
+    // statistics are those without them, bitwise, they are counted, and the run, diverged, never converges, also
+    // after a restart and on the device
     std::vector<double> x = ar1(0.8, 6000, 61);
     for (size_t i = 0; i < x.size(); i++) x[i] += i < 800 ? 18.0 : 10.0;
     const double inf = std::numeric_limits<double>::infinity();
@@ -238,15 +239,45 @@ TEST(StatisticalConvergenceTest, NonFiniteSamplesAreLeftOutAndCounted) {
         c.init(convergence_input("tolerance = 0.05\n"), {{"probe_u", dim::velocity}}, false);
         return c;
     };
-    Convergence clean = make(), poisoned = make(), resumed = make();
+    Convergence clean = make(), poisoned = make(), resumed = make(), device = make();
+    device.stage();
+    device.resume_staged();
+    const Kokkos::View<double *> result("result", clean.columns().size());
+    const Kokkos::View<uint32_t> due("due");
+    Kokkos::deep_copy(due, 1u);
+    const auto h_result = Kokkos::create_mirror_view(result);
+    const auto h_written = Kokkos::create_mirror_view(device.staged_written());
+    const auto h_input = Kokkos::create_mirror_view(device.staged_input());
+    uint64_t device_mismatches = 0;
+    const auto add = [&](uint64_t i, double t, double value) {
+        poisoned.add(i, t, {{0, value}}, NO_WINDOW);
+        // Within the device's first room (4096 samples), after the clean run converges
+        if (i > 4000) return;
+        h_written(0) = 1;
+        h_input(0) = value;
+        h_input(1) = t;
+        h_input(2) = NO_WINDOW;
+        Kokkos::deep_copy(device.staged_written(), h_written);
+        Kokkos::deep_copy(device.staged_input(), h_input);
+        device.add_staged(due.data(), result.data());
+        Kokkos::deep_copy(h_result, result);
+        for (size_t k = 0; k < poisoned.last().values.size(); k++) {
+            const double a = poisoned.last().values[k].second, b = h_result(k);
+            if (std::memcmp(&a, &b, sizeof a) != 0 && device_mismatches++ < 10) {
+                ADD_FAILURE() << "device, " << poisoned.last().values[k].first << ": " << a << " vs " << b;
+            }
+        }
+    };
     double skipped = 0.0;
     uint64_t compared = 0;
     const auto compare = [&](const Convergence & c) {
         for (size_t k = 0; k < clean.last().values.size(); k++) {
             const auto & [name, a] = clean.last().values[k];
             const double b = c.last().values[k].second;
-            if (name == "probe_u_skipped") {
+            if (name == "probe_u_nonfinite") {
                 EXPECT_EQ(b, skipped);
+            } else if (name == "converged") {
+                EXPECT_EQ(b, 0.0);
             } else if (std::memcmp(&a, &b, sizeof a) != 0 && compared++ < 10) {
                 ADD_FAILURE() << name << ": " << a << " vs " << b;
             }
@@ -256,11 +287,11 @@ TEST(StatisticalConvergenceTest, NonFiniteSamplesAreLeftOutAndCounted) {
         const double t = 0.01 * static_cast<double>(i);
         for (const auto & [at, value] : bad) {
             if (at != i) continue;
-            poisoned.add(i, t - 0.005, {{0, value}}, NO_WINDOW);
+            add(i, t - 0.005, value);
             skipped += 1.0;
         }
         clean.add(i, t, {{0, x[i]}}, NO_WINDOW);
-        poisoned.add(i, t, {{0, x[i]}}, NO_WINDOW);
+        add(i, t, x[i]);
         if (i == 2000) {
             RestartData restart;
             restart.attributes = poisoned.attributes();
@@ -275,8 +306,12 @@ TEST(StatisticalConvergenceTest, NonFiniteSamplesAreLeftOutAndCounted) {
         }
         compare(poisoned);
         if (i >= 2000) compare(resumed);
+        if (i == 4000) {
+            EXPECT_EQ(clean.last().values[2].second, 1.0);
+        }
     }
     EXPECT_EQ(compared, 0u);
+    EXPECT_EQ(device_mismatches, 0u);
     EXPECT_EQ(skipped, 5.0);
     EXPECT_EQ(clean.last().values[2].first, "converged");
     EXPECT_EQ(clean.last().values[2].second, 1.0);

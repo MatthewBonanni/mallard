@@ -58,18 +58,20 @@ docs: [Statistics](../guide/statistics.md#convergence-statisticsconvergence).
    the check schedule (the prefix sums are rebuilt from the history in the
    same order), so a resumed run writes the same rows bitwise
    (tested); `statistics.reset` starts it afresh.
-8. **Samples that are not finite are left out** (#1205). Every window is a
-   difference of the prefix sums, so one NaN or infinity in them would be in
-   every later window, and in any MSER batch holding it: the run could then
-   never converge, or accept an arbitrary start. A sample is kept only if
-   the sums stay finite with it (which rules out NaN, infinities and values
-   so large their squares overflow), so the history, the sums and MSER see
-   only usable samples, and finite signals give the same values bitwise as
-   before. Left-out samples are counted in `<signal>_skipped` (carried by
-   restarts), and a signal's first prints `W-CONVERGENCE-SKIPPED`.
-   Restarting the history at such a sample instead would discard a valid
-   transient and statistics for a sample that is often transient itself (a
-   probe without a value at one write).
+8. **A sample that is not finite is a diverged run** (#1205). Every window
+   is a difference of the prefix sums, so one NaN or infinity in them would
+   be in every later window, and in any MSER batch holding it: the values
+   would turn NaN for the rest of the run, and MSER's start arbitrary,
+   silently. Dropping the sample silently instead could declare converged
+   statistics of a run that produced a NaN. So a sample is kept out of the
+   history and the sums when they would not stay finite with it (NaN,
+   infinities, values so large their squares overflow), and it is reported:
+   counted in `<signal>_nonfinite` (carried by restarts), warned of at a
+   signal's first (`W-CONVERGENCE-NONFINITE`), and `converged` is 0 for the
+   rest of the run, so a convergence trigger never stops it as converged.
+   The other values stay finite, to show where the signal was going.
+   Finite signals give the same values bitwise as before, on the host and
+   the device.
 
 ## Validation
 

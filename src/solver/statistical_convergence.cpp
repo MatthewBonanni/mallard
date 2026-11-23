@@ -278,7 +278,7 @@ std::vector<Convergence::Monitored> Convergence::columns() const {
                                {s.name + "_tau", dim::none},
                                {s.name + "_n_eff", dim::none},
                                {s.name + "_samples", dim::none},
-                               {s.name + "_skipped", dim::none}});
+                               {s.name + "_nonfinite", dim::none}});
     }
     return all;
 }
@@ -289,7 +289,7 @@ bool Convergence::Signal::push(double time, double value) {
     const double next1 = s1.back() + v, next2 = s2.back() + v * v;
     // Every later window is a difference of these sums: one that is not finite would be in all of them
     if (!std::isfinite(next1) || !std::isfinite(next2)) {
-        skipped++;
+        nonfinite++;
         return false;
     }
     t.push_back(time);
@@ -305,11 +305,11 @@ void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_
     staged_current = false;
     for (const auto & [i, value] : samples) {
         Signal & s = signals[i];
-        if (s.push(t, value) || s.skipped > 1) continue;
-        logging::warning(diagnostic_code::CONVERGENCE_SKIPPED,
+        if (s.push(t, value) || s.nonfinite > 1) continue;
+        logging::warning(diagnostic_code::CONVERGENCE_NONFINITE,
                          "statistics.convergence: " + s.name + " = " + logging::format("%g", value) + " at t = " +
-                             logging::real(t) + " is left out of its statistics; " + s.name +
-                             "_skipped in " + file + " counts the samples left out.");
+                             logging::real(t) + " is not finite: the run diverged, so the convergence estimate cannot converge; " +
+                             s.name + "_nonfinite in " + file + " counts such samples, left out of the statistics.");
     }
     // A longer series can move the end of the transient later: each check's accepted start replaces the last
     bool checked = false, all = true;
@@ -362,7 +362,7 @@ void Convergence::update(double window_start) {
             begin = std::max(begin, std::upper_bound(s.t.begin(), s.t.end(), window_start));
             const uint64_t i0 = static_cast<uint64_t>(begin - s.t.begin()), end = s.x.size();
             n = end - i0;
-            converged = converged && n > 0;
+            converged = converged && n > 0 && s.nonfinite == 0;
             if (n > 0) {
                 if (s.n_tau == 0 || s.t[i0] != s.window_tau ||
                     static_cast<double>(n) >= 1.05 * static_cast<double>(s.n_tau) + 1.0) {
@@ -401,7 +401,7 @@ void Convergence::update(double window_start) {
         values.values.emplace_back(s.name + "_tau", n > 0 ? s.tau : NaN);
         values.values.emplace_back(s.name + "_n_eff", n_eff);
         values.values.emplace_back(s.name + "_samples", static_cast<double>(n));
-        values.values.emplace_back(s.name + "_skipped", static_cast<double>(s.skipped));
+        values.values.emplace_back(s.name + "_nonfinite", static_cast<double>(s.nonfinite));
     }
     if (tolerance > 0.0) values.values[converged_at].second = converged ? 1.0 : 0.0;
 }
@@ -422,7 +422,7 @@ RestartAttributes Convergence::attributes() const {
         all.emplace_back(p + "N_TAU", static_cast<double>(s.n_tau));
         all.emplace_back(p + "WINDOW_TAU", s.window_tau);
         all.emplace_back(p + "TAU", s.tau);
-        all.emplace_back(p + "SKIPPED", static_cast<double>(s.skipped));
+        all.emplace_back(p + "NONFINITE", static_cast<double>(s.nonfinite));
     }
     return all;
 }
@@ -460,8 +460,8 @@ void Convergence::restore(const RestartData & restart, const std::string & resta
         s.n_tau = static_cast<uint64_t>(get(p + "N_TAU"));
         s.window_tau = get(p + "WINDOW_TAU");
         s.tau = get(p + "TAU");
-        const double * skipped = restart.attribute(p + "SKIPPED");
-        s.skipped = skipped ? static_cast<uint64_t>(*skipped) : 0;
+        const double * nonfinite = restart.attribute(p + "NONFINITE");
+        s.nonfinite = nonfinite ? static_cast<uint64_t>(*nonfinite) : 0;
         const std::vector<double> * t = restart.array(p + "T");
         const std::vector<double> * x = restart.array(p + "X");
         if (!t != !x || (t && t->size() != x->size())) {
@@ -590,7 +590,7 @@ void Convergence::add_staged(const uint32_t * due, double * result) {
                 const double v = x - (n > 0 ? history(i, 1, 0) : x);
                 const double next1 = history(i, 2, n) + v, next2 = history(i, 3, n) + v * v;
                 if (!Kokkos::isfinite(next1) || !Kokkos::isfinite(next2)) {
-                    states(i).state.skipped++;
+                    states(i).state.nonfinite++;
                     continue;
                 }
                 history(i, 0, n) = t;
@@ -750,7 +750,7 @@ void Convergence::add_staged(const uint32_t * due, double * result) {
             bool meets = false;
             Kokkos::single(Kokkos::PerTeam(team), [&](bool & ok) {
                 double mean = nan, ci = nan, variance = nan, variance_ci = nan, n_eff = nan;
-                ok = n > 0;
+                ok = n > 0 && st.nonfinite == 0;
                 if (n > 0) {
                     const double * const s1 = &history(i, 2, 0);
                     const double * const s2 = &history(i, 3, 0);
@@ -774,7 +774,7 @@ void Convergence::add_staged(const uint32_t * due, double * result) {
                         ci = batch_means::half_width(m2_b, b, t_q);
                         variance_ci = batch_means::half_width(m2_v, b, t_q);
                     }
-                    ok = mb > 0 && static_cast<double>(mb) >= BATCH_TAUS * st.tau && ci <= tol * Kokkos::fabs(mean) &&
+                    ok = ok && mb > 0 && static_cast<double>(mb) >= BATCH_TAUS * st.tau && ci <= tol * Kokkos::fabs(mean) &&
                          (variance_tol == 0.0 || variance_ci <= variance_tol * variance);
                 }
                 double * const o = result + first + 8 * i;
@@ -785,7 +785,7 @@ void Convergence::add_staged(const uint32_t * due, double * result) {
                 o[4] = n > 0 ? st.tau : nan;
                 o[5] = n_eff;
                 o[6] = static_cast<double>(n);
-                o[7] = static_cast<double>(st.skipped);
+                o[7] = static_cast<double>(st.nonfinite);
             }, meets);
             converged = converged && meets;
         }
