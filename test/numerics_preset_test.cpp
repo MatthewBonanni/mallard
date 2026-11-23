@@ -383,11 +383,8 @@ TEST_P(ExampleUnderPreset, ResolvedInputRunsBitwiseTheSameAndResolvesToItself) {
 
 namespace {
 
-/** @brief The key catalog's entries of the tables the setup's input phase reads (Solver::read_input). */
-std::map<std::string, std::string> input_phase_entries(const Input & input) {
-    static const std::vector<std::string> tables = {"run",      "physics",  "chemistry", "radiation", "mesh",
-                                                    "parallel", "periodic", "boundaries", "numerics", "les",
-                                                    "sources",  "source",   "sponges"};
+/** @brief The key catalog's entries, one per key. */
+std::map<std::string, std::string> catalog_entries(const Input & input) {
     // One line per key: "  \"path\": {...},"
     std::istringstream lines(key_catalog(resolve_input(input)));
     std::map<std::string, std::string> out;
@@ -395,22 +392,21 @@ std::map<std::string, std::string> input_phase_entries(const Input & input) {
         if (line.size() < 4 || line[2] != '"') continue;
         const std::string key = line.substr(3, line.find('"', 3) - 3);
         if (line.back() == ',') line.pop_back();
-        if (std::find(tables.begin(), tables.end(), key.substr(0, key.find('.'))) != tables.end()) out[key] = line;
+        out[key] = line;
     }
     return out;
 }
 
 } // namespace
 
-// The input phase of the setup reads every key of its tables that the whole setup reads, so it can tell
-// them without the mesh. Fails if a key of [run], [physics], [mesh], [parallel], [[periodic]],
-// [[boundaries]], [numerics], [les], [[sources]], [source] or [[sponges]] is read only once the mesh is there.
-TEST_P(ExampleUnderPreset, InputPhaseReadsEveryKeyOfItsTables) {
+// The input phase of the setup reads every key the whole setup reads, so mallard input resolve and list keys
+// need no mesh. Fails if any key is read only once the mesh is there.
+TEST_P(ExampleUnderPreset, InputPhaseReadsEveryKey) {
     const Input input = example_under_preset(GetParam(), 1, N_DIM == 3 ? 8 : 16);
     Solver whole;
     CheckOptions options;
     ASSERT_TRUE(whole.check(input, options).setup_done);
     Solver phase;
     phase.read_keys(input);
-    EXPECT_EQ(input_phase_entries(phase.resolved_input()), input_phase_entries(whole.resolved_input()));
+    EXPECT_EQ(catalog_entries(phase.resolved_input()), catalog_entries(whole.resolved_input()));
 }

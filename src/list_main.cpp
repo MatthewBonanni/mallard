@@ -70,14 +70,11 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
     });
 }
 
-/** @brief The keys the case's setup reads: sets it up as mallard check does, without its report. */
+/** @brief The keys the case's setup reads, from its input phase without the mesh. */
 CaseFields set_up_keys(const std::string & input_file, const cli::Args & args) {
     return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
-        CheckOptions options;
-        options.input_file = input_file;
-        const CheckReport report = solver.check(parse_input(input_file), options);
-        out.errors = report.errors();
-        if (report.setup_done) out.keys = key_catalog(resolve_input(solver.resolved_input()));
+        solver.read_keys(parse_input(input_file));
+        out.keys = key_catalog(resolve_input(solver.resolved_input()));
     });
 }
 

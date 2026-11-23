@@ -155,50 +155,15 @@ constexpr double BATCH_TAUS = 10.0;
 
 } // namespace
 
-void Convergence::init(const Input & input, const std::vector<Monitored> & monitored, bool restart) {
-    signals.clear();
-    source.clear();
-    if (!input.contains("statistics") || !input.at("statistics").contains("convergence")) return;
+std::vector<std::string> Convergence::read(const Input & input) {
+    if (!input.contains("statistics") || !input.at("statistics").contains("convergence")) return {};
     const Input & table = input.at("statistics").at("convergence");
     const std::string key = "statistics.convergence";
     if (!table.contains("signals")) {
         throw missing_key(table, key + ".signals",
                           "List the monitored values to follow, e.g. signals = [\"integrals_kinetic_energy\"]");
     }
-    std::vector<std::string> names;
-    for (const auto & [name, dimension] : monitored) names.push_back(name);
     const auto listed = find_value<std::vector<std::string>>(table, "signals");
-    if (listed.empty()) {
-        throw InputError({.key = key + ".signals",
-                          .line = line_of(table, "signals"),
-                          .message = "the list is empty",
-                          .valid = names,
-                          .docs = DOCS});
-    }
-    for (const auto & name : listed) {
-        const auto it = std::find(names.begin(), names.end(), name);
-        if (it == names.end()) {
-            throw InputError({.key = key + ".signals",
-                              .line = line_of(table, "signals"),
-                              .message = "\"" + name + "\" is not a monitored value of the run",
-                              .valid = names,
-                              .suggestion = suggest_value(name, names),
-                              .fix = "Use a value of [integrals], [[forces]] or [[probes]], named as in [[triggers]]",
-                              .docs = DOCS});
-        }
-        const size_t index = static_cast<size_t>(it - names.begin());
-        if (std::find(source.begin(), source.end(), index) != source.end()) {
-            throw InputError({.key = key + ".signals",
-                              .line = line_of(table, "signals"),
-                              .message = "\"" + name + "\" is listed twice",
-                              .docs = DOCS});
-        }
-        source.push_back(index);
-        Signal signal;
-        signal.name = name;
-        signal.dimension = monitored[index].second;
-        signals.push_back(std::move(signal));
-    }
     confidence = find_value_or<double>(table, "confidence", 0.95);
     if (!(confidence > 0.0 && confidence < 1.0)) {
         throw InputError({.key = key + ".confidence",
@@ -242,6 +207,49 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                           .docs = DOCS});
     }
     file = find_value_or<std::string>(table, "file", "convergence.csv");
+    return listed;
+}
+
+void Convergence::init(const Input & input, const std::vector<Monitored> & monitored, bool restart) {
+    signals.clear();
+    source.clear();
+    if (!input.contains("statistics") || !input.at("statistics").contains("convergence")) return;
+    const std::vector<std::string> listed = read(input);
+    const Input & table = input.at("statistics").at("convergence");
+    const std::string key = "statistics.convergence";
+    std::vector<std::string> names;
+    for (const auto & [name, dimension] : monitored) names.push_back(name);
+    if (listed.empty()) {
+        throw InputError({.key = key + ".signals",
+                          .line = line_of(table, "signals"),
+                          .message = "the list is empty",
+                          .valid = names,
+                          .docs = DOCS});
+    }
+    for (const auto & name : listed) {
+        const auto it = std::find(names.begin(), names.end(), name);
+        if (it == names.end()) {
+            throw InputError({.key = key + ".signals",
+                              .line = line_of(table, "signals"),
+                              .message = "\"" + name + "\" is not a monitored value of the run",
+                              .valid = names,
+                              .suggestion = suggest_value(name, names),
+                              .fix = "Use a value of [integrals], [[forces]] or [[probes]], named as in [[triggers]]",
+                              .docs = DOCS});
+        }
+        const size_t index = static_cast<size_t>(it - names.begin());
+        if (std::find(source.begin(), source.end(), index) != source.end()) {
+            throw InputError({.key = key + ".signals",
+                              .line = line_of(table, "signals"),
+                              .message = "\"" + name + "\" is listed twice",
+                              .docs = DOCS});
+        }
+        source.push_back(index);
+        Signal signal;
+        signal.name = name;
+        signal.dimension = monitored[index].second;
+        signals.push_back(std::move(signal));
+    }
     stationary = false;
     t_stationary = 0.0;
     values = {};

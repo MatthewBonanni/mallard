@@ -151,13 +151,13 @@ Spectrum read_table(const Input & t, const std::string & where) {
 
 } // namespace
 
-Field read(const Input & t, const std::string & where, const Mesh & mesh) {
+Field read(const Input & t, const std::string & where, const Mesh * mesh) {
     if (!t.is_table()) {
         throw InputError({.key = where, .line = line_of(t), .message = "must be a table",
                           .fix = "Write turbulence = {spectrum = \"von_karman_pao\", intensity = ..., length_scale = ...}",
                           .docs = DOCS});
     }
-    if (mesh.axisymmetric) {
+    if (mesh && mesh->axisymmetric) {
         throw InputError({.key = where, .line = line_of(t),
                           .message = "is not available on axisymmetric meshes: its modes are divergence-free in plane "
                                      "coordinates, not in revolved ones",
@@ -214,26 +214,7 @@ Field read(const Input & t, const std::string & where, const Mesh & mesh) {
     const int64_t per_shell = find_value_or<int64_t>(t, "modes_per_shell", 32);
     if (per_shell < 1) throw invalid(t, where, "modes_per_shell", "is below 1", "Give 1 or more");
 
-    // The bounding box of the owned cells' nodes (halo cells across periodic boundaries can be shifted copies)
-    std::array<double, 2 * N_DIM> box;
-    for (uint32_t d = 0; d < N_DIM; d++) box[d] = box[N_DIM + d] = 1e300;
-    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
-        for (uint32_t i = 0; i < mesh.h_n_nodes_of_cell(c); i++) {
-            const uint32_t node = mesh.h_node_of_cell(c, i);
-            for (uint32_t d = 0; d < N_DIM; d++) {
-                const double x = double(mesh.h_node_coords(node, d));
-                box[d] = std::min(box[d], x);
-                box[N_DIM + d] = std::min(box[N_DIM + d], -x);
-            }
-        }
-    }
-    box = comm::allreduce(box, comm::Op::MIN);
-    std::array<double, N_DIM> extent, period;
-    double volume = 1.0;
-    for (uint32_t d = 0; d < N_DIM; d++) {
-        extent[d] = -box[N_DIM + d] - box[d];
-        volume *= extent[d];
-    }
+    std::array<double, N_DIM> period{};
     record_optional(t, "period", "array", dim::length);
     if (t.contains("period")) {
         const std::vector<rtype> p = as_real_vector(t.at("period"), where + ".period", dim::length);
@@ -246,13 +227,35 @@ Field read(const Input & t, const std::string & where, const Mesh & mesh) {
             throw invalid(t, where, "period", "must be " + std::to_string(N_DIM) + " positive lengths",
                           "Give the size of the periodic box the modes fit, per direction");
         }
-    } else {
-        period = extent;
     }
-    const uint64_t n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_cells;
     record_optional(t, "k_max", "number", WAVENUMBER);
-    const double k_max = t.contains("k_max") ? as_double(t.at("k_max"), where + ".k_max", WAVENUMBER)
-                                             : PI / std::pow(volume / double(n_cells), 1.0 / N_DIM);
+    const bool given_k_max = t.contains("k_max");
+    double k_max = given_k_max ? as_double(t.at("k_max"), where + ".k_max", WAVENUMBER) : 0.0;
+    if (!mesh) return Field{.modes = {}, .summary = text.str()};
+
+    // The bounding box of the owned cells' nodes (halo cells across periodic boundaries can be shifted copies)
+    std::array<double, 2 * N_DIM> box;
+    for (uint32_t d = 0; d < N_DIM; d++) box[d] = box[N_DIM + d] = 1e300;
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        for (uint32_t i = 0; i < mesh->h_n_nodes_of_cell(c); i++) {
+            const uint32_t node = mesh->h_node_of_cell(c, i);
+            for (uint32_t d = 0; d < N_DIM; d++) {
+                const double x = double(mesh->h_node_coords(node, d));
+                box[d] = std::min(box[d], x);
+                box[N_DIM + d] = std::min(box[N_DIM + d], -x);
+            }
+        }
+    }
+    box = comm::allreduce(box, comm::Op::MIN);
+    std::array<double, N_DIM> extent;
+    double volume = 1.0;
+    for (uint32_t d = 0; d < N_DIM; d++) {
+        extent[d] = -box[N_DIM + d] - box[d];
+        volume *= extent[d];
+    }
+    if (!t.contains("period")) period = extent;
+    const uint64_t n_cells = mesh->n_global_cells > 0 ? mesh->n_global_cells : mesh->n_cells;
+    if (!given_k_max) k_max = PI / std::pow(volume / double(n_cells), 1.0 / N_DIM);
     std::array<double, 3> kappa = {0.0, 0.0, 0.0};
     double dk = 0.0;
     for (uint32_t d = 0; d < N_DIM; d++) {

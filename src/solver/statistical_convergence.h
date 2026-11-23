@@ -97,6 +97,8 @@ class Convergence {
         /** @brief A monitored value the solver passes: name (as triggers name it) and dimension. */
         using Monitored = std::pair<std::string, Dimension>;
 
+        /** @brief Reads [statistics.convergence] without the monitored values; the signals it lists. */
+        std::vector<std::string> read(const Input & input);
         /** @brief Read [statistics.convergence] if any; a restarted run appends to its file. Throws InputError. */
         void init(const Input & input, const std::vector<Monitored> & monitored, bool restart);
 

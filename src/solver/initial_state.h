@@ -41,13 +41,13 @@ class InitialState {
     public:
         /**
          * @param input The run's input.
-         * @param mesh The mesh.
+         * @param mesh The mesh, or null to read and check the input alone (apply needs a mesh).
          * @param physics The single gas (unused for mixtures).
          * @param mixture The gas mixture, or null.
          * @param base_from_cells The base is the cells' current state (a
          *        restart or remap), else the expressions of [initialize].
          */
-        InitialState(const Input & input, const Mesh & mesh, const Euler & physics, const MixtureModel * mixture,
+        InitialState(const Input & input, const Mesh * mesh, const Euler & physics, const MixtureModel * mixture,
                      bool base_from_cells);
         ~InitialState();
         InitialState(const InitialState &) = delete;

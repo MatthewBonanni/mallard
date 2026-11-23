@@ -76,6 +76,7 @@
 
 struct ForceMonitor {
     std::string zone;
+    std::size_t line = 0;  // of zone in the input
     std::string file;
     Kokkos::View<uint32_t *> faces;
     uint64_t interval = 1;
@@ -1015,6 +1016,8 @@ class Solver {
         CheckCellScales check_viscous_scales(CheckReport & report, CheckFields & fields,
                                              const std::vector<double> & delta, double delta_mean,
                                              const std::array<double, N_DIM> & coarsest);
+        /** @brief Reads and checks [check] without the mesh. */
+        void read_check_inputs(region::Regions & regions) const;
         /** @brief Reads [check]: its regions' fractions and the dissipation of check.statistics. Collective. */
         void init_check_inputs();
         void check_time_step(CheckReport & report);
@@ -1029,9 +1032,24 @@ class Solver {
         std::string setup_check();
         void init_run_parameters();
         void init_output(region::Regions & regions);
+        /** @brief Where a [[write_data]] entry writes: the whole mesh (value null without region), or each region. */
+        struct WriterTarget {
+            probe::RegionValue::Kind kind;
+            const Input * value = nullptr;  // the region
+            std::string key;                // of the region, for messages
+            std::string entry_key;          // write_data[prefix = "..."]
+            std::string prefix;             // of its files
+            bool vtkhdf = false;            // surfaces, curves and points: as VTKHDF, else VTP
+        };
+        /** @brief The targets of a [[write_data]] entry, checked without the mesh. */
+        std::vector<WriterTarget> write_data_targets(const Input & output, region::Regions & regions) const;
+        static Probes::Snapshot snapshot_of(const WriterTarget & target);
+        /** @brief Reads and checks [[write_data]] without the mesh; probe_reader takes its snapshots. */
+        void read_write_data(region::Regions & regions, Probes & probe_reader) const;
         /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
-        void add_data_writers(const Input & output, region::Regions & regions, bool async_output,
-                              uint32_t io_threads);
+        void add_data_writers(const Input & output, region::Regions & regions);
+        /** @brief Reads and checks [initialize] without the mesh or the files it names. */
+        void read_initialize() const;
         void init_solution();
         void init_solution_constant();
         void init_solution_restart();
@@ -1068,6 +1086,8 @@ class Solver {
         /** @brief Reads and checks [[sponges]] without the mesh; init_sponges reads them again. */
         void read_sponges(region::Regions & regions) const;
         void init_sponges(region::Regions & regions);
+        /** @brief Reads [output], [[forces]] and [integrals] without the mesh. */
+        void read_output();
         /** @brief Reads and checks a composition table (numbers or expressions), without the mesh. */
         void read_composition(const Input & table, const std::string & where) const;
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
@@ -1075,6 +1095,8 @@ class Solver {
                                                               const std::vector<uint32_t> & cells) const;
         void allocate_memory();
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
+        /** @brief Reads and checks [particles] without the mesh. */
+        void read_particles(region::Regions & regions) const;
         void init_particles(region::Regions & regions);  // [particles], before allocate_time_stepping
         void write_particle_probes();   // [[particles.probes]] due at this step
         std::unique_ptr<Particles> particles;
@@ -1255,6 +1277,9 @@ class Solver {
         double last_good_pending = 0.0;
         bool stepped_past_divergence = false;    // a step graph went on from the invalid state
         std::string divergence_prefix = "divergence_report";  // [output] divergence_report
+        std::string run_log_file, report_file;                 // [output] run_log and report
+        bool async_output = true;                              // [output] async
+        uint32_t io_threads = 1;                               // [output] io_threads
         std::deque<divergence::Sample> progress_history;       // the last progress rows, for the report
 
         bool distribute = true;

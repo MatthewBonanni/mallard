@@ -161,50 +161,38 @@ std::vector<std::string> Statistics::data_names(const Input & input) {
     return names;
 }
 
-void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
-                      const derived::Selection & derived, const ConditionalStatistics::Context & context) {
+void Statistics::read(const Input & input, region::Regions * regions) {
     if (!input.contains("statistics")) return;
     const Input & table = input.at("statistics");
     interval = find_value_or<uint64_t>(table, "interval", 1);
     if (interval == 0) throw InputError("statistics.interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, 0.0);
     reset = find_value_or<bool>(table, "reset", false);
-    const bool use_nccl = context.distributed && context.nccl;
-    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
-    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
-    // The clock also holds the t_start the spectra and phases sample from
-    clock = Kokkos::View<Clock>("statistics_clock");
-    h_clock = pinned_mirrors(clock);
-    t_sample = Kokkos::View<rtype>("statistics_t_sample");
-    set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
+    if (table.contains("spectra")) Spectra().read(table.at("spectra"), input, interval, t_start);
+    if (table.contains("phase")) PhaseAverage().read(table.at("phase"), interval, t_start);
     const std::vector<Input> entries = find_value_or<std::vector<Input>>(table, "conditional", {});
-    conditional.resize(entries.size());
-    ConditionalStatistics::Context with_derived = context;
-    with_derived.derived = &derived;
+    std::vector<ConditionalStatistics> read_conditional(entries.size());
     for (size_t i = 0; i < entries.size(); i++) {
-        const std::string key = "statistics.conditional[" + std::to_string(i) + "]";
-        conditional[i].init(entries[i], static_cast<uint32_t>(i), species_names, mesh, with_derived, interval, t_start);
+        read_conditional[i].read(entries[i], static_cast<uint32_t>(i), interval, t_start, regions);
         for (size_t j = 0; j < i; j++) {
-            if (conditional[j].file() == conditional[i].file()) {
-                throw InputError(key + ": statistics.conditional[" + std::to_string(j) + "] writes " +
-                                 conditional[i].file() + " too; give each entry its own file.");
+            if (read_conditional[j].file() == read_conditional[i].file()) {
+                throw InputError("statistics.conditional[" + std::to_string(i) + "]: statistics.conditional[" +
+                                 std::to_string(j) + "] writes " + read_conditional[i].file() +
+                                 " too; give each entry its own file.");
             }
-        }
-        for (const int32_t c : conditional[i].sampled_codes()) {
-            derived_sampled = derived_sampled || c >= CellSampler::FIRST_DERIVED;
-            chemistry_sampled = chemistry_sampled || CellSampler::is_chemistry(c);
         }
     }
     read_fields(table);
     if (fields.empty()) {
-        if (spectra.enabled() || phase.enabled() || !conditional.empty() || table.contains("convergence")) return;
+        if (table.contains("spectra") || table.contains("phase") || !entries.empty() || table.contains("convergence")) {
+            return;
+        }
         for (const auto & probe : find_value_or<std::vector<Input>>(input, "probes", {})) {
             if (find_value_or<bool>(probe, "average", false)) return;
         }
         throw InputError("statistics: list at least one of fields and products (or add spectra, phase, conditional, convergence or "
                          "a probe with average = true).");
     }
-    const uint32_t n_cells = mesh.n_cells;
     if (contains_optional(table, "batch")) {
         batch = find_real(table, "batch", dim::time);
         if (!(batch > 0.0_r)) {
@@ -222,6 +210,36 @@ void Statistics::init(const Input & input, const std::vector<std::string> & spec
                               .fix = "e.g. confidence = 0.95",
                               .docs = "docs/guide/statistics.md#confidence-intervals"});
         }
+    }
+}
+
+void Statistics::init(const Input & input, const std::vector<std::string> & species_names, const Mesh & mesh,
+                      const derived::Selection & derived, const ConditionalStatistics::Context & context) {
+    if (!input.contains("statistics")) return;
+    read(input, context.regions);
+    const Input & table = input.at("statistics");
+    const bool use_nccl = context.distributed && context.nccl;
+    if (table.contains("spectra")) spectra.init(table.at("spectra"), input, species_names, mesh, interval, t_start, use_nccl);
+    if (table.contains("phase")) phase.init(table.at("phase"), mesh, species_names, mesh.n_cells, interval, t_start, use_nccl);
+    // The clock also holds the t_start the spectra and phases sample from
+    clock = Kokkos::View<Clock>("statistics_clock");
+    h_clock = pinned_mirrors(clock);
+    t_sample = Kokkos::View<rtype>("statistics_t_sample");
+    set_clock({0.0_r, 0.0_r, t_start, 0.0_r, 0});
+    const std::vector<Input> entries = find_value_or<std::vector<Input>>(table, "conditional", {});
+    conditional.resize(entries.size());
+    ConditionalStatistics::Context with_derived = context;
+    with_derived.derived = &derived;
+    for (size_t i = 0; i < entries.size(); i++) {
+        conditional[i].init(entries[i], static_cast<uint32_t>(i), species_names, mesh, with_derived, interval, t_start);
+        for (const int32_t c : conditional[i].sampled_codes()) {
+            derived_sampled = derived_sampled || c >= CellSampler::FIRST_DERIVED;
+            chemistry_sampled = chemistry_sampled || CellSampler::is_chemistry(c);
+        }
+    }
+    if (fields.empty()) return;
+    const uint32_t n_cells = mesh.n_cells;
+    if (batch > 0.0_r) {
         const size_t n = fields.size() + products.size();
         batch_value = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_batch", n_cells, n);
         batch_avg = Kokkos::View<rtype **, Kokkos::LayoutLeft>("statistics_batch_avg", n_cells, n);
@@ -682,17 +700,12 @@ void PhaseAverage::read_variables(const Input & table) {
     }
 }
 
-void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
-                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+void PhaseAverage::read(const Input & table, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.phase";
     interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     read_variables(table);
-    std::vector<int32_t> h_codes;
-    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key + ".fields"));
-    codes = to_device(h_codes, "phase_codes");
-
     const bool periodic = table.contains("period");
     const bool triggered = table.contains("probe");
     if (periodic == triggered) throw InputError(key + ": give either period or probe (with variable and level).");
@@ -706,8 +719,19 @@ void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vecto
         for (size_t d = 0; d < N_DIM; d++) trigger_point[d] = static_cast<double>(x[d]);
         if (!table.contains("variable")) throw InputError(key + ": variable (of the probe) not specified.");
         trigger_variable = find_value<std::string>(table, "variable");
-        trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
         level = find_double_or(table, "level", variable_dimension(trigger_variable), 0.0);
+    }
+}
+
+void PhaseAverage::init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
+                        uint32_t n_cells, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+    const std::string key = "statistics.phase";
+    read(table, interval_in, t_start_in);
+    std::vector<int32_t> h_codes;
+    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key + ".fields"));
+    codes = to_device(h_codes, "phase_codes");
+    if (table.contains("probe")) {
+        trigger_code = CellSampler::code(trigger_variable, species_names, key + ".variable");
         trigger_cell = locate_points(mesh, {trigger_point})[0];
         distributed = mesh.n_global_cells > 0;
         use_nccl = use_nccl_;

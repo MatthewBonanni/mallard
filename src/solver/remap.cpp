@@ -687,31 +687,53 @@ std::vector<std::vector<double>> remap_global(const Source & field, const Mesh &
     return out;
 }
 
-RestartData remap_restart(const Input & input, const Mesh & target, bool axisymmetric, Report & report) {
+namespace {
+
+struct Request {
+    std::string file;
+    Options options;
+    Input source_input = Input(Input::table_type{});
+};
+
+Request read_request(const Input & input) {
     const Input & init = input.at("initialize");
     if (!init.contains("file")) throw InputError("initialize: type = \"remap\" needs file, the source restart file.");
     if (!init.contains("mesh")) throw InputError("initialize: type = \"remap\" needs [initialize.mesh], the source mesh.");
-    const std::string file = find_value<std::string>(init, "file");
-    Options options;
+    Request r;
+    r.file = find_value<std::string>(init, "file");
     const int degree = find_value_or<int>(init, "degree", 2);
     if (degree < 0 || degree > MAX_DEGREE) {
         throw InputError("initialize.degree must be between 0 and " + std::to_string(MAX_DEGREE) + ".");
     }
-    options.degree = static_cast<uint8_t>(degree);
+    r.options.degree = static_cast<uint8_t>(degree);
     const std::string limiter = find_value_or<std::string>(init, "limiter", "bounds");
     if (limiter != "bounds" && limiter != "none") {
         throw InputError("initialize.limiter = \"" + limiter + "\" is not one of: bounds, none.");
     }
-    options.limit = limiter == "bounds";
-    options.axisymmetric = axisymmetric;
-
-    Input source_input(Input::table_type{});
-    source_input.as_table()["mesh"] = init.at("mesh");
+    r.options.limit = limiter == "bounds";
+    r.source_input.as_table()["mesh"] = init.at("mesh");
     if (init.contains("periodic")) {
-        source_input.as_table()["periodic"] = init.at("periodic");
+        r.source_input.as_table()["periodic"] = init.at("periodic");
     } else if (input.contains("periodic")) {
-        source_input.as_table()["periodic"] = input.at("periodic");
+        r.source_input.as_table()["periodic"] = input.at("periodic");
     }
+    return r;
+}
+
+} // namespace
+
+void read(const Input & input) {
+    const Request r = read_request(input);
+    read_mesh_input(r.source_input);
+    Mesh::periodic_pairs(r.source_input);
+}
+
+RestartData remap_restart(const Input & input, const Mesh & target, bool axisymmetric, Report & report) {
+    Request request = read_request(input);
+    const std::string & file = request.file;
+    Options & options = request.options;
+    options.axisymmetric = axisymmetric;
+    const Input & source_input = request.source_input;
     const std::shared_ptr<Mesh> source = source_mesh(source_input, options.degree);
     if (source->is_rotational()) {
         throw InputError("initialize: type = \"remap\" takes a source mesh with translational periodicity only; "

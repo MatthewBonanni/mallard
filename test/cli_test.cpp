@@ -338,6 +338,20 @@ TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
 namespace {
 
 /** @brief Runs a two-step case in the working directory: VTU snapshots and restart files under case/. */
+bool same(const json::Value & a, const json::Value & b) {
+    if (a.type != b.type || a.boolean != b.boolean || a.number != b.number || a.string != b.string ||
+        a.names != b.names || a.array.size() != b.array.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.array.size(); i++) {
+        if (!same(a.array[i], b.array[i])) return false;
+    }
+    for (size_t i = 0; i < a.members.size(); i++) {
+        if (!same(a.members[i], b.members[i])) return false;
+    }
+    return true;
+}
+
 Result small_run() {
     const bool three = Mallard_DIM == 3;
     std::ofstream("small.toml")
@@ -1024,6 +1038,66 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     EXPECT_EQ(keys.keys(), json::parse(read_file("keys.json")).keys());
     EXPECT_TRUE(keys["physics.gamma"]["set"].boolean);
     EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
+}
+
+TEST(CliTest, InputResolveNeedsNoMesh) {
+    SKIP_UNDER_MPI();
+    const bool three = Mallard_DIM == 3;
+    fs::copy_file(source_dir() + (three ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh"), "mesh.msh");
+    const std::string vector = three ? "[10.0, 0.0, 0.0]" : "[10.0, 0.0]";
+    std::ostringstream text;
+    text << "[run]\nn_steps = 1\n[mesh]\ntype = \"file\"\nfilename = \"mesh.msh\"\n"
+         << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 101325.0\nT_ref = 300.0\nrho_ref = 1.1766\n"
+         << "mu = 1.8e-5\n[numerics]\npreset = \"second_order\"\n"
+         << "[initialize]\np = 101325.0\nT = 300.0\nu = " << vector << "\n"
+         << "[[boundaries]]\nname = \"inlet\"\ntype = \"inlet_state\"\nu = " << vector
+         << "\np = 101325.0\nT = 300.0\n"
+         << "[[boundaries]]\nname = \"outlet\"\ntype = \"outlet_pressure\"\np = 101325.0\n"
+         << "[[boundaries]]\nname = \"walls\"\ntype = \"symmetry\"\n"
+         << "[[boundaries]]\nname = \"cylinder\"\ntype = \"wall_adiabatic\"\n"
+         << (three ? "[[boundaries]]\nname = \"back\"\ntype = \"symmetry\"\n"
+                     "[[boundaries]]\nname = \"front\"\ntype = \"symmetry\"\n"
+                   : "")
+         << "[[probes]]\nname = \"wake\"\ntype = \"point\"\npoint = " << (three ? "[1.5, 0.5, 0.15]" : "[1.5, 0.5]")
+         << "\nfields = [\"P\", \"U\"]\n"
+         << "[[probes]]\nname = \"surface\"\nboundary = \"cylinder\"\nfields = [\"P\"]\nreductions = [\"mean\"]\n"
+         << "[[forces]]\nzone = \"cylinder\"\n"
+         << "[statistics]\nfields = [\"P\"]\n"
+         << "[[write_data]]\nprefix = \"flow\"\ninterval = 1\nfields = [\"RHO\", \"P\"]\n"
+         << "[[write_data]]\nregion = \"cylinder\"\nprefix = \"wall\"\ninterval = 1\nfields = [\"P\"]\n"
+         << "[output]\nhash_mesh = false\n";
+    std::ofstream("mesh.toml") << text.str();
+    std::string absent = text.str();
+    absent.replace(absent.find("\"mesh.msh\""), 10, "\"absent.msh\"");
+    std::ofstream("absent.toml") << absent;
+    ASSERT_FALSE(fs::exists("absent.msh"));
+
+    // Without the mesh, the keys and values the setup reads with it
+    ASSERT_EQ(run({"check", "mesh.toml", "--catalog", "keys.json"}, true).status, 0);
+    const Result listed = run({"list", "keys", "absent.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value with_mesh = json::parse(read_file("keys.json"));
+    const json::Value without = json::parse(listed.out)["keys"];
+    EXPECT_EQ(without.keys(), with_mesh.keys());
+    for (const std::string & key : with_mesh.keys()) {
+        if (without.has(key)) EXPECT_TRUE(same(without[key], with_mesh[key])) << key;
+    }
+
+    const Result resolved = run({"input", "resolve", "mesh.toml"}, true);
+    ASSERT_EQ(resolved.status, 0) << resolved.err;
+    const Result resolved_absent = run({"input", "resolve", "absent.toml"}, true);
+    ASSERT_EQ(resolved_absent.status, 0) << resolved_absent.err;
+    std::string expected = resolved.out;
+    expected.replace(expected.find("\"mesh.msh\""), 10, "\"absent.msh\"");
+    EXPECT_EQ(resolved_absent.out, expected);
+    EXPECT_TRUE(contains(resolved.out, "[[probes]]")) << resolved.out;
+
+    const Result described = run({"input", "resolve", "absent.toml", "--format", "json"}, true);
+    ASSERT_EQ(described.status, 0) << described.err;
+    const json::Value v = json::parse(described.out);
+    EXPECT_EQ(v["resolved"].string, resolved_absent.out);
+    EXPECT_EQ(v["preset"]["name"].string, "second_order");
+    EXPECT_TRUE(contains(v["preset_summary"].string, "second_order")) << described.out;
 }
 
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {

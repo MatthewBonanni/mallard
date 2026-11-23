@@ -650,19 +650,8 @@ void set_mesh(const std::string & type, const std::string & file, const std::str
     rebuild();
 }
 
-void set_preset(const std::string & name, bool is_default,
-                const std::vector<std::tuple<std::string, std::string, bool>> & settings) {
-    if (name.empty()) {
-        state().preset = "null";
-    } else {
-        std::string list = "[";
-        for (const auto & [key, value, from_preset] : settings) {
-            if (list.size() > 1) list += ',';
-            list += json::Object().add("key", key).add("value", value).add("from_preset", from_preset).str();
-        }
-        state().preset =
-            json::Object().add("name", name).add("default", is_default).raw("settings", list + "]").str();
-    }
+void set_preset(const std::string & json) {
+    state().preset = json;
     rebuild();
 }
 

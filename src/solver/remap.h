@@ -131,6 +131,9 @@ std::vector<std::vector<double>> remap_global(std::shared_ptr<const Mesh> source
                                               const std::vector<int> & groups, const Options & options,
                                               const Mesh & target, Report & report);
 
+/** @brief Reads the keys of [initialize] type = "remap" and of its source mesh, without either file. */
+void read(const Input & input);
+
 /**
  * @brief The restart file named by [initialize] file, on the source mesh of
  *        [initialize.mesh] (and [[initialize.periodic]], else the run's

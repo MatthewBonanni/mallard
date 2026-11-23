@@ -108,9 +108,8 @@ std::vector<std::string> ConditionalStatistics::sampled(const Input & entry) {
     return names;
 }
 
-void ConditionalStatistics::init(const Input & entry, uint32_t index, const std::vector<std::string> & species_names,
-                                 const Mesh & mesh,
-                                 const Context & context, uint64_t interval_in, rtype t_start_in) {
+void ConditionalStatistics::read(const Input & entry, uint32_t index, uint64_t interval_in, rtype t_start_in,
+                                 region::Regions * regions) {
     const std::string key = "statistics.conditional[" + std::to_string(index) + "]";
     interval = find_value_or<uint64_t>(entry, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
@@ -181,6 +180,18 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
     mass = weighting == "mass";
     file_name = find_value_or<std::string>(entry, "file", default_file(on));
     restart_prefix = "CONDITIONAL_" + std::to_string(index) + "_";
+    if (entry.contains("region")) {
+        if (!regions) throw std::logic_error(key + ".region: no regions");
+        const Input & value = entry.at("region");
+        region::require_full_dimension(regions->get(value, key + ".region"), value, key + ".region");
+    }
+}
+
+void ConditionalStatistics::init(const Input & entry, uint32_t index, const std::vector<std::string> & species_names,
+                                 const Mesh & mesh,
+                                 const Context & context, uint64_t interval_in, rtype t_start_in) {
+    const std::string key = "statistics.conditional[" + std::to_string(index) + "]";
+    read(entry, index, interval_in, t_start_in, context.regions);
 
     h_codes.clear();
     for (const auto & name : on) {
@@ -196,9 +207,7 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
     distributed = context.distributed;
     nccl = distributed && context.nccl && comm::nccl_available();
     if (entry.contains("region")) {
-        if (!context.regions) throw std::logic_error(key + ".region: no regions");
         const Input & value = entry.at("region");
-        region::require_full_dimension(context.regions->get(value, key + ".region"), value, key + ".region");
         const std::vector<double> & f = context.regions->fractions(value, key + ".region");
         region_text = value.is_string() ? value.as_string() : "an inline region";
         fraction = Kokkos::View<double *>("conditional_fraction", mesh.n_cells);

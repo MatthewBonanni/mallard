@@ -93,29 +93,27 @@ const std::vector<std::string> & Triggers::built_in() {
     return names;
 }
 
-void Triggers::init(const Input & input, const std::vector<std::string> & monitored,
-                    const std::vector<std::string> & writers, bool statistics) {
-    triggers.clear();
-    names = built_in();
-    for (const auto & name : monitored) names.push_back(trigger_variable(name));
-    if (!contains_optional(input, "triggers")) return;
+std::vector<Triggers::Entry> Triggers::read(const Input & input) {
+    std::vector<Entry> out;
+    if (!contains_optional(input, "triggers")) return out;
     const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
     for (size_t i = 0; i < entries.size(); i++) {
         const Input & entry = entries[i];
         const std::string where = "triggers[" + std::to_string(i) + "]";
-        const std::string name = find_value_or<std::string>(entry, "name", "trigger_" + std::to_string(i));
-        if (!is_name(name)) {
+        Entry e{.input = entry, .where = where};
+        e.name = find_value_or<std::string>(entry, "name", "trigger_" + std::to_string(i));
+        if (!is_name(e.name)) {
             throw InputError({.key = where + ".name",
                               .line = line_of(entry, "name"),
-                              .message = "\"" + name + "\" is not a name of letters, digits and _",
+                              .message = "\"" + e.name + "\" is not a name of letters, digits and _",
                               .fix = "Name the trigger with letters, digits and _ only, e.g. \"hot_spot\"",
                               .docs = "docs/guide/running.md#triggers"});
         }
-        for (const auto & other : triggers) {
-            if (other.name == name) {
+        for (const auto & other : out) {
+            if (other.name == e.name) {
                 throw InputError({.key = where + ".name",
                                   .line = line_of(entry, "name"),
-                                  .message = "two triggers are named \"" + name + "\"",
+                                  .message = "two triggers are named \"" + e.name + "\"",
                                   .fix = "Give each trigger its own name",
                                   .docs = "docs/guide/running.md#triggers"});
             }
@@ -123,7 +121,47 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
         if (!entry.contains("when")) {
             throw missing_key(entry, where + ".when", "Add when = \"...\": the condition, e.g. \"t > 0.5\"");
         }
-        const std::string when = find_value<std::string>(entry, "when");
+        e.when = find_value<std::string>(entry, "when");
+        if (!entry.contains("do")) {
+            throw missing_key(entry, where + ".do", "Add do = \"stop\" (or \"checkpoint\", \"write <prefix>\", "
+                                                    "\"start statistics\", \"log <message>\", ..., or a list of them)");
+        }
+        if (entry.at("do").is_array()) {
+            e.actions = find_value<std::vector<std::string>>(entry, "do");
+        } else {
+            e.actions = {find_value<std::string>(entry, "do")};
+        }
+        if (e.actions.empty()) {
+            throw InputError({.key = where + ".do",
+                              .line = line_of(entry, "do"),
+                              .message = "the list of actions is empty",
+                              .valid = ACTIONS,
+                              .docs = "docs/guide/running.md#triggers"});
+        }
+        e.hold = static_cast<double>(find_real_or(entry, "for", dim::time, 0.0_r));
+        if (!(e.hold >= 0.0)) {
+            throw InputError({.key = where + ".for",
+                              .line = line_of(entry, "for"),
+                              .message = "the time the condition must hold is negative",
+                              .fix = "Give a duration of zero or more, e.g. for = 0.01",
+                              .docs = "docs/guide/running.md#triggers"});
+        }
+        e.repeat = find_value_or<bool>(entry, "repeat", false);
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+void Triggers::init(const Input & input, const std::vector<std::string> & monitored,
+                    const std::vector<std::string> & writers, bool statistics) {
+    triggers.clear();
+    names = built_in();
+    for (const auto & name : monitored) names.push_back(trigger_variable(name));
+    for (const Entry & r : read(input)) {
+        const Input & entry = r.input;
+        const std::string & where = r.where;
+        const std::string & name = r.name;
+        const std::string & when = r.when;
         std::optional<kexpr::Program> condition;
         try {
             condition.emplace(where + ".when", when, names);
@@ -144,25 +182,8 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
             }
             throw InputError(d);
         }
-        if (!entry.contains("do")) {
-            throw missing_key(entry, where + ".do", "Add do = \"stop\" (or \"checkpoint\", \"write <prefix>\", "
-                                                    "\"start statistics\", \"log <message>\", ..., or a list of them)");
-        }
-        std::vector<std::string> texts;
-        if (entry.at("do").is_array()) {
-            texts = find_value<std::vector<std::string>>(entry, "do");
-        } else {
-            texts = {find_value<std::string>(entry, "do")};
-        }
-        if (texts.empty()) {
-            throw InputError({.key = where + ".do",
-                              .line = line_of(entry, "do"),
-                              .message = "the list of actions is empty",
-                              .valid = ACTIONS,
-                              .docs = "docs/guide/running.md#triggers"});
-        }
         std::vector<Act> actions;
-        for (const auto & raw : texts) {
+        for (const auto & raw : r.actions) {
             const std::string text = trimmed(raw);
             Act act;
             if (text == "stop") {
@@ -227,20 +248,12 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
             }
             actions.push_back(act);
         }
-        const double hold = static_cast<double>(find_real_or(entry, "for", dim::time, 0.0_r));
-        if (!(hold >= 0.0)) {
-            throw InputError({.key = where + ".for",
-                              .line = line_of(entry, "for"),
-                              .message = "the time the condition must hold is negative",
-                              .fix = "Give a duration of zero or more, e.g. for = 0.01",
-                              .docs = "docs/guide/running.md#triggers"});
-        }
         std::vector<double> times = time_comparisons(*condition).first;
         Trigger trigger{.name = name,
                         .when = when,
                         .actions = actions,
-                        .repeat = find_value_or<bool>(entry, "repeat", false),
-                        .hold = hold,
+                        .repeat = r.repeat,
+                        .hold = r.hold,
                         .condition = std::move(*condition),
                         .used = {},
                         .armed = true,

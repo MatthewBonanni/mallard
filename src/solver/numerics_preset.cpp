@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 #include "input.h"
+#include "json.h"
 
 namespace numerics_preset {
 
@@ -127,6 +128,20 @@ std::string Resolution::summary(const ResolvedInput & resolved) const {
                                     "[numerics.face_reconstruction]" : "";
     if (!overrides.empty()) note += (note.empty() ? "" : "; ") + std::string("the input sets ") + overrides;
     return note.empty() ? name : name + " (" + note + ")";
+}
+
+std::string Resolution::json(const ResolvedInput & resolved) const {
+    if (name.empty()) return "null";
+    std::string list;
+    for (const auto & s : settings) {
+        const KeyRecord * record = resolved.find(s.key);
+        list += (list.empty() ? "" : ",") + ::json::Object()
+                                                 .add("key", s.key)
+                                                 .add("value", record ? record->value : "")
+                                                 .add("from_preset", s.from_preset)
+                                                 .str();
+    }
+    return ::json::Object().add("name", name).add("default", is_default).raw("settings", "[" + list + "]").str();
 }
 
 Resolution apply(Input & input) {

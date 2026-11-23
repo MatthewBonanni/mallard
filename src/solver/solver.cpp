@@ -213,12 +213,7 @@ int Solver::init(const Input & input_in) {
     }
     const ResolvedInput resolved = resolve_input(input);
     provenance::set_resolved(resolved.toml);
-    std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
-    for (const auto & s : preset.settings) {
-        const KeyRecord * record = resolved.find(s.key);
-        preset_settings.emplace_back(s.key, record ? record->value : "", s.from_preset);
-    }
-    provenance::set_preset(preset.name, preset.is_default, preset_settings);
+    provenance::set_preset(preset.json(resolved));
     print_setup(resolved);
     provenance::set_placement();
     provenance::set_read_files();
@@ -306,6 +301,16 @@ void Solver::read_input() {
     region::Regions regions(input, region::MeshRegions::without_mesh(zones));
     read_sources(regions);
     read_sponges(regions);
+    read_output();
+    Statistics().read(input, &regions);
+    convergence.read(input);
+    Triggers::read(input);
+    read_check_inputs(regions);
+    Probes probe_reader;
+    probe_reader.read(input, regions, species_names, is_viscous());
+    read_write_data(regions, probe_reader);
+    read_initialize();
+    read_particles(regions);
 }
 
 void Solver::read_mesh_keys() {
@@ -1976,7 +1981,7 @@ void Solver::init_run_parameters() {
     }
 }
 
-void Solver::init_output(region::Regions & regions) {
+void Solver::read_output() {
     check_interval = find_value_or<uint32_t>(input, "output", "check_interval", 1);
     if (check_interval == 0) {
         throw InputError({.key = "output.check_interval",
@@ -1984,47 +1989,30 @@ void Solver::init_output(region::Regions & regions) {
                           .message = "must be positive",
                           .fix = "Use 1 to check every step"});
     }
-    const bool async_output = find_value_or<bool>(input, "output", "async", true);
-    const uint32_t io_threads = find_value_or<uint32_t>(input, "output", "io_threads", 1);
+    find_value_or<bool>(input, "output", "health", true);
+    find_value_or<std::string>(input, "output", "write_stencils", "");
+    const derived::Settings on_request = derived::Settings::from_input(input, physics, mixture_model.get(), is_viscous());
+    for (uint8_t f = 0; f < derived::N_FIELDS; f++) {
+        if (writes_variable(input, derived::FIELDS[f].name)) on_request.require(static_cast<derived::Field>(f), input);
+    }
+    for (const derived::Field field : Statistics::derived_fields(input)) on_request.require(field, input);
+    async_output = find_value_or<bool>(input, "output", "async", true);
+    io_threads = find_value_or<uint32_t>(input, "output", "io_threads", 1);
     if (io_threads == 0) {
         throw InputError({.key = "output.io_threads",
                           .line = line_of(input.at("output"), "io_threads"),
                           .message = "must be positive",
                           .fix = "Use 1 (the default), or more to write several files at once"});
     }
+    if (find_value_or<std::string>(input, "mesh", "type", "file") == "file") {
+        find_value_or<bool>(input, "output", "hash_mesh", true);
+    }
+    force_monitors.clear();
     if (contains_optional(input, "forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
             monitor.zone = find_value<std::string>(entry, "zone");
-            FaceZone * zone = mesh->get_face_zone(monitor.zone);
-            if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
-            if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
-                const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
-                throw InputError({.key = "forces.zone",
-                                  .line = line_of(entry, "zone"),
-                                  .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
-                                  .valid = names,
-                                  .suggestion = suggest_value(monitor.zone, names)});
-            }
-            std::vector<uint32_t> owned;
-            for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
-                const uint32_t f = zone->h_faces(i);
-                if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) owned.push_back(f);
-            }
-            monitor.faces = Kokkos::View<uint32_t *>("force_faces", owned.size());
-            auto h_faces = Kokkos::create_mirror_view(monitor.faces);
-            for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
-            Kokkos::deep_copy(monitor.faces, h_faces);
-            uint32_t modeled = 0;
-            if (wall_model_on) {
-                const auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_bc);
-                for (const uint32_t f : owned) {
-                    const int32_t i_bc = h_face_bc(f);
-                    modeled |= i_bc >= 0 && wall_model_specs[static_cast<size_t>(i_bc)].parameters.type !=
-                                                WallModelType::NONE;
-                }
-            }
-            monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
+            monitor.line = line_of(entry, "zone");
             monitor.interval = find_value_or<uint64_t>(entry, "interval", 1);
             if (monitor.interval == 0) {
                 throw InputError({.key = "forces.interval",
@@ -2032,28 +2020,11 @@ void Solver::init_output(region::Regions & regions) {
                                   .message = "must be positive",
                                   .fix = "Use 1 to write the forces every step"});
             }
-            const std::string file = find_value_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
-            monitor.file = file;
-            if (comm::is_root() && output_files_enabled()) {
-                create_parent_directories("the forces file", file);
-                // init_output runs before the restart state is read, so check the input
-                const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
-                                    std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
-                monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
-                if (!monitor.out->good()) throw cannot_write("the forces file", file);
-                if (!resume) {
-                    std::vector<Dimension> units = {dim::none, dim::time};
-                    *monitor.out << "step,t";
-                    for (const auto & [name, dimension] : force_columns(monitor.modeled)) {
-                        *monitor.out << "," << name;
-                        units.push_back(dimension);
-                    }
-                    *monitor.out << "\n" << field_units::csv_line(units) << "\n";
-                }
-            }
+            monitor.file = find_value_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             force_monitors.push_back(monitor);
         }
     }
+    integral_monitor = IntegralMonitor();
     if (input.contains("integrals")) {
         integral_monitor.interval = find_value_or<uint64_t>(input, "integrals", "interval", 1);
         if (integral_monitor.interval == 0) {
@@ -2062,18 +2033,76 @@ void Solver::init_output(region::Regions & regions) {
                               .message = "must be positive",
                               .fix = "Use 1 to write the integrals every step"});
         }
-        if (!viscous_gradients.is_allocated()) {
-            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
-            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
-                                                 true, n_gradient_cells());
-        }
         integral_monitor.budget = find_value_or<bool>(input, "integrals", "budget", false);
         if (integral_monitor.budget && axisymmetric) {
             throw InputError("integrals.budget is for planar runs (the geometric source of axisymmetric runs is not "
                              "in it).");
         }
-        const std::string file = find_value_or<std::string>(input, "integrals", "file", "integrals.csv");
-        integral_monitor.file = file;
+        integral_monitor.file = find_value_or<std::string>(input, "integrals", "file", "integrals.csv");
+    }
+    // An undistributed solver runs on every rank (tests): no run log or report unless asked for
+    run_log_file = find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");
+    report_file = find_value_or<std::string>(input, "output", "report", distribute ? "report.html" : "");
+    divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
+}
+
+void Solver::init_output(region::Regions & regions) {
+    for (auto & monitor : force_monitors) {
+        FaceZone * zone = mesh->get_face_zone(monitor.zone);
+        if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
+        if (comm::allreduce(uint32_t(zone != nullptr), comm::Op::SUM) == 0) {
+            const std::vector<std::string> names = boundary_zone_names(*mesh, is_distributed());
+            throw InputError({.key = "forces.zone",
+                              .line = monitor.line,
+                              .message = "the mesh has no boundary zone \"" + monitor.zone + "\"",
+                              .valid = names,
+                              .suggestion = suggest_value(monitor.zone, names)});
+        }
+        std::vector<uint32_t> owned;
+        for (uint32_t i = 0; zone && i < zone->n_faces(); i++) {
+            const uint32_t f = zone->h_faces(i);
+            if (static_cast<uint32_t>(mesh->h_cells_of_face(f, 0)) < mesh->n_owned()) owned.push_back(f);
+        }
+        monitor.faces = Kokkos::View<uint32_t *>("force_faces", owned.size());
+        auto h_faces = Kokkos::create_mirror_view(monitor.faces);
+        for (size_t i = 0; i < owned.size(); i++) h_faces(i) = owned[i];
+        Kokkos::deep_copy(monitor.faces, h_faces);
+        uint32_t modeled = 0;
+        if (wall_model_on) {
+            const auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_data.face_bc);
+            for (const uint32_t f : owned) {
+                const int32_t i_bc = h_face_bc(f);
+                modeled |= i_bc >= 0 && wall_model_specs[static_cast<size_t>(i_bc)].parameters.type !=
+                                            WallModelType::NONE;
+            }
+        }
+        monitor.modeled = comm::allreduce(modeled, comm::Op::MAX) > 0;
+        const std::string & file = monitor.file;
+        if (comm::is_root() && output_files_enabled()) {
+            create_parent_directories("the forces file", file);
+            // init_output runs before the restart state is read, so check the input
+            const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
+                                std::filesystem::exists(file) && std::filesystem::file_size(file) > 0;
+            monitor.out = std::make_shared<std::ofstream>(file, resume ? std::ios::app : std::ios::trunc);
+            if (!monitor.out->good()) throw cannot_write("the forces file", file);
+            if (!resume) {
+                std::vector<Dimension> units = {dim::none, dim::time};
+                *monitor.out << "step,t";
+                for (const auto & [name, dimension] : force_columns(monitor.modeled)) {
+                    *monitor.out << "," << name;
+                    units.push_back(dimension);
+                }
+                *monitor.out << "\n" << field_units::csv_line(units) << "\n";
+            }
+        }
+    }
+    if (integral_monitor.interval > 0) {
+        if (!viscous_gradients.is_allocated()) {
+            viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
+            viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
+                                                 true, n_gradient_cells());
+        }
+        const std::string & file = integral_monitor.file;
         if (comm::is_root() && output_files_enabled()) {
             create_parent_directories("the integrals file", file);
             const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
@@ -2096,12 +2125,7 @@ void Solver::init_output(region::Regions & regions) {
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
-    // An undistributed solver runs on every rank (tests): no run log or report unless asked for
-    const std::string run_log_file =
-        find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");
-    const std::string report_file = find_value_or<std::string>(input, "output", "report", distribute ? "report.html" : "");
     run_log_on = (!run_log_file.empty() || !report_file.empty()) && output_files_enabled();
-    divergence_prefix = find_value_or<std::string>(input, "output", "divergence_report", "divergence_report");
     if (run_log_on) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
@@ -2111,7 +2135,7 @@ void Solver::init_output(region::Regions & regions) {
     }
     if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
-            add_data_writers(output, regions, async_output, io_threads);
+            add_data_writers(output, regions);
         }
     }
     if (probes.any_gradients() && !viscous_gradients.is_allocated()) {
@@ -2128,18 +2152,9 @@ void Solver::init_output(region::Regions & regions) {
     init_triggers();
 }
 
-void Solver::add_data_writers(const Input & output, region::Regions & regions, bool async_output,
-                              uint32_t io_threads) {
-    auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
-        data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
-        data_writers.back()->set_async(async_output, io_threads);
-    };
+std::vector<Solver::WriterTarget> Solver::write_data_targets(const Input & output, region::Regions & regions) const {
     const bool one = output.contains("region"), several = output.contains("regions");
-    if (!one && !several) {
-        add_writer(nullptr, "");
-        return;
-    }
+    if (!one && !several) return {{.kind = probe::RegionValue::Kind::WHOLE_MESH}};
     if (one && several) {
         throw InputError({.key = "write_data.regions",
                           .line = line_of(output, "regions"),
@@ -2166,39 +2181,18 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
             values.emplace_back(&list.as_array()[i], entry_key + ".regions[" + std::to_string(i) + "]");
         }
     }
+    std::vector<WriterTarget> targets;
     for (size_t i = 0; i < values.size(); i++) {
         const auto & [value, key] = values[i];
         const probe::RegionValue r = probe::classify_region(input, regions, *value, key);
-        const std::string file_prefix = one ? prefix : prefix + "_" + (r.name.empty() ? std::to_string(i) : r.name);
-        if (r.kind == probe::RegionValue::Kind::WHOLE_MESH) {
-            add_writer(nullptr, file_prefix);
-        } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
-            const region::Region & region = regions.get(*value, key);
-            region::require_full_dimension(region, *value, key);
-            CellSubset subset;
-            subset.name = region.summary();
-            if (region.moving() || region.solution()) {
-                // Its cells at each write: those of positive fraction where it is then
-                std::shared_ptr<const region::SolutionLevels> levels;
-                if (region.solution()) {
-                    levels = std::make_shared<region::SolutionLevels>(*mesh, region.conditions(), species_names,
-                                                                      cell_fields());
-                }
-                auto fractions = std::make_shared<region::MovingFractions>(*mesh, region, levels);
-                subset.update = [fractions](const Kokkos::View<const rtype> & time) { fractions->update(time); };
-                subset.moving_fractions = fractions->fractions();
-                subset.solution = region.solution();
-            } else {
-                subset.fractions = regions.fractions(*value, key);
-                for (uint32_t c = 0; c < mesh->n_owned(); c++) {
-                    if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
-                }
-                if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
-                    throw InputError(key + " contains no part of any cell.");
-                }
-            }
-            add_writer(&subset, file_prefix);
-        } else {
+        WriterTarget target{.kind = r.kind,
+                            .value = value,
+                            .key = key,
+                            .entry_key = entry_key,
+                            .prefix = one ? prefix : prefix + "_" + (r.name.empty() ? std::to_string(i) : r.name)};
+        if (r.kind == probe::RegionValue::Kind::VOLUME) {
+            region::require_full_dimension(regions.get(*value, key), *value, key);
+        } else if (r.kind != probe::RegionValue::Kind::WHOLE_MESH) {
             // Boundary zones, cut planes, surfaces, curves and points: point values, written as a probe writes them
             const std::string format = find_value_or<std::string>(output, "format", have_hdf5() ? "vtkhdf" : "vtu");
             if (format != "vtkhdf" && format != "vtu") {
@@ -2220,9 +2214,74 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                                   .message = "is false, but a surface, curve or points is written as one series file",
                                   .fix = "Remove series"});
             }
-            const bool vtkhdf = format == "vtkhdf";
-            Probes::Snapshot snapshot{file_prefix, entry_key, value, key, file_prefix + (vtkhdf ? ".vtkhdf" : ".pvd"),
-                                      vtkhdf ? Probes::Format::VTKHDF : Probes::Format::VTP};
+            target.vtkhdf = format == "vtkhdf";
+        }
+        targets.push_back(std::move(target));
+    }
+    return targets;
+}
+
+Probes::Snapshot Solver::snapshot_of(const WriterTarget & target) {
+    return {target.prefix,
+            target.entry_key,
+            target.value,
+            target.key,
+            target.prefix + (target.vtkhdf ? ".vtkhdf" : ".pvd"),
+            target.vtkhdf ? Probes::Format::VTKHDF : Probes::Format::VTP};
+}
+
+void Solver::read_write_data(region::Regions & regions, Probes & probe_reader) const {
+    if (!contains_optional(input, "write_data")) return;
+    for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
+        for (const WriterTarget & target : write_data_targets(output, regions)) {
+            if (target.kind == probe::RegionValue::Kind::WHOLE_MESH || target.kind == probe::RegionValue::Kind::VOLUME) {
+                DataWriter::read(output);
+            } else {
+                probe_reader.read_snapshot(input, regions, species_names, is_viscous(), output, snapshot_of(target));
+            }
+        }
+    }
+}
+
+void Solver::add_data_writers(const Input & output, region::Regions & regions) {
+    auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
+        data_writers.push_back(std::make_unique<DataWriter>());
+        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->set_async(async_output, io_threads);
+    };
+    for (const WriterTarget & target : write_data_targets(output, regions)) {
+        const std::string & file_prefix = target.prefix;
+        if (target.kind == probe::RegionValue::Kind::WHOLE_MESH) {
+            add_writer(nullptr, target.value ? file_prefix : "");
+        } else if (target.kind == probe::RegionValue::Kind::VOLUME) {
+            const Input & value = *target.value;
+            const std::string & key = target.key;
+            const region::Region & region = regions.get(value, key);
+            CellSubset subset;
+            subset.name = region.summary();
+            if (region.moving() || region.solution()) {
+                // Its cells at each write: those of positive fraction where it is then
+                std::shared_ptr<const region::SolutionLevels> levels;
+                if (region.solution()) {
+                    levels = std::make_shared<region::SolutionLevels>(*mesh, region.conditions(), species_names,
+                                                                      cell_fields());
+                }
+                auto fractions = std::make_shared<region::MovingFractions>(*mesh, region, levels);
+                subset.update = [fractions](const Kokkos::View<const rtype> & time) { fractions->update(time); };
+                subset.moving_fractions = fractions->fractions();
+                subset.solution = region.solution();
+            } else {
+                subset.fractions = regions.fractions(value, key);
+                for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+                    if (subset.fractions[c] > 0.0) subset.cells.push_back(c);
+                }
+                if (comm::allreduce(uint64_t(subset.cells.size()), comm::Op::SUM) == 0) {
+                    throw InputError(key + " contains no part of any cell.");
+                }
+            }
+            add_writer(&subset, file_prefix);
+        } else {
+            const Probes::Snapshot snapshot = snapshot_of(target);
             if (output_files_enabled()) create_parent_directories("the output", file_prefix);
             probes.add_snapshot(input, *mesh, regions, species_names,
                                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(),
@@ -2447,14 +2506,19 @@ void Solver::allocate_time_stepping() {
     }
 }
 
-void Solver::init_particles(region::Regions & regions) {
-    if (!Particles::configured(input)) return;
+void Solver::read_particles(region::Regions & regions) const {
+    if (state_reader || !Particles::configured(input)) return;
     if (simpler) {
         throw InputError(Diagnostic{.key = "particles",
                                     .line = line_of(input.at("particles")),
                                     .message = "is not available yet with chemistry.coupling = \"simpler\"",
                                     .docs = "docs/guide/particles.md"});
     }
+    Particles().read(input, regions, is_mixture() ? nullptr : &physics);
+}
+
+void Solver::init_particles(region::Regions & regions) {
+    if (!Particles::configured(input)) return;
     // A restart file's particles continue; a file without them (or a remap) seeds them from [particles]
     std::optional<RestartArrays> restart;
     if (find_value_or<std::string>(input, "initialize", "type", "constant") == "restart" &&

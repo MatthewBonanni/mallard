@@ -34,6 +34,12 @@ struct Resolution {
 
     /** @brief "high_order", "(default)" if so, plus the keys the input overrides with their values, for the log. */
     std::string summary(const ResolvedInput & resolved) const;
+
+    /**
+     * @brief As run blocks record it: {"name", "default", "settings": [{"key", "value", "from_preset"}]},
+     *        each value the key's record; null without a preset.
+     */
+    std::string json(const ResolvedInput & resolved) const;
 };
 
 /** @brief The preset of an input that sets neither `[numerics] preset` nor `[numerics.face_reconstruction]`. */

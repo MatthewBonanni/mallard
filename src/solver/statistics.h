@@ -101,6 +101,8 @@ struct CellSampler {
  */
 class PhaseAverage {
     public:
+        /** @brief Reads and checks [statistics.phase] (table) without the mesh. */
+        void read(const Input & table, uint64_t interval_in, rtype t_start_in);
         /** @brief Read [statistics.phase] (table), sampling every interval steps from t_start. */
         void init(const Input & table, const Mesh & mesh, const std::vector<std::string> & species_names,
                   uint32_t n_cells, uint64_t interval, rtype t_start, bool use_nccl);
@@ -242,6 +244,9 @@ class Statistics {
             uint64_t index;
             uint32_t close;
         };
+
+        /** @brief Reads and checks [statistics] (if any) without the mesh. */
+        void read(const Input & input, region::Regions * regions);
 
         /**
          * @brief Read [statistics] (if any) and allocate the mesh's cells; derived fields average
