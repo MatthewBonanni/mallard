@@ -20,7 +20,7 @@ notes' section 2 says a generator builds one:
 
     python tools/docs/flamelet.py [--compute] [names...]
 
---compute solves the flamelets with Cantera (about 1 min) and writes
+--compute solves the flamelets with Cantera (about 3 min) and writes
 flamelet.json next to this script; without it the figures read that file, so
 drawing them needs NumPy, SciPy and Matplotlib only. The flamelets: H2/N2
 (1:1 by mole) against air, both at 300 K and 1 atm, mechanisms/h2o2.yaml, unity
