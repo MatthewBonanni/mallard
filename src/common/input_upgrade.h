@@ -124,7 +124,8 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
  *        only that key's line changes (a new key goes after its table's last key, a new table and its keys at
  *        the end); where that is not possible (a dotted key, a key of an inline table, a value over several
  *        lines) the whole text is reformatted, comments kept. Throws std::invalid_argument for a malformed key
- *        or value, or a key whose table is not a table of the input (an element past the end of its array).
+ *        or value, or a key whose table is not a table of the input. An index equal to its array's length appends an element
+ *        to an array of tables (a new array for index 0).
  */
 std::string set_value(const std::string & text, const std::string & key, const std::string & value);
 

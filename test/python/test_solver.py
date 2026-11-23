@@ -160,7 +160,7 @@ def test_a_case_set_from_python_emits_the_toml_mallard_runs_bit_for_bit(tmp_path
     changed = base.toml().replace("n_steps = 4", "n_steps = 8").replace("cfl = 0.4", "cfl = 0.3")
     assert text.startswith(changed.replace('"HLLC"', '"HLL"') + "\n[statistics]\n"), text
     with pytest.raises(mallard.Error) as e:
-        base.set("probes[0].interval", 1)
+        base.set("probes[1].interval", 1)
     assert e.value.code == "E-INPUT"
 
     exe, py = tmp_path / "executable", tmp_path / "python"
@@ -178,6 +178,53 @@ def test_a_case_set_from_python_emits_the_toml_mallard_runs_bit_for_bit(tmp_path
     same_files(exe / "solut", py / "solut")
     start = [r for r in events(py)[1] if r["type"] == "start"][-1]
     assert start["provenance"]["input"]["text"] == text
+
+
+def test_a_typed_config_emits_the_toml_mallard_runs_bit_for_bit(tmp_path, monkeypatch):
+    from mallard import config
+    base = mallard.Case.from_toml(case_text(4))
+    case = (base.set(config.Run(n_steps=8, cfl=0.3, t_stop=(60, "ms")))
+            .set(config.Numerics(riemann_solver="HLL", face_reconstruction={"type": "MUSCL", "limiter": "barth_jespersen"}))
+            .set(config.Probes(0, name="left", fields=["RHO"], region=config.Inline({"type": "box" if DIM == 3 else "rectangle",
+                                                                                        "center": [0.3, 0.5, 0.5][:DIM],
+                                                                                        "size": [0.2, 0.4, 0.6][:DIM]}),
+                               reductions=["max"], interval=2)))
+    # The same keys set one by one: a typed config is only a typed way to write them
+    by_key = (base.set("run.n_steps", 8).set("run.cfl", 0.3).set("run.t_stop", "60 ms")
+              .set("numerics.riemann_solver", "HLL").set("numerics.face_reconstruction.type", "MUSCL")
+              .set("numerics.face_reconstruction.limiter", "barth_jespersen"))
+    text = case.toml()
+    # In the order of the class's keywords
+    assert text.startswith(by_key.toml() + '\n[[probes]]\nfields = ["RHO"]\ninterval = 2\nname = "left"\n'), text
+    with pytest.raises(ValueError):
+        base.set(config.ProbesRegion(type="circle"))
+    with pytest.raises(TypeError):
+        config.Run(n_step=8)
+
+    exe, py = tmp_path / "executable", tmp_path / "python"
+    exe.mkdir()
+    py.mkdir()
+    (exe / "input.toml").write_text(text)
+    run_executable(exe)
+    monkeypatch.chdir(py)
+    solver = mallard.Solver(case.save("input.toml"))
+    assert solver.run() == 0
+    assert solver.monitor("left_max_RHO") is not None and solver.time() <= 0.06
+    same_files(exe / "solut", py / "solut")
+
+
+def test_check_reports_mallard_checks_results_as_structs(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    report = mallard.Case.from_toml(case_text(4)).check()
+    assert report.ok and report.setup_done and report.status != "error", report.text
+    assert report.time_step.set_by == "CFL" and report.time_step.dt > 0
+    assert report.cost.n_steps == 4
+    assert json.loads(report.json)["status"] == report.status
+    assert not os.path.exists("solut")
+    bad = mallard.Case.from_toml(case_text(4)).set("run.t_stpo", 0.5).check(log=lambda m: None)
+    assert not bad.ok and bad.status == "error"
+    assert [(k.key, k.suggestion) for k in bad.unused_keys] == [("run.t_stpo", "run.t_stop")]
+    assert any(d.code == "E-KEY-UNUSED" and d.level == "error" for d in bad.diagnostics)
 
 
 def test_progress_output_and_record_callbacks_and_the_log_sink(tmp_path, monkeypatch, capfd):

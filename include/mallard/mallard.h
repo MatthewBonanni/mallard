@@ -90,6 +90,24 @@ class Session {
 };
 
 /**
+ * @brief A dimensional value for a typed config's setter (config.h): a plain number is in SI units (or the unit the
+ *        key documents, as for the input), or a value with its unit, as the input writes it: `Quantity(5.0, "mm")`
+ *        is `"5 mm"`, converted by setup, which checks the unit's dimension.
+ */
+class Quantity {
+    public:
+        Quantity(double value) : value_(value) {}
+        Quantity(double value, std::string unit) : value_(value), unit_(std::move(unit)) {}
+        double value() const { return value_; }
+        /** @brief The unit ("mm", "atm", "m/s"), or empty for a plain number. */
+        const std::string & unit() const { return unit_; }
+
+    private:
+        double value_;
+        std::string unit_;
+};
+
+/**
  * @brief A TOML value for Case::set: a bool, an integer, a float, a string, or an array of values (`{1.0, 2.0}`, a
  *        `std::vector`). Value::toml takes any other TOML value as written (an inline table, a date).
  */
@@ -108,6 +126,8 @@ class Value {
         Value(const std::string & s);
         Value(std::string_view s);
         Value(std::initializer_list<Value> items);
+        /** @brief A number, or a string of the number and its unit ("5 mm"). */
+        Value(const Quantity & q);
         template <typename T>
         Value(const std::vector<T> & items) : Value(array(std::vector<Value>(items.begin(), items.end()))) {}
         /** @brief A TOML value as written: `Value::toml("{type = \"box\", size = [1.0, 2.0]}")`, checked by set. */
@@ -121,6 +141,37 @@ class Value {
         static Value array(const std::vector<Value> & items);
         std::string text_;
 };
+
+struct CheckReport;
+struct CheckOptions;
+
+namespace config {
+/**
+ * @brief The keys of one table of the input and their values, in the order set: the base of the typed configs
+ *        (mallard/config.h, generated from the key catalog), which Case::set writes into the case's TOML.
+ */
+class Table {
+    public:
+        /**
+         * @brief The table's key path in the input ("run", "numerics.face_reconstruction", "probes[0]"); empty for a
+         *        table that only its parent's setter takes (inside an array of tables or a named table).
+         */
+        const std::string & path() const { return path_; }
+        /** @brief The keys set, relative to path(), with their values, in order. */
+        const std::vector<std::pair<std::string, Value>> & entries() const { return entries_; }
+
+    protected:
+        explicit Table(std::string path) : path_(std::move(path)) {}
+        void put(const std::string & key, const Value & value) { entries_.emplace_back(key, value); }
+        void put(const std::string & key, const Table & table) {
+            for (const auto & [k, v] : table.entries_) entries_.emplace_back(key + "." + k, v);
+        }
+
+    private:
+        std::string path_;
+        std::vector<std::pair<std::string, Value>> entries_;
+};
+} // namespace config
 
 /**
  * @brief A case: the TOML input of a run. The input is the run's record: Solver runs exactly this text, and the
@@ -143,17 +194,31 @@ class Case {
          * @brief This case with one key set, a new case (cases are values): its TOML text with that key's line
          *        changed, or added after its table's last key (a new table at the end), so toml() stays the run's
          *        whole record. `key` is a path of bare keys, an element of an array of tables by its index:
-         *        "run.n_steps", "numerics.face_reconstruction.type", "probes[0].interval". The text is reformatted
-         *        (comments kept) only where the key's line cannot change alone (a dotted key, a key of an inline
-         *        table, a value over several lines). Keys are checked by setup, as a file's are. Throws Error for a
-         *        malformed key or value, or one whose table is not a table of the case.
+         *        "run.n_steps", "numerics.face_reconstruction.type", "probes[0].interval"; an index equal to the
+         *        array's length appends an element ("probes[2]" of two probes, "probes[0]" of none). The text is
+         *        reformatted (comments kept) only where the key's line cannot change alone (a dotted key, a key of an
+         *        inline table, a value over several lines). Keys are checked by setup, as a file's are. Throws Error
+         *        for a malformed key or value, or one whose table is not a table of the case.
          */
         Case set(std::string_view key, const Value & value) const;
+        /**
+         * @brief This case with every key of a typed config set, in order, as set(key, value) sets each:
+         *        `c.set(config::Run().dt(Quantity(1.0, "us")).n_steps(100))`. Throws Error for a table without a
+         *        path (set it through its parent's setter).
+         */
+        Case set(const config::Table & table) const;
         /**
          * @brief Writes toml() to `path` and returns the case of that file, which a run then builds from (the
          *        file on disk is the run's input, as for `mallard -i path`).
          */
         Case save(const std::string & path) const;
+        /**
+         * @brief `mallard check` on the case, as structs: its setup without the run (no files written), then the
+         *        diagnostics, unused keys, time step, resolution, memory and cost estimates. An invalid input gives a
+         *        report of its errors, not an exception. Needs a Session; collective under MPI.
+         */
+        CheckReport check() const;
+        CheckReport check(const CheckOptions & options) const;
         /** @brief The input file of from_toml_file, else empty. */
         const std::string & path() const;
         /**
@@ -296,6 +361,105 @@ struct LogMessage {
 
 /** @brief Where Solver::set_log sends the solver's console output. */
 using LogSink = std::function<void(const LogMessage &)>;
+
+/** @brief What Case::check estimates for, as `mallard check`'s options give it. */
+struct CheckOptions {
+    int ranks = 0;            ///< ranks to estimate memory and cost for (--ranks); 0: the session's
+    double throughput = 0.0;  ///< cells/s per rank to estimate the cost with (--throughput); 0: measured or none
+    uint64_t steps = 0;       ///< steps to time for a measured throughput (--steps)
+    std::string memory;       ///< memory per rank to size the run for (--memory): "40GB", "a100-80"; empty: the device's
+    LogSink log;              ///< where the setup's console output goes, as Solver::set_log; empty: the console
+};
+
+/** @brief An error or warning of a check, with its diagnostic code. */
+struct CheckDiagnostic {
+    LogLevel level = LogLevel::error;  ///< error or warning
+    std::string code;                  ///< "E-INPUT", "W-CFL", ...
+    std::string message;
+    std::string docs;                  ///< the page and anchor of the docs that explain it
+};
+
+/** @brief A key the input sets that setup does not read (each also an E-KEY-UNUSED diagnostic). */
+struct CheckUnusedKey {
+    std::string key;         ///< "mesh.Nxx", "boundaries[2].tpye"
+    uint64_t line = 0;       ///< of the input, 0 if unknown
+    std::string suggestion;  ///< the likely intended key, or empty
+};
+
+/** @brief A boundary zone and its condition. */
+struct CheckBoundary {
+    std::string zone;
+    std::string condition;
+    uint64_t faces = 0;
+    std::string details;     ///< how the condition varies or what models it, or empty
+    std::string turbulence;  ///< its synthetic inflow turbulence, or empty
+};
+
+/** @brief An estimate of the resolution against the physical scales (y+, cells per flame thickness, ...). */
+struct CheckEstimate {
+    std::string id;        ///< stable: "y_plus_max"
+    std::string quantity;  ///< as the report names it
+    double value = 0.0;    ///< NaN if not estimated (basis says why)
+    std::string unit;      ///< SI ("m"), "wall units" or "dimensionless"
+    std::string target;    ///< what the regime needs ("<= 1 (DNS)"), or empty
+    std::string status;    ///< "ok", "warning", "error", or "none" without a target
+    std::string basis;     ///< what it is estimated from
+    std::string region;    ///< the region it is of; empty: the domain
+};
+
+/** @brief The initial time step. */
+struct CheckTimeStep {
+    double t = 0.0;          ///< s
+    double dt = 0.0;         ///< s
+    double dt_cfl1 = 0.0;    ///< the time step at CFL 1 (s)
+    double cfl = 0.0;        ///< dt's CFL number
+    double cfl_limit = 0.0;  ///< the time integrator's for smooth flow
+    std::string integrator;
+    std::string set_by;      ///< "CFL", "sponge" or "fixed"
+};
+
+/** @brief Memory after setup and at its peak, on the largest rank, and predicted for CheckOptions::ranks. */
+struct CheckMemory {
+    bool device_memory = false;   ///< a device with its own memory, else host memory
+    int ranks = 1;                ///< the check's ranks
+    uint64_t bytes = 0;           ///< after setup
+    uint64_t bytes_peak = 0;      ///< during setup
+    int target_ranks = 1;
+    uint64_t target_bytes_peak = 0;
+    uint64_t device_capacity = 0;  ///< 0 if unknown
+};
+
+/** @brief The cost of the run to its stop condition. */
+struct CheckCost {
+    uint64_t cells = 0;
+    int ranks = 1;
+    double throughput = 0.0;           ///< cells/s per rank
+    bool throughput_measured = false;
+    double wall_per_time = 0.0;        ///< wall seconds per simulated second
+    double flow_through_time = 0.0;    ///< s, 0 if none
+    double t_stop = 0.0;               ///< s
+    uint64_t n_steps = 0;
+};
+
+/**
+ * @brief `mallard check`'s report as structs (docs/guide/input_files.md#checking-an-input), with the whole report
+ *        as its text and as JSON (`mallard check --format json`), environment section aside.
+ */
+struct CheckReport {
+    std::string status;  ///< "ok", "warning" or "error"
+    bool ok = false;     ///< no error: the case runs
+    bool setup_done = false;
+    std::vector<CheckDiagnostic> diagnostics;
+    std::vector<CheckUnusedKey> unused_keys;
+    std::vector<CheckBoundary> boundaries;
+    std::optional<CheckTimeStep> time_step;   ///< after a setup
+    std::vector<CheckEstimate> resolution;
+    std::optional<CheckMemory> memory;        ///< after a setup
+    std::optional<CheckCost> cost;            ///< after a setup
+    std::string resolved;  ///< the input with every key explicit (`mallard input resolve`), after a setup
+    std::string text;      ///< the report as `mallard check` prints it, without color
+    std::string json;      ///< the report as `mallard check --format json` writes it
+};
 
 /** @brief Identifies a registered callback, for Solver::remove_callback. */
 using CallbackId = uint64_t;

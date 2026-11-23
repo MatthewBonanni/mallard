@@ -217,6 +217,130 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         return mallard::Case::from_toml(text, name).set(key, mallard::Value::toml(value)).toml();
     });
 
+    m.def("case_check",
+          [](const std::string & text, const std::string & path, const std::string & name, int ranks, double throughput,
+             uint64_t steps, const std::string & memory, nb::object log) {
+              const mallard::Case c = path.empty() ? mallard::Case::from_toml(text, name) : mallard::Case::from_toml_file(path);
+              mallard::CheckOptions options;
+              options.ranks = ranks;
+              options.throughput = throughput;
+              options.steps = steps;
+              options.memory = memory;
+              std::unique_ptr<nb::python_error> raised;
+              if (!log.is_none()) {
+                  options.log = [&log, &raised](const mallard::LogMessage & message) {
+                      nb::gil_scoped_acquire acquire;
+                      if (raised) return;
+                      try {
+                          log(message);
+                      } catch (nb::python_error & e) {
+                          raised = std::make_unique<nb::python_error>(std::move(e));
+                      }
+                  };
+              }
+              mallard::CheckReport report;
+              {
+                  nb::gil_scoped_release release;
+                  report = c.check(options);
+              }
+              if (raised) {
+                  raised->restore();
+                  throw nb::python_error();
+              }
+              return report;
+          },
+          "text"_a, "path"_a, "name"_a, "ranks"_a, "throughput"_a, "steps"_a, "memory"_a, "log"_a.none());
+
+    nb::class_<mallard::CheckDiagnostic>(m, "CheckDiagnostic")
+        .def_prop_ro("level",
+                     [](const mallard::CheckDiagnostic & x) {
+                         return x.level == mallard::LogLevel::warning ? "warning" : "error";
+                     })
+        .def_ro("code", &mallard::CheckDiagnostic::code)
+        .def_ro("message", &mallard::CheckDiagnostic::message)
+        .def_ro("docs", &mallard::CheckDiagnostic::docs)
+        .def("__repr__", [](const mallard::CheckDiagnostic & x) {
+            return "CheckDiagnostic(code='" + x.code + "', message='" + x.message + "')";
+        });
+
+    nb::class_<mallard::CheckUnusedKey>(m, "CheckUnusedKey")
+        .def_ro("key", &mallard::CheckUnusedKey::key)
+        .def_ro("line", &mallard::CheckUnusedKey::line)
+        .def_ro("suggestion", &mallard::CheckUnusedKey::suggestion)
+        .def("__repr__", [](const mallard::CheckUnusedKey & x) {
+            return "CheckUnusedKey(key='" + x.key + "', line=" + std::to_string(x.line) + ", suggestion='" +
+                   x.suggestion + "')";
+        });
+
+    nb::class_<mallard::CheckBoundary>(m, "CheckBoundary")
+        .def_ro("zone", &mallard::CheckBoundary::zone)
+        .def_ro("condition", &mallard::CheckBoundary::condition)
+        .def_ro("faces", &mallard::CheckBoundary::faces)
+        .def_ro("details", &mallard::CheckBoundary::details)
+        .def_ro("turbulence", &mallard::CheckBoundary::turbulence)
+        .def("__repr__", [](const mallard::CheckBoundary & x) {
+            return "CheckBoundary(zone='" + x.zone + "', condition='" + x.condition + "')";
+        });
+
+    nb::class_<mallard::CheckEstimate>(m, "CheckEstimate")
+        .def_ro("id", &mallard::CheckEstimate::id)
+        .def_ro("quantity", &mallard::CheckEstimate::quantity)
+        .def_ro("value", &mallard::CheckEstimate::value)
+        .def_ro("unit", &mallard::CheckEstimate::unit)
+        .def_ro("target", &mallard::CheckEstimate::target)
+        .def_ro("status", &mallard::CheckEstimate::status)
+        .def_ro("basis", &mallard::CheckEstimate::basis)
+        .def_ro("region", &mallard::CheckEstimate::region)
+        .def("__repr__", [](const mallard::CheckEstimate & x) {
+            return "CheckEstimate(id='" + x.id + "', value=" + std::to_string(x.value) + ")";
+        });
+
+    nb::class_<mallard::CheckTimeStep>(m, "CheckTimeStep")
+        .def_ro("t", &mallard::CheckTimeStep::t)
+        .def_ro("dt", &mallard::CheckTimeStep::dt)
+        .def_ro("dt_cfl1", &mallard::CheckTimeStep::dt_cfl1)
+        .def_ro("cfl", &mallard::CheckTimeStep::cfl)
+        .def_ro("cfl_limit", &mallard::CheckTimeStep::cfl_limit)
+        .def_ro("integrator", &mallard::CheckTimeStep::integrator)
+        .def_ro("set_by", &mallard::CheckTimeStep::set_by);
+
+    nb::class_<mallard::CheckMemory>(m, "CheckMemory")
+        .def_ro("device_memory", &mallard::CheckMemory::device_memory)
+        .def_ro("ranks", &mallard::CheckMemory::ranks)
+        .def_ro("bytes", &mallard::CheckMemory::bytes)
+        .def_ro("bytes_peak", &mallard::CheckMemory::bytes_peak)
+        .def_ro("target_ranks", &mallard::CheckMemory::target_ranks)
+        .def_ro("target_bytes_peak", &mallard::CheckMemory::target_bytes_peak)
+        .def_ro("device_capacity", &mallard::CheckMemory::device_capacity);
+
+    nb::class_<mallard::CheckCost>(m, "CheckCost")
+        .def_ro("cells", &mallard::CheckCost::cells)
+        .def_ro("ranks", &mallard::CheckCost::ranks)
+        .def_ro("throughput", &mallard::CheckCost::throughput)
+        .def_ro("throughput_measured", &mallard::CheckCost::throughput_measured)
+        .def_ro("wall_per_time", &mallard::CheckCost::wall_per_time)
+        .def_ro("flow_through_time", &mallard::CheckCost::flow_through_time)
+        .def_ro("t_stop", &mallard::CheckCost::t_stop)
+        .def_ro("n_steps", &mallard::CheckCost::n_steps);
+
+    nb::class_<mallard::CheckReport>(m, "CheckReport")
+        .def_ro("status", &mallard::CheckReport::status)
+        .def_ro("ok", &mallard::CheckReport::ok)
+        .def_ro("setup_done", &mallard::CheckReport::setup_done)
+        .def_ro("diagnostics", &mallard::CheckReport::diagnostics)
+        .def_ro("unused_keys", &mallard::CheckReport::unused_keys)
+        .def_ro("boundaries", &mallard::CheckReport::boundaries)
+        .def_ro("time_step", &mallard::CheckReport::time_step)
+        .def_ro("resolution", &mallard::CheckReport::resolution)
+        .def_ro("memory", &mallard::CheckReport::memory)
+        .def_ro("cost", &mallard::CheckReport::cost)
+        .def_ro("resolved", &mallard::CheckReport::resolved)
+        .def_ro("text", &mallard::CheckReport::text)
+        .def_ro("json", &mallard::CheckReport::json)
+        .def("__repr__", [](const mallard::CheckReport & x) {
+            return "CheckReport(status='" + x.status + "', diagnostics=" + std::to_string(x.diagnostics.size()) + ")";
+        });
+
     nb::class_<mallard::Monitor>(m, "Monitor")
         .def_ro("name", &mallard::Monitor::name)
         .def_ro("unit", &mallard::Monitor::unit)

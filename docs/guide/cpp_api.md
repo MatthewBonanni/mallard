@@ -107,7 +107,69 @@ for (const double cfl : {0.3, 0.5, 0.7}) {
 
 A key the line cannot hold alone (a dotted key, a key of an inline table, a
 value written over several lines) has the whole text reformatted, comments
-kept.
+kept. An index equal to its array's length appends an element: `probes[2]` of a
+case with two probes adds a `[[probes]]` table at the end.
+
+### Typed configs
+
+`mallard/config.h` has a class per table of the input, generated from the key
+catalog (the keys setup reads, `docs/input-keys/`), with a setter per key, typed
+and documented as [the input reference](../input.md) documents the key.
+`case.set(table)` sets every key the table holds, in order, through
+`case.set(key, value)`: a typed config writes TOML, which setup then reads and
+checks as a file's, so the run still builds from the TOML and records it.
+
+```cpp
+#include <mallard/config.h>
+namespace config = mallard::config;
+
+const mallard::Case c = mallard::Case::from_toml_file("input.toml")
+    .set(config::Run().cfl(0.5).t_stop(mallard::Quantity(2.0, "ms")))
+    .set(config::Numerics().face_reconstruction(config::NumericsFaceReconstruction().type("TENO").order(5)))
+    .set(config::Probes(1).name("wake").fields({"P"}).point({0.5, 0.1}).file("wake.csv"));
+```
+
+- **Classes.** A table's class is its path in CamelCase: `[run]` is
+  `config::Run`, `[numerics.face_reconstruction]` is
+  `config::NumericsFaceReconstruction`. An element of an array of tables takes
+  its index (`config::Probes(1)`, `config::WriteData(0)`; the array's length
+  appends one), a named table its name (`config::Regions("jet")`). A table
+  inside an array of tables or a named table is set through its parent's
+  setter (`config::Probes(0).region(config::ProbesRegion().type("circle"))`),
+  an array of tables inside one through a `std::vector` of its elements.
+- **Values.** Setters take `bool`, `std::int64_t`, `double` or
+  `std::string_view` as the key's type is; a key with a physical dimension
+  takes a `mallard::Quantity`: a plain number in SI units (or the unit the key
+  documents), or `Quantity(5.0, "mm")`, written `"5 mm"` and converted by setup
+  ([units](input_files.md#units)). Keys without one type (expressions,
+  arrays, a region's name or inline table) take a `mallard::Value`; a species
+  table (`X`, `Y`) takes each species and its value (`.X("O2", 0.21)`).
+- **Coverage.** The catalog has the keys some input of the repository sets up,
+  so a key the catalog lacks for a table (a region's parameters of another
+  type) has no setter: set it with `Value::toml("{...}")` on the parent's
+  setter, or with `case.set(key, value)`. `tools/dev/input_config.py`
+  regenerates the header from the catalog, and CI fails when it is out of date.
+
+## Checking a case
+
+`case.check()` is [`mallard check`](input_files.md#checking-an-input) on the
+case, as a `mallard::CheckReport`: the setup without the run (no files are
+written), then `status` (`"ok"`, `"warning"`, `"error"`), `ok`,
+`diagnostics` (each with its `level`, `code`, `message` and `docs`),
+`unused_keys` (each `key`, `line` and `suggestion`), `boundaries`,
+`time_step`, `resolution` (the estimates of y+, cells per flame thickness,
+...), `memory` and `cost`, the `resolved` input (every key explicit), and the
+whole report as `mallard check` prints it (`text`) and as
+`mallard check --format json` writes it (`json`). An invalid input gives a
+report of its errors, not an exception. `CheckOptions` takes `mallard check`'s
+`ranks`, `throughput`, `steps` and `memory`, and a `log` sink for the setup's
+console output. It needs a `Session`, and is collective under MPI.
+
+```cpp
+const mallard::CheckReport r = c.check();
+for (const mallard::CheckUnusedKey & k : r.unused_keys) std::cerr << k.key << ": did you mean " << k.suggestion << "\n";
+if (r.ok) std::cout << "dt " << r.time_step->dt << " s, " << r.cost->wall_per_time << " wall s per s\n";
+```
 
 ## Fields
 

@@ -36,6 +36,7 @@
 #include "parallel/comm.h"
 #include "run_log.h"
 #include "run_status.h"
+#include "solver/check.h"
 #include "solver/solver.h"
 #include "common/units.h"
 #include "version.h"
@@ -231,6 +232,10 @@ Value::Value(const std::string & s) : text_(input_detail::string_text(s)) {}
 Value::Value(const std::string_view s) : Value(std::string(s)) {}
 Value::Value(const std::initializer_list<Value> items) : Value(array(std::vector<Value>(items))) {}
 
+Value::Value(const Quantity & q)
+    : text_(q.unit().empty() ? input_detail::float_text(q.value())
+                             : input_detail::string_text(input_detail::float_text(q.value()) + " " + q.unit())) {}
+
 Value Value::toml(std::string text) { return Value(Text{}, std::move(text)); }
 
 Value Value::array(const std::vector<Value> & items) {
@@ -264,6 +269,16 @@ Case Case::set(const std::string_view key, const Value & value) const {
     return Case(std::move(text), "", name_);
 }
 
+Case Case::set(const config::Table & table) const {
+    if (table.path().empty()) {
+        throw Error(diagnostic_code::INPUT, name_ + ": a table inside an array of tables or a named table is set "
+                                                    "through its parent's setter, which places it");
+    }
+    Case out = *this;
+    for (const auto & [key, value] : table.entries()) out = out.set(table.path() + "." + key, value);
+    return out;
+}
+
 Case Case::save(const std::string & path) const {
     // Every rank of a run may save the case: each writes its own file and renames it, which replaces atomically
     const std::string own = path + ".tmp" + std::to_string(std::random_device{}());
@@ -280,6 +295,77 @@ Case Case::save(const std::string & path) const {
         throw Error(diagnostic_code::INPUT, error_text(cannot_write("the input file", path)));
     }
     return from_toml_file(path);
+}
+
+CheckReport Case::check() const { return check(CheckOptions{}); }
+
+CheckReport Case::check(const CheckOptions & options) const {
+    if (!Kokkos::is_initialized()) throw std::logic_error("mallard::Case::check: create a mallard::Session first");
+    ::CheckOptions o;
+    o.input_file = name_;
+    o.ranks = options.ranks;
+    o.throughput = options.throughput;
+    o.steps = options.steps;
+    if (!options.memory.empty()) {
+        if (const std::string error = set_memory_target(options.memory, o); !error.empty()) {
+            throw Error(diagnostic_code::INPUT, "mallard::CheckOptions::memory: " + error);
+        }
+    }
+    logging::Sink sink;
+    if (options.log) {
+        sink = [log = options.log](logging::Level level, std::string_view code, std::string_view text) {
+            LogMessage message;
+            message.level = level == logging::Level::WARNING ? LogLevel::warning
+                            : level == logging::Level::ERROR ? LogLevel::error
+                                                             : LogLevel::info;
+            message.code = code;
+            message.text = text;
+            log(message);
+        };
+    }
+    struct Restore {
+        logging::Sink previous;
+        ~Restore() { logging::set_sink(std::move(previous)); }
+    } restore{logging::set_sink(std::move(sink))};
+
+    ::CheckReport r;
+    try {
+        ::Solver solver;
+        r = solver.check(path_.empty() ? parse_input_string(text_, name_) : parse_input(path_), o);
+    } catch (const InputError & e) {
+        r = ::CheckReport{};
+        r.input_file = name_;
+        r.error(diagnostic_code::INPUT, name_ + ": " + error_text(e));
+    }
+    CheckReport out;
+    out.status = report::status_name(r.status());
+    out.ok = r.ok();
+    out.setup_done = r.setup_done;
+    for (const ::CheckDiagnostic & d : r.diagnostics) {
+        out.diagnostics.push_back({d.severity == report::Status::WARNING ? LogLevel::warning : LogLevel::error, d.code,
+                                   d.message, d.docs()});
+    }
+    for (const Diagnostic & d : r.unused) out.unused_keys.push_back({d.key, d.line, d.suggestion});
+    for (const ::CheckBoundary & b : r.boundaries) {
+        out.boundaries.push_back({b.zone, b.condition, b.faces, b.details, b.turbulence});
+    }
+    if (r.dt > 0.0) out.time_step = CheckTimeStep{r.t, r.dt, r.dt_cfl1, r.cfl, r.cfl_limit, r.integrator, r.dt_limit};
+    for (const ::CheckEstimate & e : r.resolution) {
+        out.resolution.push_back(
+            {e.id, e.quantity, e.value, e.units, e.target, report::status_name(e.status), e.basis, e.region});
+    }
+    if (r.bytes > 0) {
+        out.memory = CheckMemory{r.device_memory, r.ranks,          r.bytes, r.bytes_peak, r.target_ranks,
+                                 r.target_bytes_peak, r.device_capacity};
+    }
+    if (r.setup_done) {
+        out.cost = CheckCost{r.n_cells,       r.target_ranks,      r.throughput, r.throughput_measured,
+                             r.wall_per_time, r.flow_through_time, r.t_stop,     r.n_steps};
+    }
+    out.resolved = r.resolved;
+    out.text = check_text(r, false);
+    out.json = check_json(r);
+    return out;
 }
 
 const std::string & Case::path() const { return path_; }

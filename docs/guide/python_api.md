@@ -269,11 +269,21 @@ The TOML text, exactly as read: write it to a file to rerun the case with mallar
 
 The input file of from_toml_file, else "".
 
-#### `case.set(key, value)`
+#### `case.set(key, value=None)`
 
 This case with one key set, a new case: its TOML text with that key's line changed (or added), so toml()
 stays the run's whole record. key is a path of bare keys, an element of an array of tables by its index
-("run.n_steps", "probes[0].interval"); value is a bool, int, float, str, or a list or dict of them.
+("run.n_steps", "probes[0].interval"; the array's length appends an element); value is a bool, int, float,
+str, or a list or dict of them. key may instead be a typed config of mallard.config, without value: every
+key it holds is set, in the order of its class's keywords (case.set(config.Run(dt="1 us", n_steps=100))).
+
+#### `case.check(ranks=0, throughput=0.0, steps=0, memory='', log=None)`
+
+mallard check on the case, as a CheckReport (status, ok, diagnostics, unused_keys, boundaries,
+time_step, resolution, memory, cost, resolved, and the whole report as text and json): its setup without
+the run. An invalid input gives a report of its errors, not an exception. ranks, throughput, steps and
+memory are mallard check's options; log, a function of a LogMessage, takes the setup's console output
+(as Solver.set_log). Starts a session if none is started.
 
 #### `case.save(path)`
 

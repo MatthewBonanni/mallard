@@ -15,7 +15,9 @@ text) or that it is required, the accepted values, the builds (2D, 3D) whose set
 read it, and the inputs that set it. A key's file is its path, percent-encoded
 outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
 plus .json. With --check it compares with the committed files instead of writing
-them, and exits 1 if they differ.
+them, and exits 1 if they differ. After a build, python tools/dev/input_config.py
+regenerates the typed configs (include/mallard/config.h, tools/mallard/config.py)
+from the catalog.
 
 docs: checks docs/input.md against the catalog and exits 1 on any difference:
 every key of its key tables (those headed "| Key |") must be in the catalog, and
