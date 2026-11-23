@@ -11,7 +11,17 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 *A 2D Riemann problem on 16.8M quadrilaterals; a cellular detonation in 2H2-O2-7Ar on 19.2M hexahedra, front speed within 0.2% of Chapman-Jouguet; the Taylor-Green vortex at Re = 1600 on 256³ hexahedra, peak dissipation within 0.3% of the spectral DNS; autoignition of stratified lean H2/air at 41 atm ([`examples/`](https://matthewbonanni.github.io/mallard/docs/examples/)).*
 
-> **NOTE:** Mallard is under active development.
+<table><tr><td>
+
+**What's new**
+
+- **Automatic structured fast path** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/#cell-numbering)): Mallard finds the structured blocks in any mesh, uniform, stretched or warped, reads their stencils by index and shares TENO tables between cells of the same shape; one A100-80GB runs 13.1M TENO5 cells, where 0.10.0 ran out of memory above 2M, and `teno5_3d` steps 1.41x faster
+- **[Tabulated chemistry](https://matthewbonanni.github.io/mallard/docs/guide/flamelet/)**: flamelet/progress-variable (FPV) tables, with LES and thickened flames
+- **[Lagrangian particles](https://matthewbonanni.github.io/mallard/docs/guide/particles/)**: tracer and solid particles on the high-order reconstruction
+- **[C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/)** to run cases from your own program, and a **[Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/)** for output files and post-processing
+- **[Desktop GUI](https://github.com/MatthewBonanni/mallard-gui)**, in progress: case setup, runs and results
+
+</td></tr></table>
 
 ## Features
 
@@ -95,7 +105,6 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): step a case from your program, same results as `mallard -i`; CMake package (`find_package(Mallard)`)
 - [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): output files as numpy arrays via Mallard's reader; post-processing commands as functions
 - [`mallard session`](https://matthewbonanni.github.io/mallard/docs/guide/session/): holds a case for programs; JSON-RPC requests (check, key listings) after each edit; JSON Schemas for every answer
-- [Desktop GUI](https://github.com/MatthewBonanni/mallard-gui), in progress: case setup, runs, results
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 
@@ -109,9 +118,9 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 | | Best for |
 |---|---|
 | Container: `ghcr.io/matthewbonanni/mallard` (CPU) or `:cuda` (NVIDIA); Docker, Apptainer, Kubernetes | Trying Mallard; workstations; GPU nodes; Kubernetes |
-| Relocatable Linux CPU archive, each release since 0.11.0 | Linux clusters with MPICH-based MPI; no container runtime |
+| Portable Linux binaries, **CPU only** (MPICH or Open MPI), each release since 0.11.0 | Linux CPU clusters; no container runtime (GPUs: container or Spack) |
 | [Spack](https://spack.io): `spack install mallard` (this repository's package) | Clusters: your compilers, MPI, GPUs |
-| From source with CMake | Development; every build option |
+| From source with CMake | Development: tests, fuzzing, sanitizers, warnings as errors |
 
 Quick CPU build:
 
@@ -121,7 +130,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-- [Installation](https://matthewbonanni.github.io/mallard/docs/installation/): containers, relocatable archives, Spack, GPU and MPI builds, every CMake option
+- [Installation](https://matthewbonanni.github.io/mallard/docs/installation/): containers, portable binaries, Spack, GPU and MPI builds, every CMake option
 - [Supported platforms](https://matthewbonanni.github.io/mallard/docs/installation/#supported-platforms): GCC 15+, Clang 22+ or Xcode 26.4+; CMake 4.2+; Linux (x86-64, arm64), macOS; GPUs: CUDA 13.4, ROCm, oneAPI
 - [Feature matrix](https://matthewbonanni.github.io/mallard/docs/guide/features/): which features combine (validated, verified, implemented, rejected, untested)
 
@@ -129,7 +138,7 @@ cmake --build build -j
 
 ```sh
 cd examples/riemann_2d
-mallard -i input.toml --kokkos-num-threads=8                   # installed (container, archive, Spack)
+mallard -i input.toml --kokkos-num-threads=8                   # installed (container, portable binaries, Spack)
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 
