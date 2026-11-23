@@ -578,8 +578,7 @@ VTK Lagrange cell of their degree, `order - 1`, a triangle or quadrilateral in
 element's cell, of the wall-side cell on a boundary. Other polygons (the cut of
 a hexahedron can have five or six corners) are fans of triangles from their
 first corner, the same on every rank. `high_order = false` writes one value
-per element instead, and `high_order_degree` lowers the degree, as for the
-[high-order view](#high-order-view):
+per element instead:
 
 ```toml
 [[write_data]]
@@ -587,8 +586,7 @@ prefix = "solut/x"
 time_interval = 2e-5
 regions = ["x1", "x2", "wing"]
 fields = ["U", "P", "Q_CRITERION", "TAU_W"]
-high_order_degree = 2   # optional: quadratic elements; default order - 1
-# high_order = false    # one value per element
+# high_order = false   # one value per element
 ```
 
 ![A cut line and a wall of a TENO order 5 run on a coarse mesh: one value per element, flat across each, and Lagrange curves of degree 4 that follow the field inside each element](../images/guide/surface-high-order-light.svg#gh-light-mode-only)

@@ -252,12 +252,11 @@ const std::vector<std::pair<std::string, int32_t>> VECTORS = {{"MOMENTUM_FLUX", 
 const char * const AXES = "XYZ";
 
 /**
- * @brief The degree of a snapshot's Lagrange elements (0: one value per element): high_order (default on for
- *        surfaces and curves with a reconstruction of polynomials) and high_order_degree (default theirs).
+ * @brief The degree of a snapshot's Lagrange elements, the polynomials' own (0: one value per element):
+ *        high_order, default on for surfaces and curves with a reconstruction of polynomials.
  */
 uint32_t lagrange_degree(const Input & entry, const std::string & key, const bool surface, const uint32_t max_degree) {
     const char * const docs = "docs/guide/output.md#surfaces-from-the-polynomials";
-    const bool given = entry.contains("high_order");
     const bool on = find_value_or<bool>(entry, "high_order", surface && max_degree > 0);
     if (on && !surface) {
         throw InputError(Diagnostic{.key = key + ".high_order",
@@ -274,27 +273,7 @@ uint32_t lagrange_degree(const Input & entry, const std::string & key, const boo
                                     .fix = "Set [numerics.face_reconstruction] type = \"TENO\", or remove high_order",
                                     .docs = docs});
     }
-    if (!on) {
-        if (entry.contains("high_order_degree")) {
-            throw InputError(Diagnostic{.key = key + ".high_order_degree",
-                                        .line = line_of(entry, "high_order_degree"),
-                                        .message = given ? "is given with high_order = false"
-                                                         : "needs the polynomials of a TENO reconstruction",
-                                        .fix = "Remove high_order_degree",
-                                        .docs = docs});
-        }
-        return 0;
-    }
-    const int degree = find_value_or<int>(entry, "high_order_degree", int(max_degree));
-    if (degree < 1 || degree > int(max_degree)) {
-        throw InputError(Diagnostic{.key = key + ".high_order_degree",
-                                    .line = line_of(entry, "high_order_degree"),
-                                    .message = "is " + std::to_string(degree) +
-                                               "; the reconstruction's polynomials have degree " + std::to_string(max_degree),
-                                    .fix = "Give a degree from 1 to " + std::to_string(max_degree),
-                                    .docs = docs});
-    }
-    return static_cast<uint32_t>(degree);
+    return on ? max_degree : 0;
 }
 
 int32_t variable_code(const std::string & name, const std::vector<std::string> & species_names,

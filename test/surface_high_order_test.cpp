@@ -192,7 +192,7 @@ TEST(SurfaceHighOrderTest, ElementsAreLagrangeCellsByDefaultWithPolynomials) {
     const std::string muscl = "type = \"MUSCL\"\n";
     // MUSCL has no polynomial beyond the average: one value per element, and the key is an error
     for (const auto & [reconstruction, key, type] :
-         {std::tuple{TENO4, std::string("high_order_degree = 2\n"), std::string("UnstructuredGrid")},
+         {std::tuple{TENO4, std::string(""), std::string("UnstructuredGrid")},
           {muscl, std::string(""), std::string("PolyData")}, {TENO4, std::string("high_order = false\n"), std::string("PolyData")}}) {
         Solver solver;
         solver.set_distributed(false);
@@ -202,14 +202,12 @@ TEST(SurfaceHighOrderTest, ElementsAreLagrangeCellsByDefaultWithPolynomials) {
         ASSERT_TRUE(c.field("P")) << key;
         EXPECT_EQ(vtkhdf_type(dir + "/b_000000.vtkhdf"), type) << key;
         if (type != "PolyData") {
-            EXPECT_EQ(h5_values<int64_t>(dir + "/b_000000.vtkhdf", "VTKHDF/Offsets")[1], 3) << "degree 2";
+            EXPECT_EQ(h5_values<int64_t>(dir + "/b_000000.vtkhdf", "VTKHDF/Offsets")[1], 4) << "degree 3";
         }
         std::filesystem::remove_all(dir);
     }
     for (const auto & [reconstruction, key, message] :
-         {std::tuple{muscl, std::string("high_order = true\n"), std::string("TENO")},
-          {TENO4, std::string("high_order_degree = 4\n"), std::string("high_order_degree")},
-          {muscl, std::string("high_order_degree = 1\n"), std::string("high_order_degree")}}) {
+         {std::tuple{muscl, std::string("high_order = true\n"), std::string("TENO")}}) {
         Solver solver;
         solver.set_distributed(false);
         try {
