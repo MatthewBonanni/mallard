@@ -529,6 +529,19 @@ With the [Spalding (1953)](../references.md#spalding-1953) mass transfer number 
   `Q = pi d k_f Nu* (T - T_s) ln(1 + B_T)/B_T`. The usual choice for sprays
   in hot gas ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
 
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-light.svg#gh-light-mode-only)
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-dark.svg#gh-dark-mode-only)
+
+*A 50 µm water droplet at rest in air at 1000 K and 1 atm (Mallard
+runs). Released at its wet-bulb temperature (markers), its d² falls on the
+straight line `d0² - K t` of its film, whose properties, wet-bulb temperature
+and rate `K` are computed independently with Cantera from the same mechanism;
+released at 300 K (dashed), it first heats to that temperature (right), in a
+4 ms, and lives a little longer. At rest the two models differ in
+the heat only: Abramzon & Sirignano's blowing factor lowers the heat that
+reaches the surface, so the droplet is 4 K cooler and evaporates 22% more
+slowly.*
+
 The heat into the liquid is `Q - mdot L(T_s)`, so a droplet heats or cools to
 its wet-bulb temperature, where the heat from the gas just evaporates it. The
 liquid has a constant density and specific heat; its enthalpy is that of the
@@ -572,6 +585,16 @@ Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`
 and the gas temperature `T`; the CSV `file` adds the diameter `d` and mass `m`
 of each droplet. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>` writes
 the vapor source per volume and time.
+
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-dark.svg#gh-dark-mode-only)
+
+*Two-way coupled 20 µm water droplets (`weight = 3e3`,
+`deposition_width = 2e-4`) released at rest into a periodic stream of air at
+1000 K, `u = 10 + 4 sin(2 pi y / L)` m/s, after 1 ms (a Mallard run). The gas
+carries the vapor `Y_H2O` (left) downstream of the droplets, which lag behind
+it, and the shear tilts the trails; `PARTICLE_SOURCE_RHOY_H2O` (right) is
+each droplet's evaporation rate spread over the deposition width.*
 
 **Pitfalls.**
 

@@ -646,6 +646,20 @@ $$
 so a droplet heats or cools toward its wet-bulb temperature, where the heat
 from the gas just evaporates it.
 
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-light.svg#gh-light-mode-only)
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-dark.svg#gh-dark-mode-only)
+
+*Left: water's surface vapor mass fraction $Y_s$, eq. $\eqref{eq:droplet-surface}$, and
+$B_M$, eq. $\eqref{eq:droplet-spalding}$, in dry air at 1 atm, from
+Clausius-Clapeyron through the boiling point and from Antoine's coefficients
+of water; $B_M$ diverges at the boiling point, where $Y_s \to 1$. The dotted
+lines are the wet-bulb temperatures of a droplet at rest in air at 1000 K,
+where eq. $\eqref{eq:droplet-energy}$'s heat into the liquid vanishes. Right:
+the factors of eq. $\eqref{eq:droplet-abramzon-sirignano}$: the Stefan flow
+thickens the film by $F(B)$, lowering $Sh^*$ and $Nu^*$ in a stream (here
+$Re_p = 100$, $Sc_f = 0.7$), and blowing reduces the heat reaching the surface
+by $\ln(1 + B_T)/B_T$, already by 30% at $B_T = 1$.*
+
 **Boiling.** A droplet at or above the boiling temperature at the gas
 pressure, or whose surface would be pure vapor ($Y_s \to 1$), boils: its
 surface is at $T_b(p)$, the heat it receives evaporates it, and its superheat
