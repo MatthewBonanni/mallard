@@ -27,6 +27,7 @@
 #include "comm.h"
 #include "commands.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh.h"
@@ -37,6 +38,7 @@
 #include "run_page.h"
 #include "snapshot_block.h"
 #include "diagnostic_code.h"
+#include "file_hash.h"
 
 namespace fs = std::filesystem;
 
@@ -116,6 +118,7 @@ std::string read_file_text(const json::Value & f) {
         out += ", step " + text(step) + (id && !id->is_null() ? " of run " + id->string : "");
     }
     if (sha && !sha->is_null()) return out + ", sha256 " + sha->string;
+    if (const json::Value * tree = f.find("sha256_tree")) return out + ", sha256_tree " + tree->string;
     return out + ", " + text(f.find("note")) + ", modified " + text(f.find("modified"));
 }
 
@@ -473,10 +476,10 @@ void print_contents(const output::Contents & c) {
     print_probe_sampling(c);
 }
 
-/** @brief A file an output record of the run log lists: as complete, of this size and SHA-256 (empty: not hashed). */
+/** @brief A file an output record of the run log lists: as complete, of this size, and its entry (with its hash). */
 struct RecordedFile {
     uint64_t bytes = 0;
-    std::string sha256;
+    json::Value entry;
 };
 
 /** @brief The last start and end records of a run's mallard.jsonl, its last record, and the files written. */
@@ -496,6 +499,17 @@ Record run_record(const std::string & dir) {
             r.found = true;
             const std::string type = text(v.find("type"));
             if (type == "start") {
+                // The files a rewind set aside are found where it put them
+                const json::Value * restart = v.find("restart");
+                const json::Value * moved = restart ? restart->find("superseded") : nullptr;
+                if (moved && moved->type == json::Value::Type::ARRAY) {
+                    for (const json::Value & m : moved->array) {
+                        const auto it = r.written.find(text(m.find("path")));
+                        if (it == r.written.end()) continue;
+                        r.written[text(m.find("to"))] = std::move(it->second);
+                        r.written.erase(text(m.find("path")));
+                    }
+                }
                 r.start = v;
                 r.end = json::Value{};
             } else if (type == "end") {
@@ -504,7 +518,7 @@ Record run_record(const std::string & dir) {
                 if (const json::Value * files = v.find("files"); files && files->type == json::Value::Type::ARRAY) {
                     for (const json::Value & f : files->array) {
                         const json::Value * bytes = f.find("bytes");
-                        r.written[text(f.find("path"))] = {bytes ? uint64_t(bytes->number) : 0, text(f.find("sha256"))};
+                        r.written[text(f.find("path"))] = {bytes ? uint64_t(bytes->number) : 0, f};
                     }
                 }
             }
@@ -574,7 +588,7 @@ std::vector<std::pair<std::string, std::string>> check_records(const std::string
         } else if (uint64_t(size) != recorded.bytes) {
             problems.emplace_back(path, count(uint64_t(size), "byte") + ", the run wrote " + count(recorded.bytes) +
                                             ": changed or cut short since");
-        } else if (verify && !recorded.sha256.empty() && provenance::sha256_file(file.string()) != recorded.sha256) {
+        } else if (verify && file_hash::matches(file.string(), recorded.entry) == false) {
             problems.emplace_back(path, "its contents differ from what the run wrote (SHA-256)");
         }
     }
@@ -617,6 +631,7 @@ int run_directory(const std::string & dir, const cli::Args & args) {
     const auto problems = check_records(dir, record, args.has("--verify"));
     if (args.value_or("--format", "text") == "json") {
         json::Object o;
+        o.add("schema", interfaces::RUN_DIRECTORY.name).add("version", interfaces::RUN_DIRECTORY.version);
         o.add("directory", dir);
         o.raw("start", record.start.type == json::Value::Type::OBJECT ? "true" : "false");
         o.raw("end", record.end.type == json::Value::Type::OBJECT ? "true" : "false");
@@ -704,10 +719,12 @@ std::string quality_json(const std::array<QualitySummary, MeshQuality::N_METRICS
                      json::Object().add("value", c.value).add("cell", c.cell).raw("x", x + "]").str();
         }
         o.raw(MeshQuality::FIELDS[m], json::Object()
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", worst + "]")
                                           .str());
     }

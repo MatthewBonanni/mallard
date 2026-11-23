@@ -10,6 +10,7 @@
  */
 
 #include "region_motion.h"
+#include "gated.h"
 
 #include <array>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include "expression.h"
 #include "region_cut.h"
 #include "mesh.h"
+#include "region_clip.h"
 #include "region_sampler.h"
 #include "units.h"
 
@@ -129,9 +131,10 @@ constexpr bool GPU_SAMPLING = !Kokkos::SpaceAccessibility<Kokkos::DefaultExecuti
  *        straight cells' is split again: SMOOTH samples the shapes with a
  *        smooth edge, or all in an axisymmetric run, and the other the rest,
  *        so that sharp shapes do not carry the registers and stack of sums
- *        of smooth terms.
+ *        of smooth terms; CLIP cuts them along planar faces (region_clip.h),
+ *        so that no kernel carries clipping where no shape clips.
  */
-template <bool CURVED, bool IMPLICIT, bool SMOOTH = false>
+template <bool CURVED, bool IMPLICIT, bool SMOOTH = false, bool CLIP = false>
 struct ShapeSampler {
     Kokkos::View<Node *> nodes;
     Kokkos::View<const double *> vertices;
@@ -186,7 +189,15 @@ struct ShapeSampler {
                         const uint32_t q = cell_nodes(first + k);
                         for (int d = 0; d < 3; d++) x[d] = d < N_DIM ? static_cast<double>(coords(q, d)) : 0.0;
                     };
-                    if constexpr (GPU_SAMPLING) {
+                    if constexpr (CLIP) {
+                        const sampler::Planes planes{nodes.data() + leaf.first, leaf.count, vertices.data()};
+                        if constexpr (GPU_SAMPLING) {
+                            sampler::team_clipped_cell<SMOOTH>(member, scratch, shape, planes, axisymmetric, n, node,
+                                                               inside, total);
+                        } else {
+                            sampler::clipped_cell(shape, planes, axisymmetric, n, node, inside, total);
+                        }
+                    } else if constexpr (GPU_SAMPLING) {
                         sampler::team_straight_cell<SMOOTH>(member, scratch, shape, axisymmetric, n, node, inside, total);
                     } else {
                         sampler::straight_cell(shape, axisymmetric, n, node, inside, total);
@@ -200,17 +211,19 @@ struct ShapeSampler {
 };
 
 /** @brief Launches a ShapeSampler: 8 teams per SM where its shared memory holds them, otherwise as many as it does. */
-template <bool CURVED, bool IMPLICIT, bool SMOOTH>
-void launch(const ShapeSampler<CURVED, IMPLICIT, SMOOTH> & sample, const uint32_t n_cells) {
-    const char * name = CURVED ? "region_moving_shapes_curved" : "region_moving_shapes";
+template <bool CURVED, bool IMPLICIT, bool SMOOTH, bool CLIP>
+void launch(const ShapeSampler<CURVED, IMPLICIT, SMOOTH, CLIP> & sample, const uint32_t n_cells) {
+    const char * name = CURVED ? "region_moving_shapes_curved"
+                        : CLIP ? "region_moving_shapes_clipped"
+                               : "region_moving_shapes";
     Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM, 8>> tuned(static_cast<int>(n_cells), GPU_SAMPLING ? TEAM : 1);
     if (GPU_SAMPLING) tuned.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-    if (!GPU_SAMPLING || tuned.team_size_max(sample, Kokkos::ParallelForTag()) >= TEAM) {
-        Kokkos::parallel_for(name, tuned, sample);
+    if (!GPU_SAMPLING || gated::team_size_max(tuned, sample) >= TEAM) {
+        gated::parallel_for(name, tuned, sample);
     } else {
         Kokkos::TeamPolicy<Kokkos::LaunchBounds<TEAM>> fitted(static_cast<int>(n_cells), TEAM);
         fitted.set_scratch_size(0, Kokkos::PerTeam(sampler::team_bytes(TEAM)));
-        Kokkos::parallel_for(name, fitted, sample);
+        gated::parallel_for(name, fitted, sample);
     }
 }
 
@@ -332,9 +345,10 @@ SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> &
         velocity_gradients = Kokkos::View<rtype *[N_DIM][N_DIM]>("region_velocity_gradients", n_cells);
     }
     m_centroids = mesh.cell_coords;
-    offsets_cells_of_cell = mesh.offsets_cells_of_cell;
-    cells_of_cell = mesh.cells_of_cell;
-    cells_of_cell_shift = mesh.cells_of_cell_shift;
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    offsets_cells_of_cell = neighbors.offsets;
+    cells_of_cell = neighbors.cells;
+    cells_of_cell_shift = neighbors.shift;
     periodic = mesh.periodic_maps();
     host_time = Kokkos::View<rtype>("region_levels_time");
     m_levels = Kokkos::View<double **[N_DIM + 1]>("region_levels", n_cells, n_conditions);
@@ -353,7 +367,7 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
     const bool gradients = a.is_allocated(), axi = axisymmetric;
     const uint32_t owned = n_owned, n_k = n_conditions, n_sp = n_species;
     if (gradients) {
-        Kokkos::parallel_for("region_velocity_gradients", n_complete, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("region_velocity_gradients", n_complete, KOKKOS_LAMBDA(const uint32_t c) {
             double M[3][3] = {}, b[N_DIM][3] = {};
             for (uint32_t q = offsets(c); q < offsets(c + 1); q++) {
                 const uint32_t j = neighbors(q);
@@ -380,7 +394,7 @@ void SolutionLevels::update(const Kokkos::View<const rtype> & time) const {
             }
         });
     }
-    Kokkos::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("region_levels", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const double t = static_cast<double>(time());
         double x[3] = {0.0, 0.0, 0.0}, W[N_CONSERVATIVE];
         rtype a_c[N_DIM][N_DIM] = {};
@@ -460,9 +474,9 @@ void CrossedLevels::select_cells() const {
     const bool all = every;
     const uint32_t n = n_owned;
     const uint32_t n_pieces = static_cast<uint32_t>(offsets.extent(0)) - 1;
-    if (n == 0) Kokkos::parallel_for("region_crossed_none", 1, KOKKOS_LAMBDA(const int) { count_() = 0; });
+    if (n == 0) gated::parallel_for("region_crossed_none", 1, KOKKOS_LAMBDA(const int) { count_() = 0; });
     // A cell the host keeps (|g| <= 1.01 |grad g| r for every condition of a piece) with a margin for round-off
-    Kokkos::parallel_scan("region_crossed_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
+    gated::parallel_scan("region_crossed_cells", n, KOKKOS_LAMBDA(const uint32_t c, uint32_t & i, const bool final) {
         bool keep = all;
         for (uint32_t p = 0; p < n_pieces && !keep; p++) {
             keep = true;
@@ -479,7 +493,7 @@ void CrossedLevels::select_cells() const {
     });
     const auto values_ = m_values;
     const uint32_t n_k = m_levels->size();
-    Kokkos::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("region_crossed_levels", n, KOKKOS_LAMBDA(const uint32_t i) {
         if (i >= count_()) return;
         for (uint32_t k = 0; k < n_k; k++) {
             for (int d = 0; d <= N_DIM; d++) values_(i, k, d) = L(cells_(i), k, d);
@@ -574,16 +588,16 @@ void LevelCut::select() const {
     const auto out_weights = m_weights;
     const auto total_ = m_total;
     const uint32_t k = m_condition, n_rows = static_cast<uint32_t>(rows.extent(0)) - 1, cap = capacity();
-    Kokkos::parallel_for("region_cut_count", n_rows, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("region_cut_count", n_rows, KOKKOS_LAMBDA(const uint32_t i) {
         const auto none = [](const cut::Vec &, double, const cut::Vec &) {};
         rows(i) = i < count_() ? cut_row(i, cells_(i), offsets_, nodes_, x_, centroids, values_, k, none) : 0;
     });
-    Kokkos::parallel_scan("region_cut_offsets", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i, uint32_t & sum, const bool final) {
+    gated::parallel_scan("region_cut_offsets", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i, uint32_t & sum, const bool final) {
         const uint32_t n = i < n_rows ? rows(i) : 0;
         if (final) rows(i) = sum;
         sum += n;
     });
-    Kokkos::parallel_for("region_cut_points", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("region_cut_points", n_rows + 1, KOKKOS_LAMBDA(const uint32_t i) {
         if (i == n_rows) {
             total_() = rows(n_rows);
             return;
@@ -636,6 +650,9 @@ MovingFractions::MovingFractions(const Mesh & mesh, const Region & region, const
         if (f.kind == Filled::Kind::SHAPES) {
             h_ops.push_back({Op::Kind::SHAPES, static_cast<uint32_t>(h_leaves.size())});
             h_leaves.push_back({f.first, f.count, i == region.root() ? region.edge() : 0.0});
+            const sampler::Planes planes{region.nodes().data() + f.first, f.count, region.vertices().data()};
+            const sampler::Shape<NoImplicit> shape{{}, h_leaves.back().edge, bounded};
+            clipping = clipping || sampler::clips(shape, planes);
             return;
         }
         if (f.kind == Filled::Kind::CONDITION) {
@@ -788,7 +805,7 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
     const Kokkos::View<const Step *> s = steps;
     const kexpr::ProgramTable<> of_t = times;
     if (m.extent(0) > 0) {
-        Kokkos::parallel_for("region_motion", m.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+        gated::parallel_for("region_motion", m.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
             const double t = static_cast<double>(time());
             auto value = [&](const uint32_t p) { return of_t(p, kexpr::ArrayVariables{&t}); };
             move(m(k), s.data(), value, n(m(k).node));
@@ -827,13 +844,18 @@ void MovingFractions::update(const Kokkos::View<const rtype> & time) const {
             if (smooth_leaves) sample(ShapeSampler<false, true, true>{});
             if (has_curved) sample(ShapeSampler<true, true>{});
         } else {
-            if (sharp_leaves) sample(ShapeSampler<false, false, false>{});
-            if (smooth_leaves) sample(ShapeSampler<false, false, true>{});
+            if (clipping) {
+                if (sharp_leaves) sample(ShapeSampler<false, false, false, true>{});
+                if (smooth_leaves) sample(ShapeSampler<false, false, true, true>{});
+            } else {
+                if (sharp_leaves) sample(ShapeSampler<false, false, false>{});
+                if (smooth_leaves) sample(ShapeSampler<false, false, true>{});
+            }
             if (has_curved) sample(ShapeSampler<true, false>{});
         }
     }
     const Kokkos::View<double *> out = m_fractions;
-    Kokkos::parallel_for("region_moving_fractions", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("region_moving_fractions", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         double stack[MAX_STACK];
         int top = -1;
         for (uint32_t i = 0; i < o.extent(0); i++) {

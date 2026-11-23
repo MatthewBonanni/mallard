@@ -144,6 +144,14 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") + layers);
 }
 
+TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
+    // Rows shared over the ranks, with block cells and boundary cells
+    expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"), [](const Solver & s) {
+        const auto & muscl = dynamic_cast<const MUSCL &>(s.get_face_reconstruction());
+        EXPECT_EQ(muscl.n_table_cells, uint64_t(s.get_mesh()->n_reconstructed()));
+    });
+}
+
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
     expect_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
@@ -321,6 +329,24 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
     comm::barrier();
 }
 
+TEST(MPI3DTest, StencilShapeKeysAcrossRanksTakeTheTablesOfTheirLowestGlobalId) {
+    // Tetrahedra periodic along x, numbered along a Hilbert curve: keys whose tables are equal on the
+    // comparison grid share the table of the cell with the lowest global id, which is seldom the first
+    // cell of its key in a rank's batch
+    std::string input = blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n");
+    for (const std::string zone : {"left", "right"}) {
+        const std::string bc = "[[boundaries]]\nname = \"" + zone + "\"\n";
+        const size_t at = input.find(bc);
+        input.erase(at, input.find("[", at + bc.size()) - at);
+    }
+    const std::string box = "Lz = 1.0\n";
+    input.insert(input.find(box) + box.size(), "cell_order = \"hilbert\"\n");
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+             "[parallel]\npartitioner = \"hilbert\"\n";
+    expect_matches_serial(input);
+    comm::barrier();
+}
+
 TEST(MPI3DTest, SurfaceOutputOfAZoneMissingFromSomeRanks) {
     // Ranks whose part of the mesh does not touch the zone have no faces to send
     const std::string dir = (scratch_dir() / "mallard_mpi3d_faces").string();
@@ -441,7 +467,10 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
             "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n";
-        expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & solver) {
+            EXPECT_TRUE(solver.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(solver);
+        });
     }
     comm::barrier();
 }

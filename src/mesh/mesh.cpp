@@ -438,7 +438,41 @@ void Mesh::make_axisymmetric() {
         for (uint32_t f = 0; f < n_faces; f++) {
             h_face_measure(f) = h_face_area(f) * std::max(h_face_coords(f, 1), rtype(0));
         }
+        if (curved_geometry) revolve_curved();
         axisymmetric = true;
+    }
+}
+
+void Mesh::revolve_curved() {
+    const curved::Geometry & geometry = *curved_geometry;
+    std::vector<curved::Vec3> x;
+    std::vector<double> w;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        if (!geometry.cell_is_curved(c)) continue;
+        // Second moments times r: cubic integrands
+        geometry.cell_rule(c, 3, x, w);
+        double I_y = 0.0, m[2] = {0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1];
+            I_y += wr;
+            m[0] += wr * x[q][0];
+            m[1] += wr * x[q][1];
+        }
+        const double xc = m[0] / I_y, yc = m[1] / I_y;
+        double C[3] = {0.0, 0.0, 0.0};
+        for (size_t q = 0; q < w.size(); q++) {
+            const double wr = w[q] * x[q][1], dx = x[q][0] - xc, dy = x[q][1] - yc;
+            C[0] += wr * dx * dx;
+            C[1] += wr * dx * dy;
+            C[2] += wr * dy * dy;
+        }
+        h_cell_measure(c) = rtype(I_y);
+        h_cell_coords(c, 0) = rtype(xc);
+        h_cell_coords(c, 1) = rtype(yc);
+        for (int k = 0; k < 3; k++) h_cell_covariance(c, k) = rtype(C[k] / I_y);
+    }
+    for (uint32_t f = 0; f < n_faces; f++) {
+        if (geometry.face_is_curved(f)) h_face_measure(f) = rtype(geometry.revolved_area(f));
     }
 }
 
@@ -513,7 +547,43 @@ uint8_t Mesh::shift_index(const std::array<int8_t, 3> & lattice) {
     return static_cast<uint8_t>(shift_lattice.size() - 1);
 }
 
-void Mesh::compute_cell_neighbors() {
+namespace {
+
+/** @brief The cells of every node key and, if periodic, their node of that key (CSR, cells by global id). */
+struct KeyCells {
+    bool periodic;
+    std::vector<uint32_t> by_global_id, offsets, cells, nodes;
+
+    explicit KeyCells(const Mesh & m) : periodic(!m.h_node_key.empty()), by_global_id(m.cells_by_global_id()) {
+        offsets.assign(m.n_nodes + 1, 0);
+        for (uint32_t c = 0; c < m.n_cells; c++) {
+            for (uint32_t k = 0; k < m.h_n_nodes_of_cell(c); k++) offsets[key(m, m.h_node_of_cell(c, k)) + 1]++;
+        }
+        for (uint32_t n = 0; n < m.n_nodes; n++) offsets[n + 1] += offsets[n];
+        cells.resize(offsets[m.n_nodes]);
+        if (periodic) nodes.resize(offsets[m.n_nodes]);
+        std::vector<uint32_t> fill(offsets.begin(), offsets.end() - 1);
+        for (uint32_t c : by_global_id) {
+            for (uint32_t k = 0; k < m.h_n_nodes_of_cell(c); k++) {
+                const uint32_t n = m.h_node_of_cell(c, k);
+                const uint32_t i = fill[key(m, n)]++;
+                cells[i] = c;
+                if (periodic) nodes[i] = n;
+            }
+        }
+    }
+    uint32_t key(const Mesh & m, uint32_t n) const { return periodic ? m.h_node_key[n] : n; }
+};
+
+std::array<int8_t, 3> lattice_offset(const Mesh & m, uint32_t a, uint32_t b) {
+    std::array<int8_t, 3> lattice;
+    for (size_t j = 0; j < 3; j++) lattice[j] = m.h_node_lattice[a][j] - m.h_node_lattice[b][j];
+    return lattice;
+}
+
+} // namespace
+
+void Mesh::compute_periodic_shifts() {
     // Meshes built without periodic pairs
     if (shift_lattice.empty()) shift_lattice.assign(1, {0, 0, 0});
     if (h_face_shift.extent(0) != n_faces) {
@@ -521,116 +591,36 @@ void Mesh::compute_cell_neighbors() {
         h_face_shift = Kokkos::create_mirror_view(face_shift);
         Kokkos::deep_copy(h_face_shift, 0);
     }
-    // Cells sharing a node key with each cell, with the translation that brings
-    // them next to it: L(a) - L(b) for the cell's node a and the other's node b
-    const bool periodic = !h_node_key.empty();
-    auto key = [&](uint32_t n) { return periodic ? h_node_key[n] : n; };
-    // Cells of every key and, if periodic, their node of that key (CSR, cells by global id)
-    const std::vector<uint32_t> by_global_id = cells_by_global_id();
-    std::vector<uint32_t> key_offsets(n_nodes + 1, 0);
-    std::vector<uint32_t> key_cells, key_nodes;
-    for (uint32_t c = 0; c < n_cells; c++) {
-        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) key_offsets[key(h_node_of_cell(c, k)) + 1]++;
-    }
-    for (uint32_t n = 0; n < n_nodes; n++) key_offsets[n + 1] += key_offsets[n];
-    key_cells.resize(key_offsets[n_nodes]);
-    if (periodic) key_nodes.resize(key_offsets[n_nodes]);
-    {
-        std::vector<uint32_t> fill(key_offsets.begin(), key_offsets.end() - 1);
-        for (uint32_t c : by_global_id) {
-            for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
-                const uint32_t n = h_node_of_cell(c, k);
-                const uint32_t i = fill[key(n)]++;
-                key_cells[i] = c;
-                if (periodic) key_nodes[i] = n;
-            }
-        }
-    }
-    // Rows of new translations numbered visiting cells by global id, as for the faces
-    if (periodic) {
-        for (uint32_t c : by_global_id) {
+    // Cells sharing a node key with each cell, with the translation that brings them next to it: L(a) - L(b) for
+    // the cell's node a and the other's node b. Rows of new translations numbered visiting cells by global id, as
+    // for the faces
+    if (!h_node_key.empty()) {
+        const KeyCells keys(*this);
+        std::vector<uint64_t> seen(n_cells, ~uint64_t(0));  // the last (cell << 8 | shift) each cell was seen with
+        for (uint32_t c : keys.by_global_id) {
+            bool two_shifts = false;
             for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
                 const uint32_t a = h_node_of_cell(c, k);
-                for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
-                    const uint32_t b = key_nodes[i];
-                    std::array<int8_t, 3> lattice;
-                    for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
-                    shift_index(lattice);
+                for (uint32_t i = keys.offsets[keys.key(*this, a)]; i < keys.offsets[keys.key(*this, a) + 1]; i++) {
+                    const uint32_t other = keys.cells[i];
+                    const uint8_t shift = shift_index(lattice_offset(*this, a, keys.nodes[i]));
+                    if (other == c && shift == 0) continue;
+                    if (other == c) {
+                        throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
+                                                 "directions need at least 3 cells.");
+                    }
+                    const uint64_t entry = uint64_t(c) << 8 | shift;
+                    if (seen[other] == entry) continue;
+                    if (seen[other] >> 8 == c) two_shifts = true;
+                    seen[other] = entry;
                 }
+            }
+            if (two_shifts) {
+                throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
+                                         "periodic directions need at least 3 cells.");
             }
         }
     }
-    // Neighbors as (cell << 8 | shift row), counted, then written into the views
-    std::vector<uint64_t> nb;
-    std::vector<uint64_t> seen;  // the last (cell << 8 | shift) each neighbor entered for
-    // Unsorted, each neighbor once
-    auto neighbors = [&](uint32_t c) {
-        nb.clear();
-        bool two_shifts = false;
-        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
-            const uint32_t a = h_node_of_cell(c, k);
-            for (uint32_t i = key_offsets[key(a)]; i < key_offsets[key(a) + 1]; i++) {
-                const uint32_t other = key_cells[i];
-                const uint32_t b = periodic ? key_nodes[i] : a;
-                uint8_t shift = 0;
-                if (periodic && a != b) {
-                    std::array<int8_t, 3> lattice;
-                    for (size_t j = 0; j < 3; j++) lattice[j] = h_node_lattice[a][j] - h_node_lattice[b][j];
-                    shift = shift_index(lattice);
-                }
-                if (other == c && shift == 0) continue;
-                if (other == c) {
-                    throw std::runtime_error("Mesh: a cell touches itself across a periodic boundary; periodic "
-                                             "directions need at least 3 cells.");
-                }
-                const uint64_t entry = uint64_t(c) << 8 | shift;
-                if (seen[other] == entry) continue;
-                if (seen[other] >> 8 == c) {
-                    two_shifts = true;
-                    continue;
-                }
-                seen[other] = entry;
-                nb.push_back(uint64_t(other) << 8 | shift);
-            }
-        }
-        if (two_shifts) {
-            throw std::runtime_error("Mesh: two cells touch both directly and across a periodic boundary; "
-                                     "periodic directions need at least 3 cells.");
-        }
-    };
-    offsets_cells_of_cell = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
-    h_offsets_cells_of_cell = Kokkos::create_mirror_view(offsets_cells_of_cell);
-    h_offsets_cells_of_cell(0) = 0;
-    seen.assign(n_cells, ~uint64_t(0));
-    bool shifted = false;
-    for (uint32_t c = 0; c < n_cells; c++) {
-        neighbors(c);
-        h_offsets_cells_of_cell(c + 1) = h_offsets_cells_of_cell(c) + static_cast<uint32_t>(nb.size());
-        for (const uint64_t e : nb) shifted = shifted || (e & 0xff) != 0;
-    }
-    cells_of_cell = Kokkos::View<uint32_t *>("cells_of_cell", h_offsets_cells_of_cell(n_cells));
-    cells_of_cell_shift.rows =
-        Kokkos::View<uint8_t *>("cells_of_cell_shift", shifted ? h_offsets_cells_of_cell(n_cells) : 0);
-    h_cells_of_cell = Kokkos::create_mirror_view(cells_of_cell);
-    h_cells_of_cell_shift.rows = Kokkos::create_mirror_view(cells_of_cell_shift.rows);
-    seen.assign(n_cells, ~uint64_t(0));
-    for (uint32_t c = 0; c < n_cells; c++) {
-        neighbors(c);
-        // By global id, so that neighbor order does not depend on the local numbering
-        if (!h_global_cell_id.empty()) {
-            std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
-                return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) <
-                       std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
-            });
-        } else {
-            std::sort(nb.begin(), nb.end());
-        }
-        for (size_t i = 0; i < nb.size(); i++) {
-            h_cells_of_cell(h_offsets_cells_of_cell(c) + i) = static_cast<uint32_t>(nb[i] >> 8);
-            if (shifted) h_cells_of_cell_shift.rows(h_offsets_cells_of_cell(c) + i) = nb[i] & 0xff;
-        }
-    }
-
     shifts = Kokkos::View<rtype *[N_DIM]>("shifts", shift_lattice.size());
     h_shifts = Kokkos::create_mirror_view(shifts);
     shift_rotations = Kokkos::View<rtype *[N_DIM][N_DIM]>("shift_rotations", is_rotational() ? shift_lattice.size() : 0);
@@ -646,12 +636,79 @@ void Mesh::compute_cell_neighbors() {
             }
         }
     }
-    Kokkos::deep_copy(offsets_cells_of_cell, h_offsets_cells_of_cell);
-    Kokkos::deep_copy(cells_of_cell, h_cells_of_cell);
-    Kokkos::deep_copy(cells_of_cell_shift.rows, h_cells_of_cell_shift.rows);
     Kokkos::deep_copy(shifts, h_shifts);
     Kokkos::deep_copy(shift_rotations, h_shift_rotations);
     Kokkos::deep_copy(face_shift, h_face_shift);
+}
+
+const VertexNeighbors & Mesh::vertex_neighbors() const {
+    if (!m_vertex_neighbors) m_vertex_neighbors = build_vertex_neighbors();
+    return *m_vertex_neighbors;
+}
+
+VertexNeighbors Mesh::build_vertex_neighbors() const {
+    const KeyCells keys(*this);
+    auto row = [&](uint32_t a, uint32_t b) {
+        const auto found = std::find(shift_lattice.begin(), shift_lattice.end(), lattice_offset(*this, a, b));
+        if (found == shift_lattice.end()) throw std::logic_error("Mesh: a vertex neighbor's periodic shift has no row.");
+        return static_cast<uint8_t>(found - shift_lattice.begin());
+    };
+    // Neighbors as (cell << 8 | shift row), counted, then written into the views
+    std::vector<uint64_t> nb;
+    std::vector<uint64_t> seen;  // the last (cell << 8 | shift) each neighbor entered for
+    // Unsorted, each neighbor once (compute_periodic_shifts rejected cells seen with two shifts)
+    auto neighbors = [&](uint32_t c) {
+        nb.clear();
+        for (uint32_t k = 0; k < h_n_nodes_of_cell(c); k++) {
+            const uint32_t a = h_node_of_cell(c, k);
+            for (uint32_t i = keys.offsets[keys.key(*this, a)]; i < keys.offsets[keys.key(*this, a) + 1]; i++) {
+                const uint32_t other = keys.cells[i];
+                const uint32_t b = keys.periodic ? keys.nodes[i] : a;
+                const uint8_t shift = a != b ? row(a, b) : 0;
+                if (other == c && shift == 0) continue;
+                const uint64_t entry = uint64_t(c) << 8 | shift;
+                if (seen[other] >> 8 == c) continue;
+                seen[other] = entry;
+                nb.push_back(uint64_t(other) << 8 | shift);
+            }
+        }
+    };
+    VertexNeighbors v;
+    v.offsets = Kokkos::View<uint32_t *>("offsets_cells_of_cell", n_cells + 1);
+    v.h_offsets = Kokkos::create_mirror_view(v.offsets);
+    v.h_offsets(0) = 0;
+    seen.assign(n_cells, ~uint64_t(0));
+    bool shifted = false;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        neighbors(c);
+        v.h_offsets(c + 1) = v.h_offsets(c) + static_cast<uint32_t>(nb.size());
+        for (const uint64_t e : nb) shifted = shifted || (e & 0xff) != 0;
+    }
+    v.cells = Kokkos::View<uint32_t *>("cells_of_cell", v.h_offsets(n_cells));
+    v.shift.rows = Kokkos::View<uint8_t *>("cells_of_cell_shift", shifted ? v.h_offsets(n_cells) : 0);
+    v.h_cells = Kokkos::create_mirror_view(v.cells);
+    v.h_shift.rows = Kokkos::create_mirror_view(v.shift.rows);
+    seen.assign(n_cells, ~uint64_t(0));
+    for (uint32_t c = 0; c < n_cells; c++) {
+        neighbors(c);
+        // By global id, so that neighbor order does not depend on the local numbering
+        if (!h_global_cell_id.empty()) {
+            std::sort(nb.begin(), nb.end(), [&](uint64_t a, uint64_t b) {
+                return std::make_pair(h_global_cell(static_cast<uint32_t>(a >> 8)), a & 0xff) <
+                       std::make_pair(h_global_cell(static_cast<uint32_t>(b >> 8)), b & 0xff);
+            });
+        } else {
+            std::sort(nb.begin(), nb.end());
+        }
+        for (size_t i = 0; i < nb.size(); i++) {
+            v.h_cells(v.h_offsets(c) + i) = static_cast<uint32_t>(nb[i] >> 8);
+            if (shifted) v.h_shift.rows(v.h_offsets(c) + i) = nb[i] & 0xff;
+        }
+    }
+    Kokkos::deep_copy(v.offsets, v.h_offsets);
+    Kokkos::deep_copy(v.cells, v.h_cells);
+    Kokkos::deep_copy(v.shift.rows, v.h_shift.rows);
+    return v;
 }
 
 void Mesh::h_forward(const uint32_t s, const rtype * x, rtype * y) const {
@@ -730,15 +787,34 @@ void Mesh::copy_host_to_device() {
     }
 }
 
+namespace {
+
+/**
+ * @brief Bytes of v that a device build frees when the mesh drops it but a
+ *        host build keeps: there its host mirror h is the same allocation, and
+ *        no kernel holds a view of its own (the two handles are all there are).
+ */
+template <typename View, typename Mirror>
+uint64_t kept_on_the_host(const View & v, const Mirror & h) {
+    if (!v.is_allocated() || v.data() != h.data() || v.use_count() != 2) return 0;
+    return uint64_t(v.span()) * sizeof(typename View::value_type);
+}
+
+} // namespace
+
 void Mesh::release_setup_data() {
+    released_on_devices = kept_on_the_host(node_coords, h_node_coords) +
+                          kept_on_the_host(nodes_of_cell, h_nodes_of_cell) +
+                          kept_on_the_host(offsets_nodes_of_cell, h_offsets_nodes_of_cell) +
+                          kept_on_the_host(nodes_of_face, h_nodes_of_face) +
+                          kept_on_the_host(offsets_nodes_of_face, h_offsets_nodes_of_face);
+    for (const auto & zone : m_face_zones) released_on_devices += kept_on_the_host(zone.faces, zone.h_faces);
     node_coords = {};
     nodes_of_cell = {};
     offsets_nodes_of_cell = {};
     nodes_of_face = {};
     offsets_nodes_of_face = {};
-    h_cells_of_cell = {};
-    h_offsets_cells_of_cell = {};
-    h_cells_of_cell_shift = {};
+    m_vertex_neighbors.reset();
     for (auto & zone : m_face_zones) zone.faces = {};
 }
 

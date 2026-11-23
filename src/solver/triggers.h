@@ -3,7 +3,8 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief [[triggers]]: conditions on the run (an expression of t, the step,
  *        the wall time and the monitored values) that stop it, write a
- *        restart or a snapshot, or start the statistics.
+ *        restart or a snapshot, start or stop the statistics, log a message
+ *        or change a setting.
  * @version 0.1
  * @date 2026-11-04
  *
@@ -42,11 +43,13 @@ KOKKOS_INLINE_FUNCTION double trigger_hold_end(const double since, const double 
  */
 class Triggers {
     public:
-        enum class Action { STOP, CHECKPOINT, WRITE, START_STATISTICS };
+        enum class Action { STOP, CHECKPOINT, WRITE, START_STATISTICS, STOP_STATISTICS, LOG, SET };
 
         struct Act {
             Action action = Action::STOP;
-            std::string writer;  // WRITE: the [[write_data]] prefix
+            std::string writer;   // WRITE: the [[write_data]] prefix
+            std::string message;  // LOG: the text, with {<variable>} replaced by its value
+            std::vector<std::pair<std::string, std::string>> settings;  // SET: (key, value), as mallard ctl set
         };
 
         struct Trigger {
@@ -62,6 +65,9 @@ class Triggers {
             double since = 0.0;
             uint64_t firings = 0;
             double t_first = 0.0;  // of the first firing
+            uint64_t step_last = 0;  // of the last firing
+            double t_last = 0.0;
+            std::vector<double> times;  // the numbers its condition compares t with
         };
 
         /** @brief Names of the variables before the monitored values, in this order. */
@@ -86,8 +92,20 @@ class Triggers {
          */
         std::string evaluate(const std::vector<double> & values) const;
 
-        /** @brief Advance every trigger with its condition (from evaluate) at time t; those that fire. */
-        std::vector<size_t> advance(const std::string & conditions, double t);
+        /** @brief Advance every trigger with its condition (from evaluate) at the step and time t; those that fire. */
+        std::vector<size_t> advance(const std::string & conditions, uint64_t step, double t);
+
+        /** @brief The numbers the conditions of triggers that may still fire compare t with, where steps land. */
+        std::vector<double> landing_times() const;
+
+        /** @brief A log action's message with each {<variable>} replaced by its value in values (by variables()). */
+        std::string message(const Act & act, const std::vector<double> & values) const;
+
+        /**
+         * @brief Whether trigger i's condition is false at every time in (t0, t_end] (t_end may be infinite):
+         *        it reads no other variable than t, and t only in comparisons with numbers.
+         */
+        bool never_true(size_t i, double t0, double t_end) const;
 
         /** @brief A trigger's state between firings, as a step graph advances it (firings stay the host's). */
         struct DeviceState {
@@ -112,7 +130,10 @@ class Triggers {
         bool starts_statistics() const;
         /** @brief Time a trigger started the statistics, if one has. */
         std::optional<double> statistics_started() const;
+        /** @brief Whether the last trigger to start or stop the statistics stopped them. */
+        bool statistics_stopped() const;
 
+        /** @brief TRIGGER_<name>_{FIRINGS,ARMED,HOLDING,SINCE,T_FIRST,STEP_LAST,T_LAST} of each trigger. */
         RestartAttributes attributes() const;
         /** @brief Continue the state of a restart file's attributes (fresh where it has none). */
         void restore(const RestartAttributes & attributes);
@@ -120,6 +141,8 @@ class Triggers {
         /** @brief "when -> do" of a trigger, for the log. */
         static std::string describe(const Trigger & trigger);
         std::vector<std::pair<std::string, std::string>> summary() const;
+        /** @brief Each trigger's state, as mallard ctl status shows it: armed, holding since, fired at. */
+        std::vector<std::pair<std::string, std::string>> states() const;
 
     private:
         std::vector<Trigger> triggers;

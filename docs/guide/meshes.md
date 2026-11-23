@@ -31,7 +31,7 @@ Ly = 1.0
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 43 more.
+and 48 more.
 
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-light.svg#gh-light-mode-only)
 ![The three generated 2D meshes: quadrilaterals, triangles split along the bottom-left to top-right diagonal, and the 8 degree compression ramp](../images/guide/mesh_types_2d-dark.svg#gh-dark-mode-only)
@@ -124,7 +124,7 @@ zones = ["left", "right"]     # joined; the mesh gives the translation, [Lx, 0]
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
 [`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
-and 13 more.
+and 16 more.
 
 Periodic boundaries join two zones into interior faces: every scheme sees the
 seam as the inside of the domain, and the zones disappear from
@@ -377,6 +377,9 @@ facets. Curved faces get quadrature points on the curve with their own normals,
 and the cells next to them their exact volumes and centroids, so TENO-E keeps
 orders 3 to 6 at curved walls
 ([convergence](https://matthewbonanni.github.io/mallard/validation/#curved-boundaries)).
+In [axisymmetric runs](physics.md#axisymmetric-flows) the curved geometry is
+revolved too: a sphere or a nozzle contour in the meridian plane gets its
+volumes, `r`-weighted centroids and face areas per radian from the curve.
 
 ![Straight faces of a coarse mesh around a circle, and the curved faces on the circle with their quadrature points and normals](../images/guide/curved_faces-light.svg#gh-light-mode-only)
 ![Straight faces of a coarse mesh around a circle, and the curved faces on the circle with their quadrature points and normals](../images/guide/curved_faces-dark.svg#gh-dark-mode-only)

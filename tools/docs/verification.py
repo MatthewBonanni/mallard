@@ -37,18 +37,20 @@ FILTER = ":".join([
     "*/TENOOrder.*", "*/TENO3DOrder.*",
     "*PeriodicAdvection2D.*", "*PeriodicAdvection3D.*", "*SodMesh.TENOConverges*", "TENO3DSolver.AdvectedPulse*",
     "*ViscousMesh.StokesFirst*", "*ViscousMesh.ForcedChannel*", "*ForcedChannel3D.*",
-    "AxisymmetricTest.Poiseuille*", "*AxisymmetricOrder.*",
+    "AxisymmetricTest.Poiseuille*", "*AxisymmetricOrder.*", "*AxisymmetricCurvedOrder.*",
     "CurvedGeometry.StraightWalls*", "*CurvedTENOOrder.*", "CurvedTENO.CellsReaching*", "Curved3DGeometry.Quadratic*",
     "RemapTest.SmoothPeriodic*", "*MixtureAdvectionOrder.*",
+    "*ParticleTimeOrder.*", "ParticleOrder.*", "*ParticleSpaceOrder.*",
 ])
 
 # Studies that fail their bounds for a known, filed reason: (section, method, cells) -> issue number
 KNOWN = {}
 
 SECTIONS = ["time", "reconstruction", "advection", "viscous", "boundaries", "axisymmetric", "curved", "remap",
-            "mixtures"]
+            "mixtures", "particles"]
 CELLS = ["quadrilaterals", "triangles", "hexahedra", "tetrahedra", "prisms", "pyramids", "mixed"]
 SCHEMES = ["FO", "MUSCL", "TENO3", "TENO4", "TENO5", "TENO6"]
+INTEGRATORS = ["FE", "SSPRK3", "RDPK3Sp35", "RK4", "SSPRK54", "CK45"]
 
 
 # ------------------------------------------------------------------ running
@@ -155,7 +157,7 @@ def section_table(studies):
     return "\n".join(rows)
 
 
-def matrix(studies, section, error_filter=lambda e: True):
+def matrix(studies, section, error_filter=lambda e: True, design_of=None):
     """Observed orders by scheme (rows) and cell type (columns)."""
     cells = [c for c in CELLS if any(s["cells"] == c for s in studies if s["section"] == section)]
     rows = ["| | " + " | ".join(c.capitalize() for c in cells) + " |", "|---" * (len(cells) + 1) + "|"]
@@ -172,9 +174,35 @@ def matrix(studies, section, error_filter=lambda e: True):
             else:
                 line.append("–")
         if any_value:
-            design = {"FO": 1, "MUSCL": 2}.get(scheme) or int(scheme[4:])
+            design = design_of(scheme) if design_of else {"FO": 1, "MUSCL": 2}.get(scheme) or int(scheme[4:])
             rows.append(f"| {scheme} (design {design}) | " + " | ".join(line) + " |")
     return "\n".join(rows)
+
+
+def time_matrix(studies, columns):
+    """Observed orders of the particles by integrator (rows) and study (columns: (title, error prefix))."""
+    rows = ["| | " + " | ".join(title for title, _ in columns) + " |", "|---" * (len(columns) + 1) + "|"]
+    for method in INTEGRATORS:
+        line, any_value = [], False
+        for _, error in columns:
+            hits = [s for s in studies if s["section"] == "particles" and s["method"] == method
+                    and s["error"].startswith(error)]
+            if hits:
+                any_value = True
+                v = fmt_order(hits[0]["order"])
+                line.append(v if hits[0]["pass"] else f"**{v}** ({result(hits[0])})")
+            else:
+                line.append("–")
+        if any_value:
+            design = {"FE": 1, "SSPRK3": 3, "RDPK3Sp35": 3}.get(method, 4)
+            rows.append(f"| {method} (design {design}) | " + " | ".join(line) + " |")
+    return "\n".join(rows)
+
+
+PARTICLE_TIME_COLUMNS = [("Tracer pathlines", "max pathline error, tracers in a turning flow"),
+                         ("Drag relaxation, position", "max position error, drag relaxation, tau"),
+                         ("Drag relaxation, velocity", "max velocity error, drag relaxation, tau"),
+                         ("Near the stiff limit", "max position error, drag relaxation near the stiff limit")]
 
 
 def blocks(data):
@@ -197,6 +225,12 @@ def blocks(data):
         "summary": summary,
         "matrix-advection": matrix(studies, "advection", lambda e: e == "max density error"),
         "matrix-reconstruction": matrix(studies, "reconstruction", lambda e: e.startswith("max face-value error")),
+        "matrix-particles-time": time_matrix(studies, PARTICLE_TIME_COLUMNS),
+        "matrix-particles-interpolation": matrix(studies, "particles",
+                                                 lambda e: e == "max gas-velocity error at the particles",
+                                                 lambda scheme: 2 if scheme in ("FO", "MUSCL") else int(scheme[4:])),
+        "matrix-particles-pathlines": matrix(studies, "particles",
+                                             lambda e: e == "max pathline error, tracers in a compact vortex"),
     }
     for section in SECTIONS:
         out[f"table-{section}"] = section_table([s for s in studies if s["section"] == section])
@@ -279,11 +313,40 @@ def series_plot(studies, xlabel, label_of=lambda s: s["method"]):
     return draw
 
 
+def panels(specs):
+    """Side by side series plots: (title, x label, label of a study, studies) per panel."""
+    def draw(P):
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(1, len(specs), figsize=(3.6 * len(specs), 3.4), squeeze=False)
+        palette = [P["blue"], P["teal"], P["flame"], P["plum"], P["green"], P["gold"], P["red"], P["muted"]]
+        for ax, (title, xlabel, label_of, studies) in zip(axes.flat, specs):
+            for i, s in enumerate(studies):
+                slope_marker(ax, s["n"], s["errors"], s["design"], P)
+                ax.loglog(s["n"], s["errors"], "o-", color=palette[i % len(palette)], ms=4,
+                          label=f"{label_of(s)} ({fmt_order(s['order'])})")
+            ax.minorticks_off()
+            ticks = sorted({x for s in studies for x in s["n"]})
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([f"{x:g}" for x in ticks])
+            ax.set_title(title, fontsize=12)
+            ax.set_xlabel(xlabel, fontsize=11)
+            if len(studies) > 3:
+                ax.legend(fontsize=8.5, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2)
+            else:
+                ax.legend(fontsize=8.5, loc="lower left")
+        axes[0, 0].set_ylabel("error", fontsize=11)
+        fig.tight_layout()
+        return fig
+    return draw
+
+
 def figures(data):
     studies = data["studies"]
     by = lambda section, cond=lambda s: True: [s for s in studies if s["section"] == section and cond(s)]
     adv = by("advection", lambda s: s["error"] == "max density error")
     rec = by("reconstruction", lambda s: s["error"].startswith("max face-value error") and "troubled" not in s["method"])
+    interp = by("particles", lambda s: s["error"] == "max gas-velocity error at the particles")
+    paths = by("particles", lambda s: s["error"] == "max pathline error, tracers in a compact vortex")
     out = {
         "advection": convergence_grid(adv, [c for c in CELLS if any(s["cells"] == c for s in adv)]),
         "reconstruction": convergence_grid(rec, [c for c in CELLS if any(s["cells"] == c for s in rec)]),
@@ -292,6 +355,18 @@ def figures(data):
         "curved": series_plot(by("curved", lambda s: "TENO" not in s["method"]), "cells around",
                               lambda s: f"{s['method']}, {s['cells']}"),
         "remap": series_plot(by("remap"), "source cells per side", lambda s: f"{s['method']}, {s['cells']}"),
+        "particles-time": series_plot(
+            by("particles", lambda s: s["error"].startswith("max position error, drag relaxation, tau")), "steps"),
+        "particles-stiff": panels([
+            ("near the stiff limit (τ = 0.02)", "steps", lambda s: s["method"],
+             by("particles", lambda s: "near the stiff limit" in s["error"])),
+            ("exponential integration (τ = 0.002)", "steps", lambda s: s["error"].split()[1],
+             by("particles", lambda s: s["method"] == "RK4, exponential")),
+        ]),
+        "particles-interpolation": convergence_grid(
+            interp, [c for c in CELLS if any(s["cells"] == c for s in interp)]),
+        "particles-pathlines": convergence_grid(
+            paths, [c for c in CELLS if any(s["cells"] == c for s in paths)]),
     }
     for name, draw in out.items():
         figstyle.save(name, draw, OUT)

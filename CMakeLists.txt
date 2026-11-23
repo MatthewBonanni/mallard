@@ -16,6 +16,7 @@ if(index GREATER_EQUAL 0)
 endif()
 
 find_package(Git QUIET)
+include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -95,13 +96,21 @@ endif()
 message(STATUS "Mallard: Dimension: ${${PROJECT_NAME}_DIM}")
 add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
 
-# libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
-# every library it links is compiled position independent
-option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" ON)
+# libmallard2d/3d: the C++ library API (include/mallard, the CMake package Mallard) and the output
+# reader as a C library for the Python package (tools/mallard), so every library it links is
+# compiled position independent
+option(${PROJECT_NAME}_ENABLE_LIBRARY "Build and install libmallard${${PROJECT_NAME}_DIM}d: the C++ library API and the reader the Python package loads" ON)
+option(${PROJECT_NAME}_ENABLE_PYTHON "Check and install the Python package, which loads libmallard${${PROJECT_NAME}_DIM}d" ON)
 set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
     "A site-packages directory to install the Python package into, besides share/mallard/tools")
-if(${PROJECT_NAME}_ENABLE_PYTHON)
+if(${PROJECT_NAME}_ENABLE_PYTHON AND NOT ${PROJECT_NAME}_ENABLE_LIBRARY)
+    message(FATAL_ERROR "Mallard_ENABLE_PYTHON needs Mallard_ENABLE_LIBRARY, the library the Python package loads: "
+                        "turn both off, or Mallard_ENABLE_LIBRARY on.")
+endif()
+if(${PROJECT_NAME}_ENABLE_LIBRARY)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+if(${PROJECT_NAME}_ENABLE_PYTHON)
     file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
     if(NOT python_version STREQUAL "__version__ = \"${PROJECT_VERSION}\"")
         message(FATAL_ERROR "tools/mallard/_version.py has ${python_version}, not Mallard's version "
@@ -279,8 +288,10 @@ function(mallard_check_no_contraction)
     endif()
     get_property(dirs GLOBAL PROPERTY mallard_no_contraction_dirs)
     list(REMOVE_DUPLICATES dirs)
+    set(all_sources)
     foreach(dir IN LISTS dirs)
         get_property(sources DIRECTORY ${dir} PROPERTY mallard_no_contraction)
+        list(APPEND all_sources ${sources})
         foreach(source IN LISTS sources)
             get_source_file_property(options ${source} DIRECTORY ${dir} COMPILE_OPTIONS)
             foreach(option IN LISTS required)
@@ -290,6 +301,20 @@ function(mallard_check_no_contraction)
                 endif()
             endforeach()
         endforeach()
+    endforeach()
+    # The Riemann solvers round alike in every kernel only if every source naming them is listed
+    set(globs ${PROJECT_SOURCE_DIR}/src/*.cpp)
+    if(${PROJECT_NAME}_ENABLE_TESTS)
+        list(APPEND globs ${PROJECT_SOURCE_DIR}/test/*.cpp)
+    endif()
+    file(GLOB_RECURSE candidates ${globs})
+    list(FILTER candidates EXCLUDE REGEX "/src/external/")
+    foreach(source IN LISTS candidates)
+        file(STRINGS ${source} uses REGEX "riemann::")
+        if(uses AND NOT source IN_LIST all_sources)
+            message(FATAL_ERROR "${source} inlines the Riemann solvers: list it in mallard_no_contraction "
+                                "with the others (src/CMakeLists.txt)")
+        endif()
     endforeach()
 endfunction()
 
@@ -353,11 +378,24 @@ if(BUILD_DOCS)
     endif()
 endif()
 
-include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_LIBRARY)
+    # The CMake package: find_package(Mallard [COMPONENTS 2d 3d]) in a prefix of either dimension or both
+    include(CMakePackageConfigHelpers)
+    set(package_dir ${CMAKE_INSTALL_LIBDIR}/cmake/Mallard)
+    install(TARGETS MallardLibrary EXPORT MallardTargets${Mallard_DIM}d
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    install(EXPORT MallardTargets${Mallard_DIM}d NAMESPACE Mallard:: DESTINATION ${package_dir})
+    install(DIRECTORY include/mallard DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    configure_package_config_file(cmake/MallardConfig.cmake.in ${CMAKE_BINARY_DIR}/MallardConfig.cmake
+                                  INSTALL_DESTINATION ${package_dir})
+    write_basic_package_version_file(${CMAKE_BINARY_DIR}/MallardConfigVersion.cmake
+                                     COMPATIBILITY SameMinorVersion)
+    install(FILES ${CMAKE_BINARY_DIR}/MallardConfig.cmake ${CMAKE_BINARY_DIR}/MallardConfigVersion.cmake
+            DESTINATION ${package_dir})
+endif()
 if(${PROJECT_NAME}_ENABLE_PYTHON)
-    install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
     if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
         install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
     endif()

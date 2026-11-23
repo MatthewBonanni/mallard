@@ -152,6 +152,14 @@ class Geometry {
         Vec3 area_vector(uint32_t f) const;
 
         /**
+         * @brief 2D, revolved about the x axis (r = y, per radian): int r n dS
+         *        of face f (out of its cell 0), whose x component
+         *        (y_1^2 - y_0^2) / 2 is exact, and int r dS.
+         */
+        Vec3 revolved_area_vector(uint32_t f) const;
+        double revolved_area(uint32_t f) const;
+
+        /**
          * @brief Quadrature of face f from a rule on its flat reference element
          *        (weights summing to the reference measure: 2 on edges and
          *        quadrilaterals, 1 on triangles, as the flat rules): points,

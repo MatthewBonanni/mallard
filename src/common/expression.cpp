@@ -10,6 +10,7 @@
  */
 
 #include "expression.h"
+#include "gated.h"
 
 #include <stdexcept>
 
@@ -40,7 +41,7 @@ std::vector<double> evaluate_at(const std::vector<const Expression *> & expressi
     Kokkos::deep_copy(d_rows, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(rows.data(), n_rows));
     Kokkos::View<double **, Kokkos::LayoutRight> values("expression_values", n_rows, n_expressions);
     const Kokkos::View<rtype *[N_DIM]> x = coords;
-    Kokkos::parallel_for("evaluate_expressions", n_rows, KOKKOS_LAMBDA(const size_t k) {
+    gated::parallel_for("evaluate_expressions", n_rows, KOKKOS_LAMBDA(const size_t k) {
         const uint32_t r = d_rows(k);
         const double v[4] = {double(x(r, 0)), double(x(r, 1)), N_DIM > 2 ? double(x(r, N_DIM - 1)) : 0.0, t};
         for (uint32_t e = 0; e < table.size(); e++) values(k, e) = table(e, kexpr::ArrayVariables{v});

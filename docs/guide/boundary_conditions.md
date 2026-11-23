@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 47 more.
+and 49 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -572,19 +572,82 @@ bl_T 300 to 340`, and the run block records the file's hash.
 | `name` | required | Prefix of the variables: `<name>_<column>` |
 | `file` | required | CSV file, relative to where Mallard runs |
 | `type` | `"table"` | `table` (on a grid of 1-3 coordinates, interpolated) or `points` (scattered, by nearest points) |
-| `coordinates` | first column (`table`); `x`, `y` (`z`) (`points`) | Names of the coordinate columns |
-| `at` | the coordinates, if named `x`, `y`, `z` or like a local coordinate | One expression of `x`, `y`, `z` and the local coordinates per coordinate (not of `t`) |
+| `coordinates` | the metadata's; first column (`table`); `x`, `y` (`z`) (`points`) | Names of the coordinate columns |
+| `columns` | every other column | Names of the value columns to read |
+| `at` | the metadata's; the coordinates, if named `x`, `y`, `z` or like a local coordinate | One expression of `x`, `y`, `z` and the local coordinates per coordinate (not of `t`) |
 | `interpolation` | `"linear"` | Tables: `linear` or `cubic` |
 | `neighbors` | 1 | Points: how many nearest points to weight (1-16) |
-| `units` | SI | Units of columns, e.g. `{y = "mm", T = "degC"}` |
+| `units` | the metadata's; SI | Units of columns, e.g. `{y = "mm", T = "degC"}` |
+| `scale` | none | [Rescale](#profile-files-metadata-and-rescaling) to these `length`, `velocity`, `density`, `temperature` |
+| `reference` | the metadata's | With `scale`: the scales of the data |
+| `outside` | `"hold"` | Tables: faces beyond a coordinate column's range take its end values (`hold`) or are an input error (`error`) |
 
 Pitfalls:
 
-- An entry's data have at most 16 value columns in all; data that none of
-  the entry's expressions read are an error.
+- An entry's data have at most 16 value columns in all (`columns` picks the
+  ones to read); data that none of the entry's expressions read are an error.
 - `at` may not read `t`: read the data at a fixed place and combine them with
   `t` in the entry's expressions.
 - `where`, `mdot` and an `average` outlet pressure do not read the data.
+
+### Profile files: metadata and rescaling
+
+A profile file may describe itself, so that it is read correctly without
+repeating its description in every input: a comment line `# mallard-profile`
+before its header holds a JSON object whose keys are the defaults of the
+entry's keys, and a record of where the data come from.
+
+```
+# mallard-profile {"coordinates": ["d"], "at": ["n_m"], "units": {"d": "mm", "u": "m/s", "uu": "m^2/s^2"}, "reference": {"length": "20 mm", "velocity": 30}, "source": "DNS of Schlatter & Orlu (2010), Re_theta = 1410", "transforms": []}
+d,u,uu
+0,0,0
+...
+```
+
+| Metadata key | Meaning |
+|---|---|
+| `coordinates` | The coordinate columns (the entry's `coordinates` overrides them) |
+| `at` | Where they are read, e.g. `["n_m"]` for a wall distance in meters or `["r"]` for a radius normalized on a disk (the entry's `at` overrides it) |
+| `units` | The unit of each column (the entry's `units` overrides them column by column) |
+| `reference` | The data's own scales: `length` (e.g. the boundary-layer thickness), `velocity` (e.g. the free stream), `density`, `temperature`; numbers in SI or quantities such as `"20 mm"` |
+| `source`, `transforms` | Where the data come from and what made the file: shown nowhere, kept with the file (the run block records its hash) |
+
+With it, the entry needs only its name and file, and `turbulence = {profile
+= "bl.csv", ...}` reads a described precursor profile at the wall distance of
+any inlet. [`tools/setup/profiles.py`](../../tools/README.md#profilespy-profile-files-for-inlets)
+writes described files from analytic laws (power law, laminar channel or
+pipe, Spalding's law of the wall), adds the metadata to a measured table or a
+`mallard post average` profile, rescales a file and checks one.
+
+**Rescaling.** `scale` gives new scales, and every column is multiplied by
+the ratio of each scale to the data's `reference` (the entry's, else the
+metadata's), to the power of the column's dimension in it: lengths by the
+length ratio, velocities by the velocity ratio, Reynolds stresses by its
+square, times as length over velocity, pressures as `rho U^2`, and
+temperatures by the temperature ratio. So one boundary-layer profile serves
+inlets of another thickness and free stream, its turbulence statistics
+consistent with its mean:
+
+```toml
+[[boundaries.data]]
+name = "bl"
+file = "bl.csv"                          # described as above: delta = 20 mm, U = 30 m/s
+scale = {length = 0.05, velocity = 12}   # a 50 mm boundary layer under 12 m/s: n x2.5, u x0.4, uu x0.16
+```
+
+`scale = {length = 1, velocity = 1}` nondimensionalizes the data by their
+reference. Every column read needs a unit (`"1"` if dimensionless), so that
+its dimension is known; the run log gives the factors (`table 41, cubic,
+scaled: length x2.5, velocity x0.4`).
+
+**Other transforms are expressions.** Translating, rotating, mirroring or
+stretching the coordinates is an `at` expression (`at = ["abs(u_m - 0.1)"]`
+mirrors a profile about the middle of a 0.2 m wide inlet), and a value is
+transformed in the boundary's expressions (`u = "bl_u * 1.1"`). Above a
+table's range a column holds its end value, which is the free stream for a
+boundary-layer table up to its edge; `outside = "error"` makes faces beyond
+it an error instead, and a blend to another value is an expression such as
+`T = "n_m < 0.02 ? bl_T : 300"`.
 
 ## Walls
 
@@ -615,7 +678,7 @@ type = "wall_adiabatic"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall)
-and 7 more.
+and 8 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -1092,7 +1155,7 @@ type = "symmetry"
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach),
 [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge),
 [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d)
-and 31 more.
+and 32 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.
@@ -1153,7 +1216,7 @@ axis = [0.0, 0.0, 1.0]
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
 [`vortex_ring_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#vortex-ring-3d)
-and 13 more.
+and 16 more.
 
 Rules: zone B must match zone A node for node (to 1e-6 of the zones' shortest
 edge) after the translation or rotation, and a node without a partner is
@@ -1270,7 +1333,7 @@ bitwise the same on any number of ranks and across restarts.
 | Key | Default | Meaning |
 |---|---|---|
 | `reynolds_stress` | required (or `profile`) | `[R_xx, R_yy, R_zz, R_xy, R_xz, R_yz]` (2D: `[R_xx, R_yy, R_xy]`), numbers or expressions |
-| `profile` | — | Instead of `u` and `reynolds_stress`: a CSV of plane averages from a precursor run (`mallard post average --homogeneous`) |
+| `profile` | — | Instead of `u` and `reynolds_stress`: the statistics of a precursor run, the name of a `[[boundaries.data]]` entry with the columns `MEAN_U_*` and `COV_U_*_U_*`, or a CSV of plane averages (`mallard post average --homogeneous`) |
 | `length_scale` | required | Integral length: one number, one per direction, or one list per component |
 | `convection_velocity` | mean inflow speed (at `t = 0`) | `U_c` of Taylor's hypothesis |
 | `seed` | 1 | Random seed |
@@ -1299,6 +1362,29 @@ nscbc = { L = 1.0 }
 reynolds_stress = [1.0, 0.5, 0.5, 0.0, 0.0, 0.0]   # (1 m/s)^2 streamwise from the start
 length_scale = 0.01
 convection_velocity = 10.0   # the mean at t = 0 is 0, so give it
+```
+
+**Statistics from a precursor.** `profile` takes the mean velocity and the
+Reynolds stresses from the plane averages of a precursor run, the columns
+`MEAN_U_X`, `MEAN_U_Y` (`MEAN_U_Z`) and `COV_U_X_U_X`, ... (an off-diagonal
+covariance in either order, zero if missing) that `mallard post average
+--statistics --homogeneous` writes. It names a [`[[boundaries.data]]`](#profiles-from-data)
+entry of the inlet, read like any other: in the wall distance of a turned
+inlet, in millimeters, rescaled to another thickness and velocity. Or it names
+the file itself, read as such an entry with its defaults (the first column is
+the coordinate, named `x`, `y`, `z` (`X`, `Y`, `Z`, as `post average` writes
+them) or like a local coordinate, with linear interpolation):
+
+```toml
+[boundaries.turbulence]
+profile = "channel"              # the [[boundaries.data]] below
+length_scale = 0.1
+
+[[boundaries.data]]
+name = "channel"
+file = "inflow_profile.csv"      # a periodic channel's statistics in Y, from its wall at Y = 0
+coordinates = ["Y"]
+at = ["n_m"]                     # read at the inlet's wall distance: a channel at any position and angle
 ```
 
 The inlet must be planar and normal to a coordinate axis. Examples:

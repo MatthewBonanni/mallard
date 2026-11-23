@@ -10,6 +10,7 @@
  */
 
 #include "source_terms.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -365,7 +366,7 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         const Kokkos::View<Term *> terms = upload(static_terms, "source_static_terms");
         static_field = Kokkos::View<rtype **, Kokkos::LayoutRight>("source_static_field", mesh->n_cells,
                                                                    N_CONSERVATIVE + n_species);
-        Kokkos::parallel_for("source_static_field", n_owned,
+        gated::parallel_for("source_static_field", n_owned,
                              TermKernel<Accumulate>{{}, terms, table, weights, fields, means, {}, {}, n_species,
                                                     Accumulate{static_field}});
     }
@@ -376,7 +377,7 @@ void SourceTerms::update_means(const State & solution) {
     const StateView U = solution.flow;
     const Kokkos::View<rtype *> V = mesh->cell_measure;
     const Kokkos::View<double *[N_MEANS + 1]> terms = mean_terms;
-    Kokkos::parallel_for("source_mean_terms", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("source_mean_terms", mesh->n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
         const double v = double(V(c)), rho = double(U(c, 0));
         double m[3] = {0.0, 0.0, 0.0};
         FOR_I_DIM m[i] = double(U(c, 1 + i));
@@ -388,7 +389,7 @@ void SourceTerms::update_means(const State & solution) {
     });
     mean_sums.sum(terms);
     const Kokkos::View<double *> sums = mean_sums.sums(), m = means;
-    Kokkos::parallel_for("source_means", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("source_means", 1, KOKKOS_LAMBDA(const int) {
         for (int i = 0; i < N_MEANS; i++) m(i) = sums(i + 1) / sums(0);
     });
 }
@@ -405,7 +406,7 @@ void SourceTerms::move(const Kokkos::View<rtype> & time) {
         const Kokkos::View<double *> f = m.fractions->fractions();
         const uint32_t row = m.row;
         const int32_t k = m.integral;
-        Kokkos::parallel_for("source_moving_weights", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("source_moving_weights", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
             w(row, c) = f(c);
             if (k >= 0 && c < n_owned) terms(c, k) = f(c) * double(V(c));
         });
@@ -416,7 +417,7 @@ void SourceTerms::move(const Kokkos::View<rtype> & time) {
 void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::View<rtype> & stage_time) {
     if (m_means) update_means(solution);
     if (!moving.empty()) move(stage_time);
-    Kokkos::parallel_for("rhs_source_terms", mesh->n_owned(),
+    gated::parallel_for("rhs_source_terms", mesh->n_owned(),
                          TermKernel<AddToRhs>{static_field, dynamic_terms, table, weights, fields, means, stage_time,
                                               integral_sums.sums(), n_species,
                                               AddToRhs{rhs.flow, rhs.species, mesh->cell_measure}});
@@ -424,11 +425,11 @@ void SourceTerms::add(const State & solution, const State & rhs, const Kokkos::V
 
 void SourceTerms::evaluate(const State & solution, const Kokkos::View<rtype> & time,
                            const Kokkos::View<rtype **, Kokkos::LayoutRight> & out) {
-    Kokkos::deep_copy(Kokkos::DefaultExecutionSpace(), out, 0.0_r);
+    gated::fill(out, 0.0_r);
     if (m_empty) return;
     if (m_means) update_means(solution);
     if (!moving.empty()) move(time);
-    Kokkos::parallel_for("source_values", mesh->n_owned(),
+    gated::parallel_for("source_values", mesh->n_owned(),
                          TermKernel<Accumulate>{static_field, dynamic_terms, table, weights, fields, means, time,
                                                 integral_sums.sums(), n_species,
                                                 Accumulate{out}});

@@ -22,11 +22,13 @@ import case_view
 import domains
 import effective_resolution
 import geometry
+import gui_mockups
 import high_order_cost
 import inlets
 import les_models
 import limiters
 import mesh_fields
+import particles
 import probes
 import python
 import regions
@@ -36,6 +38,7 @@ import schematics
 import teno
 import theory
 import time_integrators
+import viscous_gradients
 import work_precision
 
 
@@ -49,14 +52,17 @@ def main():
     domains.figures()
     effective_resolution.figures()
     geometry.figures(args.mallard, args.mallard3d)
+    gui_mockups.figures()
     high_order_cost.figures()
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    particles.figures(args.mallard)
     schematics.figures()
     teno.figures()
     theory.figures()
     time_integrators.figures()
+    viscous_gradients.figures()
     work_precision.figures()
     if args.mallard:
         case_view.figures(args.mallard, args.mallard3d)

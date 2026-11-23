@@ -7,6 +7,7 @@ add_library(MallardCore STATIC
     common/region_input.cpp
     common/region_mesh.cpp
     common/region_motion.cpp
+    common/region_surface.cpp
     io/case_view.cpp
     io/case_image.cpp
     common/tabulated.cpp
@@ -23,6 +24,7 @@ add_library(MallardCore STATIC
     common/log.cpp
     common/report.cpp
     common/convergence.cpp
+    common/file_hash.cpp
     common/provenance.cpp
     common/sha256_hw.cpp
     common/snapshot_block.cpp
@@ -44,7 +46,6 @@ add_library(MallardCore STATIC
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
-    mesh/stencil_shapes.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp
@@ -57,19 +58,23 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
     chemistry/units.cpp
     numerics/face_reconstruction.cpp
+    numerics/face_weights.cpp
     numerics/overlap.cpp
     numerics/cut_quadrature.cpp
     numerics/quadrature.cpp
     numerics/scalar_reconstruction.cpp
     numerics/teno.cpp
     numerics/teno_setup.cpp
+    numerics/teno_shapes.cpp
     numerics/time_integrator.cpp
     numerics/step_control.cpp
     numerics/stencils.cpp
+    physics/flamelet.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp
@@ -107,10 +112,12 @@ add_library(MallardCore STATIC
     solver/initial_state.cpp
     solver/synthetic_turbulence.cpp
     solver/solver_initialize.cpp
+    solver/solver_flamelet.cpp
     solver/solver_mixture.cpp
     solver/solver_les.cpp
     solver/solver_wall_model.cpp
     solver/solver_rhs.cpp
+    solver/solver_convective_flux.cpp
     solver/solver_radiation.cpp
     solver/solver_sponge.cpp
     solver/solver_inflow.cpp
@@ -128,6 +135,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp
     parallel/device_comm.cpp
@@ -138,6 +146,9 @@ add_library(MallardCore STATIC
     parallel/halo_exchange.cpp
     parallel/lock_arrays.cpp
     parallel/partition.cpp
+    particles/particle_probes.cpp
+    particles/particle_quantities.cpp
+    particles/particles.cpp
 )
 
 target_include_directories(MallardCore PUBLIC
@@ -151,12 +162,17 @@ target_include_directories(MallardCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/solver
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/parallel
+    ${CMAKE_CURRENT_SOURCE_DIR}/particles
 )
 target_link_libraries(MallardCore PUBLIC Kokkos::kokkos Threads::Threads)
 
-# Kokkos computes a View's offset in the common type of its indices, so indices
-# that are all narrower than int (uint8_t, uint16_t) wrap the offset and alias
-# entries. Mallard compiles against a copy of Kokkos_View.hpp that rejects them.
+# Kokkos computes a View's offset in the common type of its indices: all-int indices
+# wrap it past 2^31 entries, and indices all narrower than int (uint8_t, uint16_t)
+# much sooner, aliasing entries. Mallard compiles against a copy of Kokkos_View.hpp
+# that computes a signed 32-bit offset as unsigned (the same offset for valid indices,
+# at the same width), so offsets reach 2^32 entries (common/view_entries.h), and that
+# rejects indices all narrower than int.
+set(view_offset_patched FALSE)
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_VIEW_HEADER Kokkos_View.hpp PATHS ${kokkos_includes} NO_DEFAULT_PATH NO_CACHE)
@@ -168,24 +184,39 @@ if(Mallard_KOKKOS_VIEW_HEADER)
     string(CONCAT narrow "\"Kokkos computes this View offset in the common type of the indices, which wraps when all "
                          "of them are narrower than int: make one index at least 32 bits (see src/CMakeLists.txt)\"")
     set(offset_anchor "    using idx_type = std::common_type_t<IndexOffsets...>;\n")
-    set(offset_check "    static_assert(sizeof(idx_type) >= sizeof(int), ${narrow});\n")
-    set(stride_anchor "      std::index_sequence<0>, IndexOffset index_offset) const {\n")
-    string(CONCAT stride_check "    static_assert(!std::is_same_v<typename base_t::layout_type, Kokkos::layout_stride> ||\n"
-                               "                  sizeof(IndexOffset) >= sizeof(int), ${narrow});\n")
+    string(CONCAT offset_patch
+        "    using common_idx_type = std::common_type_t<IndexOffsets...>;\n"
+        "    static_assert(sizeof(common_idx_type) >= sizeof(int), ${narrow});\n"
+        "    using idx_type = std::conditional_t<std::is_signed_v<common_idx_type> && sizeof(common_idx_type) == 4,\n"
+        "                                        uint32_t, common_idx_type>;\n")
+    set(stride_anchor "      return index_offset * static_cast<IndexOffset>(m_map.stride(0));\n")
+    string(CONCAT stride_patch
+        "    {\n"
+        "      static_assert(sizeof(IndexOffset) >= sizeof(int), ${narrow});\n"
+        "      using idx_type = std::conditional_t<std::is_signed_v<IndexOffset> && sizeof(IndexOffset) == 4, uint32_t,\n"
+        "                                          IndexOffset>;\n"
+        "      return static_cast<idx_type>(index_offset) * static_cast<idx_type>(m_map.stride(0));\n"
+        "    }\n")
     string(FIND "${kokkos_view}" "${offset_anchor}" offset_found)
     string(FIND "${kokkos_view}" "${stride_anchor}" stride_found)
     if(offset_found GREATER_EQUAL 0 AND stride_found GREATER_EQUAL 0)
-        string(REPLACE "${offset_anchor}" "${offset_anchor}${offset_check}" kokkos_view "${kokkos_view}")
-        string(REPLACE "${stride_anchor}" "${stride_anchor}${stride_check}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${offset_anchor}" "${offset_patch}" kokkos_view "${kokkos_view}")
+        string(REPLACE "${stride_anchor}" "${stride_patch}" kokkos_view "${kokkos_view}")
         file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded "${kokkos_view}")
         configure_file(${CMAKE_CURRENT_BINARY_DIR}/Kokkos_View.hpp.guarded
                        ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard/Kokkos_View.hpp COPYONLY)
         target_include_directories(MallardCore SYSTEM BEFORE PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/kokkos_index_guard)
+        target_compile_definitions(MallardCore PUBLIC Mallard_UNSIGNED_VIEW_OFFSETS)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${Mallard_KOKKOS_VIEW_HEADER})
+        set(view_offset_patched TRUE)
     elseif(NOT USE_SYSTEM_KOKKOS)
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_View.hpp no longer computes View offsets as the "
-                            "narrow-index guard expects; update the guard for this Kokkos version.")
+                            "offset patch expects; update the patch for this Kokkos version.")
     endif()
+endif()
+if(NOT view_offset_patched)
+    message(WARNING "Mallard: this Kokkos's Kokkos_View.hpp does not compute View offsets as src/CMakeLists.txt "
+                    "expects, so multi-dimensional Views are limited to 2^31 entries.")
 endif()
 
 # Input (common/input.h) records the keys setup reads, and its accessors how it reads
@@ -211,6 +242,32 @@ foreach(source ${mallard_sources})
                             "find_value_or<T>.")
     endif()
 endforeach()
+# Top-level kernels launch through gated.h, so that a step graph's launches after a stop do nothing
+foreach(source ${mallard_sources})
+    file(RELATIVE_PATH path ${CMAKE_SOURCE_DIR} ${source})
+    if(path MATCHES "^test/" OR path STREQUAL "src/common/gated.h")
+        continue()
+    endif()
+    file(STRINGS ${source} launches REGEX "Kokkos::parallel_(for|reduce|scan)")
+    if(NOT launches)
+        continue()
+    endif()
+    file(READ ${source} content)
+    if(content MATCHES "using[ \t\r\n]+Kokkos::parallel_(for|reduce|scan)")
+        message(FATAL_ERROR "${path} names Kokkos::parallel_${CMAKE_MATCH_1} with using: launch kernels with "
+                            "gated::parallel_${CMAKE_MATCH_1} (src/common/gated.h), whose kernels do nothing in a "
+                            "step graph's launches after a stop.")
+    endif()
+    string(REGEX MATCHALL "Kokkos::parallel_(for|reduce|scan)[ \t\r\n]*(<[^;()]*>)?[ \t\r\n]*\\([ \t\r\n]*[A-Za-z_:]*"
+           calls "${content}")
+    foreach(call ${calls})
+        if(NOT call MATCHES "(Team|Thread)[A-Za-z]*Range$")
+            string(REGEX REPLACE "^Kokkos::([a-z_]*).*" "\\1" name "${call}")
+            message(FATAL_ERROR "${path} launches a kernel with Kokkos::${name}: use gated::${name} (src/common/gated.h), "
+                                "whose kernels do nothing in a step graph's launches after a stop.")
+        endif()
+    endforeach()
+endforeach()
 # The expression and geometry engines know nothing of inputs or of each other:
 # what they need from them (unit hints, implicit shapes) is passed in
 foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
@@ -225,13 +282,20 @@ foreach(engine "kexpr.h;" "kexpr.cpp;kexpr.h" "geometry.h;common_typedef.h")
 endforeach()
 # The TENO setup computes every table with the same operations on the host
 # and on the device, and the reconstruction stages its stencil loads on GPUs
-# only: contracting multiplies and adds into FMAs would round each differently
-# by where the compiler fuses, so neither file contracts and the hot loops
-# write their FMAs explicitly. [statistics.convergence] updates its estimate on
-# the device as the host does, bit for bit, and the device cuts isosurfaces
-# into the host's quadrature points (region_motion.cpp)
-mallard_no_contraction(numerics/teno_setup.cpp numerics/teno.cpp solver/statistical_convergence.cpp
-                       common/region_motion.cpp)
+# only; the Riemann solvers are inlined in several kernels. Contracting
+# multiplies and adds into FMAs would round each differently by where the
+# compiler fuses, so none of these files contracts and the hot loops write
+# their FMAs explicitly (fmadd). Every source that inlines the Riemann solvers
+# is listed, here and in test/CMakeLists.txt, so that they round alike in every
+# kernel and whichever copy of an inline function the linker keeps. MUSCL's
+# fused cell kernel inlines the functions of its separate gradient, limiter and
+# face kernels, which nvcc would fuse differently in each, so that file does not
+# contract either. [statistics.convergence] updates its estimate on the device
+# as the host does, bit for bit, and the device cuts isosurfaces into the host's
+# quadrature points (region_motion.cpp, as region_mesh.cpp cuts them on the host)
+mallard_no_contraction(numerics/teno_setup.cpp numerics/teno_shapes.cpp numerics/teno.cpp numerics/face_reconstruction.cpp
+                       solver/solver_convective_flux.cpp solver/statistical_convergence.cpp common/region_motion.cpp
+                       common/region_mesh.cpp)
 # CPU SHA intrinsics, which nvcc's front end need not parse
 if(mallard_nvcc)
     set_source_files_properties(common/sha256_hw.cpp PROPERTIES COMPILE_OPTIONS "--host-only")
@@ -262,10 +326,10 @@ add_custom_target(mallard_git_version COMMAND ${git_version_command}
 add_dependencies(MallardCore mallard_git_version)
 target_include_directories(MallardCore PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
-# Kokkos computes the offset of a multi-dimensional View in the common type of its
-# indices, at most 32 bits (signed or not) in Mallard, so a View with more entries
-# would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp that
-# checks every allocation against common/view_entries.h.
+# A multi-dimensional View's offset is 32 bits (unsigned with the offset patch above,
+# else possibly signed), so a View with more entries than common/view_entries.h
+# allows would alias them. Mallard compiles against a copy of Kokkos_BasicView.hpp
+# that checks every allocation against it.
 if(USE_SYSTEM_KOKKOS)
     get_target_property(kokkos_includes Kokkos::kokkoscore INTERFACE_INCLUDE_DIRECTORIES)
     find_file(Mallard_KOKKOS_BASIC_VIEW_HEADER View/Kokkos_BasicView.hpp PATHS ${kokkos_includes}
@@ -297,7 +361,7 @@ endif()
 if(NOT basic_view_patched)
     if(USE_SYSTEM_KOKKOS)
         message(WARNING "Mallard: this Kokkos's View/Kokkos_BasicView.hpp does not allocate as the View size check "
-                        "in src/CMakeLists.txt expects, so Views past 2^31 entries are not rejected.")
+                        "in src/CMakeLists.txt expects, so oversized Views are not rejected.")
     else()
         message(FATAL_ERROR "src/CMakeLists.txt: the bundled Kokkos_BasicView.hpp no longer allocates as the View "
                             "size check expects; update the check for this Kokkos version.")
@@ -337,7 +401,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp install_verify.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 
@@ -345,11 +409,22 @@ add_executable(mallard main.cpp)
 target_link_libraries(mallard PRIVATE MallardCommands)
 set_target_properties(mallard PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
 mallard_target_warnings(mallard)
-if(Mallard_ENABLE_PYTHON)
-    add_library(MallardReader SHARED io/reader_c_api.cpp)
-    target_link_libraries(MallardReader PRIVATE MallardCore)
-    set_target_properties(MallardReader PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d)
-    mallard_target_warnings(MallardReader)
+# The C++ library API (include/mallard), compiled once for libmallard2d/3d and the test suite
+add_library(MallardApi OBJECT api/mallard_api.cpp)
+target_include_directories(MallardApi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
+target_include_directories(MallardApi PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(MallardApi PUBLIC MallardCore)
+mallard_target_warnings(MallardApi)
+# libmallard2d/3d: the C++ library API, and the C interface of the reader that the Python package loads
+if(Mallard_ENABLE_LIBRARY)
+    add_library(MallardLibrary SHARED io/reader_c_api.cpp)
+    target_link_libraries(MallardLibrary PRIVATE MallardApi MallardCore)
+    target_include_directories(MallardLibrary INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                                        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    target_compile_features(MallardLibrary INTERFACE cxx_std_17)
+    set_target_properties(MallardLibrary PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d EXPORT_NAME mallard${Mallard_DIM}d)
+    add_library(Mallard::mallard${Mallard_DIM}d ALIAS MallardLibrary)
+    mallard_target_warnings(MallardLibrary)
 endif()
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)
 add_custom_command(TARGET mallard POST_BUILD

@@ -1,0 +1,69 @@
+# For the key catalog only (tools/dev/input_catalog.py): the flamelet gas, a
+# table of the tests, with Z and C at the inlet and in a region, under LES.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 4
+Nz = 4
+Lx = 0.1
+Ly = 0.05
+Lz = 0.05
+
+[initialize]
+p = 101325.0
+T = 300.0
+u = [10.0, 0.0, 0.0]
+Z = 0.0
+C = 0.0
+
+[[initialize.regions]]
+region = { type = "sphere", center = [0.05, 0.025, 0.025], radius = 0.01 }
+Z = "0.3"
+C = "burnt"
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = [10.0, 0.0, 0.0]
+p = 101325.0
+T = 300.0
+Z = 1.0
+C = 0.0
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[[boundaries]]
+name = "back"
+type = "symmetry"
+
+[[boundaries]]
+name = "front"
+type = "symmetry"
+
+[numerics]
+preset = "second_order"
+
+[physics]
+type = "navier_stokes"
+gas = "flamelet"
+table = "../../../../test/data/flamelet/solver_reactor.h5"
+variance = "algebraic"
+C_Z = 0.1
+
+[les]
+Pr_t = 0.9
