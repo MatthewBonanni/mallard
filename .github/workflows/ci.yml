@@ -58,6 +58,12 @@ on:
           still build and run their other checks in full; empty runs every test
         type: string
         default: ''
+      stamp:
+        description: >-
+          Space-separated head commits of the pull requests in this batch branch: when the run
+          passes, it sets `CI` on each (as batch.yml would), so they can merge with no other run
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -1212,6 +1218,7 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
           ONLY: ${{ inputs.only }}
           COVERED: ${{ needs.device.outputs.covered }}
+          STAMP: ${{ inputs.stamp }}
         run: |
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
             --jq '.jobs[] | select(.name != "CI result" and .status == "completed"
@@ -1248,6 +1255,19 @@ jobs:
             elif [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
               gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
             fi
+          fi
+          if [ "$state" = success ] && [ -n "$STAMP" ] && [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            for sha in $STAMP; do
+              case "$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq .status)" in ahead|identical) ;;
+                *) echo "::error::$sha is not in $GITHUB_SHA: no CI set on the heads"; exit 1 ;;
+              esac
+            done
+            for sha in $STAMP; do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context=CI \
+                -f description="Passed in batch ${GITHUB_SHA:0:8} (run $GITHUB_RUN_ID)" -f target_url="$url" > /dev/null
+              echo "CI success on $sha"
+            done
           fi
           [ "$state" = success ]
       # Each build's newest compiler cache on main is the one branches restore; the older ones
