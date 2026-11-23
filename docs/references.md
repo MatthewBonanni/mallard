@@ -342,6 +342,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
 - <a id="capecelatro-desjardins-2013"></a>J. Capecelatro and O. Desjardins, An Euler–Lagrange strategy for simulating particle-laden flows, *J. Comput. Phys.* 238, 1–31 (2013). [doi:10.1016/j.jcp.2012.12.015](https://doi.org/10.1016/j.jcp.2012.12.015)
   Used in: the deposition of two-way coupling sources and dispersed-phase fields as a deposit spread by diffusion over a width in physical units (`deposition_width` in `[particles]`, `src/particles/particle_coupling.cpp`).
+- <a id="lefebvre-mcdonell-2017"></a>A. H. Lefebvre and V. G. McDonell, *Atomization and Sprays*, 2nd ed., CRC Press (2017). [doi:10.1201/9781315120911](https://doi.org/10.1201/9781315120911)
+  Used in: the size distributions of `[[particles.injectors]]` (Rosin-Rammler, log-normal, Nukiyama-Tanasawa) and their mean diameters.
+- <a id="steele-2014"></a>G. L. Steele, D. Lea and C. H. Flood, Fast splittable pseudorandom number generators, *Proc. 2014 ACM Int. Conf. on Object Oriented Programming Systems Languages & Applications (OOPSLA)*, 453–472 (2014). [doi:10.1145/2660193.2660195](https://doi.org/10.1145/2660193.2660195)
+  Used in: the counter-based random numbers of `[[particles.injectors]]` (SplitMix64's finalizer, `particles::Random` in `src/particles/particle_injection.h`).
 - <a id="maxey-1987"></a>M. R. Maxey, The gravitational settling of aerosol particles in homogeneous turbulence and random flow fields, *J. Fluid Mech.* 174, 441–465 (1987). [doi:10.1017/S0022112087000193](https://doi.org/10.1017/S0022112087000193)
 - <a id="ferry-balachandar-2001"></a>J. Ferry and S. Balachandar, A fast Eulerian method for disperse two-phase flow, *Int. J. Multiphase Flow* 27, 1199–1226 (2001). [doi:10.1016/S0301-9322(00)00069-0](https://doi.org/10.1016/S0301-9322%2800%2900069-0)
   Used in (these two): the expansion of a small particle's velocity in its relaxation time, whose first term is the equilibrium velocity toward which particles faster than the step relax.

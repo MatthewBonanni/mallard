@@ -473,3 +473,115 @@ eq. $\eqref{eq:coupling-sources}$ at the written state, from the explicit
 rates of the particles there (`Particles::fields`). `mallard check` warns
 where a particle is larger than a tenth of its cell or the volume fraction
 exceeds 1%, where the point-particle and dilute assumptions fail.
+
+## Injection
+
+`[[particles.injectors]]` add particles during the run
+(`particles::Injectors`, `src/particles/particle_injection.cpp`). Each
+injector emits parcels, each of `weight` $w$ physical particles, at a rate,
+from a site, with a velocity, a diameter and (with heat transfer) a
+temperature of its own; injected solid particles carry their diameter and
+weight per particle, so the forces, heat transfer and coupling of
+eq. $\eqref{eq:solid}$ and after use each particle's own $d$ and $w$.
+
+### Where, when and how many
+
+- **Site.** A `point` (a nozzle smaller than the cells), the faces of
+    boundary zones (`region` naming zones), or a filled region of the mesh
+    or of shapes (`region` as a cell zone or a primitive). Parcels are
+    distributed uniformly over the site: over a zone's faces by area, over
+    a region by volume (cells by their volume times the fraction of them the
+    region fills).
+- **Rate.** `rate` $\dot N$ parcels per second, or `mass_flow` $\dot M$, from
+    which
+    $\dot N = \dot M / (w\,\rho_p\,\tfrac{\pi}{6}\langle d^3\rangle)$ with
+    $\langle d^3\rangle$ the mean of $d^3$ over the injector's size
+    distribution by number (in 2D, both per unit depth). An injector emits
+    from `start` to `end` (for ever without it).
+- **Velocity.** A vector `velocity`, or a `speed` along a `direction` (on
+    boundary zones, by default each face's inward normal), spread uniformly
+    over a cone of half angle `cone_angle` $\theta_c$ about it: in 3D uniform
+    in solid angle, with the polar angle $\theta$ from
+    $\cos\theta = 1 - \xi_1 (1 - \cos\theta_c)$ and the azimuth
+    $2\pi\xi_2$; in 2D uniform in angle, $\theta = \theta_c(2\xi_1 - 1)$, with
+    $\xi_1, \xi_2$ uniform in $[0, 1)$. The speed is the same for all
+    particles of an injector.
+
+### Size distributions
+
+`diameter` is a number, every particle of that diameter, or a distribution of
+the probability density $f(d)$, by number or by mass (`basis`), clipped to
+`[min, max]`:
+
+$$
+\begin{equation}
+\begin{aligned}
+&\text{Rosin-Rammler:} && 1 - F(d) = e^{-(d/X)^q}, \quad f = \frac{q}{X}\left(\frac{d}{X}\right)^{q - 1} e^{-(d/X)^q}, \\
+&\text{log-normal:} && f \propto \frac{1}{d}\exp\left[-\frac{1}{2}\left(\frac{\ln(d / d_m)}{\sigma}\right)^2\right], \\
+&\text{Nukiyama-Tanasawa:} && f \propto \left(\frac{d}{X}\right)^{p} e^{-(d/X)^q}, \quad p > -1, \\
+&\text{uniform:} && f \propto 1 \text{ on } [d_{min}, d_{max}], \\
+&\text{table:} && f \text{ piecewise linear in } d \text{ through the given points},
+\end{aligned}
+\label{eq:injection-distributions}
+\end{equation}
+$$
+
+with the size $X$ (`size`) and spread $q$ (`spread`), the median $d_m$
+(`median`) and the standard deviation $\sigma$ of $\ln d$ (`sigma`), and the
+exponent $p$ (`exponent`), the forms of sprays and powders
+([Lefebvre & McDonell 2017](../references.md#lefebvre-mcdonell-2017)). A
+distribution by mass is the number distribution weighted by $d^3$, so it is
+sampled by number from $f(d)\,d^{-3}$. Without `min` and `max` a distribution
+of unbounded support is clipped to its $10^{-9}$ and $1 - 10^{-9}$ quantiles.
+`mallard check` reports each injector's mean diameter $D_{10}$ and Sauter
+mean diameter $D_{32} = \langle d^3\rangle / \langle d^2\rangle$.
+
+### Numerics
+
+**Parcels per step.** After every accepted step, each injector emits the
+parcels it owes for the part of the step within $[t_{start}, t_{end})$:
+$\dot N\,\Delta t'$ plus the fraction of a parcel carried from the previous
+step, whose whole part enters now and whose remainder is carried on (a
+parcel due but for the rounding of the step times, within a relative
+$4\epsilon$ of the time, enters now). The mean rate is therefore exact
+whatever the steps, and a step the step control rejects advances no time and
+injects nothing. A parcel enters at the end of the step in which it is due,
+at a point drawn from the site and with its injection velocity: the entry
+times are quantized to the step, so the spacing of the parcels along their
+paths, not their number, carries an error of up to one step, which vanishes
+as $\Delta t \to 0$.
+
+**Uniform points.** Each injector holds the cumulative weights of its
+elements (faces or cells) over every rank, ordered by global cell id and face
+centroid, so it is the same on any partition. A parcel draws its element by
+weight; the rank owning it places the parcel in one of the element's
+simplices (a face is a fan of segments or triangles, a cell of triangles or
+tetrahedra) drawn by measure, at barycentric weights from the spacings of
+sorted uniform numbers, which is uniform in the simplex. In a region of
+shapes, points outside the shape's signed distance are drawn again, up to
+1024 times per parcel (the mean cost is the cut cells' volume over the
+region's); a parcel that misses every time takes a point of the cell inside
+the region found at setup, and cells the region barely touches are dropped.
+
+**Diameters** are sampled by inverting the cumulative distribution of
+$f(d)$ (by number) tabulated on 4096 intervals of $\ln d$ between the clip
+bounds by the trapezoidal rule, linear in $\ln d$ within an interval. The
+moments that set the rate from `mass_flow` come from the same table, so the
+mean mass flow of the sampled parcels is the one given.
+
+**Random numbers.** Draw $n$ of parcel $i$ of injector $j$ is a counter-based
+hash of (`seed`, $j$, $i$, $n$), SplitMix64's finalizer chained over the key
+([Steele, Lea & Flood 2014](../references.md#steele-2014)), uniform in
+$[0, 1)$ with 53 random bits. A parcel's numbers depend only on its count
+within its injector: not on the rank, the thread, the order of kernels or
+where the steps fall. Every rank draws every parcel's element and only its
+owner places it, so the same particles enter, with ids in order of
+injection, on any rank count; there is no generator state to save, and
+restart files carry each injector's count and carried fraction and the next
+id, so a restarted run continues the injection bit for bit. The four kernels
+of a step's injection (the counts, the local parcels, the free slots, the
+insertion of the $k$-th local parcel into the $k$-th free slot) have fixed
+sizes and are captured in the step graph. By default the capacity holds the
+seeds plus $\lceil\dot N\,(t_{end} - t_{start})\rceil + 1$ parcels per
+injector up to the end of the run; parcels that find no free slot are counted
+and reported.
