@@ -1040,14 +1040,15 @@ void Solver::init_boundaries() {
                                   .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
             }
             const auto & u = bound.at("u").as_array();
-            auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
+            auto add_state = [&](const Input & v, const std::string & field, const Dimension & dimension) {
                 dirichlet.W.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound), BoundaryValue::hint,
+                    name + field, quantity_or_expression(v, where_name + field, dimension), BoundaryValue::variables(bound),
+                    BoundaryValue::hint,
                     boundary_variable::FIRST_LOCAL));
             };
-            add_state(bound.at("rho"), name + ".rho", dim::density);
-            FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
-            add_state(bound.at("p"), name + ".p", dim::pressure);
+            add_state(bound.at("rho"), ".rho", dim::density);
+            FOR_I_DIM add_state(u[i], ".u[" + std::to_string(i) + "]", dim::velocity);
+            add_state(bound.at("p"), ".p", dim::pressure);
         }
         auto fields = std::make_shared<BoundaryFields>(bound, bcs.back(), "boundaries[name = \"" + name + "\"]");
         boundary_fields[i_bc] = fields;
