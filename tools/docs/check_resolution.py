@@ -139,14 +139,14 @@ def draw(P):
     x, y = np.array(d["x"]) * 1e3, np.array(d["y"]) * 1e3
     field = np.array(d["delta_over_eta"])
     fig = plt.figure(figsize=(10.8, 6.4))
-    grid = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], width_ratios=[1.0, 0.85], hspace=0.5, wspace=0.62)
+    grid = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.15], width_ratios=[1.0, 0.85], hspace=0.5, wspace=0.7)
     ax = fig.add_subplot(grid[0, :])
     X, Y = np.meshgrid(x, y)
     polys = [[(X[j, i], Y[j, i]), (X[j, i + 1], Y[j, i + 1]), (X[j + 1, i + 1], Y[j + 1, i + 1]),
               (X[j + 1, i], Y[j + 1, i])] for j in range(field.shape[0]) for i in range(field.shape[1])]
     norm = LogNorm(0.3, 30)
     pc = PolyCollection(polys, array=field.ravel(), cmap=P["cmap"], norm=norm, edgecolors="face", linewidths=0.2,
-                        rasterized=False)
+                        rasterized=True)
     ax.add_collection(pc)
     for name, (a, b) in REGIONS.items():
         ax.text((a + b) / 2 * 1e3, y[-1] + 0.35, name, ha="center", va="bottom", fontsize=12, color=P["fg"])
@@ -170,7 +170,7 @@ def draw(P):
     bx.axhline(1.0, color=P["flame"], lw=1.4, ls=(0, (4, 2)))
     for name, (a, b) in REGIONS.items():
         bx.text((a + b) / 2 * 1e3, 3.9, name, ha="center", va="bottom", fontsize=11, color=P["muted"])
-    bx.text(x[-1], 1.08, "DNS target", ha="right", va="bottom", color=P["flame"], fontsize=11)
+    bx.text(25.0, 1.08, "DNS target", ha="left", va="bottom", color=P["flame"], fontsize=11)
     bx.axvline(REGIONS["entrance"][1] * 1e3, color=P["muted"], lw=1.0, ls=(0, (4, 2)))
     bx.set_xlim(x[0], x[-1])
     bx.set_ylim(0, 4.3)
