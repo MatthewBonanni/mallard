@@ -108,9 +108,9 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 | | Best for |
 |---|---|
 | Container: `ghcr.io/matthewbonanni/mallard` (CPU) or `:cuda` (NVIDIA); Docker, Apptainer, Kubernetes | Trying Mallard; workstations; GPU nodes; Kubernetes |
-| Relocatable Linux CPU archive, each release since 0.11.0 | Linux clusters with MPICH-based MPI; no container runtime |
+| Portable Linux binaries, **CPU only** (MPICH or Open MPI), each release since 0.11.0 | Linux CPU clusters; no container runtime (GPUs: container or Spack) |
 | [Spack](https://spack.io): `spack install mallard` (this repository's package) | Clusters: your compilers, MPI, GPUs |
-| From source with CMake | Development; every build option |
+| From source with CMake | Development: tests, fuzzing, sanitizers, warnings as errors |
 
 Quick CPU build:
 
@@ -120,7 +120,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF -DKokkos_
 cmake --build build -j
 ```
 
-- [Installation](https://matthewbonanni.github.io/mallard/docs/installation/): containers, relocatable archives, Spack, GPU and MPI builds, every CMake option
+- [Installation](https://matthewbonanni.github.io/mallard/docs/installation/): containers, portable binaries, Spack, GPU and MPI builds, every CMake option
 - [Supported platforms](https://matthewbonanni.github.io/mallard/docs/installation/#supported-platforms): GCC 15+, Clang 22+ or Xcode 26.4+; CMake 4.2+; Linux (x86-64, arm64), macOS; GPUs: CUDA 13.4, ROCm, oneAPI
 - [Feature matrix](https://matthewbonanni.github.io/mallard/docs/guide/features/): which features combine (validated, verified, implemented, rejected, untested)
 
@@ -128,7 +128,7 @@ cmake --build build -j
 
 ```sh
 cd examples/riemann_2d
-mallard -i input.toml --kokkos-num-threads=8                   # installed (container, archive, Spack)
+mallard -i input.toml --kokkos-num-threads=8                   # installed (container, portable binaries, Spack)
 ../../build/src/mallard -i input.toml --kokkos-num-threads=8   # source build
 ```
 
