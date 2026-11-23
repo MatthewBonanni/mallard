@@ -38,10 +38,21 @@ std::string brief(const double x) {
 
 } // namespace
 
-ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
-    const MixtureModel model = MixtureModel::from_input(input);
+const Input & reactor_table(const Input & input) {
+    const std::string gas = find_value_or<std::string>(input, "physics", "gas", "mixture");
+    if (gas != "mixture") throw not_accepted(input.at("physics"), "physics.gas", gas, {"mixture"});
     if (!input.contains("reactor")) throw InputError("missing [reactor].");
     const Input & table = input.at("reactor");
+    const std::string type = find_value_or<std::string>(table, "type", "constant_volume");
+    if (type != "constant_volume") {
+        throw InputError("reactor.type = \"" + type + "\": only \"constant_volume\" is supported.");
+    }
+    return table;
+}
+
+ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
+    const MixtureModel model = MixtureModel::from_input(input);
+    const Input & table = reactor_table(input);
     const Input & bench = input.at("benchmark");
     const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
     const double end_time = find_double(table, "end_time", dim::time);

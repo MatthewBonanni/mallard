@@ -2081,7 +2081,8 @@ It prints the ignition delay, the time of the maximum of `dT/dt`, once
 however small the temperature rise of a lean mixture), and otherwise none.
 Example: `examples/h2_ignition`.
 
-It also reads `[chemistry] integrator` and `C_reg`, as the solver does; the
-`[benchmark]` mode does not read `[reactor] output_interval` or `output`. Keys
-it does not read are errors, as in a run ([unknown and unused
+It also reads `[physics] gas` (`mixture`, the default and the only one) and
+`[chemistry] integrator` and `C_reg`, as the solver does; the `[benchmark]`
+mode does not read `[reactor] output_interval` or `output`. Keys it does not
+read are errors, as in a run ([unknown and unused
 keys](guide/input_files.md#unknown-and-unused-keys)).

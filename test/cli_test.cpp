@@ -992,32 +992,33 @@ TEST(CliTest, ReactorRejectsUnusedKeysAsARunDoes) {
         return text;
     };
     fs::remove("reactor.csv");
-    const std::string misspelled = with("[reactor]\n", "output_intervall = 1.0e-6\n");
+    const std::string misspelled = with("[chemistry]\n", "max_step = 1000\n");
     const Result unused = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
     EXPECT_EQ(unused.status, 1);
     EXPECT_TRUE(contains(unused.err, "E-KEY-UNUSED")) << unused.err;
     EXPECT_TRUE(contains(unused.err, "reactor_keys.toml: keys that are unknown or unused with these settings "
                                      "(mallard check lists them all):\n  line " +
-                                         std::to_string(line_starting(misspelled, "output_intervall")) +
-                                         ": reactor.output_intervall (did you mean reactor.output_interval?)"))
+                                         std::to_string(line_starting(misspelled, "max_step")) +
+                                         ": chemistry.max_step (did you mean chemistry.max_steps?)"))
         << unused.err;
     EXPECT_FALSE(fs::exists("reactor.csv"));
 
     const std::string benchmark = with("atol = 1.0e-10\n", "[benchmark]\ncells = 16\nsamples = 4\nrepeats = 1\n"
-                                                           "dt = [1.0e-8]\nrepeat = 2\noutput = \"keys.csv\"\n");
+                                                           "dt = [1.0e-8]\nlane = 4\noutput = \"keys.csv\"\n");
     const Result bench = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
     EXPECT_EQ(bench.status, 1);
-    EXPECT_TRUE(contains(bench.err, "line " + std::to_string(line_starting(benchmark, "repeat =")) +
-                                        ": benchmark.repeat (did you mean benchmark.repeats?)"))
+    EXPECT_TRUE(contains(bench.err, "line " + std::to_string(line_starting(benchmark, "lane =")) +
+                                        ": benchmark.lane (did you mean benchmark.lanes?)"))
         << bench.err;
 
     std::string missing = input;
-    missing.replace(missing.find("\nT = "), 5, "\nTT = ");
+    missing.replace(missing.find("\nend_time = "), 12, "\nend_tim = ");
     std::ofstream("reactor_keys.toml") << missing;
     const Result stopped = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
     EXPECT_EQ(stopped.status, 1);
-    EXPECT_TRUE(contains(stopped.err, "possibly misspelled:\n  line " + std::to_string(line_starting(missing, "TT =")) +
-                                          ": reactor.TT (did you mean reactor.T?)"))
+    EXPECT_TRUE(contains(stopped.err, "possibly misspelled:\n  line " +
+                                          std::to_string(line_starting(missing, "end_tim =")) +
+                                          ": reactor.end_tim (did you mean reactor.end_time?)"))
         << stopped.err;
 }
 

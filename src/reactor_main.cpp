@@ -49,17 +49,6 @@ std::string brief(const double x) {
     return buffer;
 }
 
-/** @brief The [reactor] table, of type constant_volume, the only one. */
-const Input & reactor_table(const Input & input) {
-    if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const Input & table = input.at("reactor");
-    const std::string type = find_value_or<std::string>(table, "type", "constant_volume");
-    if (type != "constant_volume") {
-        throw InputError("reactor.type = \"" + type + "\": only \"constant_volume\" is supported.");
-    }
-    return table;
-}
-
 void run(const Input & input, const std::string & input_file) {
     provenance::start_run();
     {
@@ -156,7 +145,6 @@ void run(const Input & input, const std::string & input_file) {
 
 /** @brief The [benchmark] mode (run_chemistry_benchmark), written as CSV to benchmark.output. */
 void benchmark(const Input & input) {
-    reactor_table(input);
     const std::string output = find_value_or<std::string>(input.at("benchmark"), "output", "benchmark.csv");
     std::ofstream out(output);
     if (!out) throw InputError("cannot write benchmark.output = \"" + output + "\".");
