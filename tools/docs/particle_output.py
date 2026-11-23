@@ -68,7 +68,7 @@ def snapshot_run(binary):
     """The gas speed and the particles at each snapshot time of examples/particle_vortex."""
     work = Path(tempfile.mkdtemp())
     run(binary, vortex_input('[[write_data]]\nprefix = "gas"\nformat = "vtu"\nfields = ["U"]\ntime_interval = 1.0\n'
-                             '[[write_data]]\nprefix = "drops"\nparticle_fields = ["T_P", "slip_max"]\n'
+                             '[[write_data]]\nprefix = "drops"\nparticle_fields = ["T_P", "SLIP_MAX"]\n'
                              'time_interval = 1.0\n'), work)
     out = []
     for k in SNAPSHOT_TIMES:
@@ -143,7 +143,8 @@ def particle_crossings(P, args):
     net = np.cumsum(crossings["direction"][order])
     count = inside0 - np.concatenate([[0], net, net[-1:]])
     b.step(t, count, where="post", color=P["flame"], label="seeds inside less net crossings out")
-    b.plot(probe["t"], probe["count"], "o", color=P["blue"], ms=4, mfc="none", label="probe count")
+    sampled = probe["COUNT"] if "COUNT" in probe else probe["count"]  # probe columns are uppercase since #1466
+    b.plot(probe["t"], sampled, "o", color=P["blue"], ms=4, mfc="none", label="probe count")
     b.set_xlabel("t")
     b.set_ylabel("particles in the core")
     b.set_xlim(0, None)

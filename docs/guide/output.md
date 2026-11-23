@@ -496,7 +496,7 @@ valid state of a diverging run):
 prefix = "solut/flow"
 time_interval = 0.1
 fields = ["RHO", "U", "P"]
-particle_fields = ["V", "T_P", "residence"]
+particle_fields = ["V", "T_P", "RESIDENCE"]
 
 [[write_data]]                # the particles in a sphere, alone
 prefix = "solut/near"

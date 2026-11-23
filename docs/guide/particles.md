@@ -511,19 +511,19 @@ They are written by `[[write_data]]` and listed by `mallard list fields`.
 
 ```toml
 [[particles.quantities]]
-name = "t_cavity"
+name = "T_CAVITY"
 integral = "in(cavity)"          # time spent in the region cavity of [regions]
 
 [[particles.quantities]]
-name = "T_max"
+name = "T_MAX"
 max = "T"
 
 [[particles.quantities]]
-name = "t_hot"
+name = "T_HOT"
 first_time = "T > 1500"
 
 [[particles.quantities]]
-name = "turns"
+name = "TURNS"
 winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 ```
 
@@ -595,7 +595,7 @@ particles between ranks, and are bitwise the same on any number of ranks.
 [[particles.probes]]
 name = "core"
 region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
-fields = ["turns", "hypot(U_X, U_Y)"]
+fields = ["TURNS", "hypot(U_X, U_Y)"]
 interval = 100
 ```
 
@@ -643,7 +643,7 @@ deposition history.
 prefix = "flow"
 time_interval = 0.5
 fields = ["RHO", "U"]
-particle_fields = ["V", "T_P", "turns"]
+particle_fields = ["V", "T_P", "TURNS"]
 ```
 
 *Used in:*
@@ -664,7 +664,7 @@ carry every particle and quantity whatever the snapshots write.
 ![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-light.svg#gh-light-mode-only)
 ![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-dark.svg#gh-dark-mode-only)
 
-*Particle snapshots (`particle_fields = ["T_P", "slip_max"]`) of the
+*Particle snapshots (`particle_fields = ["T_P", "SLIP_MAX"]`) of the
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
 example at `t` = 0, 3 and 6, over the gas speed of a mesh snapshot at the same
 times (a Mallard run): the heavy particles seeded in one vortex are flung out
@@ -677,7 +677,7 @@ of it into the strain between the vortices and heat from 0.4 toward the gas's
 [[particles.crossings]]        # each particle leaving through the outlet, once
 name = "outlet"
 region = "outlet"
-fields = ["V", "residence"]
+fields = ["V", "RESIDENCE"]
 
 [[particles.crossings]]        # each crossing of the plane x = 0.2, either way
 name = "station"

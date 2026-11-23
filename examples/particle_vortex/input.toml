@@ -65,7 +65,7 @@ hi = [0.4, 0.4]
 n = [9, 9]
 
 [[particles.quantities]]
-name = "slip_max"
+name = "SLIP_MAX"
 max = "hypot(U_X - V_X, U_Y - V_Y)"
 
 # The particles near the vortex's center and their temperature, every 50 steps
@@ -79,7 +79,7 @@ interval = 50
 [[write_data]]
 prefix = "vortex"
 fields = ["U", "T"]
-particle_fields = ["V", "T_P", "slip_max"]
+particle_fields = ["V", "T_P", "SLIP_MAX"]
 time_interval = 1.0
 
 [output]
