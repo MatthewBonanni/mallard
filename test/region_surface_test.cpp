@@ -263,7 +263,8 @@ std::shared_ptr<Mesh> surface_mesh(const std::string & name) {
 #if N_DIM == 2
     mesh->init_file(write_temp_shared(name + ".msh", jittered_mixed_mesh(10)));
 #else
-    mesh->init_file(write_temp_shared(name + ".msh", jittered_periodic_mesh_3d(5, 0.2)));
+    (void)name;
+    mesh->init_cart_3d(6, 6, 6, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
 #endif
     return mesh;
 }
