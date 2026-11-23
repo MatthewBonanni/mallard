@@ -337,6 +337,7 @@ class CompositionExpressions {
                 }
                 return;
             }
+            MixtureModel::record_composition(where, true);
             if (table.contains("X") == table.contains("Y")) {
                 throw InputError(where + ": give the composition as exactly one of X and Y.");
             }

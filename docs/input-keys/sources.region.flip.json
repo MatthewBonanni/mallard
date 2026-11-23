@@ -3,6 +3,10 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "rectangle",
+  "where"
+ ],
  "set_in": [],
  "type": "bool"
 }

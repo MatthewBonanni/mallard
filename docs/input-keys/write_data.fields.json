@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "references": "fields",
  "required": true,
  "set_in": [
   "examples/autoignition_2d/input.toml",

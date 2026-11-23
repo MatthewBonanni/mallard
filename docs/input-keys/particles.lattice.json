@@ -2,7 +2,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "solid",
+  "tracer"
+ ],
  "set_in": [
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/particle_vortex/input.toml",
   "examples/tracer_vortex/input.toml"
  ]

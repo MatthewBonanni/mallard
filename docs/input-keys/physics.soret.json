@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "set_in": [],
  "type": "bool"
 }

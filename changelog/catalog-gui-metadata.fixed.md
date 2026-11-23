@@ -1,0 +1,1 @@
+- The key catalog lists the species of a composition as `X.<species>` (never required) instead of the examples' species as required keys (`initialize.X.N2`), and no longer lists `write_data.boundary` and `write_data.boundary_type`, which no setup accepts ([#1399](https://github.com/MatthewBonanni/mallard/issues/1399)).

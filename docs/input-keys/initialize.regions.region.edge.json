@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "disk"
+ ],
  "set_in": [
   "examples/turbulent_hot_spot_2d/input.toml"
  ]

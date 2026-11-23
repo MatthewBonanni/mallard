@@ -114,6 +114,7 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
     if (interval == 0) throw InputError(key + ".interval must be positive.");
     t_start = find_real_or(table, "t_start", dim::time, t_start_in);
     average = find_value_or<bool>(table, "average", true);
+    record_path("statistics.spectra.file", {.output = true, .extensions = {".csv"}});
     file = find_value_or<std::string>(table, "file", average ? "spectra.csv" : "spectra/spectra.csv");
 
     auto add_field = [&](const std::string & name) {

@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "set_in": [
   "examples/flame_outflow/input.toml",
   "examples/reactive_shock_tube/input.toml",

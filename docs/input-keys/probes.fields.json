@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "references": "fields",
  "required": true,
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",

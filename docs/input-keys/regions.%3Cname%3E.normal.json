@@ -3,6 +3,14 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "circle",
+  "disk",
+  "ellipse",
+  "half_space",
+  "rectangle"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/regions.toml",
   "tools/dev/catalog_inputs/3d/regions.toml"

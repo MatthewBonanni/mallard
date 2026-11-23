@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "circle"
+ ],
  "set_in": [
   "examples/source_regions/input.toml"
  ]

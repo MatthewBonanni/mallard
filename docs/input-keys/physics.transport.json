@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/flame_2d/input.toml",

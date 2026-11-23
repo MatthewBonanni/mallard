@@ -115,6 +115,8 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
     interval = find_value_or<uint64_t>(entry, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
     t_start = find_real_or(entry, "t_start", dim::time, t_start_in);
+    record_reference(key + ".on", "fields");
+    record_reference(key + ".fields", "fields");
     on = strings(entry, "on");
     if (on.empty() || on.size() > 2) {
         throw InputError(key + ".on: give one variable (a PDF) or two (a joint PDF), such as \"MIXTURE_FRACTION\".");
@@ -179,6 +181,7 @@ void ConditionalStatistics::init(const Input & entry, uint32_t index, const std:
         throw not_accepted(entry, "weight", weighting, {"volume", "mass"});
     }
     mass = weighting == "mass";
+    record_path(key + ".file", {.output = true, .extensions = {".csv"}});
     file_name = find_value_or<std::string>(entry, "file", default_file(on));
     restart_prefix = "CONDITIONAL_" + std::to_string(index) + "_";
 

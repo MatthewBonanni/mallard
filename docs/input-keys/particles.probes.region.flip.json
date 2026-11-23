@@ -3,6 +3,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "disk"
+ ],
  "set_in": [],
  "type": "bool"
 }

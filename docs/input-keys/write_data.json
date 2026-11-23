@@ -1,4 +1,17 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "interval"
+    ],
+    [
+     "time_interval"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2,
   3

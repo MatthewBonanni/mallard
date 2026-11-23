@@ -128,6 +128,7 @@ Spectrum read_table(const Input & t, const std::string & where) {
     Spectrum s;
     s.kind = Kind::TABLE;
     if (!t.contains("file")) throw missing_key(t, where + ".file", "Add file = \"...\": a CSV file of columns k and E");
+    record_path(where + ".file", {.extensions = {".csv"}});
     const std::string file = find_value<std::string>(t, "file");
     const tabulated::Csv csv = tabulated::read_csv(file, DOCS);
     const int32_t ik = csv.column("k"), iE = csv.column("E");

@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "TENO"
+ ],
  "set_in": [],
  "type": "integer"
 }

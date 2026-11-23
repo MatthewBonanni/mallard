@@ -2,6 +2,7 @@
  "dims": [
   3
  ],
+ "references": "zones",
  "required": true,
  "set_in": [
   "examples/channel_les/input.toml",

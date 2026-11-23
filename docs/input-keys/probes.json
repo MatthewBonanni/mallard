@@ -1,4 +1,32 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "interval"
+    ],
+    [
+     "time_interval"
+    ]
+   ],
+   "required": false
+  },
+  {
+   "keys": [
+    [
+     "region"
+    ],
+    [
+     "type"
+    ],
+    [
+     "boundary",
+     "boundary_type"
+    ]
+   ],
+   "required": false
+  }
+ ],
  "dims": [
   2,
   3

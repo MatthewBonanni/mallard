@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "outlet_pressure"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml"
  ],

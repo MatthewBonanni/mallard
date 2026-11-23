@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "inlet_mass_flow"
+ ],
  "set_in": [
   "examples/channel_inlet/input.toml",
   "examples/channel_inlet_data/input.toml"

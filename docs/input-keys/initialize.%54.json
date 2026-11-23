@@ -4,7 +4,14 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "required": true,
+ "required_for": [
+  "constant"
+ ],
  "set_in": [
   "examples/channel_inlet/input.toml",
   "examples/channel_inlet_data/input.toml",
@@ -16,6 +23,9 @@
   "examples/heated_wall/input.toml",
   "examples/hot_gas_regions/input.toml",
   "examples/moving_heaters/input.toml",
+  "examples/particle_bounce/input.toml",
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/pulsed_jet/input.toml",
   "examples/reactive_shock_tube/input.toml",

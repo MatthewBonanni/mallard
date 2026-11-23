@@ -3,6 +3,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "rectangle"
+ ],
  "set_in": [],
  "type": "bool"
 }

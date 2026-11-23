@@ -8,6 +8,10 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "cartesian"
+ ],
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",

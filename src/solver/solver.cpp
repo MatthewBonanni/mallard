@@ -1921,6 +1921,7 @@ void Solver::init_run_parameters() {
                           .fix = "Add [run] with cfl = 0.5 (or a fixed dt) and t_stop or n_steps"});
     }
     const Input & run = input.at("run");
+    record_alternatives("run", {{"dt"}, {"cfl"}}, true);
     if (run.contains("dt") == run.contains("cfl")) {
         throw InputError({.key = "run",
                           .line = line_of(run),
@@ -1989,6 +1990,7 @@ void Solver::init_output(region::Regions & regions) {
     if (contains_optional(input, "forces")) {
         for (const auto & entry : find_value<std::vector<Input>>(input, "forces")) {
             ForceMonitor monitor;
+            record_reference("forces.zone", "zones");
             monitor.zone = find_value<std::string>(entry, "zone");
             FaceZone * zone = mesh->get_face_zone(monitor.zone);
             if (zone != nullptr && zone->get_type() != FaceZoneType::BOUNDARY) zone = nullptr;
@@ -2026,6 +2028,7 @@ void Solver::init_output(region::Regions & regions) {
                                   .message = "must be positive",
                                   .fix = "Use 1 to write the forces every step"});
             }
+            record_path("forces.file", {.output = true, .extensions = {".csv"}});
             const std::string file = find_value_or<std::string>(entry, "file", "forces_" + monitor.zone + ".csv");
             monitor.file = file;
             if (comm::is_root() && output_files_enabled()) {
@@ -2066,6 +2069,7 @@ void Solver::init_output(region::Regions & regions) {
             throw InputError("integrals.budget is for planar runs (the geometric source of axisymmetric runs is not "
                              "in it).");
         }
+        record_path("integrals.file", {.output = true, .extensions = {".csv"}});
         const std::string file = find_value_or<std::string>(input, "integrals", "file", "integrals.csv");
         integral_monitor.file = file;
         if (comm::is_root() && output_files_enabled()) {
@@ -2091,6 +2095,9 @@ void Solver::init_output(region::Regions & regions) {
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
     // An undistributed solver runs on every rank (tests): no run log or report unless asked for
+    record_path("output.run_log", {.output = true, .extensions = {".jsonl"}});
+    record_path("output.report", {.output = true, .extensions = {".html"}});
+    record_path("output.divergence_report", {.output = true, .kind = "prefix"});
     const std::string run_log_file =
         find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");
     const std::string report_file = find_value_or<std::string>(input, "output", "report", distribute ? "report.html" : "");

@@ -23,6 +23,7 @@ MixtureModel MixtureModel::from_input(const Input & input) {
                           "ck2yaml)");
     }
     MixtureModel model;
+    record_path("physics.mechanism", {.extensions = {".yaml", ".yml"}});
     const std::string mechanism = find_value<std::string>(physics, "mechanism");
     const std::string phase = find_value_or<std::string>(physics, "phase", "");
     try {
@@ -146,6 +147,7 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
         tabulated_gas->host().complete(Y);
         return Y;
     }
+    record_composition(where, true);
     const bool has_X = table.contains("X"), has_Y = table.contains("Y");
     if (has_X == has_Y) {
         throw InputError(where + ": give the composition as exactly one of X and Y.");
@@ -170,6 +172,12 @@ std::vector<double> MixtureModel::mass_fractions(const Input & table, const std:
     if (!(sum > 0.0)) throw InputError(where + "." + key + " has no positive entry.");
     for (double & x : f) x /= sum;
     return has_X ? mass_fractions_from_mole(f) : f;
+}
+
+void MixtureModel::record_composition(const std::string & where, const bool required) {
+    record_alternatives(where, {{"X"}, {"Y"}}, required);
+    for (const char * key : {"X", "Y"}) record_names(where + "." + key, "species");
+    record_reference(where + ".balance", "species");
 }
 
 bool MixtureModel::composition_varies(const Input & table) {

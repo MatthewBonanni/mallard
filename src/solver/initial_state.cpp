@@ -1171,6 +1171,7 @@ struct InitialState::Impl {
         Mapping m;
         m.dims = static_cast<uint32_t>(coordinates.size());
         std::string at_text;
+        record_alternatives(where, {{"at"}, {"region"}}, false);
         if (e.contains("region")) {
             if (e.contains("at")) {
                 throw invalid(e, where + ".region", "region", "is given with at", "Give at or region, not both",
@@ -1336,6 +1337,7 @@ struct InitialState::Impl {
             L.n_fractions = static_cast<uint32_t>(Y.size());
             return;
         }
+        MixtureModel::record_composition(where, base);
         if (!t.contains("X") && !t.contains("Y")) {
             if (base) {
                 throw InputError({.key = where, .line = line_of(t), .message = "has no composition",

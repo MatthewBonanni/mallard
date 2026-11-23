@@ -2,7 +2,15 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "obj",
+  "stl"
+ ],
  "required": true,
+ "required_for": [
+  "obj",
+  "stl"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/regions.toml"
  ],

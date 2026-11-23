@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "half_space"
+ ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml"
  ]

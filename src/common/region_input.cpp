@@ -307,6 +307,7 @@ class Parser {
         std::map<std::string, std::pair<Node, std::string>> surfaces;  // read from files, by type, file and units
 
         Parsed parse(const Input & value, const std::string & where, const Frame & parent, const bool top = false) {
+            if (catalog_path(where) != "regions.<name>") record_reference(where, "regions");
             if (value.is_string()) return named(value, where, parent, top);
             return parse_table(value, where, parent);
         }
@@ -1246,6 +1247,7 @@ class Parser {
                      "needs units, the unit of length of the file's coordinates, which " + type + " files do not state",
                      example + "; the unit is \"m\", \"mm\", \"in\", ... as the CAD tool exported it", docs);
             }
+            record_path(where + ".file", {.extensions = {".stl", ".obj"}});
             const std::string file = find_value<std::string>(t, "file");
             const std::string units = find_value<std::string>(t, "units");
             double factor = 0.0;

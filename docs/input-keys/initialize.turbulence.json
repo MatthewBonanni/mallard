@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "constant"
+ ],
  "set_in": [
   "examples/turbulent_hot_spot_2d/input.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml"

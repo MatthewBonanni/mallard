@@ -1712,6 +1712,7 @@ void TENO::read_options(const Input & input) {
         throw std::runtime_error("TENO curved_wall_degree must be between 2 and " + std::to_string(teno::MAX_DEGREE) + ".");
     }
     curved_wall_degree = uint8_t(wall_degree);
+    record_path("numerics.face_reconstruction.cache_file", {.output = true});
     cache_file = find_value_or<std::string>(input, "cache_file", "");
     // Single-precision builds store their tables so anyway
     single_tables = find_value_or<bool>(input, "single_precision_tables", false) && sizeof(rtype) > sizeof(float);

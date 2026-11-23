@@ -3,6 +3,7 @@
  "dims": [
   3
  ],
+ "references": "species",
  "set_in": [],
  "type": "string"
 }

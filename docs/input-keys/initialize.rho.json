@@ -3,12 +3,16 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
   "examples/explosion_3d/input.toml",
   "examples/forced_isotropic_turbulence/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_centrifuge/input.toml",
   "examples/particle_vortex/input.toml",
   "examples/riemann_2d/input.toml",
   "examples/riemann_2d_quads/coarse.toml",

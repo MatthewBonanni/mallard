@@ -2,7 +2,22 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "points",
+  "table"
+ ],
+ "path": {
+  "extensions": [
+   ".csv"
+  ],
+  "io": "input",
+  "kind": "file"
+ },
  "required": true,
+ "required_for": [
+  "points",
+  "table"
+ ],
  "set_in": [
   "examples/channel_inlet_data/input.toml",
   "tools/dev/catalog_inputs/2d/boundary_data.toml",

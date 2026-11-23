@@ -3,6 +3,11 @@
   2,
   3
  ],
+ "for_types": [
+  "disk",
+  "rectangle",
+  "sphere"
+ ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml",
   "examples/turbulent_hot_spot_2d/input.toml",

@@ -923,6 +923,7 @@ void Solver::init_dynamic_efficiency() {
 void Solver::init_reaction_sensor(const Input & combustion) {
     const derived::MixtureFraction z = derived::mixture_fraction(
         input, combustion, "les.combustion", *mixture_model, "docs/guide/les.md#non-premixed-and-partially-premixed-flames");
+    record_reference("les.combustion.sensor_species", "species");
     const std::string name = find_value_or<std::string>(
         combustion, "sensor_species",
         z.fuel_species >= 0 ? mixture_model->mechanism().species_names()[static_cast<uint32_t>(z.fuel_species)] : "");

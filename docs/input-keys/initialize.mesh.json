@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "remap"
+ ],
  "set_in": [
   "examples/riemann_2d_quads/remap.toml",
   "examples/taylor_green_3d/remap.toml"

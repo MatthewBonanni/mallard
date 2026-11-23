@@ -7,6 +7,10 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "set_in": [
   "examples/sedov_3d/input.toml",
   "examples/sedov_axisymmetric/input.toml",

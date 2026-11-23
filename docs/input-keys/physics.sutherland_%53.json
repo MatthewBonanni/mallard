@@ -4,6 +4,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/mesh_file.toml"
  ],

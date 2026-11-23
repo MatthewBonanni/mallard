@@ -4,7 +4,19 @@
   2,
   3
  ],
+ "for_types": [
+  "farfield",
+  "inlet_mass_flow",
+  "inlet_state",
+  "wall_isothermal"
+ ],
  "required": true,
+ "required_for": [
+  "farfield",
+  "inlet_mass_flow",
+  "inlet_state",
+  "wall_isothermal"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

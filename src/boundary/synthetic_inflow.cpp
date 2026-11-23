@@ -211,6 +211,7 @@ void InletProfile::read_profile(const Input & boundary, const std::string & wher
                                 const std::vector<std::string> & variables) {
     const Input & turbulence = boundary.at("turbulence");
     const std::string key = where + ".turbulence.profile";
+    record_alternatives(where + ".turbulence", {{"reynolds_stress"}, {"profile"}}, false);
     if (turbulence.contains("reynolds_stress")) {
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
     }

@@ -4,6 +4,7 @@
   2,
   3
  ],
+ "references": "fields",
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",
   "examples/channel_les/input.toml",

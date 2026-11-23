@@ -4,7 +4,14 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "required": true,
+ "required_for": [
+  "constant"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
@@ -21,6 +28,10 @@
   "examples/hot_gas_regions/input.toml",
   "examples/moving_heaters/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_bounce/input.toml",
+  "examples/particle_centrifuge/input.toml",
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/particle_vortex/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/pulsed_jet/input.toml",

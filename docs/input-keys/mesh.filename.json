@@ -4,6 +4,20 @@
   2,
   3
  ],
+ "for_types": [
+  "file"
+ ],
+ "path": {
+  "extensions": [
+   ".msh",
+   ".cgns",
+   ".cas",
+   ".h5",
+   ".hdf5"
+  ],
+  "io": "input",
+  "kind": "file_or_directory"
+ },
  "set_in": [
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/3d/mesh_file.toml"

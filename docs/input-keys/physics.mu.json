@@ -4,7 +4,13 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "required": true,
+ "required_for": [
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",
@@ -21,6 +27,10 @@
   "examples/forced_isotropic_turbulence/input.toml",
   "examples/heated_wall/input.toml",
   "examples/isotropic_turbulence/input.toml",
+  "examples/particle_bounce/input.toml",
+  "examples/particle_centrifuge/input.toml",
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/particle_vortex/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/pulsed_jet/input.toml",

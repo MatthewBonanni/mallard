@@ -323,6 +323,7 @@ Entry read_entry(const Input & e, const std::string & where, const std::string &
         throw invalid(e, where + ".name", "name", "\"" + name + "\" is not an identifier",
                       "Use letters, digits and _, starting with a letter: the variables are <name>_<column>", docs);
     }
+    record_path(where + ".file", {.extensions = {".csv"}});
     entry.file = find_value<std::string>(e, "file");
     const std::string & file = entry.file;
     const std::string type = find_value_or<std::string>(e, "type", "table");

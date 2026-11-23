@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "for_types": [
+  "box",
+  "rectangle"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/regions.toml",

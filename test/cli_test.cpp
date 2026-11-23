@@ -905,6 +905,9 @@ TEST(CliTest, ListSpeciesGivesTheMechanismsSpecies) {
     const json::Value v = json::parse(listed.out);
     for (const auto & s : v["species"].array) names.push_back(s.string);
     EXPECT_EQ(names, species);
+    ASSERT_EQ(v["molar_masses"].array.size(), species.size());
+    EXPECT_NEAR(v["molar_masses"].array[0].number, 2.016, 1e-3);   // H2, kg/kmol
+    EXPECT_NEAR(v["molar_masses"].array[9].number, 28.014, 1e-3);  // N2
     ASSERT_EQ(small_run().status, 0);
     const Result gas = run({"list", "species", "small.toml"}, true);
     EXPECT_EQ(gas.status, 0) << gas.err;
@@ -1048,6 +1051,18 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     }
     for (const char * key : {"boundaries.nscbc.sigma_t", "boundaries.nscbc.sigma_T", "regions.<name>.type"}) {
         EXPECT_TRUE(catalog.has(key)) << key;
+    }
+    // Species are placeholders, not the examples' species, and none is required
+    EXPECT_FALSE(catalog.has("initialize.X.N2"));
+    ASSERT_TRUE(catalog.has("initialize.X.<species>"));
+    EXPECT_EQ(catalog["initialize.X.<species>"]["references"].string, "species");
+    EXPECT_FALSE(catalog["initialize.X.<species>"].has("required"));
+    EXPECT_EQ(catalog["physics.mechanism"]["path"]["io"].string, "input");
+    EXPECT_EQ(catalog["write_data.prefix"]["path"]["io"].string, "output");
+    EXPECT_FALSE(catalog.has("write_data.boundary"));
+    ASSERT_TRUE(catalog["initialize.file"].has("required_for"));
+    for (const auto & type : catalog["initialize.file"]["required_for"].array) {
+        EXPECT_TRUE(type.string == "restart" || type.string == "remap") << type.string;
     }
 
     ASSERT_EQ(small_run().status, 0);

@@ -3,6 +3,7 @@
  "dims": [
   2
  ],
+ "references": "fields",
  "set_in": [
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml"

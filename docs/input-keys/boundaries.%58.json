@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "inlet_state"
+ ],
  "set_in": [
   "examples/flame_2d/input.toml",
   "examples/flame_2d/unity/input.toml",

@@ -44,6 +44,7 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
     if (!(P.kappa > 0.0) || !(P.A_plus > 0.0) || !(P.Pr_t > 0.0) || !(P.s > 0.0)) {
         throw InputError(where + ": kappa, A_plus, Pr_t and s must be positive.");
     }
+    record_alternatives(where, {{"exchange_distance"}, {"exchange_cells"}}, true);
     const bool distance = contains_optional(table, "exchange_distance"),
                cells = contains_optional(table, "exchange_cells");
     if (distance == cells) throw InputError(where + " needs exactly one of exchange_distance and exchange_cells.");

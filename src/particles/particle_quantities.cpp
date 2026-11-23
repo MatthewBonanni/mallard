@@ -147,6 +147,7 @@ void Quantities::init(const Input & table, region::Regions & regions, const uint
                                         .docs = DOCS});
         }
         std::vector<std::string> given;
+        record_alternatives(where, {{"integral"}, {"max"}, {"min"}, {"first_time"}, {"winding"}}, true);
         for (const char * kind : KINDS) {
             if (contains_optional(e, kind)) given.push_back(kind);
         }

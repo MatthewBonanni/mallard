@@ -211,12 +211,39 @@ std::string join(const std::string & table, const std::string & key) { return ta
 
 } // namespace
 
+namespace {
+
+std::mutex & names_mutex() {
+    static std::mutex m;
+    return m;
+}
+
+/** @brief Catalog path of a table of names -> what its keys name (record_names). */
+std::map<std::string, std::string> & recorded_names() {
+    static std::map<std::string, std::string> names = {{"regions", "name"}};
+    return names;
+}
+
+} // namespace
+
 std::string catalog_path(const std::string & path) {
-    std::string out = without_indices(path);
-    const std::string prefix = "regions.";
-    if (out.compare(0, prefix.size(), prefix) != 0) return out;
-    const size_t end = out.find('.', prefix.size());
-    return prefix + "<name>" + (end == std::string::npos ? "" : out.substr(end));
+    const std::string plain = without_indices(path);
+    std::lock_guard<std::mutex> lock(names_mutex());
+    std::string out, what;
+    for (size_t start = 0; start < plain.size();) {
+        const size_t end = std::min(plain.find('.', start), plain.size());
+        out += (out.empty() ? "" : ".") + (what.empty() ? plain.substr(start, end - start) : "<" + what + ">");
+        const auto it = recorded_names().find(out);
+        what = it == recorded_names().end() ? "" : it->second;
+        start = end + 1;
+    }
+    return out;
+}
+
+void record_names(const std::string & table, const std::string & what) {
+    const std::string path = catalog_path(table);
+    std::lock_guard<std::mutex> lock(names_mutex());
+    recorded_names()[path] = what;
 }
 
 namespace {
@@ -290,6 +317,18 @@ std::map<std::string, std::vector<std::string>> & recorded_options() {
 std::map<std::string, Dimension> & recorded_dimensions() {
     static std::map<std::string, Dimension> dimensions;
     return dimensions;
+}
+
+/** @brief What setup records of a key besides how it reads it, by catalog path (record_path, ...). */
+struct KeyFacts {
+    std::optional<PathUse> path;
+    std::string references;
+    std::map<std::vector<std::vector<std::string>>, bool> alternatives;  // of a table: groups -> required
+};
+
+std::map<std::string, KeyFacts> & recorded_facts() {
+    static std::map<std::string, KeyFacts> facts;
+    return facts;
 }
 
 std::mutex & options_mutex() {
@@ -445,6 +484,25 @@ void record_options(const std::string & key, std::vector<std::string> names) {
     recorded_options()[catalog_path(key)] = std::move(names);
 }
 
+void record_path(const std::string & key, PathUse use) {
+    const std::string path = catalog_path(key);
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_facts()[path].path = std::move(use);
+}
+
+void record_reference(const std::string & key, const std::string & names) {
+    const std::string path = catalog_path(key);
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_facts()[path].references = names;
+}
+
+void record_alternatives(const std::string & table, std::vector<std::vector<std::string>> groups, const bool required) {
+    const std::string path = catalog_path(table);
+    std::lock_guard<std::mutex> lock(options_mutex());
+    const auto [it, added] = recorded_facts()[path].alternatives.emplace(std::move(groups), required);
+    if (!added) it->second = it->second && required;
+}
+
 const KeyRecord * ResolvedInput::find(const std::string & path) const {
     for (const auto & key : keys) {
         if (key.path == path) return &key;
@@ -466,25 +524,67 @@ ResolvedInput resolve_input(const Input & input) {
     return resolved;
 }
 
+namespace {
+
+/** @brief The text of a string record's value ("line" of "\"line\""), or empty if it is not a string. */
+std::string string_value(const KeyRecord & record) {
+    if (record.value.empty() || record.value.front() != '"') return "";
+    return parse_input_string("v = " + record.value).as_table().entries().at("v").as_string();
+}
+
+std::string json_strings(const std::vector<std::string> & strings) {
+    std::string out = "[";
+    for (size_t i = 0; i < strings.size(); i++) out += (i ? ", " : "") + json_string(strings[i]);
+    return out + "]";
+}
+
+std::string json_strings(const std::set<std::string> & strings) {
+    return json_strings(std::vector<std::string>(strings.begin(), strings.end()));
+}
+
+} // namespace
+
 std::string key_catalog(const ResolvedInput & resolved) {
     struct Entry {
         KeyUse use;
         std::vector<std::string> values;
         bool set = false;
+        std::set<std::string> types, required_types;  // the values of its table's type it was read under
+        bool untyped = false;                         // read in a table without a type
     };
+    std::map<std::string, const KeyRecord *> by_path;
+    for (const auto & record : resolved.keys) by_path.emplace(record.path, &record);
     std::map<std::string, Entry> keys;
     for (const auto & record : resolved.keys) {
         if (!record.by_name) continue;
         Entry & entry = keys[catalog_path(record.path)];
         if (!record.use.type.empty()) entry.use = record.use;
+        // The values of its table's type under which setup read it (a typed read, or a table it found)
+        if (!record.use.type.empty() || record.set) {
+            const size_t dot = record.path.rfind('.');
+            const auto type = dot == std::string::npos || record.path.compare(dot, std::string::npos, ".type") == 0
+                                  ? by_path.end()
+                                  : by_path.find(record.path.substr(0, dot) + ".type");
+            const std::string value = type == by_path.end() ? "" : string_value(*type->second);
+            entry.untyped = entry.untyped || value.empty();
+            if (!value.empty()) entry.types.insert(value);
+            if (!value.empty() && record.use.required) entry.required_types.insert(value);
+        }
         if (!record.values.empty()) entry.values = record.values;
         entry.set = entry.set || record.set;
+    }
+    std::map<std::string, KeyFacts> facts;
+    {
+        std::lock_guard<std::mutex> lock(options_mutex());
+        facts = recorded_facts();
     }
     std::string out = "{\n";
     bool first = true;
     for (const auto & [path, entry] : keys) {
         out += first ? "" : ",\n";
         first = false;
+        // A placeholder (X.<species>) stands for keys the input names, none of which is required
+        const bool placeholder = path.back() == '>';
         out += "  " + json_string(path) + ": {\"set\": " + (entry.set ? "true" : "false");
         if (!entry.use.type.empty()) {
             const Dimension & d = entry.use.dimension;
@@ -492,15 +592,41 @@ std::string key_catalog(const ResolvedInput & resolved) {
             if (!d.same_as(dim::none)) out += ", \"dimension\": " + json_string(d.describe());
             if (std::string(d.plain_unit) != "SI") out += ", \"unit\": " + json_string(d.plain_unit);
             // An optional key without a fallback has a default the run sets (e.g. from the mesh)
-            if (entry.use.required) {
+            if (entry.use.required && !placeholder) {
                 out += ", \"required\": true";
-            } else if (!entry.use.fallback.empty()) {
+                if (!entry.untyped && !entry.required_types.empty()) {
+                    out += ", \"required_for\": " + json_strings(entry.required_types);
+                }
+            } else if (!entry.use.required && !entry.use.fallback.empty()) {
                 out += ", \"default\": " + json_string(entry.use.fallback);
             }
         }
-        if (!entry.values.empty()) {
-            out += ", \"values\": [";
-            for (size_t i = 0; i < entry.values.size(); i++) out += (i ? ", " : "") + json_string(entry.values[i]);
+        if (!entry.untyped && !entry.types.empty()) out += ", \"for_types\": " + json_strings(entry.types);
+        if (!entry.values.empty()) out += ", \"values\": " + json_strings(entry.values);
+        const auto f = facts.find(path);
+        std::string references = f == facts.end() ? "" : f->second.references;
+        if (placeholder && references.empty()) {
+            // What the names name, unless the input defines them (<name>)
+            const size_t open = path.rfind('<');
+            if (path.substr(open) != "<name>") references = path.substr(open + 1, path.size() - open - 2);
+        }
+        if (!references.empty()) out += ", \"references\": " + json_string(references);
+        if (f != facts.end() && f->second.path) {
+            const PathUse & p = *f->second.path;
+            out += std::string(", \"path\": {\"io\": ") + (p.output ? "\"output\"" : "\"input\"") +
+                   ", \"kind\": " + json_string(p.kind);
+            if (!p.extensions.empty()) out += ", \"extensions\": " + json_strings(p.extensions);
+            out += "}";
+        }
+        if (f != facts.end() && !f->second.alternatives.empty()) {
+            out += ", \"alternatives\": [";
+            bool first_group = true;
+            for (const auto & [groups, required] : f->second.alternatives) {
+                out += std::string(first_group ? "" : ", ") + "{\"keys\": [";
+                for (size_t i = 0; i < groups.size(); i++) out += (i ? ", " : "") + json_strings(groups[i]);
+                out += std::string("], \"required\": ") + (required ? "true" : "false") + "}";
+                first_group = false;
+            }
             out += "]";
         }
         out += "}";

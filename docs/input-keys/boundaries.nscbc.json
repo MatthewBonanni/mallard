@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "for_types": [
+  "inlet_state",
+  "outlet_pressure"
+ ],
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",
   "examples/flame_outflow/input.toml",

@@ -2,6 +2,11 @@
  "dims": [
   3
  ],
+ "for_types": [
+  "circle",
+  "ellipse",
+  "rectangle"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/3d/regions.toml"
  ]

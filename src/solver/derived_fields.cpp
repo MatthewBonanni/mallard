@@ -42,6 +42,7 @@ double bilger_coefficient(const chemistry::Species & s) {
 /** @brief The mass fractions of the stream `key` of a table at `where`: a composition table, or a [[boundaries]] name. */
 std::vector<double> stream(const Input & input, const Input & table, const std::string & where, const std::string & key,
                            const MixtureModel & mixture, const char * docs) {
+    record_reference(where + "." + key, "boundaries");
     const std::string path = where + "." + key;
     const Input & value = table.at(key);
     if (!value.is_string()) {
@@ -102,6 +103,7 @@ int32_t most_abundant(const chemistry::Mechanism & mech, const std::vector<doubl
 }
 
 int32_t species_of(const Input & table, const std::string & key, const MixtureModel & mixture, int32_t fallback) {
+    record_reference("output.mixture." + key, "species");
     const std::string name = find_value_or<std::string>(table, key, "");
     if (name.empty()) return fallback;
     const int32_t k = mixture.mechanism().species_index(name);
@@ -230,6 +232,7 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                                         .docs = DOCS});
         }
         if (by_species) {
+            record_reference(key + ".species", "species");
             const auto names = find_value<std::vector<std::string>>(progress, "species");
             if (names.empty()) throw InputError(key + ".species lists no species.");
             const rtype burnt = find_real_or(progress, "burnt", dim::none, 1.0_r);

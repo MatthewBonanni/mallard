@@ -1,7 +1,23 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "reynolds_stress"
+    ],
+    [
+     "profile"
+    ]
+   ],
+   "required": false
+  }
+ ],
  "dims": [
   2,
   3
+ ],
+ "for_types": [
+  "inlet_state"
  ],
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",

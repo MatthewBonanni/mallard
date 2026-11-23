@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "path": {
+  "io": "output",
+  "kind": "prefix"
+ },
  "required": true,
  "set_in": [
   "examples/autoignition_2d/input.toml",

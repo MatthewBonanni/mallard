@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "ellipsoid"
+ ],
  "set_in": [
   "examples/source_regions/input.toml",
   "tools/dev/catalog_inputs/2d/regions.toml"

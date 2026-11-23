@@ -1,7 +1,23 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "exchange_distance"
+    ],
+    [
+     "exchange_cells"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2,
   3
+ ],
+ "for_types": [
+  "wall_isothermal"
  ],
  "set_in": [
   "examples/channel_wmles/lm2000.toml",

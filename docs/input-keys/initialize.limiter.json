@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "remap"
+ ],
  "set_in": [
   "examples/taylor_green_3d/remap.toml"
  ],

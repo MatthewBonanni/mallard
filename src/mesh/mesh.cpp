@@ -154,6 +154,7 @@ std::vector<Mesh::PeriodicPair> Mesh::periodic_pairs(const Input & input) {
     for (size_t e = 0; e < entries.size(); e++) {
         const Input & entry = entries[e];
         const std::string key = "periodic[" + std::to_string(e) + "]";
+        record_reference("periodic.zones", "zones");
         const auto zones = find_value<std::vector<std::string>>(entry, "zones");
         if (zones.size() != 2) {
             throw InputError({.key = key + ".zones",

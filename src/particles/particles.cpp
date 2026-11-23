@@ -186,6 +186,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     const std::string type = find_value<std::string>(table, "type");
     if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
     is_solid = type == "solid";
+    record_path("particles.file", {.extensions = {".csv"}});
     file = find_value_or<std::string>(table, "file", "");
     distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
@@ -561,6 +562,7 @@ void Particles::read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mi
         for (size_t k = 0; k < entries.size(); k++) {
             const Input & e = entries[k];
             const std::string where = "particles.walls[" + std::to_string(k) + "]";
+            record_reference("particles.walls.zones", "zones");
             const auto zones = find_value<std::vector<std::string>>(e, "zones");
             const std::string interaction = find_value_or<std::string>(e, "interaction", "rebound");
             if (interaction != "rebound" && interaction != "stick") {

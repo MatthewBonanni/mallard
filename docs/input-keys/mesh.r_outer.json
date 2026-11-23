@@ -5,7 +5,11 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus"
+ ],
  "set_in": [
+  "examples/particle_centrifuge/input.toml",
   "examples/rotational_sector/annulus.toml",
   "examples/rotational_sector/sector.toml"
  ],

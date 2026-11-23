@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "disk"
+ ],
  "set_in": [
   "examples/particle_vortex/input.toml",
   "examples/tracer_vortex/input.toml"

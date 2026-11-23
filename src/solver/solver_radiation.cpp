@@ -62,6 +62,7 @@ void Solver::init_radiation() {
     std::vector<std::string> listed;
     const bool explicit_species = table.contains("species");
     if (explicit_species) {
+        record_reference("radiation.species", "species");
         listed = find_value<std::vector<std::string>>(table, "species");
     } else {
         listed.assign(RADIATING_NAMES.begin(), RADIATING_NAMES.end());

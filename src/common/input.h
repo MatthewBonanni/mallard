@@ -208,7 +208,39 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
 
-/** @brief A key path as the catalog lists it: no array indices, and regions.<name> for every named region. */
+/** @brief What a key naming a file or directory holds, for the key catalog. */
+struct PathUse {
+    bool output = false;                    // written by the run, else read
+    std::string kind = "file";              // file, directory, or prefix (of files the run names)
+    std::vector<std::string> extensions{};  // those it takes (".yaml"); empty for any
+};
+
+/** @brief Record that a key names a file or directory, by its path ("mesh.filename"; indices are dropped). */
+void record_path(const std::string & key, PathUse use);
+
+/**
+ * @brief Record that a key's values are names defined elsewhere: "regions" ([regions] or the
+ *        mesh's), "zones" (boundary zones), "boundaries" (names of [[boundaries]] entries),
+ *        "species", "probes", "fields" (output fields).
+ */
+void record_reference(const std::string & key, const std::string & names);
+
+/**
+ * @brief Record that the keys of a table are names, of what ("species", defined elsewhere) or,
+ *        for "name", names the input gives ([regions]): the catalog lists them as table.<what>.
+ */
+void record_names(const std::string & table, const std::string & what);
+
+/**
+ * @brief Record groups of keys of a table of which the input gives one at most, or exactly one
+ *        if required (X or Y of a composition).
+ */
+void record_alternatives(const std::string & table, std::vector<std::vector<std::string>> groups, bool required);
+
+/**
+ * @brief A key path as the catalog lists it: no array indices, and the keys of tables of names
+ *        (record_names) as their placeholder: regions.<name> for every named region, X.<species>.
+ */
 std::string catalog_path(const std::string & path);
 
 /** @brief A key setup looked up, as the accessors recorded it, and the value the run used. */
