@@ -127,7 +127,7 @@ std::string case_view(Context & context, const json::Value & params) {
     options.view_dir = dir;
     const CheckReport report = check_case(context, options).report;
     const std::string view = case_view_json(report);
-    if (view == "null") {
+    if (!report.setup_done || view == "null") {
         throw Error(code::INVALID_PARAMS, "the case cannot be set up, so it has no view",
                     json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
     }
