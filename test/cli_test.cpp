@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "data_paths.h"
+#include "interfaces.h"
 #include "json.h"
 #include "output_reader.h"
 
@@ -643,6 +644,33 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
         run({"info", "--mesh-fields", "quality", source_dir() + "/test/data/formats/gas.toml"}, true);
     EXPECT_EQ(not_a_mesh.status, 2);
     EXPECT_TRUE(contains(not_a_mesh.err, "--mesh-fields takes a mesh file")) << not_a_mesh.err;
+}
+
+TEST(CliTest, InfoOfAMeshFileListsItsCaseViewBlocksWithTheirZones) {
+    SKIP_UNDER_MPI();
+    const std::string mesh =
+        source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
+    const Result r = run({"info", "--view", "view", "--format", "json", mesh}, true);
+    ASSERT_EQ(r.status, 0) << r.err;
+    const json::Value view = json::parse(r.out)["view"];
+    EXPECT_EQ(view["schema"].string, interfaces::CASE_VIEW.name);
+    EXPECT_TRUE(view["geometry_only"].boolean);
+    size_t zones = 0;
+    for (const json::Value & b : view["blocks"].array) {
+        if (b["kind"].string != "boundary") continue;
+        zones++;
+        EXPECT_EQ(b["zone"].string, b["name"].string);
+        EXPECT_TRUE(b["key"].is_null());
+        EXPECT_GT(b["cells"].number, 0.0);
+    }
+    EXPECT_GT(zones, 0u);
+}
+
+TEST(CliTest, GeometryOnlyChecksRefuseTheOptionsOfTheWholeCheck) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"check", "input.toml", "--geometry-only", "--initial", "state"});
+    EXPECT_EQ(r.status, 2);
+    EXPECT_TRUE(contains(r.err, "--initial needs the whole check, not --geometry-only")) << r.err;
 }
 
 namespace {
