@@ -21,6 +21,8 @@
 #include <numbers>
 #include <sstream>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -29,6 +31,7 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "verification.h"
 
 namespace {
 
@@ -204,10 +207,19 @@ double pathline_error(const Particles & particles, uint32_t n, double t) {
     return error;
 }
 
-double vortex_error(uint32_t n, double dt, double t, const std::string & recon, const std::string & integrator) {
+/** @brief The input on generated meshes of another cell type than its quadrilaterals (hexahedra). */
+std::string on_mesh(std::string input, const std::string & mesh_type) {
+    const std::string cartesian = "type = \"cartesian\"\n";
+    input.replace(input.find(cartesian), cartesian.size(), "type = \"" + mesh_type + "\"\n");
+    return input;
+}
+
+double vortex_error(uint32_t n, double dt, double t, const std::string & recon, const std::string & integrator,
+                    const std::string & mesh_type = "cartesian") {
     Solver solver;
     solver.set_distributed(false);
-    solver.init(parse_toml(vortex(n, dt, static_cast<uint32_t>(std::lround(t / dt)), recon, integrator)));
+    solver.init(parse_toml(on_mesh(vortex(n, dt, static_cast<uint32_t>(std::lround(t / dt)), recon, integrator),
+                                   mesh_type)));
     solver.run();
     return pathline_error(*solver.get_particles(), n, t);
 }
@@ -229,19 +241,6 @@ void expect_same_particles(const Particles & a, const Particles & b) {
 }
 
 } // namespace
-
-TEST(ParticlesTest, VortexPathlinesConvergeAtTheReconstructionOrderInSpace) {
-    SKIP_IN_SINGLE_PRECISION("the errors on the fine mesh approach single-precision round-off");
-    // Steps short enough that the error is that of the reconstruction: the particles read the
-    // polynomial of their cell, not its average, at the stage positions
-    const double t = 0.5, dt = 0.005;
-    const double teno_coarse = vortex_error(16, dt, t, TENO4, "RK4"), teno_fine = vortex_error(32, dt, t, TENO4, "RK4");
-    EXPECT_GT(std::log2(teno_coarse / teno_fine), 3.5) << teno_coarse << " -> " << teno_fine;
-    const std::string muscl = "type = \"MUSCL\"\n";
-    const double muscl_coarse = vortex_error(16, dt, t, muscl, "RK4"), muscl_fine = vortex_error(32, dt, t, muscl, "RK4");
-    EXPECT_GT(std::log2(muscl_coarse / muscl_fine), 1.8) << muscl_coarse << " -> " << muscl_fine;
-    EXPECT_LT(teno_fine, muscl_fine);
-}
 
 namespace {
 
@@ -280,17 +279,6 @@ double turning_error(const std::string & integrator, uint32_t n_steps) {
 }
 
 } // namespace
-
-TEST(ParticlesTest, PathlinesConvergeAtTheIntegratorOrderInTime) {
-    SKIP_IN_SINGLE_PRECISION("RK4's error with 80 steps is near single-precision round-off");
-    // At CFL 0.46 and 0.23 (FE: half that)
-    const double fe = std::log2(turning_error("FE", 80) / turning_error("FE", 160));
-    const double ssprk3 = std::log2(turning_error("SSPRK3", 40) / turning_error("SSPRK3", 80));
-    const double rk4 = std::log2(turning_error("RK4", 40) / turning_error("RK4", 80));
-    EXPECT_GT(fe, 0.9);
-    EXPECT_GT(ssprk3, 2.8);
-    EXPECT_GT(rk4, 3.8);
-}
 
 TEST(ParticlesTest, TrajectoriesAreBitwiseIndependentOfTheRankCount) {
     // The vortex carries particles across the partitions of 2 and 3 ranks
@@ -662,14 +650,15 @@ std::string solid(const std::string & input, double density, double diameter, co
 double diameter_for(double tau, double density) { return std::sqrt(18.0 * MU * tau / density); }
 
 /**
- * @brief The largest errors of position and velocity of particles of relaxation time tau (Stokes drag) in
- *        the turning flow of turning_error, which start at the gas velocity: with w = v_x + i v_y and the
+ * @brief The largest errors of position and velocity at time t of particles of relaxation time tau (Stokes
+ *        drag) in the turning flow of turning_error, which start at the gas velocity: with w = v_x + i v_y and the
  *        gas U e^{iKt}, w = A e^{iKt} + (U - A) e^{-t/tau} with A = U / (1 + iK tau), and the position moves
  *        by A (e^{iKt} - 1) / (iK) + (U - A) tau (1 - e^{-t/tau}).
  */
-std::array<double, 2> inertial_turning_error(const std::string & integrator, uint32_t n_steps, double tau = 0.2) {
+std::array<double, 2> inertial_turning_error(const std::string & integrator, uint32_t n_steps, double tau = 0.2,
+                                             double t = 1.0) {
     using C = std::complex<double>;
-    const double K = 2.0 * std::numbers::pi, t = 1.0, density = 1000.0;
+    const double K = 2.0 * std::numbers::pi, density = 1000.0;
     std::ostringstream run;
     run.precision(17);
     run << "n_steps = " << n_steps << "\ndt = " << t / n_steps << "\n";
@@ -717,17 +706,6 @@ std::string solid_vortex(uint32_t n_steps, const std::string & init = "", const 
 }
 
 } // namespace
-
-TEST(SolidParticlesTest, DragRelaxationConvergesAtTheIntegratorOrder) {
-    SKIP_IN_SINGLE_PRECISION("RK4's error with 80 steps is near single-precision round-off");
-    // Each stage reads the gas of its own time and the particle's own velocity
-    for (const auto & [integrator, steps, order] :
-         {std::tuple{"FE", 80u, 0.9}, std::tuple{"SSPRK3", 40u, 2.8}, std::tuple{"RK4", 40u, 3.8}}) {
-        const auto coarse = inertial_turning_error(integrator, steps), fine = inertial_turning_error(integrator, 2 * steps);
-        EXPECT_GT(std::log2(coarse[0] / fine[0]), order) << integrator << " position";
-        EXPECT_GT(std::log2(coarse[1] / fine[1]), order) << integrator << " velocity";
-    }
-}
 
 TEST(SolidParticlesTest, StokesSettlingIsExact) {
     // v(t) = v_t (1 - e^{-t/tau}) with v_t = -tau g (1 - rho / rho_p), from rest in gas at rest
@@ -794,7 +772,7 @@ TEST(SolidParticlesTest, WallsReboundWithTheRestitutionCoefficientsOrStick) {
     // bounce, by -e_n / e_t
     const double e_n = 0.5, e_t = 0.8;
     const auto run = [&](const std::string & wall) {
-        const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+    const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
                                   "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
         const std::string keys = "velocity = " + numbers(0.3, -0.4, 0.0) + "\npoints = [" + numbers(0.5, 0.06, 0.25) +
                                  "]\n[[particles.walls]]\nzones = [\"bottom\"]\n" + wall;
@@ -907,6 +885,288 @@ TEST(SolidParticlesTest, SolidParticlesNeedAViscousGas) {
         EXPECT_NE(std::string(e.what()).find("needs the gas viscosity"), std::string::npos) << e.what();
     }
 }
+
+// ------------------------------------------------------------------ verification studies
+//
+// The particles' section of the verification manual (docs/verification/): observed orders in time against
+// exact trajectories, also of relaxations stiffer than the step, and in space under mesh refinement.
+
+namespace {
+
+double integrator_order(const std::string & integrator) {
+    if (integrator == "FE") return 1.0;
+    if (integrator == "SSPRK3" || integrator == "RDPK3Sp35") return 3.0;
+    return 4.0;
+}
+
+/** @brief Steps of the coarsest of three levels of a study in time with this integrator (FE: twice as many). */
+uint32_t coarse_steps(const std::string & integrator) { return integrator == "FE" ? 80u : 40u; }
+
+} // namespace
+
+class ParticleTimeOrder : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(ParticleTimeOrder, TracerPathlinesInATurningFlow) {
+    // The gas velocity turns at the rate K everywhere, so every reconstruction is exact and the error is that
+    // of the integrator: each stage reads the gas of its own time
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const std::string integrator = GetParam();
+    const uint32_t n = coarse_steps(integrator);
+    const double p = integrator_order(integrator);
+    verification::expect_order({"particles", integrator, "", "max pathline error, tracers in a turning flow",
+                                {double(n), 2.0 * n, 4.0 * n},
+                                {turning_error(integrator, n), turning_error(integrator, 2 * n),
+                                 turning_error(integrator, 4 * n)},
+                                p, p - 0.15});
+}
+
+TEST_P(ParticleTimeOrder, DragRelaxationInATurningFlow) {
+    // Solid particles of tau = 0.2 lag the turning gas: each stage reads the gas and the particle velocity
+    // of its own stage
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const std::string integrator = GetParam();
+    const uint32_t n = coarse_steps(integrator);
+    const double p = integrator_order(integrator);
+    std::array<std::array<double, 2>, 3> e;
+    for (uint32_t k = 0; k < 3; k++) e[k] = inertial_turning_error(integrator, n << k);
+    for (size_t j = 0; j < 2; j++) {
+        verification::expect_order({"particles", integrator, "",
+                                    std::string(j == 0 ? "max position" : "max velocity") +
+                                        " error, drag relaxation, tau = 0.2",
+                                    {double(n), 2.0 * n, 4.0 * n}, {e[0][j], e[1][j], e[2][j]}, p, p - 0.15});
+    }
+}
+
+TEST_P(ParticleTimeOrder, DragRelaxationNearTheStiffLimit) {
+    // tau = 0.02 with dt = tau/2, tau/4, tau/8: one halving from the switch to exponential integration at
+    // dt = tau, and within a factor 4 to 6 of the explicit stability limit, the integrator keeps its order
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const std::string integrator = GetParam();
+    const double p = integrator_order(integrator), tau = 0.02;
+    std::array<double, 3> e;
+    for (uint32_t k = 0; k < 3; k++) e[k] = inertial_turning_error(integrator, 100u << k, tau)[0];
+    verification::expect_order({"particles", integrator, "", "max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8",
+                                {100, 200, 400}, {e[0], e[1], e[2]}, p, p - 0.3});
+}
+
+INSTANTIATE_TEST_SUITE_P(Particles, ParticleTimeOrder, ::testing::Values("FE", "SSPRK3", "RK4"));
+
+// The rest of the verification manual's integrators: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ParticleTimeOrder, ::testing::Values("SSPRK54", "CK45", "RDPK3Sp35"));
+
+TEST(ParticleOrder, StokesSettlingFromRest) {
+    // From rest in gas at rest: v(t) = v_t (1 - e^{-t/tau}), y(t) = y0 + v_t (t - tau (1 - e^{-t/tau})) with
+    // v_t = -tau g (1 - rho / rho_p), to t = 0.5
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const double tau = 0.1, g = 1.0, t = 0.5;
+    const double v_t = -tau * g * (1.0 - 1.0 / 100.0);
+    const double v = v_t * (1.0 - std::exp(-t / tau)), dy = v_t * (t - tau * (1.0 - std::exp(-t / tau)));
+    const auto seeds = lattice_points(0.1, 0.9);
+    std::array<double, 3> ex{}, ev{};
+    for (uint32_t k = 0; k < 3; k++) {
+        const uint32_t n = 10u << k;
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(settling(tau, g, "stokes", n, t / n, "SSPRK3")));
+        solver.run();
+        for (const auto & r : solver.get_particles()->gather()) {
+            ex[k] = std::max(ex[k], std::abs(r.x[1] - wrap(seeds[r.id][1] + dy, 1.0)));
+            ev[k] = std::max(ev[k], std::abs(r.v[1] - v));
+        }
+    }
+    verification::expect_order({"particles", "SSPRK3", "", "max position error, Stokes settling from rest",
+                                {10, 20, 40}, {ex[0], ex[1], ex[2]}, 3.0, 2.85});
+    verification::expect_order({"particles", "SSPRK3", "", "max velocity error, Stokes settling from rest",
+                                {10, 20, 40}, {ev[0], ev[1], ev[2]}, 3.0, 2.85});
+}
+
+TEST(ParticleOrder, SchillerNaumannResponseToAStepInGasVelocity) {
+    // Particles at rest in a uniform stream U at a slip Reynolds number of 20, where Schiller-Naumann drag is
+    // 1 + 0.15 Re^0.687 = 2.2 times Stokes drag: dv/dt = (U - v) f(Re(U - v)) / tau_St, against the same
+    // equation integrated by RK4 in 20000 steps
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const double U = 0.5, mu = 1e-4, density = 10.0, t = 0.5;
+    const double d = 20.0 * mu / U, tau = density * d * d / (18.0 * mu);
+    auto rate = [&](double v) {
+        const double slip = U - v;
+        return slip * (1.0 + 0.15 * std::pow(std::abs(slip) * d / mu, 0.687)) / tau;
+    };
+    double v_ref = 0.0, x_ref = 0.0;
+    const uint32_t n_ref = 20000;
+    const double h = t / n_ref;
+    for (uint32_t i = 0; i < n_ref; i++) {
+        const double k1 = rate(v_ref), k2 = rate(v_ref + 0.5 * h * k1), k3 = rate(v_ref + 0.5 * h * k2),
+                     k4 = rate(v_ref + h * k3);
+        x_ref += h * (v_ref + h * (k1 + k2 + k3) / 6.0);
+        v_ref += h * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0;
+    }
+    ASSERT_GT(v_ref, 0.9 * U);  // relaxed over several tau_St / f
+    const auto seeds = lattice_points(0.1, 0.9);
+    std::array<double, 3> ex{}, ev{};
+    for (uint32_t k = 0; k < 3; k++) {
+        const uint32_t n = 25u << k;
+        std::ostringstream run, keys;
+        run.precision(17);
+        keys.precision(17);
+        run << "n_steps = " << n << "\ndt = " << t / n << "\n";
+        keys << "velocity = " << numbers(0.0, 0.0, 0.0) << "\n";
+        std::string input = solid(box(12, vec("0.5", "0.0", "0.0"), "xy", "", run.str(), lattice(0.1, 0.9)), density,
+                                  d, "schiller_naumann", keys.str());
+        input.replace(input.find("mu = 0.01"), 9, "mu = 0.0001");
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(input));
+        solver.run();
+        for (const auto & r : solver.get_particles()->gather()) {
+            ex[k] = std::max(ex[k], std::abs(r.x[0] - wrap(seeds[r.id][0] + x_ref, 1.0)));
+            ev[k] = std::max(ev[k], std::abs(r.v[0] - v_ref));
+        }
+    }
+    verification::expect_order({"particles", "RK4", "", "max position error, Schiller-Naumann step response",
+                                {25, 50, 100}, {ex[0], ex[1], ex[2]}, 4.0, 3.85});
+    verification::expect_order({"particles", "RK4", "", "max velocity error, Schiller-Naumann step response",
+                                {25, 50, 100}, {ev[0], ev[1], ev[2]}, 4.0, 3.85});
+}
+
+TEST(ParticleOrder, ExponentialIntegrationOfRelaxationsStifferThanTheStep) {
+    // tau = 0.002 at dt = 1/40 to 1/160 (dt / tau = 12.5 to 3.1), where RK4 alone is unstable: the velocity
+    // relaxes exponentially within each step toward u + tau a, and the trajectory converges in dt to the
+    // inertial one, lag tau du/dt included
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const double tau = 0.002;
+    std::array<std::array<double, 2>, 3> e;
+    for (uint32_t k = 0; k < 3; k++) e[k] = inertial_turning_error("RK4", 20u << k, tau, 0.5);
+    for (size_t j = 0; j < 2; j++) {
+        verification::expect_order({"particles", "RK4, exponential", "",
+                                    std::string(j == 0 ? "max position" : "max velocity") +
+                                        " error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1",
+                                    {20, 40, 80}, {e[0][j], e[1][j], e[2][j]}, 3.0, 2.6});
+    }
+}
+
+namespace {
+
+/** @brief The [numerics.face_reconstruction] table of a scheme name of the manual, and the design order of the gas
+ *         values at the particles: the order of the polynomial they read, or 2, the linear least-squares fit,
+ *         with FO and MUSCL. */
+std::pair<std::string, double> particle_scheme(const std::string & scheme) {
+    if (scheme == "FO" || scheme == "MUSCL") return {"type = \"" + scheme + "\"\n", 2.0};
+    const int order = std::stoi(scheme.substr(4));
+    return {"type = \"TENO\"\norder = " + std::to_string(order) + "\n", double(order)};
+}
+
+/** @brief The smooth gas velocity of the interpolation study, component d at x. */
+double interpolation_field(size_t d, const std::array<double, N_DIM> & x) {
+    const double pi2 = 2.0 * std::numbers::pi;
+    const double z = N_DIM == 3 ? std::cos(2.0 * pi2 * x[N_DIM - 1]) : 1.0;
+    if (d == 0) return 0.1 * std::sin(pi2 * x[0]) * std::cos(pi2 * x[1]) * z;
+    if (d == 1) return -0.1 * std::cos(pi2 * x[0]) * std::sin(pi2 * x[1]) * z;
+    return 0.05 * std::sin(pi2 * (x[0] + x[1]));
+}
+
+/**
+ * @brief The largest error of the gas velocity at 9 x 9 (x 4) particles in the smooth field interpolation_field,
+ *        on the box of box() with n cells per side: the velocity the particles read at the start of their first
+ *        step (quantities max = "U_X", ...), from the reconstruction polynomial of their cells.
+ */
+double interpolation_error(const std::string & mesh_type, const std::string & scheme, uint32_t n) {
+    const std::array<double, 3> lo = {0.0371, 0.0529, 0.0213}, hi = {0.9629, 0.9471, 0.4787};
+    const uint32_t m[3] = {9, 9, 4};
+    std::ostringstream keys;
+    keys.precision(17);
+    keys << "[particles.lattice]\nlo = " << numbers(lo[0], lo[1], lo[2]) << "\nhi = " << numbers(hi[0], hi[1], hi[2])
+         << "\nn = " << (N_DIM == 3 ? "[9, 9, 4]" : "[9, 9]") << "\n";
+    const char * names[3] = {"VX", "VY", "VZ"};
+    const char * fields[3] = {"U_X", "U_Y", "U_Z"};
+    for (size_t d = 0; d < N_DIM; d++) {
+        keys << "[[particles.quantities]]\nname = \"" << names[d] << "\"\nmax = \"" << fields[d] << "\"\n";
+    }
+    const std::string z = N_DIM == 3 ? " * cos(4 * pi * z)" : "";
+    const std::string u = vec("0.1 * sin(2 * pi * x) * cos(2 * pi * y)" + z, "-0.1 * cos(2 * pi * x) * sin(2 * pi * y)" + z,
+                              "0.05 * sin(2 * pi * (x + y))");
+    const std::string input = on_mesh(box(n, u, "xy", "", "n_steps = 1\ndt = 1e-9\n", keys.str(),
+                                          particle_scheme(scheme).first, "FE"), mesh_type);
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const Particles & p = *solver.get_particles();
+    double error = 0.0;
+    for (size_t d = 0; d < N_DIM; d++) {
+        const std::vector<double> sampled = quantity_of(p, names[d]);
+        EXPECT_EQ(sampled.size(), size_t(N_DIM == 3 ? 324 : 81));
+        for (size_t k = 0; k < sampled.size(); k++) {
+            std::array<double, N_DIM> x{};
+            size_t rest = k;
+            for (size_t c = 0; c < N_DIM; c++) {
+                x[c] = lo[c] + (hi[c] - lo[c]) * double(rest % m[c]) / double(m[c] - 1);
+                rest /= m[c];
+            }
+            error = std::max(error, std::abs(sampled[k] - interpolation_field(d, x)));
+        }
+    }
+    return error;
+}
+
+/** @brief Cells per side of the three levels of a study in space on a cell type. */
+std::array<uint32_t, 3> space_levels(const std::string & mesh_type) {
+    if (N_DIM == 2) return {16, 32, 64};
+    return mesh_type == "cartesian" ? std::array<uint32_t, 3>{8, 16, 32} : std::array<uint32_t, 3>{6, 12, 24};
+}
+
+} // namespace
+
+class ParticleSpaceOrder : public ::testing::TestWithParam<std::tuple<std::string, std::string>> {};
+
+TEST_P(ParticleSpaceOrder, GasVelocityAtTheParticles) {
+    // The interpolation alone: the particles read the polynomial of their cell where it is, not its average
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const auto [mesh_type, scheme] = GetParam();
+    const auto n = space_levels(mesh_type);
+    const double p = particle_scheme(scheme).second;
+    verification::expect_order({"particles", scheme, verification::cells_of(mesh_type),
+                                "max gas-velocity error at the particles", {double(n[0]), double(n[1]), double(n[2])},
+                                {interpolation_error(mesh_type, scheme, n[0]), interpolation_error(mesh_type, scheme, n[1]),
+                                 interpolation_error(mesh_type, scheme, n[2])},
+                                p, p - (N_DIM == 2 ? 0.25 : 0.5)});
+}
+
+TEST_P(ParticleSpaceOrder, TracerPathlinesInACompactVortex) {
+    // The steady vortex of vortex(): particles circle at omega(r) for t = 0.5, with steps short enough
+    // (dt ~ h^(p/4), RK4) that the error is that of the reconstruction. A pathline is no more accurate than
+    // the flow: first-order fluxes diffuse the vortex at first order, whatever the particles read
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const auto [mesh_type, scheme] = GetParam();
+    if (N_DIM == 3 && mesh_type != "cartesian") {
+        GTEST_SKIP() << "on tetrahedra the vortex flow, not the particles, sets the pathlines' error at affordable "
+                        "resolutions; GasVelocityAtTheParticles covers the particles there";
+    }
+    const std::string recon = particle_scheme(scheme).first;
+    const double p = scheme == "FO" ? 1.0 : particle_scheme(scheme).second;
+    const std::array<uint32_t, 3> n = N_DIM == 2 ? std::array<uint32_t, 3>{16, 32, 64} : std::array<uint32_t, 3>{12, 24, 48};
+    std::array<double, 3> e;
+    for (size_t k = 0; k < 3; k++) {
+        const double dt = 0.005 * std::pow(16.0 / n[k], std::max(1.0, p / 4.0));
+        const double t = 0.5;
+        e[k] = vortex_error(n[k], t / std::ceil(t / dt), t, recon, "RK4", mesh_type);
+    }
+    verification::expect_order({"particles", scheme, verification::cells_of(mesh_type),
+                                "max pathline error, tracers in a compact vortex",
+                                {double(n[0]), double(n[1]), double(n[2])}, {e[0], e[1], e[2]}, p,
+                                p - (N_DIM == 2 ? 0.25 : 0.5)});
+}
+
+INSTANTIATE_TEST_SUITE_P(Particles, ParticleSpaceOrder,
+    ::testing::Values(std::tuple{"cartesian", "MUSCL"}, std::tuple{"cartesian", "TENO4"}));
+
+// The rest of the verification manual's matrix: run by tools/docs/verification.py
+INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ParticleSpaceOrder,
+    ::testing::Values(std::tuple{"cartesian", "FO"}, std::tuple{"cartesian", "TENO3"}, std::tuple{"cartesian", "TENO5"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "FO"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "MUSCL"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO3"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO4"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO5"}));
 
 TEST(SolidParticlesTest, RelaxationsStifferThanTheStepAreIntegratedExponentially) {
     SKIP_IN_SINGLE_PRECISION("the errors at 40 steps are near single-precision round-off");
