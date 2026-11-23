@@ -28,6 +28,7 @@ namespace comm {
 namespace {
 
 ncclComm_t nccl_comm = nullptr;
+[[maybe_unused]] constexpr int MAX_CTAS = 4;
 
 } // namespace
 
@@ -39,14 +40,18 @@ ncclComm_t nccl() {
     // NCCL's graph mixing support adds event nodes to captured graphs, which a launch of the step graph after a
     // stop would still run. Mallard needs no mixing: its NCCL calls share one stream, and the host drains the step
     // queue before it calls NCCL outside a step graph.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
     ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+    // NCCL's kernels run beside the reconstruction and the fluxes, waiting for their peers: with its default of up
+    // to 16 CTAs per kernel, each holds whole SMs and makes the scheduler drain more of them for it (#305)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 17, 0)
+    config.maxCTAs = MAX_CTAS;
+#endif
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
     config.graphUsageMode = 1;
-    const ncclResult_t err = ncclCommInitRankConfig(&nccl_comm, size(), id, rank(), &config);
 #else
     setenv("NCCL_GRAPH_MIXING_SUPPORT", "0", 0);
-    const ncclResult_t err = ncclCommInitRank(&nccl_comm, size(), id, rank());
 #endif
+    const ncclResult_t err = ncclCommInitRankConfig(&nccl_comm, size(), id, rank(), &config);
     if (err != ncclSuccess) {
         nccl_comm = nullptr;
         throw std::runtime_error(std::string("NCCL: ncclCommInitRank failed: ") + ncclGetErrorString(err) +

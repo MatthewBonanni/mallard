@@ -1,0 +1,1 @@
+- NCCL kernels use at most 4 CTAs each, so that the halo and face exchanges, which run beside the reconstruction and the convective fluxes waiting for their peers, hold fewer SMs: on 4 A100s (3D TENO5 Taylor-Green, 64³ cells per GPU) a step takes 0.7% less time; results are bitwise unchanged (#305).
