@@ -192,7 +192,8 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"channel_inlet/input.toml", "second_order", 2, "", {}, ""},
     {"channel_inlet_data/input.toml", "second_order", 2, "", {}, ""},
     {"cylinder/input.toml", "high_order", 2, "",
-     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}}, ""},
+     {{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"}, {"cylinder", "cylinder"}},
+     "type = \"file\"\nfilename = \"cyl2d.msh\"\ntransform = {scale = 10.0, translate = [-5.0, -5.0]}\n"},
     {"detonation_1d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
     {"detonation_2d/input.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
     {"detonation_3d/input_2d.toml", "reacting", 2, DETONATION_INIT + "u = [0.0, 0.0]\n", {}, ""},
@@ -264,7 +265,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"detonation_3d/input.toml", "reacting", 3, DETONATION_INIT + "u = [0.0, 0.0, 0.0]\n", {}, ""},
     {"ellipsoid/input.toml", "high_order", 3, "",
      {{"left", "inflow"}, {"right", "outflow"}, {"bottom", "symmetry_y"}, {"back", "symmetry_z"}, {"top", "lateral"},
-      {"front", "lateral"}},
+      {"front", "ellipsoid"}},
      "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
     {"explosion_3d/input.toml", "high_order", 3, "", {}, ""},
     {"flame_turbulence/hit.toml", "les", 3, "", {}, ""},
@@ -281,7 +282,7 @@ const std::vector<ExampleCase> EXAMPLES = {
       {"back", "symmetry_z"}, {"front", "symmetry_y"}}, ""},
     {"sphere_re300/input.toml", "high_order", 3, "",
      {{"left", "inflow"}, {"right", "outflow"}, {"bottom", "lateral"}, {"top", "lateral"}, {"back", "lateral"},
-      {"front", "lateral"}},
+      {"front", "sphere"}},
      "type = \"cartesian\"\nNx = 8\nNy = 8\nNz = 8\nLx = 2.0\nLy = 2.0\nLz = 2.0\n"},
     {"taylor_green_3d/coarse.toml", "high_order", 3, "", {}, ""},
     {"taylor_green_3d/input.toml", "high_order", 3, "", {}, ""},
@@ -356,8 +357,18 @@ INSTANTIATE_TEST_SUITE_P(Examples, ExampleUnderPreset, ::testing::ValuesIn(examp
 
 namespace {
 
-/** @brief The resolved input a run records in its provenance, and the state (and species) after the run. */
-std::pair<std::string, std::vector<double>> resolved_run(const Input & input) {
+/**
+ * @brief The resolved input a run records in its provenance, and the state (and
+ *        species) after the run, which writes its files in the directory `dir`.
+ */
+std::pair<std::string, std::vector<double>> resolved_run(const Input & input, const std::string & dir) {
+    const std::filesystem::path previous = std::filesystem::current_path();
+    std::filesystem::create_directory(dir);
+    std::filesystem::current_path(dir);
+    struct Back {
+        std::filesystem::path dir;
+        ~Back() { std::filesystem::current_path(dir); }
+    } back{previous};
     Solver solver;
     solver.init(input);
     const std::string resolved = json::parse(provenance::json())["input"]["resolved"].string;
@@ -373,12 +384,13 @@ std::pair<std::string, std::vector<double>> resolved_run(const Input & input) {
 
 } // namespace
 
-// The resolved input of every example runs bitwise as the example and resolves to
-// itself. Fails if writing out a default changes what setup does (a key whose
-// presence matters), a value is written out inexactly, or a key read is not recorded.
+// The resolved input of every example, outputs included, runs bitwise as the
+// example and resolves to itself. Fails if writing out a default changes what
+// setup does (a key whose presence matters), a value is written out inexactly, or
+// a key read is not recorded.
 TEST_P(ExampleUnderPreset, ResolvedInputRunsBitwiseTheSameAndResolvesToItself) {
-    const auto [resolved, state] = resolved_run(example_under_preset(GetParam(), 2, N_DIM == 3 ? 8 : 16));
-    const auto [again, state_again] = resolved_run(parse_toml(resolved));
+    const auto [resolved, state] = resolved_run(example_under_preset(GetParam(), 2, N_DIM == 3 ? 8 : 16, true), "example");
+    const auto [again, state_again] = resolved_run(parse_toml(resolved), "resolved");
     EXPECT_EQ(again, resolved);
     EXPECT_EQ(state_again, state);
 }

@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <ostream>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -36,7 +37,8 @@ struct ExampleCase {
     std::string init;
     /// File meshes: (zone of the replacement mesh, example boundary it takes)
     std::vector<std::array<std::string, 2>> zones;
-    /// File meshes: the replacement [mesh] table; empty: test/data/meshes/cyl{2,3}d.msh
+    /// File meshes: the replacement [mesh] table, a file in test/data/meshes;
+    /// empty: test/data/meshes/cyl{2,3}d.msh
     std::string mesh;
 };
 
@@ -82,14 +84,62 @@ inline void erase_unreferenced_regions(Input & input) {
     if (regions.empty()) table.erase(it);
 }
 
+/** @brief The replacement mesh's zones that took the example's boundary `name`; an error if none. */
+inline std::vector<std::string> replacement_zones(const ExampleCase & c, const std::string & name) {
+    std::vector<std::string> zones;
+    for (const auto & [zone, source] : c.zones) {
+        if (source == name) zones.push_back(zone);
+    }
+    if (zones.empty()) throw std::runtime_error(c.file + ": no zone of the replacement mesh takes boundary " + name);
+    return zones;
+}
+
+/**
+ * @brief Names the replacement mesh's zones where the input names the example's
+ *        boundaries as zones (`zone`), boundaries (`boundary`) or regions of the
+ *        mesh (`region`, `regions`).
+ */
+inline void rename_zones(const ExampleCase & c, const std::set<std::string> & boundaries, Input & v,
+                         const std::string & key = "") {
+    if (v.is_table()) {
+        for (auto & [k, e] : v.as_table().entries()) rename_zones(c, boundaries, e, k);
+    } else if (v.is_array()) {
+        if (key == "boundary") {
+            Input::array_type renamed;
+            for (const auto & b : v.as_array()) {
+                if (!b.is_string() || !boundaries.count(b.as_string())) {
+                    renamed.push_back(b);
+                    continue;
+                }
+                for (const auto & zone : replacement_zones(c, b.as_string())) renamed.push_back(zone);
+            }
+            v = renamed;
+        } else {
+            for (auto & e : v.as_array()) rename_zones(c, boundaries, e, key);
+        }
+    } else if (v.is_string() && boundaries.count(v.as_string()) &&
+               (key == "zone" || key == "boundary" || key == "region" || key == "regions")) {
+        const auto zones = replacement_zones(c, v.as_string());
+        if (zones.size() == 1) {
+            v = zones[0];
+        } else if (key == "boundary") {
+            v = Input::array_type(zones.begin(), zones.end());
+        } else {
+            throw std::runtime_error(c.file + ": " + key + " names boundary " + v.as_string() + ", which several zones take");
+        }
+    }
+}
+
 /**
  * @brief The example's input with `[numerics] preset` in place of its scheme
  *        keys (riemann_solver, time_integrator, convective_flux and the
  *        reconstruction tables), no `cfl` or `dt`, `n_steps` steps, at most
- *        `max_cells` cells per direction of a generated mesh, no file output
- *        besides `[integrals]`, and paths made absolute.
+ *        `max_cells` cells per direction of a generated mesh, and paths made
+ *        absolute. Without `outputs`, no file output besides `[integrals]`;
+ *        with it, every output of the example, writing in the working
+ *        directory. On a replacement mesh, boundary zones are those it takes.
  */
-inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64_t max_cells) {
+inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64_t max_cells, bool outputs = false) {
     const std::filesystem::path path = example_path(c.file);
     const std::filesystem::path dir = path.parent_path();
     Input input = parse_input(path.string());
@@ -103,9 +153,14 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
     numerics["check_nan"] = true;
 
     table["run"] = Input::table_type{{"n_steps", static_cast<Input::integer_type>(n_steps)}};
-    table["output"] = Input::table_type{{"check_interval", 1000000}};
-    for (const char * key : {"write_data", "probes", "statistics", "forces", "triggers"}) table.erase(key);
-    erase_unreferenced_regions(input);
+    if (outputs) {
+        if (!input.contains("output")) table["output"] = Input::table_type{};
+        table["output"].as_table()["check_interval"] = 1000000;
+    } else {
+        table["output"] = Input::table_type{{"check_interval", 1000000}};
+        for (const char * key : {"write_data", "probes", "statistics", "forces", "triggers"}) table.erase(key);
+        erase_unreferenced_regions(input);
+    }
 
     auto & mesh = input.at("mesh").as_table();
     if (mesh.at("type").as_string() == "file") {
@@ -113,6 +168,10 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
             source_dir() + "/test/data/meshes/" + (c.dim == 3 ? "cyl3d.msh" : "cyl2d.msh");
         table["mesh"] =
             c.mesh.empty() ? Input(Input::table_type{{"type", "file"}, {"filename", file}}) : parse_toml(c.mesh);
+        if (table["mesh"].contains("filename")) {
+            auto & filename = table["mesh"].as_table()["filename"];
+            filename = (std::filesystem::path(source_dir()) / "test/data/meshes" / filename.as_string()).string();
+        }
         table.erase("periodic");
         Input::array_type boundaries;
         for (const auto & [zone, source] : c.zones) {
@@ -124,6 +183,14 @@ inline Input example_under_preset(const ExampleCase & c, uint64_t n_steps, int64
                 boundaries.push_back(copy);
                 break;
             }
+        }
+        std::set<std::string> names;
+        for (const auto & b : input.at("boundaries").as_array()) names.insert(b.at("name").as_string());
+        if (input.contains("regions")) {
+            for (const auto & [name, region] : input.at("regions").as_table().entries()) names.erase(name);
+        }
+        for (auto & [key, v] : table.entries()) {
+            if (key != "boundaries") rename_zones(c, names, v);
         }
         table["boundaries"] = boundaries;
     } else {
