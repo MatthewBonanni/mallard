@@ -480,20 +480,33 @@ The gas receives $q_c / V_c$ in each owned cell. With $\sigma = 0$ (the
 default) each particle's source stays in its cell: a point source of the
 mesh's size, which concentrates as the mesh is refined, so coupled results do
 not converge under refinement and, with cells comparable to the particles,
-the gas a particle reads carries its own disturbance, which the point-particle
-drag does not expect. A width in physical units makes the deposit independent
-of the mesh, so it converges as the mesh is refined at fixed $\sigma$: the
-volume fraction of a single particle against the Gaussian of $\sigma = 0.08$
-has L1 errors $5.3 \times 10^{-2}$, $2.3 \times 10^{-2}$ and
-$4.3 \times 10^{-3}$ on 16, 32 and 64 cells per side (orders 1.2 and 2.4,
-the first at $\sigma / h = 1.3$), where the cell-center deposit's error did
-not converge. Each cell adds its faces in the order of its neighbors' global
-ids, and halo values come from their owners before each step, so the
-deposit, like the particles, is bitwise independent of the rank count; on
-one rank its kernels are captured in the step graph.
+the gas a particle reads carries its own disturbance, which the
+point-particle drag does not expect. A width in physical units makes the
+deposit independent of the mesh, so it converges as the mesh is refined at
+fixed $\sigma$: the volume fraction of a single particle against the Gaussian
+of $\sigma = 0.08$ has L1 errors $5.6 \times 10^{-2}$, $1.1 \times 10^{-2}$,
+$2.5 \times 10^{-3}$ and $6.1 \times 10^{-4}$ on 16, 32, 64 and 128 cells per
+side (orders 2.4, 2.1 and 2.0), where the cell-center deposit's error did not
+converge. The error's constant depends on where the particle sits in its
+cell: the first moments are exact, but a particle at offset $\mathbf{d}$ from
+its cell's center starts with covariance $-\mathbf{d}\mathbf{d}^T$ rather
+than zero (the cell sum and its moment correction, eq.
+$\eqref{eq:coupling-moments}$), so the spread kernel's covariance is
+$\sigma^2 \mathbf{I} - \mathbf{d}\mathbf{d}^T$, an $O(h^2)$ error that is
+largest for a particle near a cell's corner and vanishes at its center. Over
+all offsets the L1 error is between $8 h^2$ and $37 h^2$ at $\sigma = 0.08$,
+each bound at second order; a particle at a fixed physical position sits at a
+different offset on each mesh, so its error stays within second-order bounds
+without decreasing by 4 on every mesh, and a study at a fixed position can appear to stall from one mesh to
+the next (64 to 128 cells for a particle at $(0.4137, 0.5862)$, near a center
+on one and a corner on the other). The study below keeps
+$|\mathbf{d}| = h / 6$ on every mesh. Each cell adds its faces in the order
+of its neighbors' global ids, and halo values come from their owners before
+each step, so the deposit, like the particles, is bitwise independent of the
+rank count; on one rank its kernels are captured in the step graph.
 
-![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32 and 64 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-light.svg#gh-light-mode-only)
-![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32 and 64 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-dark.svg#gh-dark-mode-only)
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-light.svg#gh-light-mode-only)
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-dark.svg#gh-dark-mode-only)
 
 *The volume fraction of one particle off the cell centers, deposited with
 $\sigma = 0.08$ on Cartesian meshes of a periodic unit box (Mallard runs):
