@@ -813,7 +813,10 @@ TEST(CppApiTest, ACheckReportGivesMallardChecksResultsAsStructs) {
             .check(options);
     EXPECT_FALSE(bad.ok);
     EXPECT_EQ(bad.status, "error");
-    EXPECT_FALSE(logged.empty());
+    // Rank 0 prints the setup's lines
+    if (comm::is_root()) {
+        EXPECT_FALSE(logged.empty());
+    }
     ASSERT_FALSE(bad.unused_keys.empty());
     const auto unused = std::find_if(bad.unused_keys.begin(), bad.unused_keys.end(),
                                      [](const mallard::CheckUnusedKey & k) { return k.key == "run.t_stpo"; });
