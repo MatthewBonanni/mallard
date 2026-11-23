@@ -86,6 +86,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - A [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): run a case from your own program, step by step, with the same results as `mallard -i`, through an installed CMake package (`find_package(Mallard)`)
 - A [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): every output file as numpy arrays, through Mallard's own reader, and the post-processing commands as functions
 - [`mallard session`](https://matthewbonanni.github.io/mallard/docs/guide/session/) for programs: holds a case and answers JSON-RPC requests (check, key listings) after each edit, with JSON Schemas for every answer
+- A [desktop GUI](https://github.com/MatthewBonanni/mallard-gui), in progress: case setup, runs and results
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 
