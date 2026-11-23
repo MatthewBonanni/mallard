@@ -707,15 +707,15 @@ class LesCombustion : public Table {
         /** @brief `charlette` only: exponent of the efficiency, default 0.5.
          */
         LesCombustion & beta(double v) { put("beta", v); return *this; }
-        /** @brief `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from
-         *        Cantera. Length (m), a number in SI units or a quantity with its unit; required.
+        /** @brief `temperature` and `progress` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m),
+         *        e.g. from Cantera. Length (m), a number in SI units or a quantity with its unit; required.
          */
         LesCombustion & delta_L(Quantity v) { put("delta_L", v); return *this; }
-        /** @brief `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E = F^beta`, `beta` in
-         *        [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two DNS at `Delta =
-         *        0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's efficiency function of a
-         *        subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta = 1.6 delta_L`). `none`:
-         *        `E = 1`. Comparison in the design notes, section 8.3.
+        /** @brief `dynamic` (default with `sensor = "temperature"` and `"progress"`; not available with `reaction`): `E =
+         *        F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two
+         *        DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's
+         *        efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta
+         *        = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes, section 8.3.
          */
         LesCombustion & efficiency(std::string_view v) { put("efficiency", v); return *this; }
         /** @brief Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none.
@@ -747,18 +747,20 @@ class LesCombustion : public Table {
         LesCombustion & oxidizer(const LesCombustionOxidizer & t) { put("oxidizer", t); return *this; }
         /** @brief oxidizer as a value (a region's name, an inline table). */
         LesCombustion & oxidizer(const Value & v) { put("oxidizer", v); return *this; }
-        /** @brief `temperature` only: laminar flame speed (m/s). Velocity (m s^-1), a number in SI units or a quantity with
-         *        its unit; required.
+        /** @brief `temperature` and `progress` only: laminar flame speed (m/s). Velocity (m s^-1), a number in SI units or
+         *        a quantity with its unit; required.
          */
         LesCombustion & s_L(Quantity v) { put("s_L", v); return *this; }
-        /** @brief `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`.
-         *        `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over
-         *        the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped
-         *        from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of
-         *        `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not
-         *        positive), filtered by two passes of the volume average over the cell and its vertex neighbors and
-         *        doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is
-         *        outside the table (the flammability limits). Guide.
+        /** @brief `progress` (the default and only sensor with `gas = "flamelet"`): the sensor $\Omega$ above of the
+         *        table's normalized progress variable, $c = \Lambda$ (`C_NORM`), with `delta_L` and `s_L`; the table is
+         *        looked up at zero subgrid variance (guide). `temperature` (default with mixtures): the sensor $\Omega$
+         *        above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed
+         *        flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed
+         *        flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the
+         *        flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant
+         *        species with O and without C or H is not positive), filtered by two passes of the volume average over the
+         *        cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0
+         *        (no thickening) where $Z$ is outside the table (the flammability limits). Guide.
          */
         LesCombustion & sensor(std::string_view v) { put("sensor", v); return *this; }
         /** @brief `reaction` only: the species of `omega_max` and of the flame index; default the fuel stream's most
@@ -2014,8 +2016,8 @@ class Particles : public Table {
          *        with its unit; required; 2D.
          */
         Particles & diameter(Quantity v) { put("diameter", v); return *this; }
-        /** @brief `"stokes"`, `"schiller_naumann"` or `"singh"` (Singh et al., continuum to free-molecular, subsonic to
-         *        hypersonic) (`"solid"`), default `"schiller_naumann"`. One of schiller_naumann, singh, stokes; 2D.
+        /** @brief `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; drag laws), default `"schiller_naumann"`. One
+         *        of schiller_naumann, singh, stokes; 2D.
          */
         Particles & drag(std::string_view v) { put("drag", v); return *this; }
         /** @brief CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of
@@ -2182,9 +2184,11 @@ class Physics : public Table {
          */
         Physics & units(std::string_view v) { put("units", v); return *this; }
         /** @brief (`flamelet`, with `[les]` only) Closure of the subgrid variance of `Z` in the table lookups: `algebraic`
-         *        (default), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce & Moin 1998) with the LES filter width;
-         *        `transported`: `Z2 - Z^2` of the transported second moment `Z2` (output `Y_Z2`), with the sink `2 rho D
-         *        |grad Z|^2 + C_chi rho (D + D_t) Zvar / Delta^2`; see LES of flamelets.
+         *        (default without `[les.combustion]`), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce & Moin 1998) with
+         *        the LES filter width; `transported`: `Z2 - Z^2` of the transported second moment `Z2` (output `Y_Z2`),
+         *        with the sink `2 rho D |grad Z|^2 + C_chi rho (D + D_t) Zvar / Delta^2`; `none`: zero variance, the
+         *        table's `Sz = 0` slice (default, and the only choice, with `[les.combustion]`: the thickened flame is
+         *        resolved); see LES of flamelets.
          */
         Physics & variance(std::string_view v) { put("variance", v); return *this; }
         /** @brief (`power_law`) Reference temperature and exponent, both required. Required; 3D.

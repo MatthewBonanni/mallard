@@ -625,13 +625,14 @@ class LesCombustion(Table):
         T_unburnt: `temperature` only: temperatures of the fresh and burnt gas (K). Temperature (K), a number in
             SI units or a quantity with its unit; required.
         beta: `charlette` only: exponent of the efficiency, default 0.5.
-        delta_L: `temperature` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g.
-            from Cantera. Length (m), a number in SI units or a quantity with its unit; required.
-        efficiency: `dynamic` (default with `sensor = "temperature"`; not available with `reaction`): `E =
-            F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of
-            two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's
-            efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at
-            `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes, section 8.3.
+        delta_L: `temperature` and `progress` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the
+            flame (m), e.g. from Cantera. Length (m), a number in SI units or a quantity with its unit; required.
+        efficiency: `dynamic` (default with `sensor = "temperature"` and `"progress"`; not available with
+            `reaction`): `E = F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame
+            speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor =
+            "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294;
+            doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes,
+            section 8.3.
         efficiency_max: Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none.
         flame_table: `reaction` only, required: CSV file of premixed flames against the mixture fraction,
             columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption
@@ -645,16 +646,19 @@ class LesCombustion(Table):
         oxidizer: `reaction` only, required: the streams of the mixture fraction, as in
             [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform
             composition; those the table was built with. 2D.
-        s_L: `temperature` only: laminar flame speed (m/s). Velocity (m s^-1), a number in SI units or a
-            quantity with its unit; required.
-        sensor: `temperature` (default): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`,
-            `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of
-            `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture
-            fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's
-            flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or
-            H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors
-            and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is
-            outside the table (the flammability limits). Guide.
+        s_L: `temperature` and `progress` only: laminar flame speed (m/s). Velocity (m s^-1), a number in SI
+            units or a quantity with its unit; required.
+        sensor: `progress` (the default and only sensor with `gas = "flamelet"`): the sensor $\Omega$ above of
+            the table's normalized progress variable, $c = \Lambda$ (`C_NORM`), with `delta_L` and `s_L`; the table
+            is looked up at zero subgrid variance (guide). `temperature` (default with mixtures): the sensor
+            $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and
+            partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)`
+            of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it,
+            zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer
+            stream's most abundant species with O and without C or H is not positive), filtered by two passes of the
+            volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take
+            `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits).
+            Guide.
         sensor_species: `reaction` only: the species of `omega_max` and of the flame index; default the fuel
             stream's most abundant species with C or H. 2D.
         subgrid_velocity: `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3
@@ -1735,8 +1739,8 @@ class Particles(Table):
             units or a quantity with its unit; required; 2D.
         diameter: Sphere diameter (`"solid"`). Required for solid particles. Length (m), a number in SI units or
             a quantity with its unit; required; 2D.
-        drag: `"stokes"`, `"schiller_naumann"` or `"singh"` (Singh et al., continuum to free-molecular, subsonic
-            to hypersonic) (`"solid"`), default `"schiller_naumann"`. One of schiller_naumann, singh, stokes; 2D.
+        drag: `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; drag laws), default
+            `"schiller_naumann"`. One of schiller_naumann, singh, stokes; 2D.
         file: CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`,
             `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id),
             default none. 2D.
@@ -1862,9 +1866,11 @@ class Physics(Table):
             output states and labels its numbers with (nondimensional: none, `-` in a units row). A gas mixture is
             always `SI` (Units). One of SI, nondimensional.
         variance: (`flamelet`, with `[les]` only) Closure of the subgrid variance of `Z` in the table lookups:
-            `algebraic` (default), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce & Moin 1998) with the LES filter
-            width; `transported`: `Z2 - Z^2` of the transported second moment `Z2` (output `Y_Z2`), with the sink `2
-            rho D |grad Z|^2 + C_chi rho (D + D_t) Zvar / Delta^2`; see LES of flamelets.
+            `algebraic` (default without `[les.combustion]`), `min(C_Z Delta^2 |grad Z|^2, Z (1 - Z))` (Pierce &
+            Moin 1998) with the LES filter width; `transported`: `Z2 - Z^2` of the transported second moment `Z2`
+            (output `Y_Z2`), with the sink `2 rho D |grad Z|^2 + C_chi rho (D + D_t) Zvar / Delta^2`; `none`: zero
+            variance, the table's `Sz = 0` slice (default, and the only choice, with `[les.combustion]`: the
+            thickened flame is resolved); see LES of flamelets.
         viscosity_exponent: (`power_law`) Reference temperature and exponent, both required. Required; 3D.
         viscosity_model: (`navier_stokes`) `constant` (default), `sutherland` or `power_law` (`mu (T /
             T_mu_ref)^viscosity_exponent`). One of constant, power_law, sutherland.
