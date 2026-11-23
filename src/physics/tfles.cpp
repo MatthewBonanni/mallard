@@ -65,13 +65,42 @@ Kokkos::View<double *[4]> read_flame_table(const Input & table, ThickenedFlame &
 
 } // namespace
 
-ThickenedFlame ThickenedFlame::from_input(const Input & table) {
+ThickenedFlame ThickenedFlame::from_input(const Input & table, const bool flamelet) {
     using Efficiency = ThickenedFlame::Efficiency;
     const std::string model = find_value_or<std::string>(table, "model", "");
     if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;
-    const std::string sensor = find_value_or<std::string>(table, "sensor", "temperature");
-    if (sensor == "reaction") {
+    const std::string sensor = flamelet && !table.contains("sensor")
+                                   ? "progress"
+                                   : find_value_or<std::string>(table, "sensor", "temperature");
+    if (flamelet != (sensor == "progress")) {
+        throw InputError(Diagnostic{
+            .key = "les.combustion.sensor",
+            .line = line_of(table, "sensor"),
+            .message = flamelet ? "sensor = \"" + sensor + "\" does not combine with gas = \"flamelet\": its flame "
+                                  "sensor is the table's normalized progress variable"
+                                : std::string("sensor = \"progress\" reads a flamelet table's progress variable, "
+                                              "and needs gas = \"flamelet\""),
+            .valid = flamelet ? std::vector<std::string>{"progress"} : std::vector<std::string>{"temperature", "reaction"},
+            .fix = flamelet ? "Remove sensor (\"progress\" is the default with gas = \"flamelet\")"
+                            : "Use sensor = \"temperature\" or \"reaction\"",
+            .docs = flamelet ? "docs/guide/flamelet.md#thickened-flames" : "docs/guide/les.md#thickened-flames-lescombustion"});
+    }
+    if (sensor == "progress") {
+        tf.sensor_type = Sensor::PROGRESS;
+        for (const char * key : {"T_unburnt", "T_burnt"}) {
+            if (table.contains(key)) {
+                throw InputError(Diagnostic{.key = std::string("les.combustion.") + key,
+                                            .line = line_of(table, key),
+                                            .message = "belongs to sensor = \"temperature\": with gas = \"flamelet\" "
+                                                       "the sensor reads the table's progress variable",
+                                            .fix = std::string("Remove ") + key,
+                                            .docs = "docs/guide/flamelet.md#thickened-flames"});
+            }
+        }
+        tf.delta_L = find_double(table, "delta_L", dim::length);
+        tf.s_L = find_double(table, "s_L", dim::velocity);
+    } else if (sensor == "reaction") {
         tf.sensor_type = Sensor::REACTION;
         for (const char * key : {"delta_L", "s_L", "T_unburnt", "T_burnt"}) {
             if (table.contains(key)) {
@@ -149,10 +178,13 @@ report::Summary ThickenedFlame::summary() const {
         e = std::string("Charlette efficiency, ") +
             (eddy_viscosity_velocity ? "u' = C_u nu_t / Delta" : "u' = 2 Delta^3 |lap(curl u)|");
     }
-    const bool reaction = sensor_type == Sensor::REACTION;
+    const bool reaction = sensor_type == Sensor::REACTION, progress = sensor_type == Sensor::PROGRESS;
     report::Summary s;
     s.setting("Combustion", std::string("thickened flame, sensor on ") +
-                                (reaction ? "the consumption rate, flames of the local mixture" : "T") + ", " + e);
+                                (reaction   ? "the consumption rate, flames of the local mixture"
+                                 : progress ? "the table's normalized progress variable"
+                                            : "T") +
+                                ", " + e);
     s.quantity("TFLES n_res", real(n_res), "cells", "across delta_L");
     if (reaction) {
         const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), table);
@@ -164,8 +196,10 @@ report::Summary ThickenedFlame::summary() const {
     } else {
         s.quantity("TFLES delta_L", real(delta_L), units::column("m"), "laminar flame thickness");
         s.quantity("TFLES s_L", real(s_L), units::column("m/s"), "laminar flame speed");
-        s.quantity("TFLES T_unburnt", real(T_u), units::column("K"), "the flame sensor's 0");
-        s.quantity("TFLES T_burnt", real(T_b), units::column("K"), "the flame sensor's 1");
+        if (!progress) {
+            s.quantity("TFLES T_unburnt", real(T_u), units::column("K"), "the flame sensor's 0");
+            s.quantity("TFLES T_burnt", real(T_b), units::column("K"), "the flame sensor's 1");
+        }
     }
     if (efficiency == Efficiency::CHARLETTE) {
         s.quantity("TFLES beta", real(beta), "-", "efficiency exponent");

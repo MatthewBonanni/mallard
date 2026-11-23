@@ -230,3 +230,14 @@ uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e too
 ```
 
 It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)). `-DMallard_ENABLE_PYTHON_BINDINGS=ON` adds the extension module that runs cases in Python (`mallard.Solver`), installed with the package.
+
+## Checking an install
+
+`mallard install verify` checks an install where it is, whichever way it was installed: for each solver it has, the environment (as `mallard check` without an input reports it: the build, devices and MPI, with no error) and a quick run, the Sod shock tube of `mallard new sod --quick` (a slab one cell thick in 3D) to t = 0.2, which must finish and match the exact solution ahead of the shock and at its largest Mach number. It takes a few seconds per solver on a CPU. Run it where the runs will run, as a short job on their partition; `--launcher` runs each check under the job's launcher:
+
+```sh
+srun -n 1 -c 4 mallard install verify --kokkos-num-threads=4
+mallard install verify --launcher "mpirun -n 2" --format json
+```
+
+`--format json` prints the verdict as one JSON object, which installers (the GUI's one-click installs) record with the install: `schema = "mallard-install-verify"`, `version = 1`, `passed`, `mallard` (the version), `prefix`, `seconds` and `checks`, each with `name` (`environment` or `run`), `dim`, `passed`, `seconds` and `detail` (why it failed); its [JSON Schema](schemas/install-verify.schema.json) has every field. The exit status is 0 when every check passes, 1 otherwise.

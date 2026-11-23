@@ -108,6 +108,9 @@ RULES = {
     ("statistics.md", "## Conditional statistics and PDFs: `[[statistics.conditional]]`"):
         (lambda t: "conditional" in t.get("statistics", {}), None),
     ("particles.md", "## Tracers: `[particles]`"): (lambda t: "particles" in t, None),
+    ("particles.md", "## Solid particles"): (lambda t: t.get("particles", {}).get("type") == "solid", None),
+    ("particles.md", "## Per-particle quantities"): (lambda t: "quantities" in t.get("particles", {}), None),
+    ("particles.md", "## Particle probes"): (lambda t: "probes" in t.get("particles", {}), None),
     ("probes.md", "## Probes: `[[probes]]`"): (lambda t: "probes" in t, None),
     ("probes.md", "### Region probes"): (lambda t: any("region" in p for p in t.get("probes", [])), None),
     ("physics.md", "## Euler and Navier–Stokes"): (lambda t: "type" in t.get("physics", {}), None),
