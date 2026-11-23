@@ -443,6 +443,17 @@ particles per meter of depth. The mass loading of a cell, `w m_p / (rho V)`,
 decides how strongly the particles act: near 1 and above, they drag the gas
 along.
 
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-light.svg#gh-light-mode-only)
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-dark.svg#gh-dark-mode-only)
+
+*The [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
+example, coupled one way and two ways (Mallard runs). Left: the cloud's mean
+fall velocity from its probe. Coupled one way, each particle reaches the
+terminal velocity `tau g` = 0.1 of a single particle; coupled two ways, the
+cloud, as heavy as the gas within it, drags that gas along and falls at up
+to 0.27. Right: the gas velocity at `t` = 2 and the parcels, whose wake
+sheds a vortex pair and bends the cloud into an arc.*
+
 **Deposition.** With `deposition_width = 0` (the default) each particle's
 source goes to the cell holding it. On a fine mesh that puts a point source in
 one small cell, so the result depends on the mesh. A `deposition_width` in
@@ -650,6 +661,16 @@ and later; `region` keeps the particles in a volume. Files, layout and
 pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
 carry every particle and quantity whatever the snapshots write.
 
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-light.svg#gh-light-mode-only)
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-dark.svg#gh-dark-mode-only)
+
+*Particle snapshots (`particle_fields = ["T_P", "slip_max"]`) of the
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example at `t` = 0, 3 and 6, over the gas speed of a mesh snapshot at the same
+times (a Mallard run): the heavy particles seeded in one vortex are flung out
+of it into the strain between the vortices and heat from 0.4 toward the gas's
+1/1.4.*
+
 ## Particle crossings
 
 ```toml
@@ -686,6 +707,16 @@ temperature and quantities at the end of the step, and the gas at its last
 stage. Rows are sorted by step, then by id, so the files are bitwise the same
 on any number of ranks and with or without step graphs. A restarted run
 appends to them, after the run's `# mallard-run` line.
+
+![Crossings of the circle bounding the core probe's disk in the particle_vortex example: 20 particles leave the core, and the seeds inside less the net crossings out match the probe's count at every sample](../images/guide/particle_crossings-light.svg#gh-light-mode-only)
+![Crossings of the circle bounding the core probe's disk in the particle_vortex example: 20 particles leave the core, and the seeds inside less the net crossings out match the probe's count at every sample](../images/guide/particle_crossings-dark.svg#gh-dark-mode-only)
+
+*The [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example with crossings of the boundary of its probe's disk,
+`region = {type = "boundary", of = {type = "disk", center = [0.25, 0.25], radius = 0.1}}`
+(a Mallard run). Left: the seeds and the crossing points, all out of the disk.
+Right: the 21 seeds inside less the net crossings out, by `t` of the rows,
+against the probe `core`'s count at its samples.*
 
 **Pitfalls.**
 
