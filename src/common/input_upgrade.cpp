@@ -806,7 +806,7 @@ std::map<std::string, std::string> quantity_renames(OrderedValue & root, std::ve
         const auto & vars = particle_variables();
         const bool clash = std::find(vars.begin(), vars.end(), to) != vars.end() ||
                            std::count_if(taken.begin(), taken.end(), [&](const std::string & t) { return upper(t) == to; }) > 1;
-        Finding f{.key = to_string(key), .line = line_of(v), .removed = true};
+        Finding f{.key = to_string(key), .line = line_of(v), .message = "", .suggestion = "", .removed = true};
         if (!std::regex_match(to, UPPER_NAME) || clash) {
             f.message = to_string(key) + " \"" + from + "\": particle quantity names are uppercase, like field names, " +
                         "and \"" + to + "\" " + (clash ? "is taken" : "is not one") + "; rename it and its references by hand";
@@ -848,7 +848,7 @@ std::string rename_in_strings(const std::string & line, const std::map<std::stri
         }
         const char quote = line[i];
         size_t j = i + 1;
-        while (j < line.size() && line[j] != quote) j += quote == '"' && line[j] == '\\' ? 2 : 1;
+        while (j < line.size() && line[j] != quote) j += quote == '"' && line[j] == '\\' ? size_t(2) : size_t(1);
         if (j >= line.size()) return out + line.substr(i);
         out += quote + rename_identifiers(line.substr(i + 1, j - i - 1), renames) + quote;
         i = j + 1;
