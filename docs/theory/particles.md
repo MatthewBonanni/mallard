@@ -725,27 +725,38 @@ not converge under refinement and, with cells comparable to the particles,
 the gas a particle reads carries its own disturbance, which the
 point-particle drag does not expect. A width in physical units makes the
 deposit independent of the mesh, so it converges as the mesh is refined at
-fixed $\sigma$: the volume fraction of a single particle against the Gaussian
-of $\sigma = 0.08$ has L1 errors $5.6 \times 10^{-2}$, $1.1 \times 10^{-2}$,
-$2.5 \times 10^{-3}$ and $6.1 \times 10^{-4}$ on 16, 32, 64 and 128 cells per
-side (orders 2.4, 2.1 and 2.0), where the cell-center deposit's error did not
-converge. The error's constant depends on where the particle sits in its
-cell: the first moments are exact, but a particle at offset $\mathbf{d}$ from
-its cell's center starts with covariance $-\mathbf{d}\mathbf{d}^T$ rather
-than zero (the cell sum and its moment correction, eq.
-$\eqref{eq:coupling-moments}$), so the spread kernel's covariance is
-$\sigma^2 \mathbf{I} - \mathbf{d}\mathbf{d}^T$, an $O(h^2)$ error that is
-largest for a particle near a cell's corner and vanishes at its center. Over
-all offsets the L1 error is between $8 h^2$ and $37 h^2$ at $\sigma = 0.08$,
-each bound at second order; a particle at a fixed physical position sits at a
-different offset on each mesh, so its error stays within second-order bounds
-without decreasing by 4 on every mesh, and a study at a fixed position can appear to stall from one mesh to
-the next (64 to 128 cells for a particle at $(0.4137, 0.5862)$, near a center
-on one and a corner on the other). The study below keeps
-$|\mathbf{d}| = h / 6$ on every mesh. Each cell adds its faces in the order
+fixed $\sigma$: the volume fraction of a single particle at $(0.4137, 0.5862)$
+against the Gaussian of $\sigma = 0.08$ has L1 errors $5.2 \times 10^{-2}$,
+$1.1 \times 10^{-2}$, $2.1 \times 10^{-3}$ and $5.3 \times 10^{-4}$ on 16, 32,
+64 and 128 cells per side (orders 2.3, 2.4 and 2.0), where the cell-center
+deposit's error did not converge. The second moments make the error
+independent of where the particle sits in its cell. With the first moments
+alone, a particle at offset $\mathbf{d}$ from its cell's center starts with
+covariance $-\mathbf{d}\mathbf{d}^T$ rather than zero, so the spread kernel's
+covariance is $\sigma^2 \mathbf{I} - \mathbf{d}\mathbf{d}^T$: still second
+order, but with a constant from $8 h^2$ at a cell's center to $34 h^2$ near a
+corner at $\sigma = 0.08$, so that a particle at a fixed position, which sits
+at a different offset on each mesh, converged unevenly (with the same
+particle, $2.1 \times 10^{-3}$ on 64 cells and $1.9 \times 10^{-3}$ on 128).
+On a uniform Cartesian mesh eq. $\eqref{eq:coupling-moments}$ gives the
+pre-spread deposit the particle's integral and first and second moments
+exactly, and the face-flux Laplacian adds exactly $2\,\Delta s$ to the second
+moment per direction and step, so the spread's covariance is $\sigma^2
+\mathbf{I}$ wherever the particle sits; what remains of the offset dependence
+is of higher order ($8.3 h^2$ to $8.7 h^2$ on 128 cells). On other meshes
+the corrections are consistent rather than exact: the second moments still
+remove the leading offset dependence, but not to round-off. Each cell adds its faces in the order
 of its neighbors' global ids, and halo values come from their owners before
 each step, so the deposit, like the particles, is bitwise independent of the
 rank count; on one rank its kernels are captured in the step graph.
+
+![The L1 error over h squared of one particle's deposit against its offset from the cell center along the cell's diagonal, on 32 and 64 cells per side: flat with the second moments, rising fourfold toward the corner with the first moments alone](../images/theory/particle_deposition_offset-light.svg#gh-light-mode-only)
+![The L1 error over h squared of one particle's deposit against its offset from the cell center along the cell's diagonal, on 32 and 64 cells per side: flat with the second moments, rising fourfold toward the corner with the first moments alone](../images/theory/particle_deposition_offset-dark.svg#gh-dark-mode-only)
+
+*The $L_1$ error of one particle's deposit ($\sigma = 0.08$, as below)
+against where it sits in its cell, along the cell's diagonal from its
+center ($d = 0$) toward a corner ($d / h = 0.5$): Mallard runs, and the
+same steps with the first moments alone (dashed, NumPy).*
 
 ![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-light.svg#gh-light-mode-only)
 ![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-dark.svg#gh-dark-mode-only)

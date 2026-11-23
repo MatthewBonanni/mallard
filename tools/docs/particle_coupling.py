@@ -159,7 +159,7 @@ diameter = {DIAMETER}
 density = {DENSITY}
 deposition_width = {sigma}
 velocity = [0.0, 0.0]
-points = [[{point[0]!r}, {point[1]!r}]]
+points = [[{float(point[0])!r}, {float(point[1])!r}]]
 [[write_data]]
 prefix = "deposit"
 format = "vtu"
