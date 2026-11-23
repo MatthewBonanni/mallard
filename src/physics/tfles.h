@@ -50,9 +50,10 @@ struct ThickenedFlame {
      * @brief The flame sensor: TEMPERATURE, of the progress variable between T_u and T_b (one fresh-gas state);
      *        REACTION (Legier et al. 2002), of the consumption rate of one species over its largest
      *        in the premixed flame of the local mixture fraction Z, with the s_L and delta_L of that flame, where
-     *        the flame is premixed (Takeno's flame index: fuel and oxidizer gradients point the same way).
+     *        the flame is premixed (Takeno's flame index: fuel and oxidizer gradients point the same way);
+     *        PROGRESS (gas = "flamelet"), of the table's normalized progress variable Lambda.
      */
-    enum class Sensor : uint8_t { TEMPERATURE, REACTION };
+    enum class Sensor : uint8_t { TEMPERATURE, REACTION, PROGRESS };
     Sensor sensor_type = Sensor::TEMPERATURE;
     Kokkos::View<double *[4]> table{};   // REACTION: rows (Z, s_L, delta_L, omega_max), Z increasing
     Kokkos::View<double *> z_weights{};  // REACTION: Z = z_offset + sum_k z_weights(k) Y_k (Bilger)
@@ -68,15 +69,22 @@ struct ThickenedFlame {
     static constexpr uint32_t SENSOR_PASSES = 2;
     static constexpr double SENSOR_GAIN = 2.0;
 
-    /** @brief [les.combustion] of an input with one. */
-    static ThickenedFlame from_input(const Input & table);
+    /** @brief [les.combustion] of an input with one; flamelet: of a gas = "flamelet" run. */
+    static ThickenedFlame from_input(const Input & table, bool flamelet = false);
 
     report::Summary summary() const;
 
     /** @brief Flame sensor: 1 inside the flame (preheat zone included), 0 in fresh and burnt gas. */
     KOKKOS_INLINE_FUNCTION
-    double sensor(const double T) const {
-        const double c = Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - T_u) / (T_b - T_u)));
+    double sensor(const double T) const { return progress_sensor(progress(T)); }
+
+    /** @brief The progress variable of temperature T, between T_u and T_b. */
+    KOKKOS_INLINE_FUNCTION
+    double progress(const double T) const { return Kokkos::fmin(1.0, Kokkos::fmax(0.0, (T - T_u) / (T_b - T_u))); }
+
+    /** @brief Flame sensor of a progress variable c in [0, 1]. */
+    KOKKOS_INLINE_FUNCTION
+    static double progress_sensor(const double c) {
         return Kokkos::fmin(1.0, c * (1.0 - c) / (C_SENSOR * (1.0 - C_SENSOR)));
     }
 
