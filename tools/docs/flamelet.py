@@ -3,9 +3,13 @@ docs/design/table_format.md), from a sample FPV table built the way the design
 notes' section 2 says a generator builds one:
 
 - flamelet_s_curve: the S-curve of the steady counterflow flamelets (peak
-  temperature against the stoichiometric scalar dissipation rate) and the
-  temperature of some of them against the mixture fraction;
-- flamelet_table: the table's fields at zero variance over (Z, Lambda);
+  temperature and source of C against the stoichiometric scalar dissipation
+  rate: the stable, unstable and extinguished branches) and the temperature
+  of flamelets of each branch against the mixture fraction;
+- flamelet_progress: the table at the stoichiometric Z against Lambda, its
+  nodes from the stable and the unstable branch;
+- flamelet_table: the table's fields at zero variance over (Z, Lambda), with
+  the Lambda of the extinction flamelet and of the last unstable one;
 - flamelet_lookup: the FPV map from a transported C to Lambda, and the
   multilinear lookup in a cell of the (Z, Sz, Lambda) grid;
 - flamelet_variance: the fields of the most burning flamelet against Z at
@@ -16,7 +20,7 @@ notes' section 2 says a generator builds one:
 
     python tools/docs/flamelet.py [--compute] [names...]
 
---compute solves the flamelets with Cantera (about a minute) and writes
+--compute solves the flamelets with Cantera (about 1 min) and writes
 flamelet.json next to this script; without it the figures read that file, so
 drawing them needs NumPy, SciPy and Matplotlib only. The flamelets: H2/N2
 (1:1 by mole) against air, both at 300 K and 1 atm, mechanisms/h2o2.yaml, unity
@@ -71,6 +75,9 @@ def compute():
         out["chi_st"] = chi_st
         return out
 
+    def C_st(fl):
+        return float(np.interp(Z_st, Z_GRID, fl["Y_H2O"]))
+
     def flamelet(f):
         Z, rates = [], f.net_production_rates
         for j in range(len(f.grid)):
@@ -97,44 +104,51 @@ def compute():
             mixing[f"Y_{s}"].append(gas.Y[idx[s]])
     mixing = record(mixing, Z_GRID)
 
-    f = ct.CounterflowDiffusionFlame(gas, width=0.02)
+    f = ct.CounterflowDiffusionFlame(gas, width=0.1)
     f.P = P
     f.fuel_inlet.X, f.fuel_inlet.T = FUEL, T_IN
     f.oxidizer_inlet.X, f.oxidizer_inlet.T = OXIDIZER, T_IN
-    f.fuel_inlet.mdot = 0.05
-    f.oxidizer_inlet.mdot = 0.05 * np.sqrt(ro / rf)
+    f.fuel_inlet.mdot = 0.01
+    f.oxidizer_inlet.mdot = 0.01 * np.sqrt(ro / rf)
     f.set_refine_criteria(ratio=3, slope=0.06, curve=0.12, prune=0.02)
     f.solve(loglevel=0, auto=True)
     flamelets = [flamelet(f)]
     f.two_point_control_enabled = True
-    spacings, dT, stalled = [0.95, 0.75, 0.5, 0.3], 10.0, 0
-    while spacings and f.T.max() > 400 and len(flamelets) < 400:
+    # March the control temperatures down (then, where that stalls, up), keeping each solution whose C_st
+    # falls: the stable branch to extinction and the unstable branch until the flamelets stop changing
+    sign, dT = 1.0, 10.0
+    while len(flamelets) < 400:
         saved = f.to_array()
-        Tc = f.T.min() + spacings[0] * (f.T.max() - f.T.min())
+        Tc = f.T.min() + 0.95 * (f.T.max() - f.T.min())
         f.set_left_control_point(Tc)
         f.set_right_control_point(Tc)
-        f.left_control_point_temperature -= dT
-        f.right_control_point_temperature -= dT
+        f.left_control_point_temperature -= sign * dT
+        f.right_control_point_temperature -= sign * dT
         try:
             f.solve(loglevel=0)
-            ok = f.T.max() < flamelets[-1]["T_max"] - 0.5
+            candidate = flamelet(f)
+            ok = C_st(candidate) < C_st(flamelets[-1]) - 1e-6
         except ct.CanteraError:
             ok = False
         if ok:
-            flamelets.append(flamelet(f))
-            dT, stalled = min(1.3 * dT, 20.0), 0
-            print(f"T_max {flamelets[-1]['T_max']:7.1f} K  chi_st {flamelets[-1]['chi_st']:9.2f} 1/s", flush=True)
+            flamelets.append(candidate)
+            dT = min(1.3 * dT, 20.0)
+            print(f"T_max {candidate['T_max']:7.1f} K  chi_st {candidate['chi_st']:9.3g} 1/s  C_st {C_st(candidate):.4f}",
+                  flush=True)
         else:
             f.from_array(saved)
             dT /= 2
-            if dT < 0.5:
-                spacings.pop(0)
-                dT = 10.0
-    # Every flamelet whose peak temperature is 12 K below the last one kept, the extinction point and the last
+            if dT < 0.01:
+                if sign < 0:
+                    break
+                sign, dT = -1.0, 5.0
+    # Thinned: a flamelet where C_st or chi_st has changed enough since the last one kept, the extinction point
+    # and the last
     kept = [flamelets[0]]
     ext = max(flamelets, key=lambda fl: fl["chi_st"])
     for fl in flamelets[1:]:
-        if fl is ext or fl is flamelets[-1] or fl["T_max"] < kept[-1]["T_max"] - 12:
+        if (fl is ext or fl is flamelets[-1] or C_st(fl) < C_st(kept[-1]) - 0.0025
+                or abs(np.log(fl["chi_st"] / kept[-1]["chi_st"])) > 0.35):
             kept.append(fl)
     short = lambda v: [float(f"{x:.4g}") for x in v] if isinstance(v, list) else float(f"{v:.6g}")  # noqa: E731
     DATA.write_text(json.dumps(dict(
@@ -201,43 +215,94 @@ def table(d, fields, Sz=0.0):
 
 
 # ------------------------------------------------------------------- figures
+def branches(d):
+    """The flamelets in continuation order, the extinction index, and the Lambda(Z) of a flamelet at Sz = 0."""
+    flm = d["flamelets"]
+    ext = int(np.argmax([fl["chi_st"] for fl in flm]))
+    C_max = np.max([fl["Y_H2O"] for fl in d["by_C_st"]], axis=0)
+
+    def lam(fl):
+        return np.divide(fl["Y_H2O"], C_max, out=np.zeros_like(C_max), where=C_max > 0)
+    return flm, ext, lam
+
+
 def s_curve(P, d):
     import matplotlib.pyplot as plt
 
-    flm = d["flamelets"]
+    flm, ext, _ = branches(d)
     chi = np.array([fl["chi_st"] for fl in flm])
     T = np.array([fl["T_max"] for fl in flm])
-    ext = int(np.argmax(chi))
-    fig, (a, b) = plt.subplots(1, 2, figsize=(11.5, 4.3), gridspec_kw=dict(wspace=0.3))
-    a.plot(chi[:ext + 1], T[:ext + 1], color=P["flame"], label="stable branch")
-    a.plot(chi[ext:], T[ext:], color=P["flame"], ls="--", label="unstable branch")
-    a.axhline(d["T"], color=P["muted"], ls=":", lw=1.4, label="mixing (C = 0)")
-    a.plot(chi[ext], T[ext], "o", color=P["fg"], ms=6)
-    label(a, chi[ext] * 0.85, T[ext] - 60, "extinction", P, size=12, ha="right")
-    a.set_xscale("log")
-    a.set_xlabel(r"stoichiometric scalar dissipation rate $\chi_{st}$ (1/s)")
-    a.set_ylabel(r"peak temperature $T_{max}$ (K)")
-    a.set_ylim(0, 2100)
-    a.legend(loc="center left", bbox_to_anchor=(0.0, 0.33))
-    a.set_title("S-curve of the counterflow flamelets", loc="left")
+    w = np.array([np.interp(d["Z_st"], d["Z"], fl["omega_C"]) for fl in flm])
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), gridspec_kw=dict(wspace=0.3))
+    lo, hi = 0.5 * chi.min(), 3 * chi.max()
+    floor = 10 ** np.floor(np.log10(max(w.min(), 1e-6)))
+    for ax, y, ylabel, base in ((axes[0], T, r"peak temperature $T_{max}$ (K)", d["T"]),
+                                (axes[1], w, r"$\dot\omega_C$ at $Z_{st}$ (kg/m³/s)", None)):
+        ax.plot(chi[:ext + 1], y[:ext + 1], color=P["flame"], lw=2.2, label="stable (burning)")
+        ax.plot(chi[ext:], y[ext:], color=P["plum"], lw=2.2, ls="--", label="unstable")
+        base = floor if base is None else base
+        ax.plot([lo, hi], [base, base], color=P["muted"], lw=2.2, ls=":", label="extinguished (mixing)")
+        ax.plot(chi[ext], y[ext], "o", color=P["fg"], ms=6)
+        ax.set_xscale("log")
+        ax.set_xlim(lo, hi)
+        ax.set_xlabel(r"$\chi_{st}$ (1/s)")
+        ax.set_ylabel(ylabel)
+    axes[0].set_ylim(0, None)
+    axes[1].set_yscale("log")
+    axes[1].set_ylim(floor, 3 * w.max())
+    label(axes[1], lo * 1.3, 1.4 * floor, "0 (extinguished)", P, size=10.5, ha="left", va="bottom", color=P["muted"])
+    label(axes[0], chi[ext] * 0.8, T[ext] + 70, "extinction", P, size=12, ha="right")
+    axes[0].legend(loc="lower left", bbox_to_anchor=(0.02, 0.17), fontsize=11)
+    axes[0].set_title("S-curve: peak temperature", loc="left")
+    axes[1].set_title("S-curve: source of C", loc="left")
 
-    cmap = plt.get_cmap(P["cmap"])
-    C_max = max(fl["C_st"] for fl in flm)
-    picks = np.linspace(0, len(d["by_C_st"]) - 1, 9).round().astype(int)
-    for k in picks:
-        fl = d["by_C_st"][k]
-        b.plot(d["Z"], fl["T"], color=cmap(0.92 * fl["C_st"] / C_max), lw=1.6)
-    b.axvline(d["Z_st"], color=P["muted"], ls=":", lw=1.2)
-    label(b, d["Z_st"] + 0.015, 120, r"$Z_{st}$", P, size=12, ha="left")
-    b.set_xlim(0, 1)
-    b.set_ylim(0, 2100)
-    b.set_xlabel("mixture fraction Z")
-    b.set_ylabel("T (K)")
-    b.set_title(r"Flamelets, colored by $C_{st} = C(Z_{st})$", loc="left")
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0, C_max / 0.92))
-    cb = fig.colorbar(sm, ax=b, pad=0.02)
-    cb.set_label(r"$C_{st}$")
-    cb.outline.set_visible(False)
+    c = axes[2]
+    for k in np.linspace(0, ext, 5).round().astype(int):
+        c.plot(d["Z"], flm[k]["T"], color=P["flame"], lw=1.5)
+    for k in np.linspace(ext, len(flm) - 1, 5).round().astype(int)[1:]:
+        c.plot(d["Z"], flm[k]["T"], color=P["plum"], lw=1.5, ls="--")
+    c.plot(d["Z"], d["mixing"]["T"], color=P["muted"], lw=1.8, ls=":")
+    c.axvline(d["Z_st"], color=P["muted"], ls=":", lw=1.0)
+    label(c, d["Z_st"] + 0.015, 2000, r"$Z_{st}$", P, size=12, ha="left")
+    c.set_xlim(0, 1)
+    c.set_ylim(0, 2100)
+    c.set_xlabel("mixture fraction Z")
+    c.set_ylabel("T (K)")
+    c.set_title("Flamelets of each branch", loc="left")
+    return fig
+
+
+def progress(P, d):
+    """The table at Z_st and Sz = 0 against Lambda, with the branch each node comes from."""
+    import matplotlib.pyplot as plt
+
+    flm, ext, lam = branches(d)
+    t = table(d, ["T", "omega_C", "Y_OH"])
+    Zs = d["Z_st"]
+    at = {f: np.array([np.interp(Zs, d["Z"], t[f][:, k]) for k in range(len(LAMBDA))]) for f in ("T", "omega_C", "Y_OH")}
+    node = np.array([np.interp(Zs, d["Z"], lam(fl)) for fl in flm])
+    lam_ext, lam_low = node[ext], node.min()
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, gridspec_kw=dict(wspace=0.3))
+    panels = (("T", r"$T_0$ (K)", 1.0), ("omega_C", r"$\dot\omega_C$ (kg/m³/s)", 1.0), ("Y_OH", r"$Y_{OH}$", 1.0))
+    for ax, (f, ylabel, scale) in zip(axes, panels):
+        ax.axvspan(0, lam_low, color=P["faint"], lw=0)
+        ax.axvspan(lam_low, lam_ext, color=P["plum"], alpha=0.10, lw=0)
+        ax.axvspan(lam_ext, 1, color=P["flame"], alpha=0.10, lw=0)
+        ax.plot(LAMBDA, scale * at[f], color=P["fg"], lw=2)
+        y = np.array([np.interp(Zs, d["Z"], fl[f]) for fl in flm])
+        ax.plot(node[:ext + 1], scale * y[:ext + 1], "o", color=P["flame"], ms=4)
+        ax.plot(node[ext:], scale * y[ext:], "o", color=P["plum"], ms=4)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, None)
+        ax.set_xlabel(r"$\Lambda$ (C_NORM)")
+        ax.set_ylabel(ylabel)
+    top = axes[0].get_ylim()[1]
+    label(axes[0], 0.5 * lam_low, 0.9 * top, "no steady\nflamelet:\ninterpolated", P, size=10.5, color=P["muted"])
+    label(axes[0], 0.5 * (lam_low + lam_ext), 0.9 * top, "unstable", P, size=11.5, color=P["plum"])
+    label(axes[0], 0.5 * (lam_ext + 1), 0.08 * top, "stable", P, size=11.5, color=P["flame"])
+    axes[0].set_title(r"Temperature at $Z_{st}$", loc="left")
+    axes[1].set_title(r"Source of C at $Z_{st}$", loc="left")
+    axes[2].set_title(r"OH at $Z_{st}$", loc="left")
     return fig
 
 
@@ -250,11 +315,16 @@ def table_fields(P, d):
     import matplotlib.pyplot as plt
 
     t = table(d, [f for f, _, _ in FIELDS if f != "C"])
+    flm, ext, lam = branches(d)
+    lam_ext, lam_low = lam(flm[ext]), lam(flm[-1])
     fig, axes = plt.subplots(2, 3, figsize=(12, 6.6), sharex=True, sharey=True,
                              gridspec_kw=dict(hspace=0.32, wspace=0.12))
     for ax, (f, title, scale) in zip(axes.flat, FIELDS):
         m = ax.pcolormesh(d["Z"], LAMBDA, scale * t[f].T, cmap=P["cmap"], shading="gouraud", rasterized=True)
         ax.axvline(d["Z_st"], color="white", ls=":", lw=1.0, alpha=0.8)
+        inner = (d["Z"] > 0.01) & (d["Z"] < 0.99)
+        ax.plot(d["Z"][inner], lam_ext[inner], color="white", lw=1.2, ls="--", alpha=0.9)
+        ax.plot(d["Z"][inner], lam_low[inner], color="white", lw=1.2, ls=":", alpha=0.9)
         ax.set_title(title, loc="left", fontsize=13)
         ax.set_xlim(0, 0.8)
         cb = fig.colorbar(m, ax=ax, pad=0.02, fraction=0.06)
@@ -264,6 +334,10 @@ def table_fields(P, d):
         ax.set_xlabel("Z")
     for ax in axes[:, 0]:
         ax.set_ylabel(r"$\Lambda$")
+    i = int(np.searchsorted(d["Z"], 0.6))
+    label(axes[0, 0], 0.6, 0.5 * (lam_ext[i] + 1), "stable", P, size=11, color="white")
+    label(axes[0, 0], 0.6, 0.5 * (lam_ext[i] + lam_low[i]), "unstable", P, size=11, color="white")
+    label(axes[0, 0], 0.6, 0.5 * lam_low[i], "interpolated", P, size=11, color="white")
     return fig
 
 
@@ -365,6 +439,7 @@ def tfles_sensor(P, d):
 
 FIGURES = {
     "flamelet_s_curve": s_curve,
+    "flamelet_progress": progress,
     "flamelet_table": table_fields,
     "flamelet_lookup": lookup,
     "flamelet_variance": variance,
