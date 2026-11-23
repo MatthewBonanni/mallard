@@ -1181,6 +1181,8 @@ kernel by kernel, except kernels only in conditional bodies none of those steps 
 |---|---:|---:|---:|
 | `air_3d` | 72 | 173 | 5.8 |
 | `sphere_3d` | 89 | 195 | 8.9 |
+| `teno5_3d` | | 261 | 104 |
+| `flame_3d` | | 160 | 48 |
 
 Results are bitwise those of main (snapshots after 100 steps of `air_3d`, `sphere_3d`, `teno5_3d` and
 `flame_3d`). `StepQueueTest.ACaptureThatAUnitsFirstKernelLaunchFailsIsTriedAgain` makes the first capture fail
