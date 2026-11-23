@@ -44,6 +44,7 @@ struct CheckOptions {
     std::vector<uint64_t> stencil_cells;  // or of these cells, by global id (--cells)
     std::string stencil_region;           // or of the cells of this region: a name or an inline table (--region)
     bool stencil_weights = false;         // with the pseudo-inverse rows (--weights)
+    std::string initial;        // prefix of the initial state's snapshot (--initial), or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     std::string input_file;     // named before input errors, as a run names it, or empty
@@ -71,6 +72,28 @@ struct CheckBoundary {
     uint64_t faces = 0;      // over every rank
     std::string details;     // how the condition varies or what models it, or empty
     std::string turbulence;  // its synthetic inflow turbulence, or empty
+};
+
+/**
+ * @brief A periodic pair as the mesh joined it: its map, the faces joined (one per face of each zone) and their
+ *        area, and how far a node lies from its partner's image (round-off for a periodic mesh).
+ */
+struct CheckPeriodic {
+    std::string zone_a, zone_b;  // empty for a generated mesh's sides joined without names
+    bool rotation = false;
+    std::array<double, 3> translation{};  // m
+    double angle = 0.0;                   // degrees, about axis through center
+    std::array<double, 3> center{}, axis{0.0, 0.0, 1.0};
+    uint64_t faces = 0;
+    double area = 0.0;             // of the joined faces of one zone (2D: length)
+    double node_offset_max = 0.0;  // m
+    double node_offset_relative = 0.0;  // over the mean face size, area / faces (3D: its square root)
+};
+
+/** @brief Faces of a boundary zone with no condition (each also in the boundaries error). */
+struct CheckUnassigned {
+    std::string zone;
+    uint64_t faces = 0;
 };
 
 /** @brief A region on the mesh: one of the mesh's own (the domain, its zones) or one the case uses. */
@@ -148,7 +171,11 @@ struct CheckReport {
     CheckEnvironment environment;
 
     std::vector<CheckBoundary> boundaries;
+    std::vector<CheckUnassigned> unassigned;
+    std::vector<CheckPeriodic> periodic;
     std::vector<CheckRegion> regions;
+    std::vector<double> face_y_plus;  // per local face: first-cell y+ of wall faces, NaN elsewhere (the view's walls)
+    std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
