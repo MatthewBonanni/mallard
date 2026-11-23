@@ -1,0 +1,10 @@
+{
+ "dimension": "specific heat (m^2 s^-2 K^-1)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/droplets.toml"
+ ],
+ "type": "number"
+}

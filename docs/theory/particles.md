@@ -778,3 +778,282 @@ eq. $\eqref{eq:coupling-sources}$ at the written state, from the explicit
 rates of the particles there (`Particles::fields`). `mallard check` warns
 where a particle is larger than a tenth of its cell or the volume fraction
 exceeds 1%, where the point-particle and dilute assumptions fail.
+
+## Evaporating droplets
+
+`type = "droplet"` makes the particles droplets of one liquid that evaporate
+into a gas mixture whose mechanism holds the liquid's vapor
+(`particles::Droplet`, `src/particles/particle_evaporation.h`). A droplet
+moves as a solid particle, eq. $\eqref{eq:solid}$, with the liquid's density
+and its own, shrinking diameter, and the drag and forces of `[particles]`;
+the gas heats it, and it evaporates until, below `minimum_diameter`, it is
+removed.
+
+### Assumptions
+
+- **One component**, of constant density $\rho_l$ and specific heat $c_l$.
+- **Uniform temperature** $T_p$ within the droplet (infinite liquid
+  conductivity): no internal conduction or circulation.
+- **Quasi-steady gas film**: the gas around the droplet adjusts to the
+  droplet's state faster than it changes, so the transfer to a droplet in a
+  uniform stream holds at every instant. The film's properties are evaluated
+  at reference values by the 1/3 rule (below).
+- **Equilibrium at the surface**: the vapor at the surface is at the
+  saturation pressure of the surface temperature (Raoult's law of a pure
+  liquid), with no non-equilibrium (Langmuir-Knudsen) correction, which
+  matters for droplets below about 50 µm in hot gas
+  ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+- **Subcritical**: the saturation curve ends at the critical point, and
+  real-fluid (supercritical) droplets are outside the model.
+- The gas composition at a droplet is its cell's average.
+
+### The liquid
+
+The liquid's enthalpy is referred to the mechanism's vapor enthalpy $h_v$
+(formation enthalpy included), through the latent heat $L_b$ at the boiling
+temperature $T_b$ at the pressure $p_b$:
+
+$$
+\begin{equation}
+h_l(T) = h_v(T_b) - L_b + c_l\,(T - T_b), \qquad L(T) = h_v(T) - h_l(T),
+\label{eq:droplet-enthalpy}
+\end{equation}
+$$
+
+so that the latent heat at any temperature follows Kirchhoff's law, and the
+liquid and the gas, whose total energy carries formation enthalpies, share one
+energy reference. The input refuses a liquid whose $L(T)$ vanishes below the
+critical temperature. The saturation pressure is Clausius-Clapeyron's through
+the boiling point, or Antoine's with `antoine`,
+
+$$
+\begin{equation}
+p_{sat}(T) = p_b \exp\left[\frac{L_b}{R_v}\left(\frac{1}{T_b} - \frac{1}{T}\right)\right]
+\quad\text{or}\quad
+\log_{10}\frac{p_{sat}}{\mathrm{Pa}} = A - \frac{B}{T/\mathrm{K} + C},
+\label{eq:droplet-saturation}
+\end{equation}
+$$
+
+with $R_v$ the vapor's gas constant, and the boiling temperature $T_b(p)$ at
+the gas pressure is its inverse, at most the critical temperature.
+
+### The surface and the film
+
+The surface is at $T_s = \min(T_p, T_b(p))$. The vapor's mole fraction there
+is $X_s = \min(p_{sat}(T_s) / p, 1)$, and its mass fraction
+
+$$
+\begin{equation}
+Y_s = \frac{X_s W_v}{X_s W_v + (1 - X_s)\,W_{dry}}, \qquad
+W_{dry} = \frac{1 - Y_v}{\sum_{k \ne v} Y_k / W_k},
+\label{eq:droplet-surface}
+\end{equation}
+$$
+
+with $W_v$ the vapor's molar mass, $Y_v$ the gas's vapor mass fraction and
+$W_{dry}$ the molar mass of the gas's other species. The film between the
+surface and the gas is evaluated at the reference state of the 1/3 rule,
+as in Abramzon & Sirignano's model,
+
+$$
+\begin{equation}
+T_f = T_s + \tfrac13\,(T - T_s), \qquad Y_{v,f} = Y_s + \tfrac13\,(Y_v - Y_s),
+\label{eq:droplet-film}
+\end{equation}
+$$
+
+the other species in the gas's proportions, with the mechanism's density
+$\rho_f$, specific heat $c_{p,f}$, viscosity $\mu_f$, conductivity $k_f$ and
+the vapor's mixture-averaged diffusivity $D_f$, and
+
+$$
+\begin{equation}
+Re_p = \frac{\rho\,\lvert\mathbf{u} - \mathbf{v}\rvert\,d}{\mu_f}, \quad
+Pr_f = \frac{\mu_f c_{p,f}}{k_f}, \quad
+Sc_f = \frac{\mu_f}{\rho_f D_f}, \quad
+Le_f = \frac{k_f}{\rho_f c_{p,f} D_f}, \quad
+Sh_0 = 2 + 0.6\,Re_p^{1/2} Sc_f^{1/3}, \quad
+Nu_0 = 2 + 0.6\,Re_p^{1/2} Pr_f^{1/3},
+\label{eq:droplet-numbers}
+\end{equation}
+$$
+
+the Sherwood and Nusselt numbers of
+[Ranz & Marshall 1952](../references.md#ranz-marshall-1952) at the film's
+properties. The drag uses the film's viscosity too, with the gas's
+$\gamma = c_p / (c_p - R)$ and $T_p$ for Singh et al.'s law.
+
+### Evaporation rate and heat transfer
+
+With Spalding's mass transfer number
+([Spalding 1953](../references.md#spalding-1953))
+
+$$
+\begin{equation}
+B_M = \frac{Y_s - Y_v}{1 - Y_s},
+\label{eq:droplet-spalding}
+\end{equation}
+$$
+
+`evaporation` chooses the rate $\dot m$ at which the droplet loses mass and
+the heat $Q$ the gas gives it:
+
+- **`d2_law`**: the classical quasi-steady droplet,
+
+    $$
+    \begin{equation}
+    \dot m = \pi d\,\rho_f D_f\,Sh_0 \ln(1 + B_M), \qquad Q = \pi d\,k_f\,Nu_0\,(T - T_s).
+    \label{eq:droplet-d2}
+    \end{equation}
+    $$
+
+    At rest ($Sh_0 = 2$) and at a constant surface state, $d^2$ falls
+    linearly in time, $d^2 = d_0^2 - K t$ with
+    $K = 8 \rho_f D_f \ln(1 + B_M) / \rho_l$.
+
+- **`abramzon_sirignano`** (default): the film model of
+    [Abramzon & Sirignano 1989](../references.md#abramzon-sirignano-1989),
+    in which the Stefan flow of the vapor thickens the film by
+    $F(B) = (1 + B)^{0.7} \ln(1 + B) / B$, and heat crosses it with its own
+    transfer number $B_T$:
+
+    $$
+    \begin{equation}
+    \begin{gathered}
+    Sh^* = 2 + \frac{Sh_0 - 2}{F(B_M)}, \qquad Nu^* = 2 + \frac{Nu_0 - 2}{F(B_T)}, \qquad
+    B_T = (1 + B_M)^{\phi} - 1, \qquad \phi = \frac{c_{p,v}}{c_{p,f}}\,\frac{Sh^*}{Nu^*}\,\frac{1}{Le_f}, \\
+    \dot m = \pi d\,\rho_f D_f\,Sh^* \ln(1 + B_M), \qquad
+    Q = \pi d\,k_f\,Nu^*\,(T - T_s)\,\frac{\ln(1 + B_T)}{B_T},
+    \end{gathered}
+    \label{eq:droplet-abramzon-sirignano}
+    \end{equation}
+    $$
+
+    with $c_{p,v}$ the vapor's specific heat at $T_f$; $B_T$ and $Nu^*$ are
+    found by eight fixed-point passes from $B_T = B_M$. The factor
+    $\ln(1 + B_T)/B_T$ is the blowing of the vapor, which reduces the heat
+    that reaches the surface. It is the usual choice for sprays in hot gas
+    ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+
+A vapor-rich gas ($Y_v > Y_s$, $B_M < 0$) condenses on the droplet. The heat
+into the liquid is what the gas gives less the latent heat of what
+evaporates,
+
+$$
+\begin{equation}
+M c_l\,\frac{\mathrm{d}T_p}{\mathrm{d}t} = Q - \dot m\,L(T_s), \qquad
+\frac{\mathrm{d}M}{\mathrm{d}t} = -\dot m, \qquad M = \rho_l \frac{\pi d^3}{6},
+\label{eq:droplet-energy}
+\end{equation}
+$$
+
+so a droplet heats or cools toward its wet-bulb temperature, where the heat
+from the gas just evaporates it.
+
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-light.svg#gh-light-mode-only)
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-dark.svg#gh-dark-mode-only)
+
+*Left: water's surface vapor mass fraction $Y_s$, eq. $\eqref{eq:droplet-surface}$, and
+$B_M$, eq. $\eqref{eq:droplet-spalding}$, in dry air at 1 atm, from
+Clausius-Clapeyron through the boiling point and from Antoine's coefficients
+of water; $B_M$ diverges at the boiling point, where $Y_s \to 1$. The dotted
+lines are the wet-bulb temperatures of a droplet at rest in air at 1000 K,
+where eq. $\eqref{eq:droplet-energy}$'s heat into the liquid vanishes. Right:
+the factors of eq. $\eqref{eq:droplet-abramzon-sirignano}$: the Stefan flow
+thickens the film by $F(B)$, lowering $Sh^*$ and $Nu^*$ in a stream (here
+$Re_p = 100$, $Sc_f = 0.7$), and blowing reduces the heat reaching the surface
+by $\ln(1 + B_T)/B_T$, already by 30% at $B_T = 1$.*
+
+**Boiling.** A droplet at or above the boiling temperature at the gas
+pressure, or whose surface would be pure vapor ($Y_s \to 1$), boils: its
+surface is at $T_b(p)$, the heat it receives evaporates it, and its superheat
+relaxes to the boiling temperature on its heat-up time
+$\tau_h = \rho_l c_l d^2 / (6 k_f Nu_0)$:
+
+$$
+\begin{equation}
+Q = \pi d\,k_f\,Nu_0\,(T - T_s), \qquad
+\dot m = \frac{\max\left(Q + M c_l (T_p - T_s)/\tau_h,\; 0\right)}{L(T_s)}.
+\label{eq:droplet-boiling}
+\end{equation}
+$$
+
+Above the critical pressure the boiling temperature is the critical
+temperature, and a droplet driven past it is evaluated at it.
+
+### Sources in the gas
+
+With `coupling = "two-way"` the gas receives, besides the momentum and energy
+of eq. $\eqref{eq:coupling-sources}$, the vapor: per volume, over the deposit
+of each parcel,
+
+$$
+\begin{equation}
+S_\rho = S_{\rho Y_v} = \frac{1}{V}\sum_p w\,\dot m_p, \qquad
+\mathbf{S}_{\rho\mathbf{u}} = -\frac{1}{V}\sum_p w\left(\frac{\mathrm{d}\mathbf{P}_p}{\mathrm{d}t} - M_p\,\mathbf{g}\right), \qquad
+S_{\rho E} = -\frac{1}{V}\sum_p w\left(\frac{\mathrm{d}\mathcal{E}_p}{\mathrm{d}t} - \mathbf{g}\cdot\mathbf{P}_p\right),
+\label{eq:droplet-sources}
+\end{equation}
+$$
+
+with the droplet's momentum $\mathbf{P} = M\mathbf{v}$ and total energy
+$\mathcal{E} = M(h_l(T_p) + \tfrac12\lvert\mathbf{v}\rvert^2)$ in the gas's
+reference. The vapor enters at the droplet's velocity with the enthalpy
+$h_l(T_p) + L(T_s)$, which is the vapor's $h_v(T_s)$ for a droplet at its
+surface temperature, while the gas loses the heat $Q$ it gives: the
+energy source is $\dot m\,(h_v + \tfrac12\lvert\mathbf{v}\rvert^2) - Q$ less
+the work of the forces, per droplet. The vapor source makes the gas's mass
+and its vapor species grow by the same amount, so the other species' mass
+fractions fall with dilution. Removed droplets give the gas what they still
+carry, their mass as vapor with their momentum and energy, after the step.
+
+### Numerics
+
+**Conserved block values.** After its position a droplet's integrated
+values are its momentum $\mathbf{P}$, its energy
+$E = M(c_l(T_p - T_b) + \tfrac12\lvert\mathbf{v}\rvert^2)$ and its mass $M$,
+not $\mathbf{v}$, $T_p$ and $d$; $\mathbf{v} = \mathbf{P}/M$, $T_p$ from
+$E$ and $d$ from $M$ are derived. The rates are
+$\mathrm{d}M/\mathrm{d}t = -\dot m$,
+$\mathrm{d}\mathbf{P}/\mathrm{d}t = M\,\mathrm{d}\mathbf{v}/\mathrm{d}t - \dot m\,\mathbf{v}$
+and the matching $\mathrm{d}E/\mathrm{d}t$, and the gas receives the opposite
+of these stage rates (plus $\dot m\,h_l(T_b)$, the change of reference). Every
+Runge-Kutta method combines both linearly in the same way, so gas and droplets
+together conserve mass, every species, momentum and energy to round-off,
+whatever the integrator and the stiffness; with $\mathbf{v}$ and $T_p$
+integrated, the products $M\mathbf{v}$ and $ME$ would be conserved only to
+the integrator's order once $M$ changes. Rebounds and periodic rotations act
+on $\mathbf{P}$.
+
+**Stiff velocity and temperature.** The velocity relaxes as a solid
+particle's, explicitly for $\Delta t / \tau \le 1$ and exponentially above.
+The temperature relaxes toward its wet-bulb value on the heat-up time, which
+for small droplets is far below the gas step, and its rate
+$f(T_p) = (Q - \dot m L) / (M c_l)$ is nonlinear in $T_p$. The first stage of
+a step linearizes it, by a backward difference of $10^{-6}\,T_p$:
+$J = \partial f / \partial T_p$, and where $J < 0$ the relaxation time
+$\tau_T = -1/J$ and equilibrium $T_{eq} = T_p + \tau_T f$. With
+$\Delta t > \tau_T$ the temperature is integrated exponentially toward
+$T_{eq}$, with $\tau_T$ frozen at the step's start and $T_{eq}$ of each
+stage, exactly as the velocity: exact for $T_{eq}$ linear in time over the
+step, with the error of a frozen $\tau_T$ otherwise. The mass is integrated
+explicitly: $d^2$ falls about linearly in time, so $\dot m$ changes slowly
+until the droplet is nearly gone.
+
+**Vanishing droplets.** The evaporation rate is at most the step's starting
+mass over $\Delta t$, so no droplet's mass turns negative; a droplet capped
+this way stops heating and evaporates within the step at its temperature,
+which keeps the temperature of a vanishing droplet bounded. Below
+`minimum_diameter` (by default 1% of `diameter`) a droplet's rates are zero
+and it moves with the gas; after the step and before relocation it is
+removed (`Particles::remove_evaporated`), its remains deposited into the gas
+with the same deposition as the sources, and counted as evaporated.
+
+**Gas properties.** The film properties come from the mechanism's
+thermodynamic and transport tables on the device (`ThermoTable`,
+`TransportTable::properties`), with $n_{species}$ values of work memory per
+slot. The gas composition at the droplet is its cell's average, so it is first
+order in space where the velocity and pressure the droplet reads are of the
+reconstruction's order: reconstructing the species to the droplet's position
+would need their gradients at every stage.

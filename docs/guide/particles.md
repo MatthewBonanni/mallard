@@ -9,9 +9,10 @@ them. Each particle can carry
 [quantities](#per-particle-quantities) along its path (time integrals, extrema,
 first times, turns about an axis), and [probes](#particle-probes) give
 statistics of the particles in a region. With
-[two-way coupling](#two-way-coupling) solid particles act on the gas, and
-[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh. Sprays,
-injection during the run and particle output beyond the final positions follow
+[two-way coupling](#two-way-coupling) solid particles act on the gas,
+[evaporating droplets](#evaporating-droplets) give it their vapor, and
+[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
+Injection during the run and particle output beyond the final positions follow
 in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 - [Which particles?](#which-particles)
@@ -91,7 +92,7 @@ n = [9, 9]
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
-and 1 more.
+and 2 more.
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -186,7 +187,8 @@ interaction = "stick"
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+and 1 more.
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
@@ -484,6 +486,147 @@ CUDA graphs.
   `4 width^2 / h^2` in 2D and `6 width^2 / h^2` in 3D for cells of size `h`,
   each with a halo exchange on several ranks.
 
+## Evaporating droplets
+
+```toml
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "mechanisms/h2o2.yaml"   # holds the vapor species
+transport = "mixture_averaged"
+
+[particles]
+type = "droplet"
+diameter = 50e-6
+temperature = 300.0
+evaporation = "abramzon_sirignano"   # or "d2_law"
+coupling = "two-way"
+weight = 1e4
+
+[particles.liquid]
+species = "H2O"
+density = 958.0
+specific_heat = 4216.0
+latent_heat = 2.257e6           # J/kg, at the boiling temperature
+boiling_temperature = 373.15
+critical_temperature = 647.1
+critical_pressure = 22.064e6
+```
+
+Droplets are solid particles of a liquid that evaporates into a gas mixture:
+sprays, fuel injection, humidification, quenching. Each droplet moves as a
+solid particle (drag, gravity, `forces`, walls), is heated by the gas and
+evaporates into the vapor species `species` of the mechanism, so its diameter
+falls until, below `minimum_diameter`, it is removed. With
+`coupling = "two-way"` the gas receives the vapor, with its momentum and
+energy, and gives the heat; the gas and droplets together conserve mass, every
+species, momentum and energy to round-off. Droplets need a viscous mixture
+(`gas = "mixture"`, `type = "navier_stokes"`).
+
+**The model.** A droplet is a sphere of uniform temperature (infinite liquid
+conductivity) of one component. Its surface is at its temperature `T_p`, up to
+the boiling temperature at the gas pressure, and the vapor there is at its
+saturation pressure: the surface's vapor mass fraction `Y_s` follows from
+Raoult's law of a pure liquid. The gas film around the droplet is evaluated by
+the 1/3 rule, `T_f = T_s + (T - T_s)/3`, `Y_f = Y_s + (Y - Y_s)/3`, with the
+mechanism's thermodynamics and transport (its viscosity also sets the drag).
+With the [Spalding (1953)](../references.md#spalding-1953) mass transfer number `B_M = (Y_s - Y)/(1 - Y_s)`:
+
+- `evaporation = "d2_law"`: `mdot = pi d rho_f D_f Sh0 ln(1 + B_M)` and the
+  heat from the gas `Q = pi d k_f Nu0 (T - T_s)`, [Ranz & Marshall (1952)](../references.md#ranz-marshall-1952)'s
+  `Sh0 = 2 + 0.6 Re^1/2 Sc^1/3`, `Nu0 = 2 + 0.6 Re^1/2 Pr^1/3`. At rest and at
+  its wet-bulb temperature, d² falls linearly:
+  `d² = d0² - K t`, `K = 8 rho_f D_f ln(1 + B_M) / rho_l`.
+- `evaporation = "abramzon_sirignano"` (default): the film model of
+  [Abramzon & Sirignano (1989)](../references.md#abramzon-sirignano-1989), which thickens the film by the Stefan flow and transfers heat by the
+  number `B_T = (1 + B_M)^phi - 1`, `phi = (c_p,v / c_p,f) (Sh*/Nu*) / Le_f`:
+  `mdot = pi d rho_f D_f Sh* ln(1 + B_M)`,
+  `Q = pi d k_f Nu* (T - T_s) ln(1 + B_T)/B_T`. The usual choice for sprays
+  in hot gas ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-light.svg#gh-light-mode-only)
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-dark.svg#gh-dark-mode-only)
+
+*A 50 µm water droplet at rest in air at 1000 K and 1 atm (Mallard
+runs). Released at its wet-bulb temperature (markers), its d² falls on the
+straight line `d0² - K t` of its film, whose properties, wet-bulb temperature
+and rate `K` are computed independently with Cantera from the same mechanism;
+released at 300 K (dashed), it first heats to that temperature (right), in a
+4 ms, and lives a little longer. At rest the two models differ in
+the heat only: Abramzon & Sirignano's blowing factor lowers the heat that
+reaches the surface, so the droplet is 4 K cooler and evaporates 22% more
+slowly.*
+
+The heat into the liquid is `Q - mdot L(T_s)`, so a droplet heats or cools to
+its wet-bulb temperature, where the heat from the gas just evaporates it. The
+liquid has a constant density and specific heat; its enthalpy is that of the
+mechanism's vapor at the boiling point less `latent_heat`, so the latent heat
+at other temperatures follows Kirchhoff's law and the liquid and the gas share
+one energy reference. The saturation pressure is Clausius-Clapeyron's through
+the boiling point, or Antoine's with `antoine`. A droplet at or above the
+boiling temperature boils: the heat it receives evaporates it and its superheat
+relaxes to the boiling temperature at its heating rate. Above the critical
+pressure the boiling temperature is the critical temperature, and the
+properties of a droplet driven past the critical temperature are those at it.
+
+A droplet that would evaporate entirely within a step evaporates within that
+step at its temperature, and droplets below `minimum_diameter` are removed
+after the step: with two-way coupling their remains (mass, momentum, energy)
+go to the gas as vapor. Restart files keep the count of evaporated droplets
+with those that left the domain, were lost or stuck (`PARTICLE_REMOVED`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `type` | required | `"droplet"` |
+| `diameter` | required | Initial diameter of every seeded droplet |
+| `temperature` | required | Initial temperature, below `critical_temperature` |
+| `velocity` | gas velocity | Initial velocity |
+| `evaporation` | `"abramzon_sirignano"` | `"abramzon_sirignano"` or `"d2_law"` |
+| `minimum_diameter` | `diameter / 100` | Droplets below it are removed (their remains go to the gas with two-way coupling) |
+| `drag`, `gravity`, `forces`, `coupling`, `weight`, `deposition_width` | | As for [solid particles](#solid-particles) and [two-way coupling](#two-way-coupling) |
+
+| `[particles.liquid]` key | Default | Meaning |
+|---|---|---|
+| `species` | required | The vapor species of the mechanism |
+| `density` | required | Liquid density (constant) |
+| `specific_heat` | required | Liquid specific heat (constant) |
+| `latent_heat` | required | Latent heat of vaporization at the boiling point |
+| `boiling_temperature` | required | Boiling temperature at `boiling_pressure` |
+| `boiling_pressure` | 101325 Pa | Pressure of the boiling point |
+| `critical_temperature`, `critical_pressure` | required | Critical point; above the boiling point |
+| `antoine` | Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
+
+Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`
+and the gas temperature `T`; the CSV `file` adds the diameter `d` and mass `m`
+of each droplet. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>` writes
+the vapor source per volume and time.
+
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-dark.svg#gh-dark-mode-only)
+
+*Two-way coupled 20 µm water droplets (`weight = 3e3`,
+`deposition_width = 2e-4`) released at rest into a periodic stream of air at
+1000 K, `u = 10 + 4 sin(2 pi y / L)` m/s, after 1 ms (a Mallard run). The gas
+carries the vapor `Y_H2O` (left) downstream of the droplets, which lag behind
+it, and the shear tilts the trails; `PARTICLE_SOURCE_RHOY_H2O` (right) is
+each droplet's evaporation rate spread over the deposition width.*
+
+**Pitfalls.**
+
+- The gas composition at a droplet is the average of its cell, not
+  reconstructed to its position as the velocity and pressure are.
+- One-component liquids only; the liquid's temperature is uniform (no internal
+  conduction), its density and specific heat constant.
+- Supercritical droplets are outside the model: properties stop at the
+  critical temperature, and a gas above the critical pressure boils the
+  droplet at the critical temperature.
+- With two-way droplets, the conservation ledger of the run does not check
+  the gas's totals, which the droplets change; the closed-box totals of gas and
+  droplets together are conserved to round-off.
+- `density` and `specific_heat` of `[particles]` are errors for droplets: they
+  belong to `[particles.liquid]`. A `specific_heat` and `latent_heat` whose
+  Kirchhoff latent heat vanishes below the critical temperature are refused.
+
 ## Dispersed-phase fields
 
 ```toml
@@ -526,7 +669,8 @@ winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
+[`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain).
 
 Each `[[particles.quantities]]` follows one value along every particle's
 path, for residence times, exposure (the time integral of a temperature or a
@@ -551,12 +695,13 @@ Expressions follow the [expression syntax](expressions.md) and read, at the
 particle:
 
 - `x`, `y` (`z`) and `t`;
-- the gas: `RHO`, `U_X`, `U_Y` (`U_Z`), `P` and, for a single gas, `T`,
+- the gas: `RHO`, `U_X`, `U_Y` (`U_Z`), `P` and, for a single gas and for droplets, `T`,
   evaluated as the particle's velocity is, from the reconstruction polynomial
   of its cell;
 - the particle velocity `V_X`, `V_Y` (`V_Z`), for tracers the gas velocity;
-- the particle temperature `T_P`, for a single gas, the gas temperature for
-  particles without heat transfer;
+- the particle temperature `T_P`, for a single gas and for droplets, the gas
+  temperature for particles without heat transfer;
+- the particle diameter `D_P` (solid particles and droplets; `nan` for tracers);
 - the quantities listed before this one;
 - `in(name)`: 1 inside the region `name` of [regions](geometry.md#named-regions)
   and 0 outside, smooth across the region's `edge`.
@@ -624,8 +769,9 @@ deposition history.
 
 **Pitfalls (quantities and probes).**
 
-- An expression reading `T` or `T_P` in a mixture is an error: particle
-  expressions have temperatures for a single gas only.
+- An expression reading `T` or `T_P` in a mixture is an error, except for
+  droplets: particle expressions have temperatures for a single gas and for
+  droplets only.
 - `in(name)` and probe regions are regions of primitives that do not move
   (boolean combinations included); at most 4 regions in all particle
   expressions, 4 probes with regions, and 16 quantities.

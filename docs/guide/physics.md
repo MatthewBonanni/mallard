@@ -23,7 +23,7 @@ Pr = 0.72
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 60 more.
+and 61 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -66,6 +66,7 @@ mu = 1.716e-5
 
 *Used in:*
 [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
+[`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain),
 [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
 
