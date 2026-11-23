@@ -17,13 +17,12 @@ not only the cell averages. Issue
    size nor view deletes or skips the companion. Boundary, surface, region and
    point writers have no view: their samples are already point values or
    averages over something else.
-2. **Lagrange cells at the reconstruction's order, or below.** A TENO run of
-   order `r` has central polynomials of degree `p = r - 1`; each owned cell
-   is a VTK Lagrange cell of order `p` whose nodes hold those polynomials, or
-   of `high_order_degree` `q < p` to bound the size (`(q+1)^d` nodes per
-   tensor cell), the polynomial then sampled at fewer nodes and drawn as its
-   degree-`q` interpolant. The nodes of each degree are built once, for the
-   degrees some writer asks for. MUSCL and first order have no polynomial
+2. **Lagrange cells at the reconstruction's degree.** A TENO run of order
+   `r` has central polynomials of degree `p = r - 1`; each owned cell is a
+   VTK Lagrange cell of order `p` whose nodes hold those polynomials. No
+   lower degree: it would resample the scheme's polynomial into another one,
+   and the view would no longer show what the scheme computed. The nodes
+   are built once, shared by every writer. MUSCL and first order have no polynomial
    beyond the average: they write no view, and `high_order = true` is an
    error there.
 3. **Point values where the reconstruction has them.** Nodes of smooth cells
@@ -56,7 +55,7 @@ not only the cell averages. Issue
   span P_p in physical coordinates; on quadrilaterals, hexahedra and prisms
   the bi-/trilinear geometry composed with P_p lies in the Lagrange space
   (Q_p, or P_p⊗Q_p), so the rendered field is the polynomial everywhere in
-  the cell, not only at nodes. At a lower degree it is exact at the nodes.
+  the cell, not only at nodes.
 - **Curved cells keep their exact shape.** A cell touching a curved face
   takes explicit nodes: the cell's quadratic geometry (`quadratic_nodes`,
   as before) at every Lagrange node, then the nodes on each curved face moved
@@ -108,8 +107,8 @@ not only the cell averages. Issue
   plus the cells, against `N_cells x components` for the solution: about
   `(p+1)^d` times the solution for tensor cells, `(p+1)(p+2)/2` for
   triangles. `mallard check` reports each writer's projected bytes per
-  snapshot, both, and the view's degree, and warns (`W-OUTPUT-SIZE`) above
-  10 GB naming `high_order_degree`; the view's size is why it is opt-in.
+  snapshot, both, and warns (`W-OUTPUT-SIZE`) above 10 GB; `high_order =
+  false` opts an entry out.
 - **Memory.** The nodes' geometry and basis tables are built once at setup;
   values for the requested fields live in one pinned host array the writers
   read, and evaluation runs in chunks of 2^18 nodes, so the device scratch is

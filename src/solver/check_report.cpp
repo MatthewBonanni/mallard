@@ -380,16 +380,13 @@ void output_section(report::Text & text, const CheckReport & r) {
     for (const CheckOutput & o : r.outputs) {
         const Status row = o.high_order_bytes > OUTPUT_SIZE_WARNING ? Status::WARNING : Status::OK;
         s = report::worse(s, row);
-        rows.push_back({row,
-                        {o.prefix, o.format, bytes(o.bytes),
-                         o.high_order_degree > 0 ? bytes(o.high_order_bytes) : "-",
-                         o.high_order_degree > 0 ? std::to_string(o.high_order_degree) : "-"}});
+        rows.push_back({row, {o.prefix, o.format, bytes(o.bytes), o.high_order_bytes > 0.0 ? bytes(o.high_order_bytes) : "-"}});
     }
     text.section("Output", s);
     text.note("Bytes of each [[write_data]] snapshot before compression, the mesh counted where each snapshot "
               "repeats it; high-order view: its companion files of the reconstruction polynomials, written "
-              "with high_order = true. See docs/guide/output.md#high-order-view.");
-    text.table({"prefix", "format", "cell values", "high-order view", "degree"}, rows);
+              "on by default for TENO runs. See docs/guide/output.md#high-order-view.");
+    text.table({"prefix", "format", "cell values", "high-order view"}, rows);
 }
 
 void sizing_section(report::Text & text, const CheckReport & r) {
@@ -719,7 +716,6 @@ std::string outputs_json(const CheckReport & r) {
                  .add("format", o.format)
                  .add("bytes", o.bytes)
                  .add("high_order_bytes", o.high_order_bytes)
-                 .add("high_order_degree", o.high_order_degree)
                  .str();
     }
     return a + "]";

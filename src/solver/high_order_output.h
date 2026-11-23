@@ -10,6 +10,7 @@
 #define HIGH_ORDER_OUTPUT_H
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -21,29 +22,29 @@
 #include "physics.h"
 
 /**
- * @brief Fills the LagrangeViews the writers write, one per degree: every
- *        owned cell as Lagrange cells of that degree, and at their nodes the
+ * @brief Fills the LagrangeView the writers write: every owned cell as
+ *        Lagrange cells of the polynomials' degree, and at their nodes the
  *        requested fields from its polynomial, or from its average where the
  *        reconstruction has no admissible value there (troubled cells).
  */
 class HighOrderOutput {
     public:
         /**
-         * @brief Sets the views of degrees 1 to that of TENO's polynomials (views[d] of degree d),
-         *        their method and fields; none for reconstructions without.
+         * @brief Sets the view's degree (that of TENO's polynomials), method and fields;
+         *        degree 0 for reconstructions without.
          */
         void init(std::shared_ptr<Mesh> mesh, const FaceReconstruction * reconstruction, bool mixture,
-                  std::vector<LagrangeView> & views);
+                  LagrangeView & view);
 
         /** @brief Once the writers requested their fields: the nodes, their geometry and the arrays of their values. */
         void setup();
 
         /** @brief Whether any writer writes a view. */
-        bool active() const { return !built.empty(); }
+        bool active() const { return built.has_value(); }
 
         /**
          * @brief Enqueues the requested fields at every node from the polynomials of
-         *        W_cells, current in the halo too; the views' values hold them after a fence.
+         *        W_cells, current in the halo too; the view's values hold them after a fence.
          */
         void update(FaceReconstruction & reconstruction, Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells,
                     const Euler & physics);
@@ -63,7 +64,7 @@ class HighOrderOutput {
             Kokkos::View<rtype *[N_DIM]> offsets;  // chunk work: nodes from the centroid
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
         };
-        /** @brief A view the writers write, and its device data. */
+        /** @brief The view the writers write, and its device data. */
         struct Built {
             LagrangeView * view = nullptr;
             uint64_t n_nodes = 0;
@@ -77,8 +78,8 @@ class HighOrderOutput {
         void build(Built & b);
 
         std::shared_ptr<Mesh> mesh;
-        std::vector<LagrangeView> * views = nullptr;
-        std::vector<Built> built;
+        LagrangeView * view = nullptr;
+        std::optional<Built> built;
 };
 
 #endif // HIGH_ORDER_OUTPUT_H

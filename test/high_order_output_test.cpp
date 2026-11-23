@@ -157,16 +157,12 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
         std::filesystem::remove_all(dir);
         Solver solver;
         solver.set_distributed(false);
-        std::string writers;
-        for (int degree = 1; degree < order; degree++) {
-            writers += "[[write_data]]\nprefix = \"" + dir + "/f" + std::to_string(degree) + "\"\nformat = \"vtkhdf\"\n"
-                       "series = false\ninterval = 1\nhigh_order = true\nhigh_order_degree = " + std::to_string(degree) +
-                       "\nfields = [\"RHO\", \"U\", \"TENO_SIGMA\"]\n";
-        }
-        solver.init(parse_toml(polynomial_case(mesh_file, order, writers)));
+        solver.init(parse_toml(polynomial_case(mesh_file, order,
+                                               "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\n"
+                                               "series = false\ninterval = 1\nfields = [\"RHO\", \"U\", \"TENO_SIGMA\"]\n")));
         solver.run();
-        for (uint32_t p = 1; p < uint32_t(order); p++) {
-        const std::string file = dir + "/f" + std::to_string(p) + "_high_order_000000.vtkhdf";
+        const uint32_t p = uint32_t(order) - 1;
+        const std::string file = dir + "/f_high_order_000000.vtkhdf";
         const auto points = h5_values<double>(file, "VTKHDF/Points");
         const auto offsets = h5_values<int64_t>(file, "VTKHDF/Offsets");
         const auto types = h5_values<uint8_t>(file, "VTKHDF/Types");
@@ -187,13 +183,12 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
             n_checked++;
             for (size_t k = first; k < first + n; k++) {
                 EXPECT_NEAR(rho[k], polynomial_rho(order, points[3 * k], points[3 * k + 1]), 1e-12)
-                    << "order " << order << " degree " << p << " cell " << c << " node " << k - first;
+                    << "order " << order << " cell " << c << " node " << k - first;
                 EXPECT_NEAR(u[3 * k], 0.2, 1e-12);
                 EXPECT_EQ(u[3 * k + 2], 0.0);
             }
         }
         EXPECT_GT(n_checked, 20u);
-        }
     }
 }
 
@@ -249,7 +244,7 @@ TEST(HighOrderOutputTest, AWriterOfPartOfTheMeshRejectsTheKey) {
     }
 }
 
-TEST(HighOrderOutputTest, TheViewNeedsTenoAndADegreeOfItsPolynomials) {
+TEST(HighOrderOutputTest, TheViewNeedsTenoAndAFieldAtTheNodes) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string mesh_file = write_temp("high_order_keys.msh", jittered_mixed_mesh(4));
     const std::string dir = (scratch_dir() / "mallard_high_order_keys").string();
@@ -259,8 +254,8 @@ TEST(HighOrderOutputTest, TheViewNeedsTenoAndADegreeOfItsPolynomials) {
     muscl.replace(muscl.find(teno), teno.size(), "type = \"MUSCL\"\n");
     for (const auto & [input, key] : {std::pair{muscl, std::string("TENO")},
                                       {polynomial_case(mesh_file, 3, "[[write_data]]\nprefix = \"" + dir + "/b\"\n"
-                                                       "interval = 1\nhigh_order = true\nhigh_order_degree = 3\n"
-                                                       "fields = [\"P\"]\n"), std::string("high_order_degree")}}) {
+                                                       "interval = 1\nhigh_order = true\nfields = [\"TENO_SIGMA\"]\n"),
+                                       std::string("values at the nodes")}}) {
         Solver solver;
         solver.set_distributed(false);
         try {
@@ -291,7 +286,7 @@ TEST(HighOrderOutputTest, TheDefaultIsOffWhereTheViewDoesNotApply) {
         const CheckReport r = checked.check(parse_toml(input), CheckOptions{});
         EXPECT_TRUE(r.unused.empty()) << input;
         for (const CheckDiagnostic & d : r.diagnostics) EXPECT_NE(d.severity, report::Status::ERROR) << d.message;
-        for (const CheckOutput & o : r.outputs) EXPECT_EQ(o.high_order_degree, 0u) << input;
+        for (const CheckOutput & o : r.outputs) EXPECT_EQ(o.high_order_bytes, 0.0) << input;
     }
 }
 
@@ -309,8 +304,6 @@ TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     checked.set_distributed(false);
     const CheckReport r = checked.check(parse_toml(input), CheckOptions{});
     ASSERT_EQ(r.outputs.size(), 2u);
-    EXPECT_EQ(r.outputs[0].high_order_degree, 3u);
-    EXPECT_EQ(r.outputs[1].high_order_degree, 0u);
     EXPECT_EQ(r.outputs[1].high_order_bytes, 0.0);
     Solver solver;
     solver.set_distributed(false);

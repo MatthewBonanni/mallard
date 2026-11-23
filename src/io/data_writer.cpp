@@ -140,7 +140,7 @@ void DataWriter::init(const Input & input,
                       const std::vector<std::string> & restart_variables,
                       const CellSubset * cell_subset,
                       const std::string & prefix_in,
-                      std::vector<LagrangeView> * views) {
+                      LagrangeView * view_in) {
     if (!input.contains("prefix")) {
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
@@ -367,30 +367,18 @@ void DataWriter::init(const Input & input,
                           .fix = "Remove high_order here: restart and xdmf files and regions hold cell values",
                           .docs = "docs/guide/output.md#high-order-view"});
     }
-    const uint32_t max_degree = views && !views->empty() ? static_cast<uint32_t>(views->size() - 1) : 0;
-    const auto has_node_field = [&](const LagrangeView & v) {
-        return std::ranges::any_of(fields, [&](const Field & f) { return v.can_write(f.name); });
-    };
-    const bool applies = whole_mesh && max_degree > 0 && has_node_field((*views)[max_degree]);
-    if (whole_mesh && find_value_or<bool>(input, "high_order", applies)) {
-        if (max_degree == 0) {
+    const bool teno = view_in && view_in->order > 0;
+    const bool node_field =
+        teno && std::ranges::any_of(fields, [&](const Field & f) { return view_in->can_write(f.name); });
+    if (whole_mesh && find_value_or<bool>(input, "high_order", node_field)) {
+        if (!teno) {
             throw InputError({.key = "write_data.high_order",
                               .line = line_of(input, "high_order"),
                               .message = "needs the polynomials of a TENO reconstruction; this run's has none",
                               .fix = "Set [numerics.face_reconstruction] type = \"TENO\", or remove high_order",
                               .docs = "docs/guide/output.md#high-order-view"});
         }
-        const int degree = find_value_or<int>(input, "high_order_degree", int(max_degree));
-        if (degree < 1 || degree > int(max_degree)) {
-            throw InputError({.key = "write_data.high_order_degree",
-                              .line = line_of(input, "high_order_degree"),
-                              .message = "is " + std::to_string(degree) + "; the reconstruction's polynomials have degree " +
-                                         std::to_string(max_degree),
-                              .fix = "Give a degree from 1 to " + std::to_string(max_degree),
-                              .docs = "docs/guide/output.md#high-order-view"});
-        }
-        LagrangeView & v = (*views)[size_t(degree)];
-        if (!has_node_field(v)) {
+        if (!node_field) {
             throw InputError({.key = "write_data.high_order",
                               .line = line_of(input, "high_order"),
                               .message = "needs a field with values at the nodes; none of fields has",
@@ -398,7 +386,7 @@ void DataWriter::init(const Input & input,
                               .docs = "docs/guide/output.md#high-order-view"});
         }
         high_order = std::make_unique<DataWriter>();
-        high_order->init_view(*this, v);
+        high_order->init_view(*this, *view_in);
     }
 
     if (output_files_enabled()) create_parent_directories("the output", prefix);
