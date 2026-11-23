@@ -209,10 +209,39 @@ class Solver {
         void set_output_data(std::function<void(const Mesh &, std::vector<Data> &)> add) { output_data = std::move(add); }
 
         /**
-         * @brief Run until a stop condition is reached.
+         * @brief Initialize the solver from the text of a TOML input, which provenance records as the run's input.
+         * @param name What errors call the input.
+         * @return Exit status.
+         */
+        int init_from_text(const std::string & text, const std::string & name);
+
+        /**
+         * @brief Run until a stop condition is reached: start_run, advance_run to the stop, then finish_run.
          * @return Exit status.
          */
         int run();
+
+        /** @brief Starts the run after init(): the start's output and first progress row. */
+        void start_run();
+
+        /**
+         * @brief Takes steps after start_run until a stop condition is reached, step reaches until_step, or t
+         *        reaches until_time, on which the last step lands.
+         */
+        void advance_run(uint64_t until_step, rtype until_time = std::numeric_limits<rtype>::infinity());
+
+        /**
+         * @brief Ends the run: the end's output, summary and end record. Before a stop condition is reached,
+         *        the run ends as stopped by the caller.
+         * @return Exit status.
+         */
+        int finish_run();
+
+        /** @brief Whether start_run was called and finish_run was not. */
+        bool run_started() const { return run_hold != nullptr; }
+
+        /** @brief Whether a stop condition of the run ([run] n_steps, t_stop, a trigger, a request) is reached. */
+        bool run_stopped() const { return !stop_reason().empty(); }
 
         /**
          * @brief Whether run() takes requests from signals and serves the
@@ -401,7 +430,13 @@ class Solver {
         void restore_last_good();
         std::string describe_invalid_cells();
         [[noreturn]] void diverged();
-        int run_loop();  // run() but for the end record of an error
+        /** @brief One pass of the run's loop: one step taken, or one rejected under error control. */
+        void advance_once();
+        /** @brief What a step that left the state invalid ends in: the divergence report, then its error. */
+        [[noreturn]] void stop_diverged();
+        /** @brief f() under the solver's communication scope, with the end record of an error it throws. */
+        template <typename F>
+        auto recording_errors(F && f);
         /**
          * @brief The divergence report's evidence (collective): what failed in each local cell of the failing
          *        state, then, with the last valid state in place (if has_valid), its neighborhood.
@@ -894,6 +929,12 @@ class Solver {
 
     protected:
         void init_mesh();
+        /**
+         * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
+         *        covariances. A curved cell's rule sums over its faces as the local mesh orients them, which
+         *        differs in the outermost halo layer, and so rounds differently (collective among neighbors).
+         */
+        void exchange_halo_geometry();
         /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);
@@ -908,7 +949,8 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -937,6 +979,8 @@ class Solver {
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The initial state's primitive fields as a snapshot (check --initial). */
+        void check_initial(CheckReport & report, const CheckOptions & options);
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
         void init_run_parameters();
@@ -1143,6 +1187,11 @@ class Solver {
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
         bool publishing = false;
         std::vector<std::pair<std::string, std::string>> monitor_values;
+        struct RunHold;
+        std::unique_ptr<RunHold> run_hold;  // what lives from start_run to finish_run
+        // advance_run's limits, which steps on the device and landing times respect
+        uint64_t pause_step = std::numeric_limits<uint64_t>::max();
+        rtype pause_time = std::numeric_limits<rtype>::infinity();
 
         // Divergence: the state at the start of the last step whose state was valid
         bool keep_last_good = true;              // [run] keep_last_good
@@ -1178,6 +1227,8 @@ class Solver {
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
+        void revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights);
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
@@ -1348,6 +1399,9 @@ class Solver {
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
         FaceWeights<> flux_weights;
+        // Unit normals of the convective flux points, (face, q, dim): curved meshes, else empty.
+        // The face reconstruction's, but r-weighted on curved faces of axisymmetric runs
+        Kokkos::View<rtype ***> flux_normals;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;

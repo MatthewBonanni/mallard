@@ -1561,13 +1561,45 @@ TEST(MPITest, CurvedWallsMatchSerial) {
                                       "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
         const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
-        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & s) {
+            EXPECT_TRUE(s.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(s);
+        });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, AxisymmetricCurvedWallsMatchSerial) {
+    // The meridian half-plane of a spherical shell, walls projected onto the
+    // circles or P2 lines of the file: revolved curved cells and faces, the
+    // r-weighted flux points and TENO's curved source rules of halo cells
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 2.0\n";
+    const std::string boundaries = "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n"
+                                   "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+                                   "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n";
+    const std::string blast = "exp(-40 * ((x + 0.5)^2 + (y - 1.3)^2))";
+    for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{2, std::string()}}) {
+        const std::string file = write_temp_shared("mallard_mpi_half_annulus_" + std::to_string(order) + ".msh",
+                                                   half_annulus_gmsh(5, 15, 1.0, 2.0, order, order == 2));
+        for (const std::string recon : {"type = \"TENO\"\norder = 4\n", "type = \"MUSCL\"\n"}) {
+            std::string input = box_input("cartesian", recon, NS + "axisymmetric = true\n", boundaries, 10);
+            const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+            input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
+            const std::string centered = "exp(-40 * ((x - 0.35)^2 + (y - 0.45)^2))";
+            for (size_t at; (at = input.find(centered)) != std::string::npos;) input.replace(at, centered.size(), blast);
+            expect_matches_serial(input, [](const Solver & s) {
+                EXPECT_TRUE(s.get_mesh()->curved_geometry);
+                EXPECT_TRUE(s.get_mesh()->axisymmetric);
+                expect_halo_geometry_matches_owners(s);
+            });
         }
     }
     comm::barrier();
