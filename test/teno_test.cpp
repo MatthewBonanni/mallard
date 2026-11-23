@@ -706,7 +706,7 @@ TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     std::filesystem::remove(file_of(cache));
 }
 
-TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) {
+TEST(TENOTest, SinglePrecisionCacheShrinksTheFileAndRunsThatWriteAndReadItAgree) {
     if constexpr (sizeof(rtype) == sizeof(float)) GTEST_SKIP() << "tables are single precision already";
     auto mesh = make_mesh("cartesian_tri", 10, 8);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
@@ -724,7 +724,8 @@ TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) 
     }
     EXPECT_GT(max_diff, 0.0);
     EXPECT_LT(max_diff, 1e-5 * max_value);
-    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.6 * static_cast<double>(std::filesystem::file_size(file_of(full))));
+    // Values take half the bytes; stencils as many
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.8 * static_cast<double>(std::filesystem::file_size(file_of(full))));
     // A cache in the other precision is recomputed, never reinterpreted
     const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
     expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");

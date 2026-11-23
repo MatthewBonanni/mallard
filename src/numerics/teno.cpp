@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <unordered_map>
@@ -116,10 +117,14 @@ struct CellTables {
     std::array<uint16_t, teno::MAX_FACES> small_size = {};
     std::vector<int32_t> small_cells, small_faces;  // the faces' sector stencils one after another
     std::vector<rtype> small_pinv;                  // (s, l)
+    // From a cache: its pseudo-inverses' blobs, which cells share exactly when their values are equal
+    uint32_t large_blob = NO_BLOB, small_blob = NO_BLOB;
+    static constexpr uint32_t NO_BLOB = ~0u;
 };
 
 using IndexRow = std::vector<int32_t> CellTables::*;
 using ValueRow = std::vector<rtype> CellTables::*;
+using BlobRow = uint32_t CellTables::*;
 
 template <typename T>
 using HostUnmanaged = Kokkos::View<T *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
@@ -262,9 +267,9 @@ class PackedRows {
          *        after another.
          */
         PackedRows(uint8_t slice_shift, uint8_t values_per_slot, IndexRow cell_row, IndexRow face_row, ValueRow pinv_row,
-                   bool single_values, bool share_values, const uint64_t * global_ids, bool sectors)
+                   BlobRow blob_row, bool single_values, bool share_values, const uint64_t * global_ids, bool sectors)
             : shift(slice_shift), width(values_per_slot), single(single_values), share(share_values), gid(global_ids),
-              by_face(sectors), cells(cell_row), faces(face_row), pinv(pinv_row), store(values_per_slot) {}
+              by_face(sectors), cells(cell_row), faces(face_row), pinv(pinv_row), blob(blob_row), store(values_per_slot) {}
 
         /**
          * @brief Upload each chunk as it is added, for n_cells cells of at
@@ -813,25 +818,40 @@ class PackedRows {
                 for (uint32_t c = a; c < std::min(n, a + slice); c++) largest = std::max(largest, (tables[c].*cells).size());
                 slice_start.push_back(slice_start.back() + largest);
             }
-            std::vector<teno::CanonicalTable> canonical(n);
-            std::vector<uint64_t> first_value(n + 1, 0);
-            for (uint32_t c = 0; c < n; c++) first_value[c + 1] = first_value[c] + (tables[c].*pinv).size();
-            std::vector<rtype> ordered(first_value[n]);
-            gated::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n),
-                                 [&](const uint32_t c) {
-                const CellTables & t = tables[c];
-                canonical[c] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
-                for (size_t s = 0; s < canonical[c].order.size(); s++) {
-                    const size_t from = canonical[c].order[s];
-                    for (uint32_t l = 0; l < width; l++) ordered[first_value[c] + s * width + l] = (t.*pinv)[from * width + l];
+            // Cells of a cache's blob share a row, ranked once with the lowest global id of its cells; others one each
+            std::vector<uint32_t> row(n), first;
+            std::vector<uint64_t> ids;
+            std::map<std::pair<uint32_t, std::vector<uint16_t>>, uint32_t> of_blob;
+            for (uint32_t c = 0; c < n; c++) {
+                const uint64_t id = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
+                const uint32_t b = tables[c].*blob;
+                uint32_t r = uint32_t(first.size());
+                if (b != CellTables::NO_BLOB) r = of_blob.try_emplace({b, segments(tables[c])}, r).first->second;
+                if (r == first.size()) {
+                    first.push_back(c);
+                    ids.push_back(id);
+                }
+                row[c] = r;
+                ids[r] = std::min(ids[r], id);
+            }
+            const uint32_t n_rows = static_cast<uint32_t>(first.size());
+            std::vector<teno::CanonicalTable> canonical(n_rows);
+            std::vector<uint64_t> first_value(n_rows + 1, 0);
+            for (uint32_t r = 0; r < n_rows; r++) first_value[r + 1] = first_value[r] + (tables[first[r]].*pinv).size();
+            std::vector<rtype> ordered(first_value[n_rows]);
+            gated::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_rows),
+                                 [&](const uint32_t r) {
+                const CellTables & t = tables[first[r]];
+                canonical[r] = teno::CanonicalTable((t.*pinv).data(), width, segments(t));
+                for (size_t s = 0; s < canonical[r].order.size(); s++) {
+                    const size_t from = canonical[r].order[s];
+                    for (uint32_t l = 0; l < width; l++) ordered[first_value[r] + s * width + l] = (t.*pinv)[from * width + l];
                 }
             });
-            std::vector<uint64_t> ids(n);
-            for (uint32_t c = 0; c < n; c++) ids[c] = gid != nullptr ? gid[c0 + c] : uint64_t(c0 + c);
             const std::vector<uint32_t> shapes =
-                store.add(n, canonical.data(), [&](uint32_t c) { return ordered.data() + first_value[c]; }, ids.data());
+                store.add(n_rows, canonical.data(), [&](uint32_t r) { return ordered.data() + first_value[r]; }, ids.data());
             ordered = std::vector<rtype>();
-            cell_shape.insert(cell_shape.end(), shapes.begin(), shapes.end());
+            for (uint32_t c = 0; c < n; c++) cell_shape.push_back(shapes[row[c]]);
             std::vector<uint64_t> first_image(n + 1, images.size() / 2);
             for (uint32_t c = 0; c < n; c++) {
                 const auto & f = tables[c].*faces;
@@ -850,7 +870,7 @@ class PackedRows {
                 const uint32_t lane = (c0 + c) & (slice - 1);
                 uint64_t image = first_image[c];
                 for (size_t s = 0; s < (t.*cells).size(); s++) {
-                    const uint16_t from = canonical[c].order[s];
+                    const uint16_t from = canonical[row[c]].order[s];
                     const int32_t cell = (t.*cells)[from], face = (t.*faces)[from];
                     int32_t entry = cell;
                     if (face != -1) {
@@ -917,6 +937,7 @@ class PackedRows {
         bool by_face;
         IndexRow cells, faces;
         ValueRow pinv;
+        BlobRow blob;
         std::vector<uint64_t> slice_start = {0};  // (slice + 1)
         uint32_t n_added = 0;
         teno::TableStore<> store;                 // shared: a table per stencil shape
@@ -1138,13 +1159,13 @@ void merge_tables(TENO & scheme, const Kokkos::View<uint32_t *> & rows, const te
 
 PackedRows large_rows(const TENO & scheme) {
     return PackedRows(scheme.slice_shift, scheme.n_dof_large, &CellTables::large_cells, &CellTables::large_faces,
-                      &CellTables::large_pinv, scheme.single_tables, scheme.share_tables,
+                      &CellTables::large_pinv, &CellTables::large_blob, scheme.single_tables, scheme.share_tables,
                       scheme.global_cell_ids(), false);
 }
 
 PackedRows small_rows(const TENO & scheme) {
     return PackedRows(scheme.slice_shift, teno::NK_SMALL, &CellTables::small_cells, &CellTables::small_faces,
-                      &CellTables::small_pinv, scheme.single_tables, scheme.share_tables,
+                      &CellTables::small_pinv, &CellTables::small_blob, scheme.single_tables, scheme.share_tables,
                       scheme.global_cell_ids(), true);
 }
 
@@ -4506,6 +4527,8 @@ bool TENO::load_cache() {
             std::array<const std::vector<char> *, N_BLOBS> blob;
             for (int b = 0; b < N_BLOBS; b++) blob[size_t(b)] = &held.at(ids[k][size_t(b)]);
             fits[k] = take_blobs(chunk[k], blob, cache_single);
+            chunk[k].large_blob = ids[k][LARGE];
+            chunk[k].small_blob = ids[k][SMALL];
         });
         for (size_t k = 0; k < chunk.size(); k++) {
             ok = ok && fits[k];
@@ -4519,6 +4542,7 @@ bool TENO::load_cache() {
                 t.small_faces.clear();
                 t.small_pinv.clear();
                 t.small_size = {};
+                t.small_blob = CellTables::NO_BLOB;
             }
             largest_stencil = std::max(largest_stencil, static_cast<uint32_t>(t.large_cells.size()));
         }
