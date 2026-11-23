@@ -15,7 +15,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 
 **What's new**
 
-- **Automatic structured fast path** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/#cell-numbering)): Mallard finds the structured blocks in any mesh, uniform, stretched or warped, reads their stencils by index and shares TENO tables between cells of the same shape; one A100-80GB holds 13.7M TENO5 cells instead of 2.1M
+- **Automatic structured fast path** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/#cell-numbering)): Mallard finds the structured blocks in any mesh, uniform, stretched or warped, reads their stencils by index and shares TENO tables between cells of the same shape; one A100-80GB runs 13.1M TENO5 cells, where 0.10.0 ran out of memory above 2M, and `teno5_3d` steps 1.41x faster
 - **[Tabulated chemistry](https://matthewbonanni.github.io/mallard/docs/guide/flamelet/)**: flamelet/progress-variable (FPV) tables, with LES and thickened flames
 - **[Lagrangian particles](https://matthewbonanni.github.io/mallard/docs/guide/particles/)**: tracer and solid particles on the high-order reconstruction
 - **[C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/)** to run cases from your own program, and a **[Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/)** for output files and post-processing
