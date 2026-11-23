@@ -15,6 +15,7 @@ import argparse
 import csv
 import functools
 import math
+import re
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,7 @@ def cloud_run(binary, coupling):
     cfg = (ROOT / "examples" / "particle_cloud" / "input.toml").read_text()
     cfg = cfg.replace('coupling = "two-way"', f'coupling = "{coupling}"')
     cfg = cfg.replace('prefix = "cloud"', 'prefix = "cloud"\nformat = "vtu"').replace(', "PARTICLE_SOURCE_RHOU_Y"', "")
+    cfg = re.sub(r"particle_fields = .*\n", "", cfg)
     cfg += '\n[[write_data]]\nprefix = "end"\nformat = "restart"\ntime_interval = 2.0\n'
     run(binary, cfg, work)
     r = restart.read(str(sorted(work.glob("end_*.restart"))[-1]))
