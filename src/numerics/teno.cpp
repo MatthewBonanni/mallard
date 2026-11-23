@@ -3753,8 +3753,10 @@ namespace {
 // version 25 stops 3D stencils grown past their start short of a curved-wall cell at the full degree, and fits
 // curved_wall_degree only when no shorter stencil fits (#1202);
 // version 26 has shared tables fitted once per stencil shape (#986), which differ from version 25's at round-off;
-// version 27 gives a stencil shape's cells its fitted cell's moments (#1166)
-constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-27";
+// version 27 gives a stencil shape's cells its fitted cell's moments (#1166);
+// version 28 stores each distinct table once, after the cells, which refer to it (#935)
+constexpr char TENO_CACHE_MAGIC[16] = "MALLARD-TENO-28";
+constexpr char TENO_CACHE_END[8] = {'T', 'E', 'N', 'O', '-', 'E', 'N', 'D'};
 constexpr char TENO_CACHE_FAMILY[] = "MALLARD-TENO-";
 
 struct Fnv1a {
@@ -3848,32 +3850,97 @@ bool get_values(std::istream & in, std::vector<T> & values, const bool single) {
     return true;
 }
 
+/** @brief Bytes of a cell's values in the cache: its rows, its central and its sector pseudo-inverses. */
+enum TableBlob { ROWS = 0, LARGE = 1, SMALL = 2, N_BLOBS = 3 };
+
+std::array<std::vector<char>, N_BLOBS> table_blobs(const CellTables & t, const bool single) {
+    std::array<std::vector<char>, N_BLOBS> out;
+    put(out[ROWS], t.basis_mean.data(), t.basis_mean.size());
+    put_values(out[ROWS], t.si, single);
+    put_values(out[ROWS], t.moments, single);
+    put_values(out[LARGE], t.large_pinv, single);
+    put_values(out[SMALL], t.small_pinv, single);
+    return out;
+}
+
+/** @brief Each distinct blob of a cache once, with how many cells refer to it. */
+class BlobWriter {
+    public:
+        explicit BlobWriter(std::ostream & out_in) : out(out_in) {}
+
+        uint32_t add(const std::vector<char> & bytes) {
+            uint64_t a = 0x243f6a8885a308d3ULL ^ bytes.size(), b = 0x13198a2e03707344ULL + bytes.size();
+            size_t i = 0;
+            for (; i + 8 <= bytes.size(); i += 8) {
+                uint64_t w;
+                std::memcpy(&w, bytes.data() + i, 8);
+                a = ((a ^ w) * 0x9e3779b97f4a7c15ULL) ^ (a >> 29);
+                b = ((b ^ w) * 0xc2b2ae3d27d4eb4fULL) ^ (b >> 31);
+            }
+            for (; i < bytes.size(); i++) {
+                a = (a ^ uint8_t(bytes[i])) * 0x100000001b3ULL;
+                b = (b ^ uint8_t(bytes[i])) * 0x9e3779b97f4a7c15ULL;
+            }
+            auto [it, added] = index.try_emplace({a, b}, uint32_t(blobs.size()));
+            if (added) {
+                blobs.push_back({offset, bytes.size(), 0});
+                out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                offset += bytes.size();
+            }
+            blobs[it->second].refs++;
+            return it->second;
+        }
+
+        struct Blob {
+            uint64_t offset = 0, bytes = 0;
+            uint32_t refs = 0;
+        };
+        std::vector<Blob> blobs;
+
+    private:
+        struct PairHash {
+            size_t operator()(const std::pair<uint64_t, uint64_t> & k) const { return static_cast<size_t>(k.first ^ (k.second >> 1)); }
+        };
+        std::ostream & out;
+        uint64_t offset = 0;
+        std::unordered_map<std::pair<uint64_t, uint64_t>, uint32_t, PairHash> index;
+};
+
 /**
- * @brief Append one cell's record: its fixed-size data, then its stencils at
- *        their actual sizes; single stores the pseudo-inverses and the
- *        smoothness-indicator matrix in single precision.
+ * @brief Append one cell's record: its fixed-size data, its blobs' indices,
+ *        its stencils' cells at their actual sizes and the entries with a
+ *        face (slot, face).
  */
-void serialize(const CellTables & t, const bool single, std::vector<char> & buf) {
+void serialize(const CellTables & t, const std::array<uint32_t, N_BLOBS> & blob, std::vector<char> & buf) {
     const uint16_t n_large = static_cast<uint16_t>(t.large_cells.size());
     put(buf, &t.gather_depth, 1);
     put(buf, &t.scale, 1);
     put(buf, &n_large, 1);
     put(buf, t.small_size.data(), t.small_size.size());
-    put(buf, t.basis_mean.data(), t.basis_mean.size());
-    put_values(buf, t.si, single);
-    put_values(buf, t.moments, single);
+    put(buf, blob.data(), blob.size());
     put(buf, t.large_cells.data(), n_large);
-    put(buf, t.large_faces.data(), n_large);
-    put_values(buf, t.large_pinv, single);
     put(buf, t.small_cells.data(), t.small_cells.size());
-    put(buf, t.small_faces.data(), t.small_faces.size());
-    put_values(buf, t.small_pinv, single);
+    std::vector<std::pair<uint16_t, int32_t>> faces;
+    for (size_t k = 0; k < t.large_faces.size(); k++) {
+        if (t.large_faces[k] != -1) faces.emplace_back(uint16_t(k), t.large_faces[k]);
+    }
+    for (size_t k = 0; k < t.small_faces.size(); k++) {
+        if (t.small_faces[k] != -1) faces.emplace_back(uint16_t(n_large + k), t.small_faces[k]);
+    }
+    const uint32_t n_faces = static_cast<uint32_t>(faces.size());
+    put(buf, &n_faces, 1);
+    for (const auto & [slot, face] : faces) {
+        put(buf, &slot, 1);
+        put(buf, &face, 1);
+    }
 }
 
-bool deserialize(std::istream & in, const uint8_t nk, const uint16_t n_moments, const bool single, CellTables & t) {
+/** @brief One cell's record, without its values; blob receives its blobs' indices. */
+bool deserialize(std::istream & in, const uint8_t nk, const uint16_t n_moments, CellTables & t,
+                 std::array<uint32_t, N_BLOBS> & blob) {
     uint16_t n_large = 0;
     if (!get(in, &t.gather_depth, 1) || !get(in, &t.scale, 1) || !get(in, &n_large, 1) ||
-        !get(in, t.small_size.data(), t.small_size.size())) {
+        !get(in, t.small_size.data(), t.small_size.size()) || !get(in, blob.data(), blob.size())) {
         return false;
     }
     size_t n_small = 0;
@@ -3882,16 +3949,61 @@ bool deserialize(std::istream & in, const uint8_t nk, const uint16_t n_moments, 
     t.si.resize(N_DIM == 2 ? static_cast<size_t>(nk * (nk + 1) / 2) : 0);
     t.moments.resize(N_DIM == 3 ? n_moments : 0);
     t.large_cells.resize(n_large);
-    t.large_faces.resize(n_large);
+    t.large_faces.assign(n_large, -1);
     t.large_pinv.resize(size_t(n_large) * nk);
     t.small_cells.resize(n_small);
-    t.small_faces.resize(n_small);
+    t.small_faces.assign(n_small, -1);
     t.small_pinv.resize(n_small * teno::NK_SMALL);
-    return get(in, t.basis_mean.data(), t.basis_mean.size()) && get_values(in, t.si, single) &&
-           get_values(in, t.moments, single) &&
-           get(in, t.large_cells.data(), n_large) && get(in, t.large_faces.data(), n_large) &&
-           get_values(in, t.large_pinv, single) && get(in, t.small_cells.data(), n_small) &&
-           get(in, t.small_faces.data(), n_small) && get_values(in, t.small_pinv, single);
+    uint32_t n_faces = 0;
+    if (!get(in, t.large_cells.data(), n_large) || !get(in, t.small_cells.data(), n_small) || !get(in, &n_faces, 1) ||
+        n_faces > n_large + n_small) {
+        return false;
+    }
+    for (uint32_t k = 0; k < n_faces; k++) {
+        uint16_t slot = 0;
+        int32_t face = 0;
+        if (!get(in, &slot, 1) || !get(in, &face, 1) || slot >= n_large + n_small) return false;
+        (slot < n_large ? t.large_faces[slot] : t.small_faces[slot - n_large]) = face;
+    }
+    return true;
+}
+
+/** @brief Bytes that values take in a blob. */
+template <typename T>
+size_t value_bytes(const std::vector<T> & values, const bool single) {
+    return values.size() * (single ? sizeof(float) : sizeof(T));
+}
+
+/** @brief Values from a blob's bytes at p, stored in single precision if single; returns past them. */
+template <typename T>
+const char * take_values(const char * p, std::vector<T> & values, const bool single) {
+    if (!single) {
+        std::memcpy(values.data(), p, values.size() * sizeof(T));
+        return p + values.size() * sizeof(T);
+    }
+    for (size_t k = 0; k < values.size(); k++) {
+        float v;
+        std::memcpy(&v, p + k * sizeof(float), sizeof(float));
+        values[k] = static_cast<T>(v);
+    }
+    return p + values.size() * sizeof(float);
+}
+
+/** @brief Whether blobs hold t's values at their sizes; if so, fills them in. */
+bool take_blobs(CellTables & t, const std::array<const std::vector<char> *, N_BLOBS> & blob, const bool single) {
+    const size_t rows = t.basis_mean.size() * sizeof(rtype) + value_bytes(t.si, single) + value_bytes(t.moments, single);
+    if (blob[ROWS]->size() != rows || blob[LARGE]->size() != value_bytes(t.large_pinv, single) ||
+        blob[SMALL]->size() != value_bytes(t.small_pinv, single)) {
+        return false;
+    }
+    const char * p = blob[ROWS]->data();
+    std::memcpy(t.basis_mean.data(), p, t.basis_mean.size() * sizeof(rtype));
+    p += t.basis_mean.size() * sizeof(rtype);
+    p = take_values(p, t.si, single);
+    take_values(p, t.moments, single);
+    take_values(blob[LARGE]->data(), t.large_pinv, single);
+    take_values(blob[SMALL]->data(), t.small_pinv, single);
+    return true;
 }
 
 } // namespace
@@ -4264,18 +4376,53 @@ void TENO::save_cache(const uint8_t halo_layers) {
     write_header(out, header);
     const auto large_index = host_index(stencil_large);
     const auto small_index = host_index(stencil_small);
+    // The cells, then each distinct blob once (gathered aside), its index and where they start
+    const std::string blob_file = partial + ".blobs";
+    std::ofstream blob_out(blob_file, std::ios::binary);
+    BlobWriter blobs(blob_out);
     std::vector<CellTables> chunk;
+    std::vector<std::array<std::vector<char>, N_BLOBS>> bytes;
     std::vector<char> buf;
     for (uint32_t c0 = 0; c0 < n_table_rows; c0 += CHUNK_CELLS) {
         chunk.assign(std::min(CHUNK_CELLS, n_table_rows - c0), CellTables());
         download_tables(*this, large_index, small_index, c0, chunk);
+        bytes.assign(chunk.size(), {});
+        gated::parallel_for("teno_cache_blobs", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, chunk.size()),
+                             [&](const size_t k) { bytes[k] = table_blobs(chunk[k], cache_single); });
         buf.clear();
-        for (const CellTables & t : chunk) serialize(t, cache_single, buf);
+        for (size_t k = 0; k < chunk.size(); k++) {
+            std::array<uint32_t, N_BLOBS> ids;
+            for (int b = 0; b < N_BLOBS; b++) ids[size_t(b)] = blobs.add(bytes[k][size_t(b)]);
+            serialize(chunk[k], ids, buf);
+        }
         out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
     }
+    blob_out.close();
+    const uint64_t blob_start = static_cast<uint64_t>(out.tellp());
+    {
+        std::ifstream blob_in(blob_file, std::ios::binary);
+        std::vector<char> piece(size_t(1) << 24);
+        while (blob_in.read(piece.data(), static_cast<std::streamsize>(piece.size())) || blob_in.gcount() > 0) {
+            out.write(piece.data(), blob_in.gcount());
+        }
+    }
+    const uint64_t index_start = static_cast<uint64_t>(out.tellp());
+    buf.clear();
+    const uint64_t n_blobs = blobs.blobs.size();
+    put(buf, &n_blobs, 1);
+    for (const auto & b : blobs.blobs) {
+        put(buf, &b.offset, 1);
+        put(buf, &b.bytes, 1);
+        put(buf, &b.refs, 1);
+    }
+    put(buf, &blob_start, 1);
+    put(buf, &index_start, 1);
+    put(buf, TENO_CACHE_END, sizeof(TENO_CACHE_END));
+    out.write(buf.data(), static_cast<std::streamsize>(buf.size()));
     out.close();
     std::error_code error;
-    if (out.good()) std::filesystem::rename(partial, cache_file, error);
+    std::filesystem::remove(blob_file, error);
+    if (out.good() && blob_out.good()) std::filesystem::rename(partial, cache_file, error);
     if (!out.good() || error) {
         std::filesystem::remove(partial, error);
         logging::warning(diagnostic_code::TENO_CACHE, "TENO: could not write stencil cache " + cache_file + ".");
@@ -4303,14 +4450,70 @@ bool TENO::load_cache() {
         cache_status = cache_file + " does not match this case, recomputed";
         return false;
     }
+    // The blobs' index, at the end, and a reader of the blobs, each kept while cells still refer to it
+    struct Blob {
+        uint64_t offset = 0, bytes = 0;
+        uint32_t refs = 0;
+    };
+    std::vector<Blob> index;
+    uint64_t blob_start = 0;
+    std::ifstream blob_in(cache_file, std::ios::binary);
+    bool ok = false;
+    {
+        char end[sizeof(TENO_CACHE_END)] = {};
+        uint64_t index_start = 0, n_blobs = 0;
+        constexpr std::streamoff FOOTER = 2 * sizeof(uint64_t) + sizeof(TENO_CACHE_END);
+        blob_in.seekg(-FOOTER, std::ios::end);
+        const uint64_t file_end = static_cast<uint64_t>(blob_in.tellg()) + FOOTER;
+        ok = blob_in.good() && get(blob_in, &blob_start, 1) && get(blob_in, &index_start, 1) && get(blob_in, end, sizeof(end)) &&
+             std::memcmp(end, TENO_CACHE_END, sizeof(end)) == 0 && blob_start <= index_start && index_start < file_end;
+        if (ok) {
+            blob_in.seekg(static_cast<std::streamoff>(index_start));
+            ok = get(blob_in, &n_blobs, 1) && n_blobs * (2 * sizeof(uint64_t) + sizeof(uint32_t)) <= file_end - index_start;
+        }
+        if (ok) {
+            index.resize(n_blobs);
+            for (Blob & b : index) {
+                ok = ok && get(blob_in, &b.offset, 1) && get(blob_in, &b.bytes, 1) && get(blob_in, &b.refs, 1) &&
+                     b.offset + b.bytes <= index_start - blob_start;
+            }
+        }
+    }
+    std::unordered_map<uint32_t, std::vector<char>> held;
     TableBuilder builder(*this, n_table_rows);
     const uint16_t n_moments = N_DIM == 3 ? teno_setup::n_moments(degree) : 0;
     std::vector<CellTables> chunk;
-    bool ok = true;
+    std::vector<std::array<uint32_t, N_BLOBS>> ids;
     for (uint32_t c0 = 0; c0 < n_table_rows && ok; c0 += CHUNK_CELLS) {
         chunk.assign(std::min(CHUNK_CELLS, n_table_rows - c0), CellTables());
-        for (CellTables & t : chunk) {
-            ok = ok && deserialize(in, n_dof_large, n_moments, cache_single, t);
+        ids.assign(chunk.size(), {});
+        for (size_t k = 0; k < chunk.size() && ok; k++) {
+            ok = deserialize(in, n_dof_large, n_moments, chunk[k], ids[k]);
+            for (int b = 0; b < N_BLOBS && ok; b++) {
+                const uint32_t id = ids[k][size_t(b)];
+                ok = id < index.size() && index[id].refs > 0;
+                if (!ok || held.count(id)) continue;
+                std::vector<char> & v = held[id];
+                v.resize(index[id].bytes);
+                blob_in.seekg(static_cast<std::streamoff>(blob_start + index[id].offset));
+                ok = get(blob_in, v.data(), v.size());
+            }
+        }
+        if (!ok) break;
+        std::vector<uint8_t> fits(chunk.size(), 1);
+        gated::parallel_for("teno_cache_values", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, chunk.size()),
+                             [&](const size_t k) {
+            std::array<const std::vector<char> *, N_BLOBS> blob;
+            for (int b = 0; b < N_BLOBS; b++) blob[size_t(b)] = &held.at(ids[k][size_t(b)]);
+            fits[k] = take_blobs(chunk[k], blob, cache_single);
+        });
+        for (size_t k = 0; k < chunk.size(); k++) {
+            ok = ok && fits[k];
+            for (int b = 0; b < N_BLOBS; b++) {
+                const uint32_t id = ids[k][size_t(b)];
+                if (--index[id].refs == 0) held.erase(id);
+            }
+            CellTables & t = chunk[k];
             if (!sector_stencils) {
                 t.small_cells.clear();
                 t.small_faces.clear();
