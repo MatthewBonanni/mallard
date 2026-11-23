@@ -295,10 +295,29 @@ Model model(const CheckReport & r, const memory::Bytes & b) {
     return m;
 }
 
+/**
+ * @brief The steady state's bytes as the sized run holds them: a host build
+ *        sizing a GPU leaves out what device builds free after setup.
+ */
+memory::Bytes sized_steady(const CheckReport & r) {
+    memory::Bytes b = r.steady_bytes;
+    if (r.sizing_gpu && !r.device_memory) {
+        for (size_t c = 0; c < memory::N_CATEGORIES; c++) b[c] -= std::min(b[c], r.released_on_devices[c]);
+    }
+    return b;
+}
+
+/** @brief The rank's bytes that device builds free after setup but this host build keeps, by category. */
+memory::Bytes released_on_devices(const CheckReport & r, const Mesh & mesh) {
+    memory::Bytes b{};
+    if (!r.device_memory) b[static_cast<size_t>(memory::Category::MESH)] = mesh.released_on_devices;
+    return b;
+}
+
 } // namespace
 
 double predicted_peak(const CheckReport & r, const double local_cells) {
-    double peak = model(r, r.steady_bytes).at(local_cells);
+    double peak = model(r, sized_steady(r)).at(local_cells);
     for (const memory::Bytes & phase : r.setup_phases) peak = std::max(peak, model(r, phase).at(local_cells));
     return peak;
 }
@@ -323,6 +342,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     r.bytes_peak = comm::allreduce(usage.peak, comm::Op::MAX);
     r.setup_bytes = of_largest_rank(usage.at_peak, usage.peak);
     r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
+    r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
     for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
     r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
     r.local_owned = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_owned()) : 0, comm::Op::MAX);
@@ -401,7 +421,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     const double usable = (1.0 - SIZING_MARGIN) * static_cast<double>(r.sizing_memory);
     double n_max = std::numeric_limits<double>::infinity();
     std::vector<memory::Bytes> snapshots = r.setup_phases;
-    snapshots.push_back(r.steady_bytes);
+    snapshots.push_back(sized_steady(r));
     for (size_t k = 0; k < snapshots.size(); k++) {
         const Model m = model(r, snapshots[k]);
         const double n_fit = (usable - overhead - m.fixed) / m.per_cell;
@@ -490,6 +510,7 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
         const uint64_t peak = comm::allreduce(usage.peak, comm::Op::MAX);
         r.steady_bytes = of_largest_rank(usage.at_peak, usage.peak);
+        r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
         // The time stepping's kernels add their local memory to CUDA's reservation
         if (r.device_memory) {
             r.outside_kokkos =

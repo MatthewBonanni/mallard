@@ -182,6 +182,7 @@ struct CheckReport {
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
     memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
     memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
+    memory::Bytes released_on_devices{};  // of steady_bytes, what device builds free after setup (host builds)
     std::vector<memory::Bytes> setup_phases;  // at the peak of each phase of the setup
     uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
     double view_entries_per_cell = 0.0;  // the most of any View proportional to the cells, largest rank

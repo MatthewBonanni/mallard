@@ -392,6 +392,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
         memory_row("outside Kokkos per GPU", double(r.sizing_overhead),
                          r.overhead_measured ? "measured on this GPU"
                                              : "typical: CUDA's context and kernels' local memory on an A100");
+        uint64_t released = 0;
+        for (const uint64_t b : r.released_on_devices) released += b;
+        if (!r.device_memory && released > 0) {
+            memory_row("freed after setup on GPUs", double(released),
+                       "the mesh's node lists, which this CPU build keeps: left out of the steady state");
+        }
     }
     if (r.max_local_cells == 0) {
         rows.push_back(
@@ -804,6 +810,7 @@ std::string check_json(const CheckReport & r) {
                             .add("steps_timed", r.steps_timed)
                             .raw("at_setup_peak", bytes_json(r.setup_bytes))
                             .raw("steady", bytes_json(r.steady_bytes))
+                            .raw("released_on_devices", bytes_json(r.released_on_devices))
                             .str());
     } else {
         o.raw("memory", "null");
