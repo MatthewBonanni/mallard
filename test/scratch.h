@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 /**
  * @brief The running test's own directory, shared by all ranks and unique to
@@ -36,8 +37,16 @@ std::filesystem::path rank_scratch_dir();
 std::string serial_name(const std::string & name);
 
 /**
+ * @brief Files under dir that this process still has open or mapped (Linux
+ *        and macOS; none elsewhere).
+ */
+std::vector<std::string> open_files_under(const std::filesystem::path & dir);
+
+/**
  * @brief Removes dir, which every rank shares, on rank 0 once every rank is
  *        done with it: "" on every rank, or on every rank why it could not.
+ *        A file that any rank still has open fails it on every file system
+ *        (shared storage could not remove it) and keeps dir.
  */
 std::string remove_shared_directory(const std::filesystem::path & dir);
 
