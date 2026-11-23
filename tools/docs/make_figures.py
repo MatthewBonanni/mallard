@@ -28,6 +28,7 @@ import inlets
 import les_models
 import limiters
 import mesh_fields
+import particle_injection
 import particles
 import probes
 import python
@@ -57,6 +58,7 @@ def main():
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    particle_injection.figures(args.mallard)
     particles.figures(args.mallard)
     schematics.figures()
     teno.figures()

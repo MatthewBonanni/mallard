@@ -572,6 +572,18 @@ particles diverges (Rosin–Rammler with `spread` below 3) needs a `min`. The
 setup log shows each injector's mean diameter D10 and Sauter mean diameter
 D32.
 
+![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-light.svg#gh-light-mode-only)
+![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-dark.svg#gh-dark-mode-only)
+
+*A point injector (`rate = 1e6`, `speed = 30.0`, `cone_angle = 12.0`) of
+droplets of density 800 kg/m³ into air at rest, after 4 ms (a Mallard run).
+Left: the parcels within the cone, the small ones stopped by drag near the
+nozzle and the large ones carried farthest. Right: the 4000 diameters drawn
+from `{distribution = "rosin_rammler", size = 40e-6, spread = 3.0, basis = "mass", min = 5e-6, max = 150e-6}`
+against its density by mass and by number (`f / d³`), in `ln d`: by mass the
+distribution peaks near `size`, by number the particles are mostly the small
+ones.*
+
 **Reproducibility.** Each injected particle draws its place, direction and
 diameter from random numbers keyed by `[particles] seed`, its injector and its
 count within the injector, not from a sequence: the same particles enter on
