@@ -238,6 +238,50 @@ TEST(PostExtractTest, StepsAndTimesAreThoseTheFilesRecordNotTheirNames) {
     }
 }
 
+TEST(PostExtractTest, BoundaryProbesOfTheRecordedInputAreTheRunsBitForBit) {
+    // Without -i, extract reads the input the restart file records: its boundary probes must read back
+    const std::string run = fresh_dir("boundary_run");
+    std::ostringstream s;
+    s << "[run]\nn_steps = 4\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n"
+      << (N_DIM == 3 ? "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x) * y\"\np = \"1.0\"\nu = "
+      << (N_DIM == 3 ? "[\"0.3\", \"0.0\", \"0.1\"]" : "[\"0.3\", \"0.0\"]") << "\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n"
+      << "[[probes]]\nname = \"bottom\"\nboundary = \"bottom\"\nfields = [\"RHO\", \"P\"]\ninterval = 2\n"
+      << "file = \"" << run << "/probe_bottom.csv\"\n"
+      << "[[probes]]\nname = \"walls\"\nboundary_type = \"wall\"\nfields = [\"P\"]\ninterval = 2\n"
+      << "reductions = [\"integral\"]\nfile = \"" << run << "/probe_walls.csv\"\nreductions_file = \"" << run
+      << "/probe_walls_reductions.csv\"\n"
+      << "[[write_data]]\nprefix = \"" << run << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    {
+        Solver solver;
+        solver.init(parse_toml(s.str()));
+        solver.run();
+    }
+    comm::barrier();
+    const std::string out = fresh_dir("boundary");
+    for (const char * name : {"bottom", "walls"}) {
+        ASSERT_EQ(extract({run + "/restart_000004.restart", "--probe", name, "-o", out}), 0) << name;
+    }
+    auto at_step_4 = [](const std::string & file) {
+        std::vector<std::string> out;
+        for (const std::string & r : rows(file)) {
+            if (r.starts_with("4,")) out.push_back(r);
+        }
+        return out;
+    };
+    for (const char * file : {"/probe_bottom.csv", "/probe_walls.csv", "/probe_walls_reductions.csv"}) {
+        const std::vector<std::string> expected = at_step_4(run + file);
+        EXPECT_FALSE(expected.empty()) << file;
+        EXPECT_EQ(rows(out + file), expected) << file;
+    }
+}
+
 TEST(PostExtractTest, FileOfAnotherMeshIsAnError) {
     const std::string run = run_dir();
     const std::string dir = fresh_dir("coarse");
