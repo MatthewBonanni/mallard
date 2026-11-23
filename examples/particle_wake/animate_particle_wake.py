@@ -3,12 +3,14 @@ vortex street, over the vorticity of the gas.
 
     python examples/particle_wake/animate_particle_wake.py extract RUN_DIR   (writes RUN_DIR/frames.npz)
     python examples/particle_wake/animate_particle_wake.py render OUT.mp4 RUN_DIR [RUN_DIR ...] [--fps 24]
-        [--poster OUT.jpg] [--poster-t T]
+        [--crf 18] [--poster OUT.jpg] [--poster-t T]
 
 extract reads a run's frames (frames/frame_*.restart, which carry the particles, and the vorticity snapshots
 frames/wake_*.vtu) into one compact file: every particle's position by id, and the vorticity on a uniform
 grid of the window. render draws one panel per run on one clock, the first run's vorticity under every
-panel (the particles do not act on the gas, so every run has the same flow). The MP4 is H.264 (CRF 18).
+panel (the particles do not act on the gas, so every run has the same flow), each particle a round dot. Frames
+are drawn at 3840 x 2160; render writes OUT.mp4 at that size and OUT_1080p.mp4 at half of it (H.264), and the
+poster as OUT.jpg, OUT.png and OUT_1080p.jpg (T in U t / D since the seeding; OUT "-" skips the video).
 """
 import argparse
 import glob
@@ -90,6 +92,7 @@ def main():
     r.add_argument("--fps", type=float, default=24)
     r.add_argument("--poster")
     r.add_argument("--poster-t", type=float)
+    r.add_argument("--crf", type=int, default=18)
     args = ap.parse_args()
     if args.cmd == "extract":
         extract(args.run)
@@ -99,8 +102,12 @@ def main():
 
 COLORS = {0.0: "#9fe7ff", 0.25: "#7dffb0", 1.0: "#ffc34d", 4.0: "#ff6f91"}
 WX0, WX1, WY0, WY1 = -1.5, 11.5, -3.25, 3.25
-PX = 0.0125
-SPACING = 23.4 / 669  # of the seeding lattice
+W, HT = 3840, 2160  # the master frame; render also encodes a copy at half this size
+MARGIN, GAP, TOP = 46, 46, 222
+PW = (W - 2 * MARGIN - GAP) // 2 // 2 * 2
+PH = PW // 2
+SS = 3  # supersampling of the particle dots and the cylinder's edge
+DOT_RADIUS = 1.5  # in master pixels
 NX_SEED, LANE_ROWS = 670, 8
 
 
@@ -108,29 +115,58 @@ def hex_rgb(c):
     return np.array([int(c[i:i + 2], 16) for i in (1, 3, 5)]) / 255.0
 
 
-def panel(w, pos, color):
-    """RGB image of one panel: the vorticity, dimmed, under the particle density in the run's color."""
-    from scipy.ndimage import gaussian_filter
+class Panels:
+    """Panel images of PW x PH pixels: the vorticity, dimmed, under the particles drawn as round dots in the
+    run's color, anti-aliased by supersampling."""
 
-    nx, ny = int(round((WX1 - WX0) / PX)), int(round((WY1 - WY0) / PX))
-    i0, j0 = int(round((WX0 - X0) / H)), int(round((WY0 - Y0) / H))
-    v = w[j0:j0 + ny, i0:i0 + nx].astype(float)
-    inside = np.isnan(v)
-    bg = hex_rgb(BG)
-    strength = np.clip(np.abs(np.nan_to_num(v)) / 1.2, 0, 1)[..., None] ** 0.7
-    tone = np.where((np.nan_to_num(v) > 0)[..., None], hex_rgb("#c0392b"), hex_rgb("#2e6fd8"))
-    img = bg + 0.6 * strength * (tone - bg)
-    # alternate lanes of the seeding lattice's rows in two shades, as dye streaks
-    lane = (np.arange(len(pos)) // NX_SEED // LANE_ROWS) % 2
-    for shade, sel in ((1.0, lane == 0), (0.5, lane == 1)):
-        p = pos[sel & ~np.isnan(pos[:, 0])]
-        count, _, _ = np.histogram2d(p[:, 1], p[:, 0], bins=[ny, nx], range=[[WY0, WY1], [WX0, WX1]])
-        # particles per seeded area (1: the density of the lattice), smoothed over the lattice spacing
-        density = gaussian_filter(count, 2.2) * (SPACING / PX) ** 2
-        a = (1 - np.exp(-0.6 * density))[..., None]
-        img = img * (1 - a) + shade * hex_rgb(color) * a
-    img[inside] = hex_rgb("#3a3f4b")
-    return img
+    def __init__(self):
+        from scipy.ndimage import map_coordinates
+
+        self.map_coordinates = map_coordinates
+        px = (WX1 - WX0) / PW
+        x = WX0 + (np.arange(PW) + 0.5) * px
+        y = WY0 + (np.arange(PH) + 0.5) * px
+        gx, gy = np.meshgrid(x, y)
+        self.coords = np.array([(gy - Y0) / H, (gx - X0) / H])
+        xs = WX0 + (np.arange(PW * SS) + 0.5) * px / SS
+        ys = WY0 + (np.arange(PH * SS) + 0.5) * px / SS
+        disc = (xs[None, :] ** 2 + ys[:, None] ** 2 < 0.25).astype(float)
+        self.cylinder = self.down(disc)[..., None]
+        r = DOT_RADIUS * SS
+        k = int(np.ceil(r))
+        dy, dx = np.mgrid[-k:k + 1, -k:k + 1]
+        inside = dx ** 2 + dy ** 2 <= r * r
+        self.offsets = np.column_stack([dy[inside], dx[inside]])
+        self.scale = SS / px
+
+    @staticmethod
+    def down(a):
+        return a.reshape(PH, SS, PW, SS).mean(axis=(1, 3))
+
+    def dots(self, p):
+        """Coverage of the dots of the particles p in each pixel, 0 to 1."""
+        mask = np.zeros((PH * SS, PW * SS), dtype=bool)
+        iy = np.floor((p[:, 1] - WY0) * self.scale).astype(np.int64)
+        ix = np.floor((p[:, 0] - WX0) * self.scale).astype(np.int64)
+        for oy, ox in self.offsets:
+            jy, jx = iy + oy, ix + ox
+            ok = (jy >= 0) & (jy < PH * SS) & (jx >= 0) & (jx < PW * SS)
+            mask[jy[ok], jx[ok]] = True
+        return self.down(mask.astype(np.float32))
+
+    def __call__(self, w, pos, color):
+        v = self.map_coordinates(np.nan_to_num(w.astype(np.float32)), self.coords, order=1)
+        bg = hex_rgb(BG)
+        strength = np.clip(np.abs(v) / 1.2, 0, 1)[..., None] ** 0.7
+        tone = np.where((v > 0)[..., None], hex_rgb("#c0392b"), hex_rgb("#2e6fd8"))
+        img = bg + 0.6 * strength * (tone - bg)
+        # alternate lanes of the seeding lattice's rows in two shades, as dye streaks
+        lane = (np.arange(len(pos)) // NX_SEED // LANE_ROWS) % 2
+        for shade, sel in ((0.5, lane == 1), (1.0, lane == 0)):
+            a = self.dots(pos[sel & ~np.isnan(pos[:, 0])])[..., None]
+            img = img * (1 - a) + shade * hex_rgb(color) * a
+        img = img * (1 - self.cylinder) + hex_rgb("#3a3f4b") * self.cylinder
+        return (np.clip(img, 0, 1) * 255 + 0.5).astype(np.uint8)[::-1]
 
 
 def label(st):
@@ -140,6 +176,7 @@ def label(st):
 def render(args):
     import imageio.v2 as imageio
     import matplotlib
+    from PIL import Image
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -148,51 +185,64 @@ def render(args):
     gas = next(r for r in runs if "w" in r)
     t0 = runs[0]["t"][0]
     clock = runs[0]["t"]
-    fig = plt.figure(figsize=(19.2, 10.8), dpi=100)
+    dpi = 200
+    fig = plt.figure(figsize=(W / dpi, HT / dpi), dpi=dpi)
     fig.patch.set_facecolor(BG)
-    cols, rows = 2, -(-len(runs) // 2)
-    left, right, bottom, top, gap = 0.012, 0.988, 0.02, 0.885, 0.012
-    pw, ph = (right - left - gap) / cols, (top - bottom - gap * (rows - 1)) / rows
-    axes, ims, stamps = [], [], []
+    panels = Panels()
+    slots, ims = [], []
     for i, r in enumerate(runs):
-        c, rr = i % cols, i // cols
-        ax = fig.add_axes([left + c * (pw + gap), top - (rr + 1) * ph - rr * gap, pw, ph])
-        ax.set_axis_off()
+        c, rr = i % 2, i // 2
+        xo, yo = MARGIN + c * (PW + GAP), HT - TOP - (rr + 1) * PH - rr * GAP
         st = round(float(r["stokes"]), 6)
-        ims.append(ax.imshow(np.zeros((2, 2, 3)), origin="lower", extent=[WX0, WX1, WY0, WY1], aspect="equal",
-                             interpolation="antialiased"))
-        ax.text(0.012, 0.965, label(st), transform=ax.transAxes, color=COLORS.get(st, FG), fontsize=17,
-                va="top", fontweight="bold")
-        axes.append((ax, r, st))
-    fig.text(0.012, 0.965, "Solid particles in a Kármán vortex street", color=FG, fontsize=26, va="top",
+        ims.append(fig.figimage(np.zeros((PH, PW, 3), dtype=np.uint8), xo=xo, yo=yo, origin="upper"))
+        fig.text((xo + 24) / W, (yo + PH - 18) / HT, label(st), color=COLORS.get(st, FG), fontsize=17,
+                 va="top", fontweight="bold", zorder=5)
+        slots.append((r, st))
+    fig.text(MARGIN / W, 0.965, "Solid particles in a Kármán vortex street", color=FG, fontsize=26, va="top",
              fontweight="bold")
-    fig.text(0.012, 0.918, "Cylinder at Re = 100, Mach 0.2: 134,000 particles per Stokes number St = τU/D, "
+    fig.text(MARGIN / W, 0.918, "Cylinder at Re = 100, Mach 0.2: 134,000 particles per Stokes number St = τU/D, "
              "seeded upstream, over the vorticity of the gas (red: counterclockwise). Mallard, TENO5, 246,000 cells",
              color="#b8bcc6", fontsize=13.5, va="top")
-    clock_text = fig.text(0.988, 0.965, "", color=FG, fontsize=20, va="top", ha="right", family="monospace")
+    clock_text = fig.text(1 - MARGIN / W, 0.965, "", color=FG, fontsize=20, va="top", ha="right",
+                          family="monospace")
 
     def draw(k):
         t = clock[k]
         j = int(np.argmin(np.abs(gas["w_t"] - t)))
-        for im, (ax, r, st) in zip(ims, axes):
+        for im, (r, st) in zip(ims, slots):
             kk = int(np.argmin(np.abs(r["t"] - t)))
-            im.set_data(panel(gas["w"][j], r["pos"][kk], COLORS.get(st, FG)))
+            im.set_data(panels(gas["w"][j], r["pos"][kk], COLORS.get(st, FG)))
         clock_text.set_text(f"t U/D = {(t - t0) * 0.2:5.1f}")
         fig.canvas.draw()
         return np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()
 
+    def half(frame):
+        return np.asarray(Image.fromarray(frame).resize((W // 2, HT // 2), Image.LANCZOS))
+
     if args.poster:
         k = int(np.argmin(np.abs(clock - (t0 + args.poster_t / 0.2)))) if args.poster_t is not None else len(clock) - 1
-        imageio.imwrite(args.poster, draw(k), quality=92)
+        frame = draw(k)
+        stem, ext = os.path.splitext(args.poster)
+        imageio.imwrite(stem + ".png", frame)
+        imageio.imwrite(args.poster, frame, quality=95)
+        imageio.imwrite(stem + "_1080p" + ext, half(frame), quality=95)
     if args.out != "-":
-        writer = imageio.get_writer(args.out, fps=args.fps, codec="libx264", quality=None,
-                                    ffmpeg_params=["-crf", "18", "-pix_fmt", "yuv420p", "-preset", "slow"],
-                                    macro_block_size=8)
+        stem, ext = os.path.splitext(args.out)
+        opts = dict(fps=args.fps, codec="libx264", quality=None, macro_block_size=8)
+        params = ["-crf", str(args.crf), "-pix_fmt", "yuv420p", "-preset", "slow", "-movflags", "+faststart"]
+        full = imageio.get_writer(args.out, ffmpeg_params=params, **opts)
+        small = imageio.get_writer(stem + "_1080p" + ext, ffmpeg_params=params, **opts)
+        frame = None
         for k in range(len(clock)):
-            writer.append_data(draw(k))
+            frame = draw(k)
+            full.append_data(frame)
+            small.append_data(half(frame))
+        last = half(frame)
         for _ in range(int(args.fps * 2)):
-            writer.append_data(draw(len(clock) - 1))
-        writer.close()
+            full.append_data(frame)
+            small.append_data(last)
+        full.close()
+        small.close()
 
 
 if __name__ == "__main__":
