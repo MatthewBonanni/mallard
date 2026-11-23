@@ -350,8 +350,9 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         ASSERT_EQ(cfl.size(), 8u) << file;
         for (rtype value : cfl) EXPECT_NEAR(double(value), expected, 1e-6) << file;
     }
-    // A boundary zone's and a slice's snapshots give a cell field the value of each sample's cell
-    for (const std::string file : {"/wall_000000.vtp", "/wall_000001.vtp", "/slice_000000.vtp", "/slice_000001.vtp"}) {
+    // A boundary zone's and a slice's snapshots (Lagrange curves of the default TENO's polynomials) give a
+    // cell field the value of each sample's cell, at every node of its element
+    for (const std::string file : {"/wall_000000.vtu", "/wall_000001.vtu", "/slice_000000.vtu", "/slice_000001.vtu"}) {
         const std::string text = file_contents(dir + file);
         const size_t tag = text.find("Name=\"CFL\"");
         ASSERT_NE(tag, std::string::npos) << file;
@@ -361,7 +362,7 @@ TEST(IOTest, LocalCFLIsWrittenWithFixedTimeStepAndAtStepZero) {
         std::memcpy(&n_bytes, text.data() + at, sizeof(n_bytes));
         std::vector<double> cfl(n_bytes / sizeof(double));
         std::memcpy(cfl.data(), text.data() + at + sizeof(n_bytes), n_bytes);
-        ASSERT_EQ(cfl.size(), file.find("wall") != std::string::npos ? 4u : 2u) << file;
+        ASSERT_EQ(cfl.size(), (file.find("wall") != std::string::npos ? 4u : 2u) * 5u) << file;
         for (double value : cfl) EXPECT_NEAR(value, expected, 1e-6) << file;
     }
 }

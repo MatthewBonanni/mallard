@@ -107,7 +107,7 @@ def draw(P, data):
     figstyle.bare(ax)
     xs = np.linspace(0, 1, 200)
     X, Y = np.meshgrid(xs, xs)
-    ax.contourf(X, Y, exact(X, Y), levels=14, cmap=P["cmap"])
+    ax.contourf(X, Y, exact(X, Y), levels=14, cmap=P["cmap"]).set_rasterized(True)
     for k in range(N + 1):
         ax.plot([k / N, k / N], [0, 1], color=P["bg"], lw=0.7)
         ax.plot([0, 1], [k / N, k / N], color=P["bg"], lw=0.7)
