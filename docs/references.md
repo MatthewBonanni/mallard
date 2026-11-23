@@ -334,8 +334,16 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: `drag = "schiller_naumann"` of solid particles (`src/particles/particle_forces.h`), with [Clift, Grace & Weber (1978)](#clift-grace-weber-1978) for its range and accuracy.
 - <a id="singh-2022"></a>N. Singh, M. Kroells, C. Li, E. Ching, M. Ihme, C. J. Hogan and T. E. Schwartzentruber, General drag coefficient for flow over spherical particles, *AIAA J.* 60, 587–597 (2022). [doi:10.2514/1.J060648](https://doi.org/10.2514/1.J060648), [arXiv:2012.04813](https://arxiv.org/abs/2012.04813)
   Used in: `drag = "singh"` of solid particles (`src/particles/particle_forces.h`, Appendix C).
+- <a id="abraham-1970"></a>F. F. Abraham, Functional dependence of drag coefficient of a sphere on Reynolds number, *Phys. Fluids* 13, 2194–2195 (1970). [doi:10.1063/1.1693218](https://doi.org/10.1063/1.1693218)
+  Used in: the continuum drag of `drag = "singh"`, $C_D = (24/\delta_0^2)(1 + \delta_0/Re_p^{1/2})^2$ with $\delta_0 = 9.4$.
+- <a id="davies-1945"></a>C. N. Davies, Definitive equations for the fluid resistance of spheres, *Proc. Phys. Soc.* 57, 259–270 (1945). [doi:10.1088/0959-5309/57/4/301](https://doi.org/10.1088/0959-5309/57/4/301)
+  Used in: the constants of the slip correction of `drag = "singh"` ($A_1 = 2.514$, $A_2 = 0.8$, $A_3 = 0.55$ for $Kn = \lambda/d$).
 - <a id="maxey-riley-1983"></a>M. R. Maxey and J. J. Riley, Equation of motion for a small rigid sphere in a nonuniform flow, *Phys. Fluids* 26, 883–889 (1983). [doi:10.1063/1.864230](https://doi.org/10.1063/1.864230)
   Used in: the equation of motion of solid particles, and its `"pressure_gradient"` and `"added_mass"` forces.
+- <a id="auton-1988"></a>T. R. Auton, J. C. R. Hunt and M. Prud'homme, The force exerted on a body in inviscid unsteady non-uniform rotational flow, *J. Fluid Mech.* 197, 241–257 (1988). [doi:10.1017/S0022112088003246](https://doi.org/10.1017/S0022112088003246)
+  Used in: the added-mass coefficient $C_A = 1/2$ of the `"added_mass"` force in nonuniform flow.
+- <a id="saffman-1968"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow — Corrigendum, *J. Fluid Mech.* 31, 624 (1968). [doi:10.1017/S0022112068999990](https://doi.org/10.1017/S0022112068999990)
+  Used in: the coefficient 1.615 of the `"saffman_lift"` force.
 - <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
   Used in: the `"saffman_lift"` force of solid particles.
 - <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
