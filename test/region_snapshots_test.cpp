@@ -613,7 +613,7 @@ TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
         const int64_t p0 = h5_values<int64_t>(file, "VTKHDF/Steps/PointOffsets")[k];
         const int64_t n_points = h5_values<int64_t>(file, "VTKHDF/NumberOfPoints")[k];
         ASSERT_EQ(counts[k], int64_t(measure.size())) << k;
-        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/measure"), c0, counts[k]), measure) << k;
+        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/AREA"), c0, counts[k]), measure) << k;
         EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/P"), c0, counts[k]), as<double>(appended_array(text, "P")));
         EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/Points"), p0, n_points, 3), as<double>(appended_array(text, "Points")));
         EXPECT_EQ(slice(h5_values<int64_t>(file, group + "Connectivity"), i0, ids[k]),
