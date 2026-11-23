@@ -112,7 +112,7 @@ From 0.11.0, each release attaches portable binaries of Mallard for Linux CPUs (
 | Cluster's MPI | `mpirun --version` (or `mpiexec --version`) prints | Archive |
 |---|---|---|
 | MPICH, Cray MPICH, Intel MPI, MVAPICH (`libmpi.so.12`) | `HYDRA build details` (MPICH, MVAPICH), `Intel(R) MPI Library`; on Cray, `module list` shows `cray-mpich` | `mallard-<version>-linux-<arch>-cpu-mpich.tar.gz` |
-| Open MPI 4.x or 5.x (`libmpi.so.40`) | `mpirun (Open MPI) 4.x` or `5.x` | `mallard-<version>-linux-<arch>-cpu-openmpi.tar.gz` |
+| Open MPI 4.x or 5.x (`libmpi.so.40`) | `mpirun (Open MPI) 4.x` or `5.x` (`ompi_info --version`: `Open MPI v4.x` or `v5.x`) | `mallard-<version>-linux-<arch>-cpu-openmpi.tar.gz` |
 
 ```sh
 v=0.11.0 mpi=mpich   # or: mpi=openmpi
