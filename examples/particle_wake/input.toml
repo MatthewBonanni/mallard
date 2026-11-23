@@ -5,8 +5,8 @@
 # (18 mu), D = 1, U = 0.2) sets what the street does to them: tracers wrap
 # into its vortices, particles of St near 1 are flung out of the vortex
 # cores and gather on the braids between them (preferential concentration),
-# and heavy particles cross the street almost unaffected, rebounding off the
-# cylinder and leaving a shadow behind it. This input has St = 1;
+# and heavy particles (St = 4) are only bent by the street, rebounding
+# elastically off the front of the cylinder and leaving a shadow behind it. This input has St = 1;
 # run_particle_wake.py runs it at St = 0 (tracers), 0.25, 1 and 4.
 
 [run]

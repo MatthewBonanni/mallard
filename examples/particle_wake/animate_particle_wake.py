@@ -100,6 +100,8 @@ def main():
 COLORS = {0.0: "#9fe7ff", 0.25: "#7dffb0", 1.0: "#ffc34d", 4.0: "#ff6f91"}
 WX0, WX1, WY0, WY1 = -1.5, 11.5, -3.25, 3.25
 PX = 0.0125
+SPACING = 23.4 / 669  # of the seeding lattice
+NX_SEED, LANE_ROWS = 670, 8
 
 
 def hex_rgb(c):
@@ -108,18 +110,25 @@ def hex_rgb(c):
 
 def panel(w, pos, color):
     """RGB image of one panel: the vorticity, dimmed, under the particle density in the run's color."""
+    from scipy.ndimage import gaussian_filter
+
     nx, ny = int(round((WX1 - WX0) / PX)), int(round((WY1 - WY0) / PX))
     i0, j0 = int(round((WX0 - X0) / H)), int(round((WY0 - Y0) / H))
     v = w[j0:j0 + ny, i0:i0 + nx].astype(float)
     inside = np.isnan(v)
     bg = hex_rgb(BG)
-    strength = np.clip(np.abs(np.nan_to_num(v)) / 2.0, 0, 1)[..., None] ** 0.8
+    strength = np.clip(np.abs(np.nan_to_num(v)) / 1.2, 0, 1)[..., None] ** 0.7
     tone = np.where((np.nan_to_num(v) > 0)[..., None], hex_rgb("#c0392b"), hex_rgb("#2e6fd8"))
     img = bg + 0.6 * strength * (tone - bg)
-    p = pos[~np.isnan(pos[:, 0])]
-    count, _, _ = np.histogram2d(p[:, 1], p[:, 0], bins=[ny, nx], range=[[WY0, WY1], [WX0, WX1]])
-    a = (1 - np.exp(-count / 1.6))[..., None]
-    img = img * (1 - a) + hex_rgb(color) * a
+    # alternate lanes of the seeding lattice's rows in two shades, as dye streaks
+    lane = (np.arange(len(pos)) // NX_SEED // LANE_ROWS) % 2
+    for shade, sel in ((1.0, lane == 0), (0.5, lane == 1)):
+        p = pos[sel & ~np.isnan(pos[:, 0])]
+        count, _, _ = np.histogram2d(p[:, 1], p[:, 0], bins=[ny, nx], range=[[WY0, WY1], [WX0, WX1]])
+        # particles per seeded area (1: the density of the lattice), smoothed over the lattice spacing
+        density = gaussian_filter(count, 2.2) * (SPACING / PX) ** 2
+        a = (1 - np.exp(-0.6 * density))[..., None]
+        img = img * (1 - a) + shade * hex_rgb(color) * a
     img[inside] = hex_rgb("#3a3f4b")
     return img
 

@@ -661,7 +661,7 @@ interval = 10        # default 1
 [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
 [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300)
-and 3 more.
+and 4 more.
 
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
