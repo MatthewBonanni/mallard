@@ -624,7 +624,9 @@ TEST(ErrorMessages, CheckReportsTheErrorsOfSectionsPastTheIndependentEntriesThat
     EXPECT_EQ(errors[0].rfind("boundaries[", 0), 0u) << listed(report);
     EXPECT_EQ(errors[1], "write_data[1].interval") << listed(report);
     for (const CheckDiagnostic & d : report.diagnostics) {
-        if (d.severity == report::Status::ERROR) EXPECT_GT(d.line, 0u) << d.message;
+        if (d.severity == report::Status::ERROR) {
+            EXPECT_GT(d.line, 0u) << d.message;
+        }
     }
     // Past them the setup ended: keys it did not read are unused, and in the failed entries the unknown ones
     EXPECT_EQ(keys_of(report, diagnostic_code::KEY_UNUSED),
