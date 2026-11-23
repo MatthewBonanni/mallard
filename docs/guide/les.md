@@ -287,6 +287,18 @@ Validation (`efficiency = "none"`, H2:N2 = 1:1 against air, the
   divergence ahead of the tip, which converges at second order (2.24 and 2.25 at 4
   cells).
 
+The triple flame of `examples/triple_flame/tfles` (its mixtures, inflow and
+cells of 0.128 mm, on a channel 40 `delta_L` wide and 24 long) 0.96 ms, about 3
+flame times, after its planar start. The flame index is positive on the
+premixed tip and wings and negative on the diffusion flame that trails between
+them along `Z_st`; the sensor, filtered and doubled, covers the premixed
+branches with a cell or two to spare and so reaches into the diffusion flame
+just behind the tip, which `TF_F` thickens up to 1.88 there and not at all from
+about 4 mm behind the tip on:
+
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-light.svg#gh-light-mode-only)
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-dark.svg#gh-dark-mode-only)
+
 Pitfalls: `efficiency = "dynamic"` needs the temperature sensor (an input
 error with `reaction`). Build the table with the streams, temperature and
 pressure of the run: a hot oxidizer has another table. The sensor costs one

@@ -3250,7 +3250,7 @@ void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_
         const bool old = i < cells.size() && (j == x_cells.size() || cells[i] <= x_cells[j]);
         const bool sampled = j < x_cells.size() && (i == cells.size() || x_cells[j] <= cells[i]);
         all.push_back(old ? cells[i] : x_cells[j]);
-        auto mean = [&](double m, double x) { return m + a * (x - m); };
+        auto mean = [&](double m, double x) { return m + rounded_product(a, x - m); };
         weights.push_back(mean(old ? mean_weights[i] : 0.0, sampled ? x_weights[j] : 0.0));
         for (size_t v = 0; v < n_cols; v++) {
             values.push_back(mean(old ? mean_values[i * n_cols + v] : 0.0, sampled ? x_values[j * n_cols + v] : 0.0));
