@@ -16,7 +16,8 @@
   "examples/taylor_green_3d/coarse.toml",
   "examples/taylor_green_3d/input.toml",
   "examples/taylor_green_3d/remap.toml",
-  "examples/turbulent_inflow_duct/input.toml"
+  "examples/turbulent_inflow_duct/input.toml",
+  "tools/dev/catalog_inputs/2d/high_order_view.toml"
  ],
  "type": "integer"
 }

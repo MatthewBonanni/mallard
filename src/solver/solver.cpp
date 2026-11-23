@@ -2103,7 +2103,7 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
-    high_order_output.init(mesh, face_reconstruction.get(), is_mixture(), lagrange_view);
+    high_order_output.init(mesh, face_reconstruction.get(), is_mixture(), lagrange_views);
     if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
             add_data_writers(output, regions, async_output, io_threads);
@@ -2129,7 +2129,7 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
     auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
         data_writers.push_back(std::make_unique<DataWriter>());
         data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix,
-                                  subset ? nullptr : &lagrange_view);
+                                  subset ? nullptr : &lagrange_views);
         data_writers.back()->set_async(async_output, io_threads);
     };
     const bool one = output.contains("region"), several = output.contains("regions");

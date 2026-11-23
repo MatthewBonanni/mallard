@@ -21,58 +21,64 @@
 #include "physics.h"
 
 /**
- * @brief Fills a LagrangeView: every owned cell as a Lagrange cell of the
- *        degree of the reconstruction polynomials, and at its nodes the
+ * @brief Fills the LagrangeViews the writers write, one per degree: every
+ *        owned cell as Lagrange cells of that degree, and at their nodes the
  *        requested fields from its polynomial, or from its average where the
  *        reconstruction has no admissible value there (troubled cells).
  */
 class HighOrderOutput {
     public:
         /**
-         * @brief Sets the view's order, method and fields: those of TENO's polynomials,
-         *        none for reconstructions without (order 0).
+         * @brief Sets the views of degrees 1 to that of TENO's polynomials (views[d] of degree d),
+         *        their method and fields; none for reconstructions without.
          */
         void init(std::shared_ptr<Mesh> mesh, const FaceReconstruction * reconstruction, bool mixture,
-                  LagrangeView & view);
+                  std::vector<LagrangeView> & views);
 
         /** @brief Once the writers requested their fields: the nodes, their geometry and the arrays of their values. */
         void setup();
 
-        /** @brief Whether any writer writes the view. */
-        bool active() const { return n_nodes > 0; }
+        /** @brief Whether any writer writes a view. */
+        bool active() const { return !built.empty(); }
 
         /**
          * @brief Enqueues the requested fields at every node from the polynomials of
-         *        W_cells, current in the halo too; the view's values hold them after a fence.
+         *        W_cells, current in the halo too; the views' values hold them after a fence.
          */
         void update(FaceReconstruction & reconstruction, Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells,
                     const Euler & physics);
 
     private:
-        /** @brief The cells of one shape, with the same nodes per cell, evaluated chunk by chunk. */
+        /** @brief Lagrange cells of one shape, with the same nodes each, evaluated chunk by chunk. */
         struct Group {
-            uint32_t m = 0;        // nodes per cell
+            uint32_t m = 0;        // nodes per Lagrange cell
             uint32_t n_cells = 0;
-            uint32_t chunk = 0;    // cells per chunk
-            uint32_t n_basis[2] = {0, 0};
-            Kokkos::View<uint32_t *> cells;        // padded to whole chunks with the last cell
-            Kokkos::View<uint32_t *> geometry;     // where its geometry nodes start
-            Kokkos::View<uint8_t *> curved;        // 1: quadratic geometry
+            uint32_t chunk = 0;    // Lagrange cells per chunk
+            uint32_t n_basis = 0;  // vertices
+            bool exact = false;    // the nodes are given (curved cells), not the vertices
+            Kokkos::View<uint32_t *> cells;        // their mesh cells, padded to whole chunks with the last
+            Kokkos::View<uint32_t *> geometry;     // where their vertices, or (exact) nodes, start
             Kokkos::View<uint64_t *> first_node;   // in the view
-            Kokkos::View<rtype **> basis[2];       // [node][geometry node] of linear and quadratic geometry
+            Kokkos::View<rtype **> basis;          // [node][vertex], but exact
             Kokkos::View<rtype *[N_DIM]> offsets;  // chunk work: nodes from the centroid
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
         };
+        /** @brief A view the writers write, and its device data. */
+        struct Built {
+            LagrangeView * view = nullptr;
+            uint64_t n_nodes = 0;
+            std::vector<Group> groups;
+            Kokkos::View<rtype *[N_DIM]> geometry;  // the vertices and given nodes
+            Kokkos::View<uint8_t *> codes;          // per requested field
+            Kokkos::View<uint32_t *> columns;       // per requested field: its first column
+            Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> values;  // [field][node][component]
+        };
+
+        void build(Built & b);
 
         std::shared_ptr<Mesh> mesh;
-        LagrangeView * view = nullptr;
-        uint64_t n_nodes = 0;
-        uint32_t n_columns = 0;
-        std::vector<Group> groups;
-        Kokkos::View<rtype *[N_DIM]> geometry;  // the cells' geometry nodes
-        Kokkos::View<uint8_t *> codes;          // per requested field
-        Kokkos::View<uint32_t *> columns;       // per requested field: its first column
-        Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace> values;  // [field][node][component]
+        std::vector<LagrangeView> * views = nullptr;
+        std::vector<Built> built;
 };
 
 #endif // HIGH_ORDER_OUTPUT_H

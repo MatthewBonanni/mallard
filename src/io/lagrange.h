@@ -21,7 +21,7 @@ class Geometry;
 
 namespace lagrange {
 
-/** @brief The shapes of VTK Lagrange cells that Mallard writes (pyramids as collapsed hexahedra). */
+/** @brief The shapes of VTK Lagrange cells that Mallard writes (pyramids as two tetrahedra). */
 enum class Shape : uint8_t {
     TRIANGLE,
     QUADRILATERAL,
@@ -59,17 +59,24 @@ std::vector<Point> reference_nodes(Shape shape, uint32_t order);
  */
 std::vector<double> basis(Shape shape, uint32_t order, std::span<const Point> points);
 
-/** @brief The shape of a mesh cell of n_vertices vertices: a pyramid is a hexahedron with its top face at the apex. */
+/** @brief The shape of a mesh cell of n_vertices vertices, but pyramids. */
 Shape shape_of(uint32_t dim, uint32_t n_vertices);
 
+/** @brief A Lagrange cell of a mesh cell: its shape, and its vertices or (exact) its nodes. */
+struct Piece {
+    Shape shape;
+    std::vector<Point> points;  // the vertices in VTK order, or (exact) every node
+    bool exact = false;
+};
+
 /**
- * @brief The geometry of mesh cell c as a Lagrange cell of shape_of its
- *        vertices: its nodes, the vertices in VTK order (a pyramid's apex four
- *        times), and on curved cells (curves not null) but pyramids the
- *        nodes of a quadratic cell on the curved geometry.
- * @return The geometry's order: 1, or 2 for curved cells.
+ * @brief Mesh cell c as Lagrange cells of this order: itself, or a pyramid
+ *        as two tetrahedra (VTK has no Lagrange pyramid, and locates points
+ *        badly in degenerate hexahedra). Curved cells (curves not null) but
+ *        pyramids give their nodes: on the cell's quadratic geometry
+ *        (quadratic_nodes), and on its curved faces' exact shape.
  */
-uint32_t cell_geometry(const Mesh & mesh, const curved::Geometry * curves, uint32_t c, std::vector<Point> & nodes);
+std::vector<Piece> pieces(const Mesh & mesh, const curved::Geometry * curves, uint32_t c, uint32_t order);
 
 /**
  * @brief The nodes of curved cell c after its corners (mesh nodes in VTK

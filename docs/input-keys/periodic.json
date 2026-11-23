@@ -36,6 +36,7 @@
   "examples/vortex_ring_3d/coarse.toml",
   "examples/vortex_ring_3d/input.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/high_order_view.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tools/dev/catalog_inputs/3d/sector.toml"

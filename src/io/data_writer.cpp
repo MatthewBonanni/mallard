@@ -140,7 +140,7 @@ void DataWriter::init(const Input & input,
                       const std::vector<std::string> & restart_variables,
                       const CellSubset * cell_subset,
                       const std::string & prefix_in,
-                      LagrangeView * view_in) {
+                      std::vector<LagrangeView> * views) {
     if (!input.contains("prefix")) {
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
@@ -367,10 +367,34 @@ void DataWriter::init(const Input & input,
                           .fix = "Remove high_order here: restart and xdmf files and regions hold cell values",
                           .docs = "docs/guide/output.md#high-order-view"});
     }
-    if (whole_mesh && find_value_or<bool>(input, "high_order", true) && view_in && view_in->order > 0 &&
-        std::ranges::any_of(fields, [&](const Field & f) { return view_in->can_write(f.name); })) {
+    if (whole_mesh && find_value_or<bool>(input, "high_order", false)) {
+        const uint32_t max_degree = views && !views->empty() ? static_cast<uint32_t>(views->size() - 1) : 0;
+        if (max_degree == 0) {
+            throw InputError({.key = "write_data.high_order",
+                              .line = line_of(input, "high_order"),
+                              .message = "needs the polynomials of a TENO reconstruction; this run's has none",
+                              .fix = "Set [numerics.face_reconstruction] type = \"TENO\", or remove high_order",
+                              .docs = "docs/guide/output.md#high-order-view"});
+        }
+        const int degree = find_value_or<int>(input, "high_order_degree", int(max_degree));
+        if (degree < 1 || degree > int(max_degree)) {
+            throw InputError({.key = "write_data.high_order_degree",
+                              .line = line_of(input, "high_order_degree"),
+                              .message = "is " + std::to_string(degree) + "; the reconstruction's polynomials have degree " +
+                                         std::to_string(max_degree),
+                              .fix = "Give a degree from 1 to " + std::to_string(max_degree),
+                              .docs = "docs/guide/output.md#high-order-view"});
+        }
+        LagrangeView & v = (*views)[size_t(degree)];
+        if (std::ranges::none_of(fields, [&](const Field & f) { return v.can_write(f.name); })) {
+            throw InputError({.key = "write_data.high_order",
+                              .line = line_of(input, "high_order"),
+                              .message = "needs a field with values at the nodes; none of fields has",
+                              .fix = "Add one of RHO, U, P, T, MACH, ... to fields, or remove high_order",
+                              .docs = "docs/guide/output.md#high-order-view"});
+        }
         high_order = std::make_unique<DataWriter>();
-        high_order->init_view(*this, *view_in);
+        high_order->init_view(*this, v);
     }
 
     if (output_files_enabled()) create_parent_directories("the output", prefix);
@@ -399,8 +423,22 @@ void DataWriter::init_view(const DataWriter & main, LagrangeView & view_in) {
     }
 }
 
-DataWriter::Values DataWriter::capture_view() const {
+DataWriter::Values DataWriter::capture_view(const bool expand) const {
     Values values = capture(mesh->n_owned(), false, true);
+    if (expand && view->n_entries() != mesh->n_owned()) {
+        for (size_t f = 0; f < fields.size(); f++) {
+            const size_t n_comp = fields[f].n_vtk_components();
+            std::vector<rtype> out;
+            out.reserve(view->n_entries() * n_comp);
+            for (size_t k = 0; k + 1 < view->first_entry.size(); k++) {
+                for (uint64_t e = view->first_entry[k]; e < view->first_entry[k + 1]; e++) {
+                    out.insert(out.end(), values[f].begin() + std::ptrdiff_t(k * n_comp),
+                               values[f].begin() + std::ptrdiff_t((k + 1) * n_comp));
+                }
+            }
+            values[f] = std::move(out);
+        }
+    }
     for (const Field & field : node_fields) {
         const rtype * v = view->values(field.name);
         values.emplace_back(v, v + view->n_nodes() * LagrangeView::components(field.name));
@@ -449,7 +487,7 @@ OutputSummary DataWriter::summary() const {
         parts.push_back(names);
     }
     if (high_order) {
-        parts.push_back("high-order view " + high_order->index_file() + " (order " + std::to_string(high_order->view->order) + ")");
+        parts.push_back("high-order view " + high_order->index_file() + " (degree " + std::to_string(high_order->view->order) + ")");
     }
     std::string contents;
     for (const std::string & part : parts) contents += (contents.empty() ? "" : "; ") + part;
@@ -465,9 +503,9 @@ double DataWriter::snapshot_bytes() const {
     uint64_t ids = 0;
     for (uint32_t k = 0; k < n_out; k++) ids += mesh->h_n_nodes_of_cell(subset ? subset_cells[k] : k);
     const bool distributed = mesh->n_global_cells > 0;
-    std::array<uint64_t, 2> counts = {n_out, view ? view->n_nodes() : ids};
+    std::array<uint64_t, 3> counts = {n_out, view ? view->n_nodes() : ids, view ? view->n_entries() : n_out};
     if (distributed && comm::size() > 1) counts = comm::allreduce(counts, comm::Op::SUM);
-    const double cells = double(counts[0]);
+    const double cells = double(counts[2]);
     const double points = view ? double(counts[1]) : double(distributed ? mesh->n_global_nodes : mesh->n_nodes);
     double values = 0.0;
     for (const Field & field : fields) values += cells * (format == DataFormat::RESTART ? 1 : field.n_vtk_components());
@@ -785,7 +823,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
                 in_flight->hash.push_back({filename, filename, true, collective});
             }
             auto job = [this, filename, block, root, mesh_file,
-                        values = view ? capture_view() : capture(mesh->n_owned(), subset), list = history]() {
+                        values = view ? capture_view(false) : capture(mesh->n_owned(), subset), list = history]() {
                 write_vtkhdf(filename, block, values);
                 if (root) {
                     publish_file("the VTKHDF file", filename);
@@ -814,7 +852,7 @@ void DataWriter::write(uint64_t step, rtype t, bool force, const RestartAttribut
             in_flight->hash.push_back({piece.str() + ".vtu", piece.str() + ".vtu"});
             if (distributed && root) in_flight->hash.push_back({filename, filename});
             auto job = [this, piece = piece.str() + ".vtu", filename, stem, block, root, distributed, n_ranks,
-                        values = view ? capture_view() : capture(mesh->n_owned(), subset, true),
+                        values = view ? capture_view(true) : capture(mesh->n_owned(), subset, true),
                         series = history]() mutable {
                 write_vtu(partial_name(piece), block, values);
                 publish_file("the snapshot", piece);
@@ -863,7 +901,7 @@ DataWriter::Block DataWriter::snapshot_of(uint64_t step, rtype t, bool force) co
                                                            : file_format::VTU_OUTPUT.version;
     Block block = snapshot_block::make(step, double(t), snapshot_block::current_reason(force), FORMAT_NAMES.at(format),
                                        version, std::move(list));
-    if (view) block.reconstruction = {view->method, int(view->order) + 1, {"cell_average"}};
+    if (view) block.reconstruction = {view->method, view->reconstruction_order, {"cell_average"}};
     return block;
 }
 
@@ -1874,7 +1912,9 @@ void DataWriter::write_vtu(const std::string & filename, const Block & block, Va
 
     using header_t = uint64_t;
     // Distributed runs write their owned cells (of the subset); unused halo nodes are harmless
-    const uint32_t n_out = subset ? static_cast<uint32_t>(subset_cells.size()) : mesh->n_owned();
+    const uint32_t n_out = view      ? static_cast<uint32_t>(view->n_entries())
+                           : subset ? static_cast<uint32_t>(subset_cells.size())
+                                    : mesh->n_owned();
     const bool zlib = compression == Compression::ZLIB;
 
     // The mesh's arrays (points, connectivity, offsets, types): the same in

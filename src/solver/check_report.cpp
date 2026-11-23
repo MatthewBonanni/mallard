@@ -382,14 +382,14 @@ void output_section(report::Text & text, const CheckReport & r) {
         s = report::worse(s, row);
         rows.push_back({row,
                         {o.prefix, o.format, bytes(o.bytes),
-                         o.high_order_order > 0 ? bytes(o.high_order_bytes) : "-",
-                         o.high_order_order > 0 ? std::to_string(o.high_order_order) : "-"}});
+                         o.high_order_degree > 0 ? bytes(o.high_order_bytes) : "-",
+                         o.high_order_degree > 0 ? std::to_string(o.high_order_degree) : "-"}});
     }
     text.section("Output", s);
     text.note("Bytes of each [[write_data]] snapshot before compression, the mesh counted where each snapshot "
-              "repeats it; high-order view: its companion files of the reconstruction polynomials, off with "
-              "high_order = false. See docs/guide/output.md#high-order-view.");
-    text.table({"prefix", "format", "cell values", "high-order view", "order"}, rows);
+              "repeats it; high-order view: its companion files of the reconstruction polynomials, written "
+              "with high_order = true. See docs/guide/output.md#high-order-view.");
+    text.table({"prefix", "format", "cell values", "high-order view", "degree"}, rows);
 }
 
 void sizing_section(report::Text & text, const CheckReport & r) {
@@ -719,7 +719,7 @@ std::string outputs_json(const CheckReport & r) {
                  .add("format", o.format)
                  .add("bytes", o.bytes)
                  .add("high_order_bytes", o.high_order_bytes)
-                 .add("high_order_order", o.high_order_order)
+                 .add("high_order_degree", o.high_order_degree)
                  .str();
     }
     return a + "]";

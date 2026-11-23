@@ -397,12 +397,25 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 ### High-order view
 
 A TENO run knows more than its cell averages: inside each cell, the
-reconstruction's central polynomial of degree `order - 1`. Each whole-mesh
-`vtkhdf` or `vtu` snapshot writer of a TENO run also writes that, as the
-**high-order view** `PREFIX_high_order...`, beside its own files, in the same
-format and layout (`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and
-its `.vtu` files). Each cell is a VTK Lagrange cell of the polynomials'
-degree (order 3: quadratic, order 5: quartic), and its nodes hold the fields
+reconstruction's central polynomial of degree `order - 1`. With
+`high_order = true`, a whole-mesh `vtkhdf` or `vtu` snapshot writer of a TENO
+run also writes that, as the **high-order view** `PREFIX_high_order...`,
+beside its own files, in the same format and layout
+(`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and its `.vtu`
+files):
+
+```toml
+[[write_data]]
+prefix = "solut/flow"
+interval = 500
+fields = ["RHO", "U", "P", "MACH"]
+high_order = true
+high_order_degree = 2   # optional: quadratic cells; default order - 1
+```
+
+Each cell is a VTK Lagrange cell of the polynomials' degree (order 3:
+quadratic, order 5: quartic), or of the lower `high_order_degree`, and its
+nodes hold the fields
 the entry writes from the polynomial: `RHO`, `RHOU`, `RHOE`, `U`, `P`, `T`,
 `H`, `MACH` and their components, from the point values of the conservative
 variables. Other fields (`TENO_SIGMA`, `CFL`, statistics, ...) are cell data
@@ -421,13 +434,15 @@ leaves the admissible states, hold their averages at every node, as
 [probes](probes.md) with `sampling = "point"` do; the view's
 [snapshot block](#snapshot-metadata) says so (`value = "point_value"`, with
 the reconstruction and its fallback). Triangles, quadrilaterals,
-tetrahedra, hexahedra and prisms are Lagrange cells of their shape; pyramids
-are Lagrange hexahedra with their top face collapsed to the apex, which every
-VTK reader draws (VTK 9 has no Lagrange pyramid); VTK's point location is
-unreliable in such degenerate cells, so probing and resampling filters miss
-or misplace points inside pyramids. On straight cells the drawn field is the polynomial
-exactly; on curved cells it is exact at the nodes. Rationale, node orderings
-and costs: [design note](../design/high_order_output.md).
+tetrahedra, hexahedra and prisms are Lagrange cells of their shape; each
+pyramid is two Lagrange tetrahedra, which VTK draws, probes and resamples
+like any cell (VTK 9 has no Lagrange pyramid), its cell data repeated on
+both. Cells on [curved boundaries](meshes.md#curved-boundaries) keep their
+shape: nodes on a curved face lie on the exact curve or surface, the others
+on the cell's quadratic geometry. At its full degree on straight cells the
+drawn field is the polynomial exactly; at a lower degree, or on curved cells,
+it is exact at the nodes. Rationale, node orderings and costs: [design
+note](../design/high_order_output.md).
 
 **Use it to look, not to measure.** ParaView's filters on the view (contours,
 slices, integrals, plots over lines) act on the values at the nodes and VTK's
@@ -438,30 +453,23 @@ the same point values), [`[integrals]`](statistics.md) and
 
 **Size.** The view holds `(p+1)^2` (2D quadrilaterals) or `(p+1)^3` (hexahedra)
 nodes per cell for degree `p`, each with its coordinates: at order 5 about 25
-times a 2D snapshot of the same fields, 125 times in 3D. `mallard check`
-prints each entry's bytes per snapshot, with and without the view, in its
-**Output** section, and warns (`W-OUTPUT-SIZE`) above 10 GB per snapshot.
-`high_order = false` in an entry writes the cell values alone:
+times a 2D snapshot of the same fields, 125 times in 3D, hence off by
+default; `high_order_degree = 2` brings that to 9 and 27 times. `mallard
+check` prints each entry's bytes per snapshot, with and without the view,
+and the view's degree in its **Output** section, and warns
+(`W-OUTPUT-SIZE`) above 10 GB per snapshot.
 
-```toml
-[[write_data]]
-prefix = "solut/flow"
-interval = 500
-fields = ["RHO", "U", "P"]
-high_order = false   # cell values only
-```
-
-For a run written with it off, `mallard post derive` writes the view
-afterwards (on by default; `--high-order off` leaves it out). From restart
-files, which hold the cell averages, it is the view the run would have
-written:
+For a run written without it, `mallard post derive --high-order on` writes
+the view afterwards. From restart files, which hold the cell averages, it is
+the view the run would have written:
 
 ```sh
-mallard post derive solut/restart_000500.restart --fields MACH --with-state -o view
+mallard post derive solut/restart_000500.restart --fields MACH --with-state --high-order on -o view
 ```
 
-MUSCL and first-order runs have no polynomial beyond the average and write no
-view; nor do `xdmf`, restart, region and boundary writers.
+MUSCL and first-order runs have no polynomial beyond the average, and
+`high_order = true` is an error there, as it is on `xdmf`, restart, region and
+boundary writers.
 
 ### Snapshots of regions
 

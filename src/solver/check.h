@@ -168,7 +168,7 @@ struct CheckOutput {
     std::string prefix, format;
     double bytes = 0.0;             // the snapshot's cell values, and its mesh where each snapshot repeats it
     double high_order_bytes = 0.0;  // its high-order view's, 0 without one
-    uint32_t high_order_order = 0;
+    uint32_t high_order_degree = 0;
 };
 
 struct CheckReport {

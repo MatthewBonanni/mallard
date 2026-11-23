@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "comm.h"
+#include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "lagrange.h"
 #include "mesh_block.h"
@@ -156,18 +157,22 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
         std::filesystem::remove_all(dir);
         Solver solver;
         solver.set_distributed(false);
-        solver.init(parse_toml(polynomial_case(mesh_file, order,
-                                               "[[write_data]]\nprefix = \"" + dir + "/f\"\nformat = \"vtkhdf\"\n"
-                                               "series = false\ninterval = 1\nfields = [\"RHO\", \"U\", \"TENO_SIGMA\"]\n")));
+        std::string writers;
+        for (int degree = 1; degree < order; degree++) {
+            writers += "[[write_data]]\nprefix = \"" + dir + "/f" + std::to_string(degree) + "\"\nformat = \"vtkhdf\"\n"
+                       "series = false\ninterval = 1\nhigh_order = true\nhigh_order_degree = " + std::to_string(degree) +
+                       "\nfields = [\"RHO\", \"U\", \"TENO_SIGMA\"]\n";
+        }
+        solver.init(parse_toml(polynomial_case(mesh_file, order, writers)));
         solver.run();
-        const std::string file = dir + "/f_high_order_000000.vtkhdf";
+        for (uint32_t p = 1; p < uint32_t(order); p++) {
+        const std::string file = dir + "/f" + std::to_string(p) + "_high_order_000000.vtkhdf";
         const auto points = h5_values<double>(file, "VTKHDF/Points");
         const auto offsets = h5_values<int64_t>(file, "VTKHDF/Offsets");
         const auto types = h5_values<uint8_t>(file, "VTKHDF/Types");
         const auto rho = h5_values<double>(file, "VTKHDF/PointData/RHO");
         const auto u = h5_values<double>(file, "VTKHDF/PointData/U");
         EXPECT_EQ(h5_values<double>(file, "VTKHDF/CellData/TENO_SIGMA").size(), types.size());
-        const uint32_t p = uint32_t(order - 1);
         size_t n_checked = 0;
         for (size_t c = 0; c < types.size(); c++) {
             const size_t first = size_t(offsets[c]), n = size_t(offsets[c + 1]) - first;
@@ -182,22 +187,23 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactly) {
             n_checked++;
             for (size_t k = first; k < first + n; k++) {
                 EXPECT_NEAR(rho[k], polynomial_rho(order, points[3 * k], points[3 * k + 1]), 1e-12)
-                    << "order " << order << " cell " << c << " node " << k - first;
+                    << "order " << order << " degree " << p << " cell " << c << " node " << k - first;
                 EXPECT_NEAR(u[3 * k], 0.2, 1e-12);
                 EXPECT_EQ(u[3 * k + 2], 0.0);
             }
         }
         EXPECT_GT(n_checked, 20u);
+        }
     }
 }
 
-TEST(HighOrderOutputTest, OptingOutWritesTheSameSolutionFilesAndNoView) {
+TEST(HighOrderOutputTest, TheViewIsOptInAndLeavesTheSolutionFilesAlone) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string mesh_file = write_temp("high_order_opt_out.msh", jittered_mixed_mesh(6));
     const std::string dir = (scratch_dir() / "mallard_high_order_opt_out").string();
     std::filesystem::remove_all(dir);
     for (const std::string variant : {"on", "off"}) {
-        const std::string key = variant == "off" ? "high_order = false\n" : "";
+        const std::string key = variant == "on" ? "high_order = true\n" : "";
         Solver solver;
         solver.set_distributed(false);
         solver.init(parse_toml(polynomial_case(
@@ -243,6 +249,29 @@ TEST(HighOrderOutputTest, AWriterOfPartOfTheMeshRejectsTheKey) {
     }
 }
 
+TEST(HighOrderOutputTest, TheViewNeedsTenoAndADegreeOfItsPolynomials) {
+    if (comm::size() > 1) GTEST_SKIP() << "serial";
+    const std::string mesh_file = write_temp("high_order_keys.msh", jittered_mixed_mesh(4));
+    const std::string dir = (scratch_dir() / "mallard_high_order_keys").string();
+    std::string muscl = polynomial_case(mesh_file, 3, "[[write_data]]\nprefix = \"" + dir + "/b\"\ninterval = 1\n"
+                                                     "high_order = true\nfields = [\"P\"]\n");
+    const std::string teno = "type = \"TENO\"\ntroubled_threshold = 1.0\norder = 3\n";
+    muscl.replace(muscl.find(teno), teno.size(), "type = \"MUSCL\"\n");
+    for (const auto & [input, key] : {std::pair{muscl, std::string("TENO")},
+                                      {polynomial_case(mesh_file, 3, "[[write_data]]\nprefix = \"" + dir + "/b\"\n"
+                                                       "interval = 1\nhigh_order = true\nhigh_order_degree = 3\n"
+                                                       "fields = [\"P\"]\n"), std::string("high_order_degree")}}) {
+        Solver solver;
+        solver.set_distributed(false);
+        try {
+            solver.init(parse_toml(input));
+            ADD_FAILURE() << "accepted " << key;
+        } catch (const std::exception & e) {
+            EXPECT_NE(std::string(e.what()).find(key), std::string::npos) << e.what();
+        }
+    }
+}
+
 TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::string mesh_file = write_temp("high_order_check.msh", jittered_mixed_mesh(8));
@@ -250,12 +279,16 @@ TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
     std::filesystem::remove_all(dir);
     const std::string input = polynomial_case(mesh_file, 4,
                                               "[[write_data]]\nprefix = \"" + dir + "/v\"\nformat = \"vtu\"\n"
-                                              "interval = 1\nfields = [\"RHO\", \"U\", \"P\", \"TENO_SIGMA\"]\n");
+                                              "interval = 1\nhigh_order = true\nfields = [\"RHO\", \"U\", \"P\", \"TENO_SIGMA\"]\n"
+                                              "[[write_data]]\nprefix = \"" + dir + "/c\"\nformat = \"vtu\"\n"
+                                              "interval = 1\nfields = [\"RHO\"]\n");
     Solver checked;
     checked.set_distributed(false);
     const CheckReport r = checked.check(parse_toml(input), CheckOptions{});
-    ASSERT_EQ(r.outputs.size(), 1u);
-    EXPECT_EQ(r.outputs[0].high_order_order, 3u);
+    ASSERT_EQ(r.outputs.size(), 2u);
+    EXPECT_EQ(r.outputs[0].high_order_degree, 3u);
+    EXPECT_EQ(r.outputs[1].high_order_degree, 0u);
+    EXPECT_EQ(r.outputs[1].high_order_bytes, 0.0);
     Solver solver;
     solver.set_distributed(false);
     solver.init(parse_toml(input));
@@ -272,11 +305,12 @@ TEST(HighOrderOutputTest, CheckProjectsTheSizeOfEachSnapshotAndItsView) {
 #if Mallard_DIM == 3 && defined(Mallard_HAS_HDF5)
 
 TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactlyOnEveryCellShape) {
-    // Hexahedra, tetrahedra, prisms and pyramids (as collapsed hexahedra): a
-    // quadratic density is exact at every node of cells clear of the walls
+    // Hexahedra, tetrahedra, prisms and pyramids (as two tetrahedra each): a
+    // quadratic density is exact at every node of cells clear of the walls,
+    // and the cells fill the box, positive, without overlap
     if (comm::size() > 1) GTEST_SKIP() << "serial";
     const std::vector<std::pair<std::string, uint8_t>> meshes = {
-        {"cartesian", 72}, {"cartesian_tet", 71}, {"cartesian_prism", 73}, {"cartesian_pyramid", 72}};
+        {"cartesian", 72}, {"cartesian_tet", 71}, {"cartesian_prism", 73}, {"cartesian_pyramid", 71}};
     auto rho = [](double x, double y, double z) {
         return 1.0 + 0.3 * x - 0.2 * y + 0.1 * z + 0.4 * x * y + 0.5 * z * z - 0.3 * y * z;
     };
@@ -296,24 +330,34 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactlyOnEveryCell
             "u = [\"0.2\", \"0.1\", \"0.0\"]\np = \"1.0\"\n" + boundaries +
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[numerics.face_reconstruction]\ntype = \"TENO\"\ntroubled_threshold = 1.0\norder = 3\n"
-            "[[write_data]]\nprefix = \"" + dir + "/f\"\nseries = false\ninterval = 1\nfields = [\"RHO\"]\n"));
+            "[[write_data]]\nprefix = \"" + dir + "/f\"\nseries = false\ninterval = 1\nhigh_order = true\n"
+            "fields = [\"RHO\", \"TENO_SIGMA\"]\n"));
         solver.run();
         const std::string file = dir + "/f_high_order_000000.vtkhdf";
         const auto points = h5_values<double>(file, "VTKHDF/Points");
         const auto offsets = h5_values<int64_t>(file, "VTKHDF/Offsets");
         const auto types = h5_values<uint8_t>(file, "VTKHDF/Types");
         const auto values = h5_values<double>(file, "VTKHDF/PointData/RHO");
+        const size_t n_cells = h5_values<double>(dir + "/f_000000.vtkhdf", "VTKHDF/CellData/TENO_SIGMA").size();
+        EXPECT_EQ(types.size(), (type == "cartesian_pyramid" ? 2 : 1) * n_cells) << type;
+        EXPECT_EQ(h5_values<double>(file, "VTKHDF/CellData/TENO_SIGMA").size(), types.size()) << type;
+        double volume = 0.0;
         const Shape shape = vtk_type == 71 ? Shape::TETRAHEDRON : vtk_type == 73 ? Shape::WEDGE : Shape::HEXAHEDRON;
         size_t n_checked = 0;
         for (size_t c = 0; c < types.size(); c++) {
             const size_t first = size_t(offsets[c]), n = size_t(offsets[c + 1]) - first;
             ASSERT_EQ(types[c], vtk_type) << type;
             ASSERT_EQ(n, lagrange::n_nodes(shape, 2)) << type;
-            if (type == "cartesian_pyramid") {
-                // The top face is the apex
-                for (size_t k = 5; k < 8; k++) {
-                    for (size_t i = 0; i < 3; i++) EXPECT_EQ(points[3 * (first + k) + i], points[3 * (first + 4) + i]);
+            if (shape == Shape::TETRAHEDRON) {
+                double e[3][3];
+                for (size_t a = 0; a < 3; a++) {
+                    for (size_t i = 0; i < 3; i++) e[a][i] = points[3 * (first + a + 1) + i] - points[3 * first + i];
                 }
+                const double v = (e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                                  e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                                  e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0])) / 6.0;
+                EXPECT_GT(v, 0.0) << type << " cell " << c;
+                volume += v;
             }
             bool interior = true;
             for (size_t k = first; k < first + n; k++) {
@@ -327,12 +371,61 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactlyOnEveryCell
             }
         }
         EXPECT_GT(n_checked, 7u) << type;
+        if (shape == Shape::TETRAHEDRON) EXPECT_NEAR(volume, 1.0, 1e-12) << type;
     }
 }
 
 #endif // Mallard_DIM == 3 && Mallard_HAS_HDF5
 
 #ifdef Mallard_HAS_HDF5
+
+TEST(HighOrderOutputTest, CurvedWallsKeepTheirExactShape) {
+    // The cylinder's cells written with every node of the wall on the circle,
+    // where straight-sided cells would put the edges' inner nodes inside it
+    if (comm::size() > 1) GTEST_SKIP() << "serial";
+    const std::string dir = (scratch_dir() / "mallard_high_order_curved").string();
+    std::filesystem::remove_all(dir);
+#if Mallard_DIM == 2
+    const std::string mesh = source_dir() + "/test/data/meshes/cyl2d.msh";
+    const std::string wall = "type = \"circle\"\ncenter = [0.5, 0.5]\nradius = 0.2\n";
+    const std::string u = "u = [\"0.2\", \"0.0\"]\n";
+    std::vector<std::string> zones = {"inlet", "outlet", "walls", "cylinder"};
+#else
+    const std::string mesh = source_dir() + "/test/data/meshes/cyl3d.msh";
+    const std::string wall = "type = \"cylinder\"\ncenter = [0.5, 0.5, 0.0]\naxis = [0.0, 0.0, 1.0]\nradius = 0.2\n"
+                             "filled = false\n";
+    const std::string u = "u = [\"0.2\", \"0.0\", \"0.0\"]\n";
+    std::vector<std::string> zones = {"inlet", "outlet", "walls", "cylinder", "front", "back"};
+#endif
+    std::string boundaries;
+    for (const std::string & zone : zones) boundaries += "[[boundaries]]\nname = \"" + zone + "\"\ntype = \"outlet_extrapolation\"\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml("[run]\nn_steps = 1\ncfl = 0.2\n[mesh]\ntype = \"file\"\nfilename = \"" + mesh + "\"\n"
+                           "[[mesh.curved]]\nzone = \"cylinder\"\n" + wall +
+                           "[initialize]\ntype = \"analytical\"\nrho = \"1.0\"\n" + u + "p = \"1.0\"\n" + boundaries +
+                           "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+                           "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n"
+                           "[[write_data]]\nprefix = \"" + dir + "/f\"\nseries = false\ninterval = 1\nhigh_order = true\n"
+                           "fields = [\"RHO\"]\n"));
+    solver.run();
+    const std::string file = dir + "/f_high_order_000000.vtkhdf";
+    const auto points = h5_values<double>(file, "VTKHDF/Points");
+    const auto offsets = h5_values<int64_t>(file, "VTKHDF/Offsets");
+    const auto types = h5_values<uint8_t>(file, "VTKHDF/Types");
+    const auto rho = h5_values<double>(file, "VTKHDF/PointData/RHO");
+    size_t inner_on_wall = 0;  // nodes but vertices
+    for (size_t c = 0; c < types.size(); c++) {
+        const int64_t n_vertices = types[c] == 69 ? 3 : types[c] == 70 || types[c] == 71 ? 4 : types[c] == 72 ? 8 : 6;
+        for (size_t k = size_t(offsets[c]); k < size_t(offsets[c + 1]); k++) {
+            const double r = std::hypot(points[3 * k] - 0.5, points[3 * k + 1] - 0.5);
+            EXPECT_GT(r, 0.2 - 1e-12) << "cell " << c << " node " << k;
+            inner_on_wall += r < 0.2 + 1e-12 && int64_t(k) - offsets[c] >= n_vertices;
+            EXPECT_NEAR(rho[k], 1.0, 1e-12);
+        }
+    }
+    EXPECT_GE(inner_on_wall, 16u);  // two per cubic edge on the wall, 8 of them in 2D
+}
 
 TEST(HighOrderOutputTest, ViewFilesDoNotDependOnTheRanks) {
     if (comm::size() > 1 && !have_parallel_hdf5()) GTEST_SKIP() << "needs parallel HDF5";
@@ -356,7 +449,7 @@ TEST(HighOrderOutputTest, ViewFilesDoNotDependOnTheRanks) {
                               u + "p = \"1.0\"\n" + boundaries +
                               "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
                               "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 4\n";
-    expect_vtkhdf_output_matches_serial(input, "interval = 1\nseries = false\nfields = [\"RHO\", \"U\", \"T\"]\n",
+    expect_vtkhdf_output_matches_serial(input, "interval = 1\nseries = false\nhigh_order = true\nfields = [\"RHO\", \"U\", \"T\"]\n",
                                         (scratch_dir() / "mallard_high_order_ranks").string(),
                                         {"_high_order_000002", "_000002"});
 }

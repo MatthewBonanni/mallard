@@ -202,30 +202,34 @@ struct CellSubset {
 };
 
 /**
- * @brief The high-order view of the snapshots (docs/design/high_order_output.md):
- *        every owned cell as a VTK Lagrange cell of the reconstruction's
- *        order with nodes of its own, and the fields that are functions of
- *        the state at those nodes, from the reconstruction polynomials. The
- *        solver sets order and fields, the writers add the fields they write
- *        to requested, and the solver then fills the rest; the values before
- *        each snapshot whose writer writes a view.
+ * @brief A high-order view of the snapshots (docs/design/high_order_output.md):
+ *        every owned cell as VTK Lagrange cells of one degree with nodes of
+ *        their own (a cell, or two tetrahedra for a pyramid), and the fields
+ *        that are functions of the state at those nodes, from the
+ *        reconstruction polynomials. The solver sets degree and fields, the
+ *        writers add the fields they write to requested, and the solver then
+ *        fills the rest; the values before each snapshot whose writer writes it.
  */
 struct LagrangeView {
-    uint32_t order = 0;                   // 0: the reconstruction has no polynomials, no view
+    uint32_t order = 0;                   // the cells' degree
     std::string method;                   // the reconstruction, as snapshot blocks name it
+    int reconstruction_order = 0;         // and its order
     std::vector<std::string> fields;      // those that can be written at the nodes
     std::vector<std::string> requested;   // those the writers write there
-    std::vector<uint64_t> first_node;     // [owned cell in global-id order + 1]: where its nodes start
+    std::vector<uint64_t> first_entry;    // [owned cell in global-id order + 1]: where its Lagrange cells start
+    std::vector<uint64_t> first_node;     // [Lagrange cell + 1]: where its nodes start
     std::vector<rtype> points;            // [node][3]
-    std::vector<uint8_t> types;           // [owned cell in global-id order]: VTK cell type
+    std::vector<uint8_t> types;           // [Lagrange cell]: VTK cell type
     /** @brief A requested field's values at the nodes, [node][1 or 3 components]. */
     std::function<const rtype *(const std::string &)> values;
 
     bool can_write(const std::string & name) const { return std::find(fields.begin(), fields.end(), name) != fields.end(); }
     uint64_t n_nodes() const { return first_node.empty() ? 0 : first_node.back(); }
+    uint64_t n_entries() const { return types.size(); }
     /** @brief Components of a field at the nodes: 3 for the vectors U and RHOU (z zero in 2D), else 1. */
     static uint32_t components(const std::string & name) { return name == "U" || name == "RHOU" ? 3 : 1; }
 };
+
 
 /**
  * @brief Writes snapshots either every `interval` steps or every
@@ -251,9 +255,9 @@ class DataWriter {
          *        (default: CONSERVATIVE_NAMES); ignored for other formats.
          * @param subset Only these cells (vtkhdf and vtu), with their fractions as REGION_FRACTION.
          * @param prefix The files' prefix, if not the entry's.
-         * @param view The high-order view (vtkhdf and vtu of the whole mesh, with high_order): its
-         *        fields this writer writes are added to its requested ones, and each snapshot then
-         *        also writes the view as <prefix>_high_order.
+         * @param views The high-order views by degree (vtkhdf and vtu of the whole mesh, with
+         *        high_order): this writer's fields at the nodes are added to its view's requested
+         *        ones, and each snapshot then also writes the view as <prefix>_high_order.
          */
         void init(const Input & input,
                   std::vector<Data> & data,
@@ -261,7 +265,7 @@ class DataWriter {
                   const std::vector<std::string> & restart_variables = {},
                   const CellSubset * subset = nullptr,
                   const std::string & prefix = "",
-                  LagrangeView * view = nullptr);
+                  std::vector<LagrangeView> * views = nullptr);
 
         /**
          * @brief Write files on a background thread ([output] async), and
@@ -353,6 +357,8 @@ class DataWriter {
         }
         /** @brief The writer of the high-order view, or null. */
         const DataWriter * high_order_writer() const { return high_order.get(); }
+        /** @brief The degree of the high-order view's cells, or 0. */
+        uint32_t high_order_degree() const { return high_order ? high_order->view->order : 0; }
 
         DataFormat get_format() const { return format; }
         /** @brief Whether its region follows the solution: a write reads the solution's cell values. */
@@ -407,8 +413,11 @@ class DataWriter {
 
         /** @brief The values of the first n_cells cells (by_id: of the owned cells by global id), or of the subset's cells. */
         Values capture(uint32_t n_cells, bool in_subset = false, bool by_id = false) const;
-        /** @brief The high-order view's values: the cell fields' of the owned cells by global id, then the node fields'. */
-        Values capture_view() const;
+        /**
+         * @brief The high-order view's values: the cell fields' of the owned cells by global id (expand: of
+         *        each of their Lagrange cells), then the node fields'.
+         */
+        Values capture_view(bool expand) const;
         /** @brief Set up as the writer of main's high-order view. */
         void init_view(const DataWriter & main, LagrangeView & view_in);
         /** @brief The VTKHDF mesh of the high-order view's cells, in global order (collective). */
@@ -587,6 +596,7 @@ class DataWriter {
             std::vector<int64_t> connectivity, offsets;      // offsets: one more on the last rank
             std::vector<uint8_t> types;                      // cells only
             GlobalOrder order;                               // of the cells
+            std::vector<uint32_t> repeat;                    // high-order view: Lagrange cells of each block cell
         } vtkhdf;
         // vtkhdf with series = true (the default): a file per snapshot, the mesh in <prefix>_mesh.vtkhdf unless
         // it changes, and the series file <prefix>.vtkhdf, an index of them (vtkhdf_series.h) built by rank 0

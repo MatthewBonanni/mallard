@@ -986,7 +986,7 @@ Options:
                          reconstruction's polynomials at the nodes of VTK
                          Lagrange cells, as [[write_data]] high_order does
                          (docs/guide/output.md#high-order-view); the whole mesh
-                         only. Default: on.
+                         only. Default: off.
   --steps LIST           Extract the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Extract the snapshot nearest to simulated time T, or
@@ -1079,7 +1079,7 @@ Options:
                          reconstruction's polynomials at the nodes of VTK
                          Lagrange cells, as [[write_data]] high_order does
                          (docs/guide/output.md#high-order-view); the whole mesh
-                         only. Default: on.
+                         only. Default: off.
   --steps LIST           Derive the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Derive the snapshot nearest to simulated time T, or

@@ -272,7 +272,6 @@ Shape shape_of(uint32_t dim, uint32_t n_vertices) {
     } else {
         switch (n_vertices) {
             case 4: return Shape::TETRAHEDRON;
-            case 5:
             case 8: return Shape::HEXAHEDRON;
             case 6: return Shape::WEDGE;
             default: break;
@@ -410,20 +409,90 @@ std::vector<Point> quadratic_nodes(const Mesh & mesh, const curved::Geometry & g
     return out;
 }
 
-uint32_t cell_geometry(const Mesh & mesh, const curved::Geometry * curves, uint32_t c, std::vector<Point> & nodes) {
+namespace {
+
+/** @brief The Lagrange nodes of curved cell c on its curved faces moved onto them: the other nodes stay. */
+void onto_curved_faces(const Mesh & mesh, const curved::Geometry & curves, uint32_t c, Shape shape, uint32_t order,
+                       const std::vector<uint32_t> & corners, std::vector<Point> & nodes) {
+    const std::vector<Point> vertices = reference_nodes(shape, 1);
+    const std::vector<Point> reference = reference_nodes(shape, order);
+    constexpr double TOL = 1e-12;
+    for (uint32_t j = 0; j < mesh.h_n_faces_of_cell(c); j++) {
+        const uint32_t f = mesh.h_face_of_cell(c, j);
+        if (!curves.face_is_curved(f)) continue;
+        const uint32_t n = mesh.h_n_nodes_of_face(f);
+        std::vector<Point> R(n);
+        for (uint32_t k = 0; k < n; k++) {
+            const auto at = std::find(corners.begin(), corners.end(), mesh.h_node_of_face(f, k));
+            R[k] = vertices[size_t(at - corners.begin())];
+        }
+        // The face's reference coordinates (curved::Geometry::eval's) to the cell's: affine on reference cells
+        const auto r0 = face_reference(n, 0);
+        Point a{}, b{};
+        for (size_t i = 0; i < 3; i++) {
+            if (n == 2) {
+                a[i] = (R[1][i] - R[0][i]) / 2.0;
+            } else if (n == 3) {
+                a[i] = R[1][i] - R[0][i];
+                b[i] = R[2][i] - R[0][i];
+            } else {
+                a[i] = (R[1][i] - R[0][i]) / 2.0;
+                b[i] = (R[3][i] - R[0][i]) / 2.0;
+            }
+        }
+        const auto dot = [](const Point & u, const Point & v) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; };
+        const double aa = dot(a, a), ab = dot(a, b), bb = dot(b, b);
+        const double det = n == 2 ? aa : aa * bb - ab * ab;
+        for (size_t l = 0; l < reference.size(); l++) {
+            Point d;
+            for (size_t i = 0; i < 3; i++) d[i] = reference[l][i] - R[0][i];
+            const double da = dot(d, a), db = dot(d, b);
+            const double s = n == 2 ? da / det : (bb * da - ab * db) / det;
+            const double t = n == 2 ? 0.0 : (aa * db - ab * da) / det;
+            double residual = 0.0;
+            for (size_t i = 0; i < 3; i++) residual += std::pow(d[i] - s * a[i] - t * b[i], 2);
+            if (std::sqrt(residual) > TOL) continue;
+            const bool inside = n == 3 ? s > -TOL && t > -TOL && s + t < 1.0 + TOL : s > -TOL && s < 2.0 + TOL && t > -TOL && t < 2.0 + TOL;
+            if (!inside) continue;
+            const double xi[2] = {r0[0] + s, n == 2 ? 0.0 : r0[1] + t};
+            curved::Vec3 x;
+            curves.eval(f, xi, x, nullptr);
+            nodes[l] = {x[0], x[1], x[2]};
+        }
+    }
+}
+
+} // namespace
+
+std::vector<Piece> pieces(const Mesh & mesh, const curved::Geometry * curves, uint32_t c, uint32_t order) {
     const uint32_t n = mesh.h_n_nodes_of_cell(c);
     std::vector<uint32_t> corners(n);
-    for (uint32_t k = 0; k < n; k++) corners[k] = mesh.h_node_of_cell(c, vtk_local_node(n, k));
-    const bool pyramid = N_DIM == 3 && n == 5;
-    nodes.clear();
-    for (uint32_t k = 0; k < (pyramid ? 8u : n); k++) {
-        Point x = {0.0, 0.0, 0.0};
-        FOR_I_DIM x[i] = double(mesh.h_node_coords(corners[std::min(k, n - 1)], i));
-        nodes.push_back(x);
+    std::vector<Point> x(n);
+    for (uint32_t k = 0; k < n; k++) {
+        corners[k] = mesh.h_node_of_cell(c, vtk_local_node(n, k));
+        x[k] = {0.0, 0.0, 0.0};
+        FOR_I_DIM x[k][i] = double(mesh.h_node_coords(corners[k], i));
     }
-    if (pyramid || !curves || !curves->cell_is_curved(c)) return 1;
-    for (const Point & x : quadratic_nodes(mesh, *curves, c, corners)) nodes.push_back(x);
-    return 2;
+    if (N_DIM == 3 && n == 5) {
+        // Two tetrahedra on the base's diagonal 0-2, positive as the pyramid
+        return {Piece{Shape::TETRAHEDRON, {x[0], x[1], x[2], x[4]}, false},
+                Piece{Shape::TETRAHEDRON, {x[0], x[2], x[3], x[4]}, false}};
+    }
+    const Shape shape = shape_of(N_DIM, n);
+    if (!curves || !curves->cell_is_curved(c)) return {Piece{shape, x, false}};
+    // Curved: the quadratic cell of quadratic_nodes at the Lagrange nodes, those on curved faces on the faces
+    std::vector<Point> geometry = x;
+    for (const Point & p : quadratic_nodes(mesh, *curves, c, corners)) geometry.push_back(p);
+    const std::vector<Point> reference = reference_nodes(shape, order);
+    const std::vector<double> phi = basis(shape, 2, reference);
+    std::vector<Point> nodes(reference.size(), Point{0.0, 0.0, 0.0});
+    for (size_t l = 0; l < reference.size(); l++) {
+        for (size_t k = 0; k < geometry.size(); k++) {
+            for (size_t i = 0; i < 3; i++) nodes[l][i] += phi[l * geometry.size() + k] * geometry[k][i];
+        }
+    }
+    onto_curved_faces(mesh, *curves, c, shape, order, corners, nodes);
+    return {Piece{shape, nodes, true}};
 }
 
 } // namespace lagrange

@@ -265,13 +265,18 @@ std::vector<uint64_t> as_bits(const rtype * values, size_t n) {
 void DataWriter::build_vtkhdf_view() {
     const bool distributed = mesh->n_global_cells > 0;
     const uint32_t n_out = mesh->n_owned();
-    // Each cell's record: its type, then its nodes' coordinates as raw bits
+    // Each cell's record: its Lagrange cells' count, their types and node counts, then their nodes' coordinates as raw bits
     std::vector<uint64_t> ids(n_out), offsets{0}, records;
     for (uint32_t k = 0; k < n_out; k++) {
         ids[k] = mesh->h_global_cell(owned_by_id[k]);
-        records.push_back(view->types[k]);
-        const std::vector<uint64_t> bits = as_bits(view->points.data() + 3 * view->first_node[k],
-                                                   3 * (view->first_node[k + 1] - view->first_node[k]));
+        const uint64_t e0 = view->first_entry[k], e1 = view->first_entry[k + 1];
+        records.push_back(e1 - e0);
+        for (uint64_t e = e0; e < e1; e++) {
+            records.push_back(view->types[e]);
+            records.push_back(view->first_node[e + 1] - view->first_node[e]);
+        }
+        const std::vector<uint64_t> bits = as_bits(view->points.data() + 3 * view->first_node[e0],
+                                                   3 * (view->first_node[e1] - view->first_node[e0]));
         records.insert(records.end(), bits.begin(), bits.end());
         offsets.push_back(records.size());
     }
@@ -279,25 +284,39 @@ void DataWriter::build_vtkhdf_view() {
     m.order = GlobalOrder(ids, distributed ? mesh->n_global_cells : mesh->n_cells, distributed);
     const auto [block_offsets, block] = m.order.gather_csr(offsets, records);
     const uint64_t n_block = m.order.size();
-    const auto [first, total] = scan((block.size() - n_block) / 3, distributed);
     m.connectivity.clear();
     m.offsets.clear();
     m.types.clear();
     m.points.clear();
+    m.repeat.clear();
+    uint64_t n_points = 0;
+    for (uint64_t c = 0; c < n_block; c++) {
+        const uint64_t * r = &block[block_offsets[c]];
+        for (uint64_t e = 0; e < r[0]; e++) n_points += r[2 + 2 * e];
+    }
+    const auto [first, total] = scan(n_points, distributed);
     int64_t at = static_cast<int64_t>(first);
     for (uint64_t c = 0; c < n_block; c++) {
         const uint64_t * r = &block[block_offsets[c]];
-        const uint64_t n = (block_offsets[c + 1] - block_offsets[c] - 1) / 3;
-        m.types.push_back(static_cast<uint8_t>(r[0]));
-        m.offsets.push_back(at);
-        for (uint64_t k = 0; k < n; k++) m.connectivity.push_back(at + static_cast<int64_t>(k));
-        for (uint64_t i = 0; i < 3 * n; i++) m.points.push_back(static_cast<rtype>(std::bit_cast<double>(r[1 + i])));
-        at += static_cast<int64_t>(n);
+        const uint64_t n_sub = r[0];
+        const uint64_t * coords = r + 1 + 2 * n_sub;
+        m.repeat.push_back(static_cast<uint32_t>(n_sub));
+        uint64_t n_cell_points = 0;
+        for (uint64_t e = 0; e < n_sub; e++) {
+            const uint64_t n = r[2 + 2 * e];
+            m.types.push_back(static_cast<uint8_t>(r[1 + 2 * e]));
+            m.offsets.push_back(at);
+            for (uint64_t k = 0; k < n; k++) m.connectivity.push_back(at + static_cast<int64_t>(k));
+            at += static_cast<int64_t>(n);
+            n_cell_points += n;
+        }
+        for (uint64_t i = 0; i < 3 * n_cell_points; i++) m.points.push_back(static_cast<rtype>(std::bit_cast<double>(coords[i])));
     }
+    const auto [first_cell, n_cells] = scan(m.types.size(), distributed);
     if (last_rank(distributed)) m.offsets.push_back(static_cast<int64_t>(total));
-    m.n_cells = m.order.n_global();
+    m.n_cells = n_cells;
     m.n_ids = m.n_points = total;
-    m.first_cell = m.order.first();
+    m.first_cell = first_cell;
     m.first_id = m.first_point = first;
     m.built = true;
 }
@@ -421,9 +440,21 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         const uint32_t n_comp = fields[f].n_vtk_components();
         local = values[f];
         if (relative_error > 0.0) compression::round_to_relative_error(local, relative_error);
-        const std::vector<rtype> block = m.order.gather<rtype>(local, n_comp);
-        write_dataset(cell_data, fields[f].name.c_str(), m.n_cells, int(n_comp), m.first_cell, n_block, block.data(),
-                      dxpl, deflate, serial, io_threads);
+        std::vector<rtype> block = m.order.gather<rtype>(local, n_comp);
+        if (!m.repeat.empty() && m.types.size() != n_block) {
+            // A cell's value on each of its Lagrange cells
+            std::vector<rtype> each;
+            each.reserve(m.types.size() * n_comp);
+            for (uint64_t c = 0; c < n_block; c++) {
+                for (uint32_t e = 0; e < m.repeat[c]; e++) {
+                    each.insert(each.end(), block.begin() + std::ptrdiff_t(c * n_comp),
+                                block.begin() + std::ptrdiff_t((c + 1) * n_comp));
+                }
+            }
+            block = std::move(each);
+        }
+        write_dataset(cell_data, fields[f].name.c_str(), m.n_cells, int(n_comp), m.first_cell, block.size() / n_comp,
+                      block.data(), dxpl, deflate, serial, io_threads);
         annotate(cell_data, fields[f].name, fields[f].description);
         h5::cell_methods(cell_data, fields[f].name, cell_methods(fields[f].name));
     }
@@ -434,8 +465,8 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         const uint32_t n_comp = LagrangeView::components(field.name);
         local = values[fields.size() + f];
         if (relative_error > 0.0) compression::round_to_relative_error(local, relative_error);
-        std::vector<uint64_t> offsets(view->first_node.size());
-        for (size_t k = 0; k < offsets.size(); k++) offsets[k] = view->first_node[k] * n_comp;
+        std::vector<uint64_t> offsets(view->first_entry.size());
+        for (size_t k = 0; k < offsets.size(); k++) offsets[k] = view->first_node[view->first_entry[k]] * n_comp;
         const auto [block_offsets, bits] = m.order.gather_csr(offsets, as_bits(local.data(), local.size()));
         std::vector<rtype> block(bits.size());
         for (size_t i = 0; i < bits.size(); i++) block[i] = static_cast<rtype>(std::bit_cast<double>(bits[i]));

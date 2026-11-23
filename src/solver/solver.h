@@ -1588,7 +1588,7 @@ class Solver {
         // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
-        LagrangeView lagrange_view;  // the snapshots' high-order view, filled by high_order_output
+        std::vector<LagrangeView> lagrange_views;  // the snapshots' high-order views by degree, filled by high_order_output
         HighOrderOutput high_order_output;
         std::vector<ForceMonitor> force_monitors;
         IntegralMonitor integral_monitor;

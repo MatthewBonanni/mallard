@@ -67,7 +67,7 @@ def run(mallard, work):
         '[[boundaries]]\nname = "sides"\ntype = "outlet_extrapolation"\n'
         '[physics]\ntype = "euler"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n'
         f'[numerics.face_reconstruction]\ntype = "TENO"\norder = {ORDER}\n'
-        '[[write_data]]\nprefix = "out/flow"\nformat = "vtu"\ninterval = 1\nfields = ["RHO"]\n'
+        '[[write_data]]\nprefix = "out/flow"\nformat = "vtu"\ninterval = 1\nhigh_order = true\nfields = ["RHO"]\n'
         '[output]\nrun_log = ""\n')
     subprocess.run([mallard, "-i", "input.toml", "--kokkos-num-threads=2"], cwd=work, check=True,
                    stdout=subprocess.DEVNULL)

@@ -600,14 +600,14 @@ void Solver::check_outputs(CheckReport & r) const {
         CheckOutput o{writer->get_prefix(), FORMAT_NAMES.at(writer->get_format()), writer->snapshot_bytes(), 0.0, 0};
         if (const DataWriter * view = writer->high_order_writer()) {
             o.high_order_bytes = view->snapshot_bytes();
-            o.high_order_order = lagrange_view.order;
+            o.high_order_degree = writer->high_order_degree();
         }
         if (o.high_order_bytes > OUTPUT_SIZE_WARNING) {
             r.warning(diagnostic_code::OUTPUT_SIZE,
                       "[[write_data]] " + o.prefix + " writes a high-order view of " + bytes(o.high_order_bytes) +
-                          " per snapshot (order " + std::to_string(o.high_order_order) + "; the cell values: " +
-                          bytes(o.bytes) + "): set high_order = false in that [[write_data]] to write the cell "
-                          "values alone, or write it less often");
+                          " per snapshot (degree " + std::to_string(o.high_order_degree) + "; the cell values: " +
+                          bytes(o.bytes) + "): lower its high_order_degree, write it less often, or drop "
+                          "high_order = true to write the cell values alone");
         }
         r.outputs.push_back(std::move(o));
     }

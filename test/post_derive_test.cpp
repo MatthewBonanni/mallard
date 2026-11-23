@@ -41,7 +41,7 @@ std::string vector_of(const char * x, const char * y, const char * z) {
 
 /** @brief A periodic box writing restart files and VTU snapshots of the fields every 2 steps. */
 std::string case_input(const std::string & dir, const std::string & physics, const std::string & state,
-                       const std::string & output, const std::string & fields) {
+                       const std::string & output, const std::string & fields, bool high_order = false) {
     std::ostringstream s;
     s << "[run]\nn_steps = 4\ndt = 1.0e-4\n[mesh]\ntype = \"cartesian\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n";
     if (N_DIM == 3) s << "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
@@ -53,7 +53,7 @@ std::string case_input(const std::string & dir, const std::string & physics, con
       << "[output]\ncheck_interval = 1000000\nrun_log = \"\"\n" << output
       << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n"
       << "[[write_data]]\nprefix = \"" << dir << "/flow\"\nformat = \"vtu\"\nfields = [" << fields
-      << "]\ninterval = 2\n";
+      << "]\ninterval = 2\n" << (high_order ? "high_order = true\n" : "");
     return s.str();
 }
 
@@ -81,20 +81,22 @@ void expect_derived_as_written(const std::string & name, const std::string & phy
         list += (list.empty() ? "" : ",") + f;
         quoted += (quoted.empty() ? "\"" : ", \"") + f + "\"";
     }
+    // And their high-order views, where a field has values at the nodes (MACH, not the mixture's)
+    const bool nodes = std::find(fields.begin(), fields.end(), "MACH") != fields.end();
     const std::string run = fresh_dir(name + "_run");
     {
         Solver solver;
-        solver.init(parse_toml(case_input(run, physics, state, output, quoted)));
+        solver.init(parse_toml(case_input(run, physics, state, output, quoted, nodes)));
         solver.run();
     }
     comm::barrier();
     const std::string out = fresh_dir(name);
-    ASSERT_EQ(derive({run + "/restart_000000.restart", run + "/restart_000002.restart", run + "/restart_000004.restart",
-                      "--fields", list, "--snapshot", "vtu", "-o", out}),
-              0);
-    // And their high-order views, where a field has values at the nodes (MACH, not the mixture's)
-    const bool nodes = std::find(fields.begin(), fields.end(), "MACH") != fields.end();
+    std::vector<std::string> words = {run + "/restart_000000.restart", run + "/restart_000002.restart",
+                                      run + "/restart_000004.restart", "--fields", list, "--snapshot", "vtu", "-o", out};
+    if (nodes) words.insert(words.end(), {"--high-order", "on"});
+    ASSERT_EQ(derive(words), 0);
     EXPECT_EQ(fs::exists(run + "/flow_high_order.pvd"), nodes);
+    EXPECT_EQ(fs::exists(out + "/derived_high_order.pvd"), nodes);
     for (const std::string view : {"", "_high_order"}) {
         if (!view.empty() && !nodes) continue;
         const output::Contents written = output::open(run + "/flow" + view + ".pvd");

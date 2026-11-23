@@ -1,0 +1,39 @@
+# For the key catalog only (tools/dev/input_catalog.py): a [[write_data]] entry
+# writing the high-order view of a TENO run at a degree below its polynomials'.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 1.0
+Ly = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.1 * sin(2 * pi * x)"
+u = [0.5, 0.0]
+p = 1.0
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[[write_data]]
+prefix = "flow"
+format = "vtu"
+interval = 1
+fields = ["RHO", "P"]
+high_order = true
+high_order_degree = 2
