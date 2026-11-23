@@ -25,8 +25,10 @@
 
 #include <toml.hpp>
 
+#include "build_info.h"
 #include "data_paths.h"
 #include "data_writer.h"
+#include "file_format.h"
 #include "mesh_block.h"
 #include "scratch.h"
 #include "solver.h"
@@ -180,6 +182,14 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
                 EXPECT_EQ(data.faces.keys.size(), 10u);
             }
         }
+    }
+}
+
+TEST(FormatCompatTest, UnreadableVersionsNameThisBuildsVersion) {
+    for (const int64_t version : {int64_t{0}, int64_t{99}}) {
+        const std::string error =
+            error_of([&] { file_format::check_version(file_format::RESTART, "gas.restart", version); });
+        EXPECT_NE(error.find("Mallard " + mallard_version() + " reads restart files"), std::string::npos) << error;
     }
 }
 
