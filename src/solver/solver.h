@@ -950,6 +950,8 @@ class Solver {
         void init_boundaries();
         std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
         std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
+        /** @brief The boundary zones no [[boundaries]] entry of case_input names (all if it has none). Collective. */
+        std::vector<CheckUnassigned> zones_not_named(const Input & case_input) const;
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -1314,6 +1316,16 @@ class Solver {
         void report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const;
         /** @brief Gives each diagnostic of the report its key (from its text if it has none), line and column. */
         void locate_diagnostics(CheckReport & r, const std::string & input_file) const;
+        /**
+         * @brief After a setup stopped on errors of independent entries ([[boundaries]], [[write_data]], or zones none
+         *        covers), sets up again from original without them (a failed boundary entry, or an uncovered zone, as
+         *        a symmetry plane) until a setup ends or stops on another error. Adds the errors and warnings of each
+         *        setup to report at their keys in original; returns the keys to report as unused: those the last
+         *        setup did not read if it ended, else those unknown to Mallard (unknown_keys), as in the failed entries.
+         */
+        std::vector<Diagnostic> check_past_errors(CheckReport & report, const Input & original,
+                                                  const std::string & input_file);
+        bool mesh_read = false;  // the mesh phase of the setup completed
         /** @brief Thrown by stop_if_failed: the errors are in setup_errors. */
         struct SetupStopped : std::runtime_error {
             SetupStopped() : std::runtime_error("the setup stopped at the errors of independent parts") {}
