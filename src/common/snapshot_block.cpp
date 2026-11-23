@@ -15,6 +15,7 @@
 #include "common_typedef.h"
 #include "json.h"
 #include "provenance.h"
+#include "units.h"
 
 namespace snapshot_block {
 
@@ -156,10 +157,11 @@ std::string Block::json() const {
     }
     b.raw("fields", list + "]");
     json::Object units;
-    units.add("time", "s");
-    if (averaged) units.add("statistics.average_start", "s").add("statistics.average_end", "s");
-    if (any_average) units.add("fields.average.start", "s").add("fields.average.end", "s");
-    if (any_phase) units.add("fields.average.bin_weight", "s").add("fields.average.period", "s");
+    const std::string seconds = units::of(dim::time);
+    units.add("time", seconds);
+    if (averaged) units.add("statistics.average_start", seconds).add("statistics.average_end", seconds);
+    if (any_average) units.add("fields.average.start", seconds).add("fields.average.end", seconds);
+    if (any_phase) units.add("fields.average.bin_weight", seconds).add("fields.average.period", seconds);
     b.raw("units", units.str());
     return b.str();
 }
