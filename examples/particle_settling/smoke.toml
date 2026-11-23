@@ -1,0 +1,72 @@
+# Smoke settling in still air (2D build): particles that relax faster than a step.
+#
+# Particles of 1 um (density 1000 kg/m^3) relax in tau = 3.1 us, less than a
+# third of the flow's time step (11.5 us at cfl = 0.8 on these 1 cm cells):
+# an explicit integrator would be unstable at that ratio. Each particle with
+# tau below the step relaxes exponentially within the step toward its
+# equilibrium velocity u + tau g (1 - rho / rho_p), here its terminal
+# velocity, so the step stays the flow's own.
+#
+# Run (seconds on one CPU thread):
+#   ../../build/src/mallard -i smoke.toml
+#   python check_particle_settling.py smoke.csv
+#
+# Result: every particle falls at tau g' = 30.24 um/s, exactly (to round-off),
+# Real smoke of this size settles faster: Schiller-Naumann drag has no slip
+# correction for particles near the mean free path of the gas (Kn = 0.066
+# here); drag = "singh" has, and settles them 12% faster.
+
+[run]
+t_stop = 0.01
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 4
+Ny = 4
+Lx = 0.04
+Ly = 0.04
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0e5
+T = 300.0
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 1.0e5
+T_ref = 300.0
+rho_ref = 1.1614401858304297
+mu = 1.8e-5
+Pr = 0.72
+
+[particles]
+type = "solid"
+diameter = 1e-6          # m
+density = 1000.0         # kg/m^3
+gravity = [0.0, -9.81]   # m/s^2, on the particles only
+velocity = [0.0, 0.0]
+file = "smoke.csv"
+
+[particles.lattice]
+lo = [0.005, 0.005]
+hi = [0.035, 0.035]
+n = [3, 3]
+
+[output]
+check_interval = 500
