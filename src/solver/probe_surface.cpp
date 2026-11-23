@@ -114,7 +114,8 @@ FaceSet boundary_faces(const Mesh & mesh, const std::vector<std::string> & zones
         area = std::sqrt(area);
         for (size_t d = 0; d < N_DIM; d++) reals.push_back(static_cast<double>(mesh.h_face_coords(f, d)));
         for (size_t d = 0; d < N_DIM; d++) reals.push_back(static_cast<double>(mesh.h_face_normals(f, d)) / area);
-        reals.push_back(mesh.curved_geometry && mesh.curved_geometry->face_is_curved(f)
+        // Axisymmetric runs: face_measure is int r dS, curved faces included
+        reals.push_back(mesh.curved_geometry && mesh.curved_geometry->face_is_curved(f) && !mesh.axisymmetric
                             ? curved_measure(*mesh.curved_geometry, f, n_nodes)
                             : static_cast<double>(mesh.h_face_measure(f)));
         for (uint32_t j = 0; j < n_nodes; j++) {

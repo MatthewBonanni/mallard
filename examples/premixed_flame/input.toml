@@ -9,7 +9,7 @@
 #
 #   python ../../tools/setup/flame_reference.py reference full
 #   python ../../tools/setup/flame_restart.py full/h2_phi1.0_mix_full.csv \
-#       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2
+#       ../../mechanisms/h2o2.yaml ohmech 20 . --flame-times 2 --explicit-step
 #
 # then run and measure the flame speed with
 #   mallard post flame solut/flame.vtkhdf --reference-speed 2.33108
@@ -67,6 +67,7 @@ transport = "mixture_averaged"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
+explicit_step = true
 
 [output]
 check_interval = 2000
