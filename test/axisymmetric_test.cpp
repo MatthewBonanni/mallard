@@ -21,8 +21,10 @@
 #include <vector>
 
 #include "data_paths.h"
+#include "gmsh_fixtures.h"
 #include "input.h"
 #include "test_fixtures.h"
+#include "test_utils.h"
 #include "verification.h"
 #include "solver.h"
 
@@ -389,3 +391,232 @@ TEST_P(AxisymmetricOrder, ManufacturedResidualConvergesAtDesignOrder) {
 
 INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricOrder,
                          ::testing::Combine(::testing::Values("cartesian", "cartesian_tri"), ::testing::Values(3, 4, 5)));
+
+namespace {
+
+constexpr double SHELL_IN = 1.0, SHELL_OUT = 2.0;
+
+/**
+ * @brief The meridian half-plane of the spherical shell SHELL_IN <= |x| <=
+ *        SHELL_OUT (half_annulus_gmsh), geometry "curved" (arcs projected
+ *        onto the circles), "high_order" (P2 lines from the file) or
+ *        "straight" (curved_geometry = false).
+ */
+std::string shell_input(const std::string & file, const std::string & geometry, const std::string & reconstruction,
+                        const std::string & init, const std::string & arcs) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 20\ncfl = 0.4\n[mesh]\ntype = \"file\"\nfilename = \"" << file << "\"\n";
+    if (geometry == "straight") s << "curved_geometry = false\n";
+    if (geometry == "curved") {
+        s << "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = " << SHELL_IN << "\n"
+          << "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = " << SHELL_OUT << "\n";
+    }
+    s << "[initialize]\n" << init << "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n"
+      << "[[boundaries]]\nname = \"inner\"\n" << arcs << "\n[[boundaries]]\nname = \"outer\"\n" << arcs << "\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\n" << reconstruction << "\n"
+      << "[physics]\ntype = \"euler\"\naxisymmetric = true\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    return s.str();
+}
+
+std::string shell_file(uint32_t n, int order = 1, bool triangles = false) {
+    return write_temp("axisymmetric_shell_" + std::to_string(n) + "_" + std::to_string(order) + (triangles ? "_tri" : "") +
+                          ".msh",
+                      half_annulus_gmsh(n, 3 * n, SHELL_IN, SHELL_OUT, order, triangles));
+}
+
+} // namespace
+
+TEST(AxisymmetricCurved, RevolvedMeasuresOfCurvedCellsAndFacesAreExact) {
+    // Projected arcs make the mesh the exact spherical shell: its volume, its
+    // first and second moments and its spheres' areas, per radian. The
+    // straight polygons miss each by O(h^2)
+    for (const bool triangles : {false, true}) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(shell_input(shell_file(4, 1, triangles), "curved", "type = \"FO\"",
+                                           "type = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n",
+                                           "type = \"symmetry\"")));
+        const Mesh & mesh = *solver.get_mesh();
+        ASSERT_TRUE(mesh.curved_geometry);
+        double volume = 0.0, moment_x = 0.0, moment_r = 0.0, second[3] = {0.0, 0.0, 0.0};
+        for (uint32_t c = 0; c < mesh.n_cells; c++) {
+            const double m = double(mesh.h_cell_measure(c));
+            const double xc = double(mesh.h_cell_coords(c, 0)), rc = double(mesh.h_cell_coords(c, 1));
+            volume += m;
+            moment_x += m * xc;
+            moment_r += m * rc;
+            second[0] += m * (double(mesh.h_cell_covariance(c, 0)) + xc * xc);
+            second[1] += m * (double(mesh.h_cell_covariance(c, 1)) + xc * rc);
+            second[2] += m * (double(mesh.h_cell_covariance(c, 2)) + rc * rc);
+        }
+        const double a = SHELL_IN, b = SHELL_OUT, fifth = (std::pow(b, 5) - std::pow(a, 5)) / 5.0;
+        EXPECT_NEAR(volume, 2.0 / 3.0 * (b * b * b - a * a * a), roundoff(1e-13)) << triangles;
+        EXPECT_NEAR(moment_x, 0.0, roundoff(1e-13)) << triangles;
+        EXPECT_NEAR(moment_r, PI / 8.0 * (b * b * b * b - a * a * a * a), roundoff(1e-13)) << triangles;
+        EXPECT_NEAR(second[0], 2.0 / 3.0 * fifth, roundoff(1e-12)) << triangles;
+        EXPECT_NEAR(second[1], 0.0, roundoff(1e-12)) << triangles;
+        EXPECT_NEAR(second[2], 4.0 / 3.0 * fifth, roundoff(1e-12)) << triangles;
+        double sphere[2] = {0.0, 0.0};
+        for (uint32_t f = 0; f < mesh.n_faces; f++) {
+            if (mesh.h_cells_of_face(f, 1) >= 0 || !mesh.curved_geometry->face_is_curved(f)) continue;
+            const double r = std::hypot(double(mesh.h_face_coords(f, 0)), double(mesh.h_face_coords(f, 1)));
+            sphere[r < 1.5 ? 0 : 1] += double(mesh.h_face_measure(f));
+        }
+        EXPECT_NEAR(sphere[0], 2.0 * a * a, roundoff(1e-13)) << triangles;
+        EXPECT_NEAR(sphere[1], 2.0 * b * b, roundoff(1e-13)) << triangles;
+    }
+}
+
+using CurvedUniformParam = std::tuple<std::string, std::string, bool>;
+class AxisymmetricCurvedUniform : public ::testing::TestWithParam<CurvedUniformParam> {};
+
+TEST_P(AxisymmetricCurvedUniform, UniformFlowAndGasAtRestStayExactlyUniform) {
+    // The r-weighted flux points of every curved face sum to its int r n dS,
+    // so the faces close each curved cell against the planar area that the
+    // pressure source integrates over: without that, curved cells accelerate
+    const auto [geometry, reconstruction, triangles] = GetParam();
+    const std::string file = shell_file(3, geometry == "high_order" ? 2 : 1, triangles);
+    for (const std::string u : {"0.0", "0.5"}) {
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(shell_input(file, geometry, reconstruction,
+                                           "type = \"constant\"\nu = [" + u + ", 0.0]\np = 1.0\nT = 1.0\n",
+                                           u == "0.0" ? "type = \"symmetry\"" : "type = \"outlet_extrapolation\"")));
+        ASSERT_TRUE(solver.get_mesh()->curved_geometry);
+        solver.copy_device_to_host();
+        std::vector<std::array<double, N_CONSERVATIVE>> start(solver.get_mesh()->n_owned());
+        for (uint32_t c = 0; c < start.size(); c++) FOR_I_CONSERVATIVE start[c][i] = double(solver.h_conservatives(c, i));
+        solver.run();
+        solver.copy_device_to_host();
+        double change = 0.0;
+        for (uint32_t c = 0; c < start.size(); c++) {
+            FOR_I_CONSERVATIVE change = std::max(change, std::abs(double(solver.h_conservatives(c, i)) - start[c][i]));
+        }
+        EXPECT_LT(change, roundoff(1e-13)) << "u = " << u;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Axisymmetric, AxisymmetricCurvedUniform,
+    ::testing::Combine(::testing::Values("curved", "high_order"),
+                       ::testing::Values("type = \"FO\"", "type = \"MUSCL\"", "type = \"TENO\"\norder = 3",
+                                         "type = \"TENO\"\norder = 5"),
+                       ::testing::Bool()));
+
+namespace {
+
+/** @brief Smooth state [rho, u_x, u_r, p] regular on the axis, its velocity tangent to every sphere |x| = R. */
+std::array<double, 4> shell_state(double x, double r) {
+    const double h = 0.1 * (1.0 + 0.3 * std::cos(x));
+    return {1.0 + 0.2 * std::sin(x) * std::cos(r), -h * r * r, h * r * x, 1.0 + 0.2 * std::cos(x) * std::cos(r)};
+}
+
+/** @brief Euler flux F . n of shell_state (n of any length). */
+std::array<double, 4> shell_flux(double x, double r, double nx, double nr) {
+    const auto [rho, u, v, p] = shell_state(x, r);
+    const double un = u * nx + v * nr;
+    const double E = p / (GAMMA - 1.0) + 0.5 * rho * (u * u + v * v);
+    return {rho * un, rho * u * un + p * nx, rho * v * un + p * nr, (E + p) * un};
+}
+
+/**
+ * @brief dU/dt of each cell's r-weighted average under shell_state, over the
+ *        exact cells (arcs on the circles): int F . n r dS, int p dA = closed
+ *        int Q n_x dS with dQ/dx = p, and int r dA = closed int r^2 / 2 n_r dS.
+ */
+std::vector<std::array<double, 4>> shell_exact_rhs(const Mesh & mesh) {
+    const double gx[8] = {0.0198550717512319, 0.1016667612931866, 0.2372337950418355, 0.4082826787521751,
+                          0.5917173212478249, 0.7627662049581645, 0.8983332387068134, 0.9801449282487681};
+    const double gw[8] = {0.0506142681451881, 0.1111905172266872, 0.1568533229389436, 0.1813418916891810,
+                          0.1813418916891810, 0.1568533229389436, 0.1111905172266872, 0.0506142681451881};
+    std::vector<std::array<double, 4>> out(mesh.n_cells);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        const uint32_t nn = mesh.h_n_nodes_of_cell(c);
+        double o[2] = {0.0, 0.0};
+        for (uint32_t k = 0; k < nn; k++) {
+            for (uint32_t d = 0; d < 2; d++) o[d] += double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), d)) / nn;
+        }
+        std::array<double, 4> flux = {};
+        double source = 0.0, volume = 0.0;
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+            const uint32_t f = mesh.h_face_of_cell(c, k);
+            double a[2], b[2];
+            for (uint32_t d = 0; d < 2; d++) {
+                a[d] = double(mesh.h_node_coords(mesh.h_node_of_face(f, 0), d));
+                b[d] = double(mesh.h_node_coords(mesh.h_node_of_face(f, 1), d));
+            }
+            // Out of the cell: the side of the chord away from the cell's vertex average
+            const double cross = (0.5 * (a[0] + b[0]) - o[0]) * (b[1] - a[1]) - (0.5 * (a[1] + b[1]) - o[1]) * (b[0] - a[0]);
+            const double side = cross > 0.0 ? 1.0 : -1.0;
+            const double R = std::hypot(a[0], a[1]);
+            const bool arc = mesh.h_cells_of_face(f, 1) < 0 && std::abs(R - std::hypot(b[0], b[1])) < 1e-12 &&
+                             (std::abs(R - SHELL_IN) < 1e-12 || std::abs(R - SHELL_OUT) < 1e-12);
+            const double ta = std::atan2(a[1], a[0]), tb = std::atan2(b[1], b[0]);
+            for (size_t q = 0; q < 8; q++) {
+                double x, r, dx, dr;
+                if (arc) {
+                    const double t = ta + gx[q] * (tb - ta);
+                    x = R * std::cos(t);
+                    r = R * std::sin(t);
+                    dx = -R * std::sin(t) * (tb - ta);
+                    dr = R * std::cos(t) * (tb - ta);
+                } else {
+                    x = a[0] + gx[q] * (b[0] - a[0]);
+                    r = a[1] + gx[q] * (b[1] - a[1]);
+                    dx = b[0] - a[0];
+                    dr = b[1] - a[1];
+                }
+                const double nx = side * dr * gw[q], nr = -side * dx * gw[q];
+                const auto F = shell_flux(x, r, nx, nr);
+                for (size_t i = 0; i < 4; i++) flux[i] += r * F[i];
+                source += (x + 0.2 * std::sin(x) * std::cos(r)) * nx;
+                volume += 0.5 * r * r * nr;
+            }
+        }
+        flux[2] -= source;
+        for (size_t i = 0; i < 4; i++) out[c][i] = -flux[i] / volume;
+    }
+    return out;
+}
+
+/** @brief Mean error of the RHS at the exact averages of shell_state, over every cell of the shell. */
+double shell_residual_error(uint32_t n, const std::string & geometry, const std::string & reconstruction) {
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(shell_input(shell_file(n), geometry, reconstruction,
+                                       "type = \"analytical\"\nn_subdivisions = 6\n"
+                                       "rho = \"1 + 0.2 * sin(x) * cos(y)\"\n"
+                                       "u = [\"-0.1 * (1 + 0.3 * cos(x)) * y^2\", \"0.1 * (1 + 0.3 * cos(x)) * y * x\"]\n"
+                                       "p = \"1 + 0.2 * cos(x) * cos(y)\"\n",
+                                       "type = \"symmetry\"")));
+    const auto rhs = host_rhs(solver);
+    const auto exact = shell_exact_rhs(*solver.get_mesh());
+    const uint32_t n_cells = solver.get_mesh()->n_owned();
+    double sum = 0.0;
+    for (uint32_t c = 0; c < n_cells; c++) {
+        for (size_t v = 0; v < 4; v++) sum += std::abs(rhs[c][v] - exact[c][v]);
+    }
+    return sum / n_cells;
+}
+
+} // namespace
+
+class AxisymmetricCurvedOrder : public ::testing::TestWithParam<int> {};
+
+TEST_P(AxisymmetricCurvedOrder, ResidualBetweenCurvedSpheresConvergesAtDesignOrder) {
+    // The spatial operator at the exact r-weighted averages of a smooth state
+    // tangent to the slip walls of a spherical shell, over every cell, those
+    // on the curved walls and on the axis included. Straight walls stall
+    SKIP_IN_SINGLE_PRECISION("the finest residual errors are near single-precision round-off");
+    const int order = GetParam();
+    const std::string teno = "type = \"TENO\"\norder = " + std::to_string(order);
+    const std::vector<double> errors = {shell_residual_error(8, "curved", teno), shell_residual_error(16, "curved", teno)};
+    verification::expect_order({"axisymmetric", "TENO" + std::to_string(order), "quadrilaterals, curved walls",
+                                "mean residual error, spherical shell", {8, 16}, errors, order - 1.0,
+                                order - 1 - 0.3});
+    EXPECT_LT(errors[1], 0.1 * shell_residual_error(16, "straight", teno));
+}
+
+INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricCurvedOrder, ::testing::Values(3, 4));
