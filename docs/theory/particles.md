@@ -16,15 +16,18 @@ rationale: [particles](../design/particles.md).
 
 ## Assumptions
 
-The particles are dilute, one-way coupled point particles:
+The particles are dilute point particles, one-way coupled by default:
 
-- **Dilute and one-way coupled.** The gas moves the particles; they do not
-  act on the gas or on each other (no collisions, no wakes of one particle
-  felt by another). That holds for volume fractions below about $10^{-6}$,
-  and for mass loadings small enough that the particles' momentum and
-  energy are negligible against the gas's
+- **Dilute and, by default, one-way coupled.** The gas moves the particles;
+  they do not act on each other (no collisions, no wakes of one particle felt
+  by another), nor on the gas. That holds for volume fractions below about
+  $10^{-6}$, and for mass loadings small enough that the particles' momentum
+  and energy are negligible against the gas's
   ([Elghobashi 1994](../references.md#elghobashi-1994),
   [Balachandar & Eaton 2010](../references.md#balachandar-eaton-2010)).
+  With `coupling = "two-way"` solid particles act on the gas too, which
+  extends this to volume fractions of about $10^{-3}$
+  ([Two-way coupling](#two-way-coupling)).
 - **Point particles.** Each particle is smaller than the cells and the
   smallest scales of the flow around it, so that the gas state at its center,
   the *undisturbed* flow interpolated from the resolved field, drives it,
@@ -453,7 +456,8 @@ Stokes drag without added mass, $\tau_T / \tau = 3\,(c_p / c_{p,g})\,Pr / Nu$.
 
 The temperature is a state of the particle only: it enters the drag through
 $T_p / T$ of Singh et al.'s law, and the gas temperature at the particle drives
-it, but the particle's heat does not return to the gas (one-way coupling).
+it, but the particle's heat returns to the gas only with two-way coupling
+([Two-way coupling](#two-way-coupling)).
 Left out: radiation (the particle neither emits nor absorbs, also with the
 optically thin radiation of the gas,
 [Chemistry and radiation](chemistry_radiation.md)), the variation of the gas
