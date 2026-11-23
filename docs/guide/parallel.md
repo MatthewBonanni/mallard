@@ -64,7 +64,7 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 
 - `multijagged` (the default since 0.8.0): equal slabs along x, each slab cut along y and, in 3D, along z, with the number of pieces per axis that leaves the least area between the blocks. A box of cuboid cells gets cuboid parts; the blocks are numbered along a Hilbert curve, so the ranks of a node hold a compact group.
 - `hilbert` (the default before 0.8.0): cells split along a Hilbert curve through their centroids.
-- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB).
+- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB), or `spack install mallard +kaminpar`.
 
 On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), every feature included, as long as halos go through NCCL: with MPI's exchanges (`halo_exchange = "mpi"`, or a build without NCCL) the steps run kernel by kernel, with the host synchronizing at every exchange.
 
