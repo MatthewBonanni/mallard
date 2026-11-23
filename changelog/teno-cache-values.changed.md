@@ -1,0 +1,1 @@
+- A run that reads a TENO cache copies each distinct table's pseudo-inverse once per chunk of cells instead of once per cell: `mallard post derive` of the 64³ Taylor-Green benchmark with a cache sets up about 15% faster; results are bitwise unchanged (#935).

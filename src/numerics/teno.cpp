@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <set>
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -837,7 +838,13 @@ class PackedRows {
             const uint32_t n_rows = static_cast<uint32_t>(first.size());
             std::vector<teno::CanonicalTable> canonical(n_rows);
             std::vector<uint64_t> first_value(n_rows + 1, 0);
-            for (uint32_t r = 0; r < n_rows; r++) first_value[r + 1] = first_value[r] + (tables[first[r]].*pinv).size();
+            for (uint32_t r = 0; r < n_rows; r++) {
+                const CellTables & t = tables[first[r]];
+                if ((t.*pinv).size() != (t.*cells).size() * width) {
+                    throw std::logic_error("TENO: the first cell of a shared table must bring its values.");
+                }
+                first_value[r + 1] = first_value[r] + (t.*pinv).size();
+            }
             std::vector<rtype> ordered(first_value[n_rows]);
             gated::parallel_for("teno_pack_canonical", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n_rows),
                                  [&](const uint32_t r) {
@@ -3971,10 +3978,8 @@ bool deserialize(std::istream & in, const uint8_t nk, const uint16_t n_moments, 
     t.moments.resize(N_DIM == 3 ? n_moments : 0);
     t.large_cells.resize(n_large);
     t.large_faces.assign(n_large, -1);
-    t.large_pinv.resize(size_t(n_large) * nk);
     t.small_cells.resize(n_small);
     t.small_faces.assign(n_small, -1);
-    t.small_pinv.resize(n_small * teno::NK_SMALL);
     uint32_t n_faces = 0;
     if (!get(in, t.large_cells.data(), n_large) || !get(in, t.small_cells.data(), n_small) || !get(in, &n_faces, 1) ||
         n_faces > n_large + n_small) {
@@ -4010,13 +4015,20 @@ const char * take_values(const char * p, std::vector<T> & values, const bool sin
     return p + values.size() * sizeof(float);
 }
 
-/** @brief Whether blobs hold t's values at their sizes; if so, fills them in. */
-bool take_blobs(CellTables & t, const std::array<const std::vector<char> *, N_BLOBS> & blob, const bool single) {
+/**
+ * @brief Whether blobs hold t's values at their sizes, nk values per central
+ *        slot; if so, fills them in, its pseudo-inverses only where asked.
+ */
+bool take_blobs(CellTables & t, const std::array<const std::vector<char> *, N_BLOBS> & blob, const bool single,
+                const uint8_t nk, const bool large_pinv, const bool small_pinv) {
     const size_t rows = t.basis_mean.size() * sizeof(rtype) + value_bytes(t.si, single) + value_bytes(t.moments, single);
-    if (blob[ROWS]->size() != rows || blob[LARGE]->size() != value_bytes(t.large_pinv, single) ||
-        blob[SMALL]->size() != value_bytes(t.small_pinv, single)) {
+    const size_t value = single ? sizeof(float) : sizeof(rtype);
+    if (blob[ROWS]->size() != rows || blob[LARGE]->size() != t.large_cells.size() * nk * value ||
+        blob[SMALL]->size() != t.small_cells.size() * teno::NK_SMALL * value) {
         return false;
     }
+    if (large_pinv) t.large_pinv.resize(t.large_cells.size() * nk);
+    if (small_pinv) t.small_pinv.resize(t.small_cells.size() * teno::NK_SMALL);
     const char * p = blob[ROWS]->data();
     std::memcpy(t.basis_mean.data(), p, t.basis_mean.size() * sizeof(rtype));
     p += t.basis_mean.size() * sizeof(rtype);
@@ -4521,12 +4533,21 @@ bool TENO::load_cache() {
             }
         }
         if (!ok) break;
-        std::vector<uint8_t> fits(chunk.size(), 1);
+        // Shared tables: the packing reads the pseudo-inverses of the first cell of each blob (and sector sizes) alone
+        std::vector<uint8_t> fits(chunk.size(), 1), large_pinv(chunk.size(), 1), small_pinv(chunk.size(), 1);
+        if (share_tables) {
+            std::set<uint32_t> large_seen;
+            std::set<std::pair<uint32_t, std::array<uint16_t, teno::MAX_FACES>>> small_seen;
+            for (size_t k = 0; k < chunk.size(); k++) {
+                large_pinv[k] = large_seen.insert(ids[k][LARGE]).second;
+                small_pinv[k] = small_seen.insert({ids[k][SMALL], chunk[k].small_size}).second;
+            }
+        }
         gated::parallel_for("teno_cache_values", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, chunk.size()),
                              [&](const size_t k) {
             std::array<const std::vector<char> *, N_BLOBS> blob;
             for (int b = 0; b < N_BLOBS; b++) blob[size_t(b)] = &held.at(ids[k][size_t(b)]);
-            fits[k] = take_blobs(chunk[k], blob, cache_single);
+            fits[k] = take_blobs(chunk[k], blob, cache_single, n_dof_large, large_pinv[k], small_pinv[k]);
             chunk[k].large_blob = ids[k][LARGE];
             chunk[k].small_blob = ids[k][SMALL];
         });
