@@ -1339,14 +1339,12 @@ TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
         if (k) distinct.insert({k.hash, k.check});
     }
     const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
-    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
-#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(n_keyed, 1728);
     EXPECT_EQ(distinct.size(), 147u);
+    // Single precision keys are on a coarser grid (#1172)
+#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(digest, 16533836760420377906ULL);
 #else
-    EXPECT_EQ(n_keyed, 1557);
-    EXPECT_EQ(distinct.size(), 1557u);
-    EXPECT_EQ(digest, 176108027913348827ULL);
+    EXPECT_EQ(digest, 0ULL);
 #endif
 }
