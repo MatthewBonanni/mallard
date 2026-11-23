@@ -1590,7 +1590,7 @@ keys.
 | `weight` | Particles per parcel (`"solid"`, `"droplet"`; per meter of depth in 2D), default 1 |
 | `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`, `"droplet"`), default 0 (each particle's own cell) |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_p`, diameter `d` and mass `m`, then the quantities, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_P`, diameter `D_P` and mass `M_P`, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
 
 ### `[particles.liquid]`

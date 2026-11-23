@@ -1342,8 +1342,8 @@ void Particles::write(const uint64_t step, const double t) const {
     if (is_solid) {
         for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
     }
-    if (heated || is_droplet) out << ",T_p";
-    if (is_droplet) out << ",d,m";
+    if (heated || is_droplet) out << ",T_P";
+    if (is_droplet) out << ",D_P,M_P";
     for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {
