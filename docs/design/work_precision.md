@@ -170,6 +170,7 @@ the defaults of `[numerics.face_reconstruction]` apart from `order`.
     `mallard post convergence --field RHO --exact ...` on the run's final restart
     file: the volume-weighted $L_2$ norm against the exact cell averages
     (quadrature exact to degree 6).
+
 - **The Shu-Osher problem** ([Shu & Osher 1989](../references.md#shu-osher-1989)),
   as the [`shu_osher`](https://matthewbonanni.github.io/mallard/docs/examples/#shu-osher)
   example: a Mach 3 shock running into an entropy wave, with RHLL because HLLC
