@@ -1223,6 +1223,11 @@ class Solver {
          *        numerics up on it again, carrying the TENO tables over.
          */
         void drop_unread_halo();
+        /**
+         * @brief Curved meshes, in drop_unread_halo: the kept cells take the geometry exchange_halo_geometry gave
+         *        them, as the trim reorients the faces of the halo's new edge, which curved cell rules sum over.
+         */
+        void keep_halo_geometry(Mesh & trimmed, const std::vector<int32_t> & new_cell) const;
         uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();

@@ -694,6 +694,7 @@ void Solver::drop_unread_halo() {
         auto trimmed = restrict_local_mesh(*mesh, distribution, keep, carried.new_cell, carried.new_face);
         trimmed->apply_curved(curved_surfaces);
         if (axisymmetric) trimmed->make_axisymmetric();
+        if (trimmed->curved_geometry) keep_halo_geometry(*trimmed, carried.new_cell);
         trimmed->copy_host_to_device();
         carried.from.reset(static_cast<TENO *>(face_reconstruction.release()));
         carried_tables = std::move(carried);
@@ -702,6 +703,18 @@ void Solver::drop_unread_halo() {
         init_boundaries();
         init_numerics();
     });
+}
+
+void Solver::keep_halo_geometry(Mesh & trimmed, const std::vector<int32_t> & new_cell) const {
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        if (new_cell[c] < 0) continue;
+        const auto d = static_cast<uint32_t>(new_cell[c]);
+        FOR_I_DIM trimmed.h_cell_coords(d, i) = mesh->h_cell_coords(c, i);
+        trimmed.h_cell_volume(d) = mesh->h_cell_volume(c);
+        if (!trimmed.axisymmetric) continue;
+        trimmed.h_cell_measure(d) = mesh->h_cell_measure(c);
+        for (uint32_t k = 0; k < 3; k++) trimmed.h_cell_covariance(d, k) = mesh->h_cell_covariance(c, k);
+    }
 }
 
 void Solver::describe_partition_surface() {
