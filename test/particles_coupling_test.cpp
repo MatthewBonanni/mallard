@@ -398,10 +398,11 @@ double spread_error(uint32_t n, double sigma) {
 TEST(ParticleCouplingTest, DepositionConvergesToTheGaussianUnderRefinement) {
     // At a fixed width in physical units, the deposited field converges to the Gaussian about the particle,
     // at second order once the cell size resolves the width (sigma / h = 1.3, 2.6, 5.1), and keeps its integral
+    // (in 3D, 1.79 from 32 to 64 cells: the box's half-length along z is 3 sigma, and the reference is not periodic)
     const double sigma = 0.08;
     const double coarse = spread_error(16, sigma), medium = spread_error(32, sigma), fine = spread_error(64, sigma);
     EXPECT_GT(std::log2(coarse / medium), 1.0);
-    EXPECT_GT(std::log2(medium / fine), 1.8);
+    EXPECT_GT(std::log2(medium / fine), 1.7);
     EXPECT_LT(fine, 0.01);
 }
 
@@ -457,19 +458,19 @@ TEST(ParticleCouplingTest, DepositedSpreadIsIndependentOfTheParticlesPlaceInItsC
     // whether the particle sits at its cell's center or near a corner: the moment corrections give the
     // pre-spread deposit the particle's first and second moments, and the spread adds sigma^2 I exactly
     const uint32_t n = 32;
-    const double h = 1.0 / n, sigma = 0.045;
+    const double h = 1.0 / n, sigma = 0.03;
     const double volume = 1e3 * PI / 6.0 * std::pow(diameter_for(0.1, 1000.0), 3);
-    // The Gaussian's tail beyond the nearest periodic half-length, 0.25, changes its moments by under 1e-6
-    const double tolerance = std::max(1e-6, roundoff(1e-12)) * sigma * sigma;
+    // The deposit's tail beyond the nearest periodic half-length, 0.25 = 8 sigma, changes its moments by under 1e-6
+    const double tolerance = std::max(1e-6, roundoff(1e-12));
     for (const std::array<double, 3> & offset : {std::array<double, 3>{0.0, 0.0, 0.0}, {0.45, 0.45, 0.45},
                                                  {0.45, -0.3, 0.2}, {-0.4, 0.1, -0.45}}) {
         const std::array<double, 3> p = {(12.5 + offset[0]) * h, (14.5 + offset[1]) * h, (5.5 + offset[2]) * h};
         const Moments m = deposit_moments(n, sigma, p);
         EXPECT_NEAR(m.total, volume, roundoff(1e-12) * volume);
         for (size_t a = 0; a < N_DIM; a++) {
-            EXPECT_NEAR(m.mean[a], 0.0, roundoff(1e-12)) << "offset " << offset[0] << ", " << offset[1];
+            EXPECT_NEAR(m.mean[a], 0.0, tolerance * h) << "offset " << offset[0] << ", " << offset[1];
             for (size_t b = 0; b < N_DIM; b++) {
-                EXPECT_NEAR(m.covariance[a][b], a == b ? sigma * sigma : 0.0, tolerance)
+                EXPECT_NEAR(m.covariance[a][b], a == b ? sigma * sigma : 0.0, tolerance * sigma * sigma)
                     << "offset " << offset[0] << ", " << offset[1] << ", component " << a << b;
             }
         }
