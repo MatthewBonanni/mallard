@@ -634,7 +634,10 @@ class TENO : public FaceReconstruction {
          *        coordinates moved, geometry recomputed and on the device).
          *        Each cell's tables are a function of the mesh alone, so with
          *        the cells of cells_within_reach() the result is bitwise that
-         *        of a full setup. Collective when tables are shared.
+         *        of a full setup. Collective when tables are shared. In single
+         *        precision with shared tables every table is set up again: a
+         *        cell's table can be the fit of a cell of its stencil shape
+         *        anywhere in the mesh (teno::ShapeKeys::check).
          */
         void rebuild_cells(const std::vector<uint32_t> & cells);
 

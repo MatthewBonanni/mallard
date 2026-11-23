@@ -654,6 +654,17 @@ they take one table instead of two. In 2D, a cell whose search reads a wall
 with another boundary behind it (a thin body, whose far side can drop mirror
 images) has no key and is fitted on its own.
 
+In single precision the coordinates carry round-off of about $10^{-7}$ of their
+magnitude, which is more than $2^{-30} h$: cells of one shape would get keys of
+their own (#1172). Single precision keys are on a grid of $h/16$ instead, which
+only groups the cells, and each cell of a group is then compared with the
+group's representative, on the device: every value its key reads, unrounded,
+must agree to within 16 round-offs of the mesh's largest coordinate (with the
+periodic translations), over $h$, relative to the larger of 1 and the value.
+Cells that differ by more are fitted on their own. A table taken from a group
+is the representative's fit, which no fit of another cell reproduces bitwise in
+single precision: `rebuild_cells` then sets every table up again.
+
 **Cache.** `cache_file` writes the tables after the setup and reads them back
 on later runs (format version 26; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,

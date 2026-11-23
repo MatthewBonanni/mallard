@@ -918,35 +918,49 @@ TEST(TENOTest, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTablesOfAFullSet
     const auto tables = teno_tables(*full);
     const auto rebuilt = teno_tables(*incremental);
     for (size_t k = 0; k < tables.size(); k++) EXPECT_TRUE(rebuilt[k] == tables[k]) << "table " << k;
-    // The move changed tables beyond the moved cells: rebuilding only those is not enough
+    // The move changed tables beyond the moved cells: rebuilding only those is not enough (in single
+    // precision every shared table is rebuilt)
     changed_only->rebuild_cells(changed);
-    EXPECT_FALSE(teno_tables(*changed_only) == tables);
+    if (!teno::ShapeKeys::CHECKED) EXPECT_FALSE(teno_tables(*changed_only) == tables);
     EXPECT_FALSE(before == tables);
 }
 
 namespace {
 
-/**
- * @brief Two separate blocks of 10 x 10 squares with symmetry walls, the second
- *        three times as large and at (x1, y1): the tables shared by stencil
- *        shape against each cell's own fit, and how many cells were fitted.
- */
-void expect_shared_tables_match_own_fits(const double x1, const double y1, const uint32_t most_fitted) {
+/** @brief Blocks of quads, block b with node (i, j) at (x[b][i], y[b][j]). */
+std::shared_ptr<Mesh> quad_blocks(const std::vector<std::array<std::vector<double>, 2>> & blocks) {
     std::vector<std::array<rtype, N_DIM>> nodes;
     std::vector<std::vector<uint32_t>> cells;
-    for (const auto & [x0, y0, h] : {std::tuple{0.0, 0.0, 0.125}, std::tuple{x1, y1, 0.375}}) {
+    for (const auto & [x, y] : blocks) {
         const uint32_t base = static_cast<uint32_t>(nodes.size());
-        for (uint32_t j = 0; j <= 10; j++) {
-            for (uint32_t i = 0; i <= 10; i++) nodes.push_back({rtype(x0 + i * h), rtype(y0 + j * h)});
+        const uint32_t nx = static_cast<uint32_t>(x.size());
+        for (const double yj : y) {
+            for (const double xi : x) nodes.push_back({rtype(xi), rtype(yj)});
         }
-        for (uint32_t j = 0; j < 10; j++) {
-            for (uint32_t i = 0; i < 10; i++) {
-                const uint32_t a = base + j * 11 + i;
-                cells.push_back({a, a + 1, a + 12, a + 11});
+        for (uint32_t j = 0; j + 1 < y.size(); j++) {
+            for (uint32_t i = 0; i + 1 < nx; i++) {
+                const uint32_t a = base + j * nx + i;
+                cells.push_back({a, a + 1, a + nx + 1, a + nx});
             }
         }
     }
-    auto mesh = mesh_from(nodes, cells);
+    return mesh_from(nodes, cells);
+}
+
+/** @brief 11 nodes from x0, h apart. */
+std::vector<double> lattice(const double x0, const double h) {
+    std::vector<double> x(11);
+    for (uint32_t i = 0; i <= 10; i++) x[i] = x0 + double(i) * h;
+    return x;
+}
+
+/**
+ * @brief Two separate blocks of 10 x 10 squares of size h with symmetry walls,
+ *        the second three times as large and at (x1, y1): the tables shared by
+ *        stencil shape against each cell's own fit, and how many cells were fitted.
+ */
+void expect_shared_tables_match_own_fits(const double h, const double x1, const double y1, const uint32_t most_fitted) {
+    auto mesh = quad_blocks({{lattice(0.0, h), lattice(0.0, h)}, {lattice(x1, 3 * h), lattice(y1, 3 * h)}});
     const Mesh & m = *mesh;
     BoundaryData bd = make_uniform_boundaries(m, BoundaryType::SYMMETRY, GAMMA);
     Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", m.n_cells);
@@ -1003,14 +1017,82 @@ TEST(TENOTest, CellsOfOneStencilShapeAndDifferentSizesTakeOneFitWithTheirOwnScal
     // second block has the stencil shape of a cell of the first, whose fit it
     // takes, with its own scale and its own wall faces for the mirror images
     // (faces of its own block), and the face values of its own fit up to round-off
-    expect_shared_tables_match_own_fits(2.0, 2.0, 100);
+    expect_shared_tables_match_own_fits(0.125, 2.0, 2.0, 100);
 }
 
 TEST(TENOTest, CellsFacingABoundaryBehindTheirWallsTakeTheirOwnFit) {
     // Side by side, 0.75 apart: 6 small cells but 2 large ones, so the images
     // that the other block's wall drops (past the far side of a thin body)
     // differ between cells of one shape
-    expect_shared_tables_match_own_fits(2.0, 0.0, 200);
+    expect_shared_tables_match_own_fits(0.125, 2.0, 0.0, 200);
+}
+
+TEST(TENOTest, CellsOfOneStencilShapeWithCoordinatesNotExactInBinaryTakeOneFit) {
+    // Coordinates that round differently in every cell, by about 1e-7 of their
+    // size in single precision, are one shape all the same (#1172)
+    expect_shared_tables_match_own_fits(0.1, 2.0, 2.0, 100);
+}
+
+TEST(TENOTest, CellsThatReadANodeMovedByLessThanTheKeysGridTakeTheirOwnFit) {
+    // A node of a lattice of squares moved by a 500th of a cell: single precision
+    // keys, on a grid of a 16th of a cell, group cells whose stencils reach it
+    // with cells of the lattice, but their tables are their own fits (taking a
+    // lattice cell's, the face values differ by 7e-5 of the largest in single
+    // precision)
+    const uint32_t n = 20, moved = 10 * (n + 1) + 10;
+    const double h = 0.05;
+    std::vector<std::array<rtype, N_DIM>> nodes;
+    std::vector<std::vector<uint32_t>> cells;
+    for (uint32_t j = 0; j <= n; j++) {
+        for (uint32_t i = 0; i <= n; i++) nodes.push_back({rtype(i * h), rtype(j * h)});
+    }
+    nodes[moved] = {rtype(10 * h + 0.002 * h), rtype(10 * h + 0.001 * h)};
+    for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t i = 0; i < n; i++) {
+            const uint32_t a = j * (n + 1) + i;
+            cells.push_back({a, a + 1, a + n + 2, a + n + 1});
+        }
+    }
+    auto mesh = mesh_from(nodes, cells);
+    const Mesh & m = *mesh;
+    const BoundaryData bd = make_uniform_boundaries(m, BoundaryType::SYMMETRY, GAMMA);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", m.n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < m.n_cells; c++) {
+        double U[N_CONSERVATIVE];
+        smooth_conservatives(double(m.h_cell_coords(c, 0)), double(m.h_cell_coords(c, 1)), U);
+        FOR_I_CONSERVATIVE h_W(c, i) = rtype(U[i]);
+    }
+    Kokkos::deep_copy(W, h_W);
+    for (const int order : {3, 4}) {
+        auto setup = [&](const bool share) {
+            auto teno = std::make_unique<TENO>();
+            teno->set_mesh(mesh);
+            teno->set_boundaries(bd);
+            teno->share_tables = share;
+            teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+            Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", m.n_faces, teno->n_face_quadrature_points());
+            teno->calc_face_values(W, face_W);
+            return std::make_pair(std::move(teno), Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W));
+        };
+        const auto [own, a] = setup(false);
+        const auto [shared, b] = setup(true);
+        EXPECT_LT(shared->n_cells_fitted, m.n_cells) << "order " << order;
+        double largest = 0.0, difference = 0.0;
+        for (uint32_t f = 0; f < m.n_faces; f++) {
+            for (int side = 0; side < 2; side++) {
+                if (m.h_cells_of_face(f, side) < 0) continue;
+                for (uint8_t q = 0; q < own->n_face_quadrature_points(); q++) {
+                    FOR_I_CONSERVATIVE {
+                        largest = std::max(largest, std::abs(double(a(f, q, side, i))));
+                        difference = std::max(difference, std::abs(double(a(f, q, side, i)) - double(b(f, q, side, i))));
+                    }
+                }
+            }
+        }
+        // Round-off only: tables in the shared store's slot order sum in another order
+        EXPECT_LT(difference, 16 * double(std::numeric_limits<rtype>::epsilon()) * largest) << "order " << order;
+    }
 }
 
 TEST(TENOSetup, CellsOfAStructuredBlockTakeTheKeysOfTheirSearch) {
@@ -1046,15 +1128,13 @@ TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
         if (k) distinct.insert({k.hash, k.check});
     }
     const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
-    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
-#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(n_keyed, 144);
     EXPECT_EQ(distinct.size(), 27u);
+    // Single precision keys are on a coarser grid (#1172)
+#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(digest, 6490497294593806500ULL);
 #else
-    EXPECT_EQ(n_keyed, 110);
-    EXPECT_EQ(distinct.size(), 110u);
-    EXPECT_EQ(digest, 6536239145204640138ULL);
+    EXPECT_EQ(digest, 0ULL);
 #endif
 }
 
