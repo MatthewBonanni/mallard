@@ -84,7 +84,8 @@ def particle_cloud_coupling(P, args):
     b = fig.add_axes([0.55, 0.06, 0.4, 0.86])
     for coupling, color, name in [("one-way", P["muted"], "one-way"), ("two-way", P["flame"], "two-way")]:
         p, _, _ = cloud_run(args.mallard, coupling)
-        a.plot(np.concatenate([[0], p["t"]]), np.concatenate([[0], -p["V_Y mean"]]), color=color, label=name)
+        v = p["MEAN_V_Y"] if "MEAN_V_Y" in p else p["V_Y mean"]  # probe columns are uppercase since #1466
+        a.plot(np.concatenate([[0], p["t"]]), np.concatenate([[0], -v]), color=color, label=name)
     tau, g = 0.1, 1.0
     t = np.linspace(0, 2, 200)
     a.plot(t, tau * g * (1 - np.exp(-t / tau)), color=P["blue"], ls="--", lw=1.2,
