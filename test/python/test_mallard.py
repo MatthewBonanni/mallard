@@ -213,6 +213,23 @@ def test_post_average(run, tmp_path):
     assert one["window"]["start"] == 0 and one["snapshots"][0]["weight"] == pytest.approx(one["window"]["end"])
 
 
+def test_post_signal(tmp_path):
+    t = 0.05 * np.arange(2000)
+    path = tmp_path / "probe.csv"
+    with open(path, "w") as f:
+        f.write("step,t,U_Y\n# units: 1,s,m s-1\n")
+        for i, ti in enumerate(t):
+            f.write(f"{i},{ti!r},{0.4 * np.sin(2 * np.pi * 0.5 * ti)!r}\n")
+    report = mallard.post.signal(path, "U_Y", segment=20, strouhal="1,2")
+    assert report["schema"] == "mallard-signal" and report["units"] == "m s-1"
+    assert report["spectrum"]["peak"]["f"] == pytest.approx(0.5, abs=1e-3)
+    assert report["spectrum"]["peak"]["St"] == pytest.approx(0.25, abs=1e-3)
+    assert report["spectrum"]["units"]["psd"] == "m2 s-1"
+    with pytest.raises(mallard.CommandError) as error:
+        mallard.post.signal(path, "U_X")
+    assert error.value.returncode == 1 and "did you mean" in error.value.stderr
+
+
 def test_report(logged_run, tmp_path):
     (logged_run / "report.html").unlink(missing_ok=True)
     report = mallard.report(logged_run)

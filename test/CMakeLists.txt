@@ -70,6 +70,7 @@ set(MALLARD_TEST_SOURCES
     post_average_test.cpp
     post_flame_test.cpp
     post_convergence_test.cpp
+    post_signal_test.cpp
     wall_model_test.cpp
     units_test.cpp
     periodic_pairs_test.cpp

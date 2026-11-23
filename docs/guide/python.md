@@ -264,6 +264,9 @@ mallard.open(avg["written"][0]).read("RMS_U_X")         # avg["window"], each sn
 
 conv = mallard.post.convergence(["coarse", "medium", "fine"], quantity="forces_cylinder:Fx_pressure")
 
+sig = mallard.post.signal("solut/probe_wake_point.csv", "U_Y", times="60:", strouhal="1,0.2")
+sig["spectrum"]["peak"]["St"], sig["statistics"]["mean"], sig["statistics"]["mean_ci"]
+
 mallard.report("runs/cylinder")["report"]                # rebuilds runs/cylinder/report.html
 archive = mallard.pack("runs/cylinder", output="cylinder.tar.gz", with_outputs="all")
 archive["rerun"]["command"], [f["path"] for f in archive["files"] if f["role"] == "output"]

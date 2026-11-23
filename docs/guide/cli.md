@@ -28,7 +28,7 @@ A few things hold for every command:
   (`--kokkos-num-threads=8`, `--kokkos-device-id=1`) go after the command
   ([Running in parallel](parallel.md)).
 - **From Python:** the commands with `--format json` (`info`, `diff`, `check`,
-  `list`, `post extract`, `post convergence`) are functions of the
+  `list`, `post extract`, `post convergence`, `post signal`) are functions of the
   [Python package](python.md), `mallard.info(path)` and `mallard.post.extract(files, latest=True)`,
   which run the command and return its JSON as a dict.
 - **Programs that drive Mallard** (a GUI, a workflow tool) start with
@@ -50,6 +50,7 @@ A few things hold for every command:
 | Run control | `mallard ctl`, control files ([Running](running.md)) | `mallard-run-control` |
 | Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
 | Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
+| Signal analysis | `mallard post signal --format json` | `mallard-signal` |
 
 ## Shell completion
 
@@ -154,6 +155,8 @@ Commands:
     mallard post flame        Position, thermal thickness, consumption and
                               displacement speed of a premixed flame in saved
                               snapshots
+    mallard post signal       Spectrum, autocorrelation and window statistics of
+                              a column of a probe, force or integral file
     mallard post convergence  Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -912,6 +915,8 @@ Commands:
   mallard post flame          Position, thermal thickness, consumption and
                               displacement speed of a premixed flame in saved
                               snapshots
+  mallard post signal         Spectrum, autocorrelation and window statistics of
+                              a column of a probe, force or integral file
   mallard post convergence    Order of accuracy, extrapolated value and grid
                               convergence index (GCI) of runs at several
                               resolutions
@@ -1321,6 +1326,102 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-flame
+```
+
+### mallard post signal
+
+```text
+Usage: mallard post signal FILE --column NAME [--point K] [--times T1:T2] [--segment T] [--strouhal L,U] [-o DIR]
+       mallard post signal FORCES.csv --column CD|CL --reference TABLE
+
+Analyzes a column of a CSV file a run wrote ([[probes]], [[forces]],
+[integrals], and the tables of mallard post extract) after the run, by the run's
+own code, so that the run and a later analysis agree: MSER-5's end of the
+initial transient, then, from it on, the mean, RMS and variance with their
+batch-means confidence intervals and whether they are converged, as
+[statistics.convergence] computes them; the autocorrelation and Sokal's
+integrated autocorrelation time; and Welch's power spectral density, as the
+probes' time spectra compute it, with its peak, refined by a parabola through
+the logarithms of its largest bins, and the peak's amplitude, from the power
+within 2 bins of it. Without an accepted transient (a signal still drifting),
+every sample is analyzed, with a warning.
+
+Each quantity has the units of the file's units line, composed: the variance in
+the column's squared, the PSD in its squared per frequency; a nondimensional
+run's units are 1. The spectrum needs samples equally spaced in time (a probe's
+time_interval); other signals get the statistics and the autocorrelation alone.
+A probe file of several samples needs --point; a [[forces]] file with
+--reference also has the coefficients CD and CL. It reads the file where it is
+and runs on one rank.
+
+Options:
+  --column NAME             The column to analyze, as the file's header names it
+                            (U_Y, integral_P, Fy_pressure), or with --reference
+                            the force coefficient CD or CL. Required.
+  --point K                 In a probe file of several samples (one row per
+                            sample at each time), the K-th row of each time,
+                            from 0: the value of its point, face or cell column.
+                            Default: the one row of each time.
+  --times T1:T2             Only the rows with T1 <= t <= T2, in the file's time
+                            units; either may be left out (T1:). Default: every
+                            row. Rows a restarted run appended replace those of
+                            the same and later times.
+  --window hann|rectangular
+                            The window of each segment of the spectrum. Default:
+                            hann.
+  --segment T               The length of each segment of Welch's spectrum, in
+                            time units: its bin width is 1 / T. Default: the
+                            whole signal, one segment.
+  --overlap F               The fraction by which successive segments overlap,
+                            from 0 to below 1. Default: 0.5.
+  --detrend constant|linear|none
+                            What each segment has removed before its window: its
+                            mean, its least-squares line, or nothing. Default:
+                            constant.
+  --strouhal L,U            Add Strouhal numbers St = f L / U to the spectrum
+                            and its peak. Default: none.
+  --max-lag T               The autocorrelation up to lag T, in time units.
+                            Default: up to Sokal's window, where the integrated
+                            autocorrelation time stops.
+  --batches B               The batches of the batch-means confidence intervals.
+                            Default: 20.
+  --confidence C            The confidence level of the intervals. Default:
+                            0.95.
+  --tolerance TOL           Report whether the mean is converged: its interval
+                            at most TOL times its magnitude, with batches of at
+                            least 10 autocorrelation times, as
+                            [statistics.convergence] tolerance. Default: none.
+  --variance-tolerance TOL  With --tolerance, also the variance's interval at
+                            most TOL times the variance. Default: none.
+  --reference TABLE         For a [[forces]] file, the reference of the
+                            coefficients CD and CL, an inline TOML table: {rho,
+                            u, length} in 2D (forces per unit depth), {rho, u,
+                            area} in 3D; u is the free-stream velocity, along
+                            which CD is, and CL is across it (u turned by +90
+                            degrees in 2D), or along lift = [x, y, z]. Default:
+                            none.
+  -o, --output DIR          Also write DIR/statistics.csv,
+                            DIR/autocorrelation.csv and DIR/spectrum.csv, each
+                            with a units line. Default: none.
+  --format text|json        text: sections and tables, with the units of every
+                            quantity; json: everything as one JSON object, the
+                            spectrum and autocorrelation included, for scripts.
+                            Default: text.
+  -h, --help                Show this page.
+
+Examples:
+  $ mallard post signal solut/probe_wake_point.csv --column U_Y --times 60: --strouhal 1,0.2
+  $ mallard post signal solut/probe_wake_arc_reductions.csv --column mean_P --tolerance 0.01
+  $ mallard post signal solut/probe_line.csv --column P --point 12 --segment 20 -o line_12
+  $ mallard post signal solut/forces_cylinder.csv --column CL --times 60: \
+        --reference '{rho = 1, u = [0.2, 0], length = 1}' --format json | jq .spectrum.peak
+
+Exit status:
+  0  analyzed
+  1  the file cannot be read, has no such column or point, or holds too few samples
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-post-signal
 ```
 
 ### mallard post convergence

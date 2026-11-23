@@ -22,7 +22,7 @@ SECTIONS = [
     ("Reading files", "reader", "mallard.", ["open", "File", "Field", "Snapshot", "Geometry", "series",
                                               "run_files", "run_record"]),
     ("Commands", "commands", "mallard.", ["info", "diff", "report", "pack", "command", "CommandError"]),
-    ("`mallard.post`", "post", "mallard.post.", ["extract", "derive", "average", "convergence"]),
+    ("`mallard.post`", "post", "mallard.post.", ["extract", "derive", "average", "convergence", "signal"]),
 ]
 
 

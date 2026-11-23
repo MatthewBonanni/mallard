@@ -437,6 +437,9 @@ histories, so a continued run keeps them.
   detected, not at `t_stationary`: what came before was not kept.
 - Costs nothing on the device: the analysis runs on the host each time a
   signal has a new sample, on every rank alike.
+- After a run, [`mallard post signal`](output.md#spectra-and-statistics-of-a-column-mallard-post-signal)
+  gives the same transient, intervals and verdict for any column of a probe,
+  force or integral file, signals or not.
 
 ## See also
 

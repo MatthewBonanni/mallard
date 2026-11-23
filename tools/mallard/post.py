@@ -40,3 +40,14 @@ def convergence(runs, **options):
     (`mallard post convergence --help`). A quantity that diverges is a result, not an error (exit status 1
     with a report): each quantity's verdict says so."""
     return command("post", "convergence", *_paths(runs), verdicts=(1,), **options)
+
+
+def signal(file, column, **options):
+    """`mallard post signal FILE --column NAME`: of a column of a probe, force or integral CSV file, MSER-5's end
+    of the transient, then the mean, RMS and variance with their batch-means intervals (as
+    `[statistics.convergence]`), the autocorrelation with Sokal's integrated time, and Welch's spectrum with its
+    peak and amplitude (as the probes' time spectra). Options: `point`, `times`, `window`, `segment`, `overlap`,
+    `detrend`, `strouhal`, `max_lag`, `batches`, `confidence`, `tolerance`, `variance_tolerance`, `reference`
+    (an inline TOML table as a string: with it, `column` may be `"CD"` or `"CL"` of a `[[forces]]` file),
+    `output` (`mallard post signal --help`). Returns the analysis, each quantity with its units."""
+    return command("post", "signal", file, column=column, **options)

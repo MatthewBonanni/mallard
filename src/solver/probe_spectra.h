@@ -28,6 +28,9 @@ namespace probe_spectra {
 
 enum class Window { HANN, RECTANGULAR };
 
+/** @brief What each segment has removed before its window: nothing, its mean, or its least-squares line. */
+enum class Detrend { NONE, CONSTANT, LINEAR };
+
 /** @brief The periodic window of m points: Hann w_n = (1 - cos(2 pi n / m)) / 2, or all ones. */
 std::vector<double> window(Window w, uint32_t m);
 
@@ -44,6 +47,14 @@ uint32_t segment_length(uint64_t n, uint32_t segments);
  *        frequency (c_k = 1). Its sum times f_s / M is the windowed variance.
  */
 std::vector<double> welch(const std::vector<double> & x, uint32_t segments, Window w, double dt);
+
+/**
+ * @brief Welch's one-sided power spectral density, as above, of segments of m
+ *        samples, shift apart and the last ending at the last sample, each
+ *        detrended by d.
+ */
+std::vector<double> welch(const std::vector<double> & x, uint32_t m, uint64_t shift, uint32_t segments, Window w,
+                          Detrend d, double dt);
 
 /** @brief The largest value of a spectrum above k = 0, its frequency refined by a parabola through log P. */
 struct Peak {

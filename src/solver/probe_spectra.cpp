@@ -77,7 +77,11 @@ uint32_t segment_length(uint64_t n, uint32_t segments) {
 
 std::vector<double> welch(const std::vector<double> & x, uint32_t segments, Window w, double dt) {
     const uint32_t m = segment_length(x.size(), segments);
-    const uint64_t shift = m / 2;
+    return welch(x, m, m / 2, segments, w, Detrend::CONSTANT, dt);
+}
+
+std::vector<double> welch(const std::vector<double> & x, uint32_t m, uint64_t shift, uint32_t segments, Window w,
+                          Detrend d, double dt) {
     const uint64_t first = x.size() - (uint64_t(segments - 1) * shift + m);
     const std::vector<double> win = window(w, m);
     double power = 0.0;
@@ -85,16 +89,29 @@ std::vector<double> welch(const std::vector<double> & x, uint32_t segments, Wind
     const double fs = 1.0 / dt;
     std::vector<double> psd(m / 2 + 1, 0.0);
     std::vector<Complex> in(m), out(m);
+    // Least squares of the line a + b (i - c), c the middle sample, whose abscissae sum to zero
+    const double c = 0.5 * static_cast<double>(m - 1);
+    double sxx = 0.0;
+    for (uint32_t i = 0; i < m; i++) sxx += (static_cast<double>(i) - c) * (static_cast<double>(i) - c);
     for (uint32_t s = 0; s < segments; s++) {
         const double * seg = x.data() + first + s * shift;
-        double mean = 0.0;
-        for (uint32_t i = 0; i < m; i++) mean += seg[i];
-        mean /= static_cast<double>(m);
-        for (uint32_t i = 0; i < m; i++) in[i] = (seg[i] - mean) * win[i];
+        double mean = 0.0, slope = 0.0;
+        if (d != Detrend::NONE) {
+            for (uint32_t i = 0; i < m; i++) mean += seg[i];
+            mean /= static_cast<double>(m);
+        }
+        if (d == Detrend::LINEAR && sxx > 0.0) {
+            for (uint32_t i = 0; i < m; i++) slope += (static_cast<double>(i) - c) * seg[i];
+            slope /= sxx;
+        }
+        for (uint32_t i = 0; i < m; i++) {
+            const double trend = d == Detrend::LINEAR ? mean + slope * (static_cast<double>(i) - c) : mean;
+            in[i] = (seg[i] - trend) * win[i];
+        }
         fft(in.data(), 1, m, out.data());
         for (size_t k = 0; k < psd.size(); k++) {
-            const double c = k == 0 || 2 * k == m ? 1.0 : 2.0;
-            psd[k] += c * std::norm(out[k]) / (fs * power * static_cast<double>(segments));
+            const double ck = k == 0 || 2 * k == m ? 1.0 : 2.0;
+            psd[k] += ck * std::norm(out[k]) / (fs * power * static_cast<double>(segments));
         }
     }
     return psd;
