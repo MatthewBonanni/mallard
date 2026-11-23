@@ -24,6 +24,7 @@
 #include "commands.h"
 #include "data_paths.h"
 #include "field_units.h"
+#include "json.h"
 #include "output_reader.h"
 #include "provenance.h"
 #include "scratch.h"
@@ -781,5 +782,107 @@ TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsLines) {
             EXPECT_EQ(files["/forces.csv"]["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
             EXPECT_EQ(spectra["mean P"], "kg m-1 s-2");
         }
+    }
+}
+
+TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsMetadata) {
+    // The units stored in snapshot and probe files follow the case's units as the CSV units lines do
+    const std::string line = N_DIM == 3 ? "start = [0.1, 0.5, 0.5]\nend = [0.9, 0.5, 0.5]\n" : "start = [0.1, 0.5]\nend = [0.9, 0.5]\n";
+    bool hdf5 = false;
+#ifdef Mallard_HAS_HDF5
+    hdf5 = comm::size() == 1 || have_parallel_hdf5();
+#endif
+    for (const std::string system : {"nondimensional", "SI"}) {
+        const std::string dir = (scratch_dir() / ("mallard_units_metadata_" + system)).string();
+        if (comm::is_root()) std::filesystem::remove_all(dir);
+        comm::barrier();
+        std::ostringstream s;
+        s << units_case(dir, system)
+          << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n"
+          << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_*\", \"COV_*\"]\n"
+          << "[[probes]]\nname = \"lv\"\nformat = \"vtp\"\nfile = \"" << dir << "/lv.pvd\"\n" << line
+          << "n_points = 4\nfields = [\"RHO\", \"P\"]\n"
+          << "[[probes]]\nname = \"blob\"\nregion = "
+          << (N_DIM == 3 ? "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2}"
+                         : "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}")
+          << "\nfields = [\"RHO\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/blob.csv\"\n";
+        if (hdf5) {
+            s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 2\nfields = [\"RHO\", \"P\"]\n"
+              << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\n"
+              << "fields = [\"RHO\", \"P\"]\n"
+              << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\n" << line
+              << "n_points = 4\nfields = [\"RHO\", \"P\"]\n"
+              << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\n" << line
+              << "n_points = 4\nfields = [\"RHO\", \"P\"]\n";
+        }
+        {
+            Solver solver;
+            solver.init(parse_toml(s.str()));
+            solver.run();
+        }
+        comm::barrier();
+        if (!comm::is_root()) continue;
+
+        // Every units entry a file stores, by where it is: fields as the C++ reader finds them, the snapshot and
+        // probe sampling blocks' own units, and the CF attributes of the coordinates and times
+        std::map<std::string, std::string> stored;
+        auto block_units = [&](const std::string & where, const std::string & block) {
+            if (block.empty()) return;
+            const json::Value b = json::parse(block);
+            ASSERT_TRUE(b.has("units")) << where;
+            for (const std::string & key : b["units"].keys()) stored[where + " units." + key] = b["units"][key].string;
+        };
+        const std::string vtu = comm::size() > 1 ? "/f_000002_p0000.vtu" : "/f_000002.vtu";
+        std::vector<std::string> files = {vtu, "/lv_000002.vtp", "/blob.csv"};
+        if (hdf5) files.insert(files.end(), {"/h_000002.xmf", "/h_000002.h5", "/k_000002.vtkhdf", "/probe.h5", "/probe.vtkhdf"});
+        for (const std::string & file : files) {
+            const output::Contents c = output::open(dir + file);
+            for (const output::Field & f : c.fields) stored[file + " " + f.name] = f.units;
+            block_units(file + " sampling", c.sampling);
+        }
+        for (const std::string & file : {vtu, std::string("/lv_000002.vtp")}) {
+            block_units(file + " block", provenance::parse_comment(read_file(dir + file), snapshot_block::NAME));
+        }
+#ifdef Mallard_HAS_HDF5
+        if (hdf5) {
+            for (const auto & [file, dataset] : std::vector<std::pair<std::string, std::string>>{
+                     {"/h_mesh.h5", "nodes/coordinates"}, {"/k_000002.vtkhdf", "VTKHDF/Points"},
+                     {"/k_000002.vtkhdf", "VTKHDF/FieldData/TIME"}, {"/probe.h5", "time"},
+                     {"/probe.h5", "coordinates"}, {"/probe.vtkhdf", "VTKHDF/Points"}}) {
+                h5::Handle h(H5Fopen((dir + file).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, file);
+                h5::Handle d(H5Dopen2(h, dataset.c_str(), H5P_DEFAULT), H5Dclose, dataset);
+                stored[file + " " + dataset] = h5::read_string_attribute(d, "units");
+            }
+        }
+#endif
+        const std::string area = N_DIM == 3 ? "volume" : "area";
+        for (const auto & key : {vtu + " RHO", vtu + " MEAN_P", vtu + " block units.time",
+                                 vtu + " block units.statistics.average_start", vtu + " block units.fields.average.start",
+                                 std::string("/lv_000002.vtp P"), std::string("/lv_000002.vtp block units.time"),
+                                 std::string("/lv_000002.vtp sampling units.points.requested"),
+                                 "/blob.csv sampling units.measures.region." + area}) {
+            EXPECT_TRUE(stored.count(key)) << system << ": " << key;
+        }
+        if (system == "nondimensional") {
+            for (const auto & [where, unit] : stored) EXPECT_EQ(unit, "1") << where;
+        } else {
+            EXPECT_EQ(stored[vtu + " RHO"], "kg m-3");
+            EXPECT_EQ(stored[vtu + " MEAN_P"], "kg m-1 s-2");
+            EXPECT_EQ(stored[vtu + " block units.time"], "s");
+            EXPECT_EQ(stored[vtu + " block units.statistics.average_start"], "s");
+            EXPECT_EQ(stored["/lv_000002.vtp P"], "kg m-1 s-2");
+            EXPECT_EQ(stored["/lv_000002.vtp sampling units.points.requested"], "m");
+            EXPECT_EQ(stored["/blob.csv sampling units.measures.region." + area], N_DIM == 3 ? "m3" : "m2");
+            EXPECT_EQ(stored["/blob.csv sampling units.measures.in_domain." + std::string(N_DIM == 3 ? "surface_area" : "perimeter")],
+                      N_DIM == 3 ? "m2" : "m");
+            if (hdf5) {
+                for (const char * file : {"/h_000002.xmf", "/h_000002.h5", "/k_000002.vtkhdf", "/probe.h5", "/probe.vtkhdf"}) {
+                    EXPECT_EQ(stored[std::string(file) + " RHO"], "kg m-3") << file;
+                }
+                EXPECT_EQ(stored["/k_000002.vtkhdf VTKHDF/FieldData/TIME"], "s");
+                EXPECT_EQ(stored["/probe.h5 coordinates"], "m");
+            }
+        }
+        if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
     }
 }
