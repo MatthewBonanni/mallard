@@ -94,6 +94,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Initial-transient detection and confidence intervals (MSER-5, batch means): start statistics, stop at convergence
 - [C++ API](https://matthewbonanni.github.io/mallard/docs/guide/cpp_api/): step a case from your program, same results as `mallard -i`; CMake package (`find_package(Mallard)`)
 - [Python package](https://matthewbonanni.github.io/mallard/docs/guide/python/): output files as numpy arrays via Mallard's reader; post-processing commands as functions
+- [Desktop GUI](https://github.com/MatthewBonanni/mallard-gui), in progress: case setup, runs, results
 
 **Verification and validation** ([cases](https://matthewbonanni.github.io/mallard/validation/))
 
