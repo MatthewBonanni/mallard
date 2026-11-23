@@ -177,6 +177,13 @@ struct ExactSumsLargest {
     }
 };
 
+/** @brief Terms that are all zero, of n rows. */
+struct ExactSumsZeros {
+    uint32_t n = 0;
+    KOKKOS_INLINE_FUNCTION double operator()(uint32_t, uint32_t) const { return 0.0; }
+    uint32_t extent(int) const { return n; }
+};
+
 /** @brief Integers of a column's window: its limbs, then its count of terms that are not finite. */
 constexpr uint32_t EXACT_SUMS_WINDOW_WIDTH = EXACT_SUMS_WINDOW + 1;
 
@@ -281,6 +288,7 @@ class ExactSums {
               limbs("exact_sums_limbs", size_t(n_columns) * EXACT_SUMS_WIDTH), totals("exact_sums", n_columns),
               distributed(distributed_), use_nccl(use_nccl_) {
             if (n_rows >= uint32_t(1) << 31) throw std::invalid_argument("ExactSums: 2^31 rows or more on a rank");
+            reserve_reduction_scratch(n_columns, n_rows);
         }
 
         /** @brief Sum the columns of terms (row, column) into sums(), enqueued on the default execution space. */
@@ -356,6 +364,23 @@ class ExactSums {
         const Kokkos::View<double *> & sums() const { return totals; }
 
     private:
+        /**
+         * @brief Sums zeros as the widest columns of sum_rows do, on enough rows for the most blocks, so that
+         *        Kokkos grows its reduction scratch for their values here: grown in a step graph's capture, it is an
+         *        allocation there, and graphs captured before it keep the scratch it frees.
+         */
+        void reserve_reduction_scratch(const uint32_t n_columns, const uint32_t n_rows) const {
+            const uint32_t n = Kokkos::max(n_rows, static_cast<uint32_t>(Kokkos::DefaultExecutionSpace().concurrency()));
+            const ExactSumsZeros zeros{n};
+            if (n_columns >= 4) {
+                sum_columns<4>(zeros, Kokkos::View<const uint32_t>(), 0);
+            } else if (n_columns >= 2) {
+                sum_columns<2>(zeros, Kokkos::View<const uint32_t>(), 0);
+            } else if (n_columns == 1) {
+                sum_columns<1>(zeros, Kokkos::View<const uint32_t>(), 0);
+            }
+        }
+
         Kokkos::View<double *> largest;
         Kokkos::View<int64_t *> windows;  // EXACT_SUMS_WINDOW_WIDTH a column
         Kokkos::View<int64_t *> limbs;  // EXACT_SUMS_WIDTH a column, zero between calls
