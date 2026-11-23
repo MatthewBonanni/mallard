@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MatthewBonanni/mallard/blob/main/docs/schemas/install-verify.schema.json",
+  "title": "mallard install verify --format json",
+  "description": "The verdict of mallard install verify: the environment check and the quick run of each solver installed. Minor versions add fields; readers ignore fields they do not know.",
+  "type": "object",
+  "required": ["schema", "version", "passed", "mallard", "prefix", "launcher", "seconds", "checks"],
+  "properties": {
+    "schema": {"const": "mallard-install-verify"},
+    "version": {"const": 1},
+    "passed": {"type": "boolean", "description": "Every check passed."},
+    "mallard": {"type": "string", "description": "The version of this build, as mallard --version prints it."},
+    "prefix": {"type": "string", "description": "The install's prefix: the directory of bin/."},
+    "launcher": {"type": "string", "description": "The --launcher the checks ran under; empty for none."},
+    "seconds": {"type": "number", "minimum": 0},
+    "directory": {"type": "string", "description": "With --keep: where the checks' cases and logs are."},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "dim", "passed", "seconds", "detail"],
+        "properties": {
+          "name": {"enum": ["environment", "run"]},
+          "dim": {"enum": [2, 3]},
+          "passed": {"type": "boolean"},
+          "seconds": {"type": "number", "minimum": 0},
+          "detail": {"type": "string", "description": "What was found, or why the check failed."},
+          "backend": {"type": "string", "description": "environment: the Kokkos backend of the build."},
+          "precision": {"enum": ["single", "double", ""]},
+          "mpi": {"type": "boolean"},
+          "template": {"const": "sod"},
+          "steps": {"type": ["number", "null"]},
+          "cells_per_second": {"type": ["number", "null"]},
+          "monitors": {
+            "type": "object",
+            "description": "run: the monitors of the last progress record, compared with the exact solution.",
+            "properties": {
+              "min_rho": {"type": ["number", "null"]},
+              "min_p": {"type": ["number", "null"]},
+              "max_mach": {"type": ["number", "null"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}
