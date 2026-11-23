@@ -43,40 +43,31 @@ constexpr uint64_t CHUNK_NODES = uint64_t(1) << 18;
 } // namespace
 
 void HighOrderOutput::init(std::shared_ptr<Mesh> mesh_in, const FaceReconstruction * reconstruction, bool mixture,
-                           std::vector<LagrangeView> & views_in) {
+                           LagrangeView & view_in) {
     mesh = std::move(mesh_in);
-    views = &views_in;
-    built.clear();
-    if (!reconstruction || reconstruction->get_type() != FaceReconstructionType::TENO) {
-        views->assign(1, LagrangeView{});
-        return;
-    }
+    view = &view_in;
+    built.reset();
+    *view = LagrangeView{};
+    if (!reconstruction || reconstruction->get_type() != FaceReconstructionType::TENO) return;
     const uint32_t degree = static_cast<const TENO *>(reconstruction)->degree;
-    views->assign(size_t(degree) + 1, LagrangeView{});
-    for (uint32_t d = 1; d <= degree; d++) {
-        LagrangeView & v = (*views)[d];
-        v.order = d;
-        v.method = "TENO";
-        v.reconstruction_order = int(degree) + 1;
-        v.fields = field_names(mixture);
-    }
+    view->order = degree;
+    view->method = "TENO";
+    view->reconstruction_order = int(degree) + 1;
+    view->fields = field_names(mixture);
 }
 
 void HighOrderOutput::setup() {
-    built.clear();
-    if (!views) return;
-    for (LagrangeView & v : *views) {
-        if (v.requested.empty()) continue;
-        Built b;
-        b.view = &v;
-        build(b);
-        built.push_back(std::move(b));
-    }
+    built.reset();
+    if (!view || view->requested.empty()) return;
+    Built b;
+    b.view = view;
+    build(b);
+    built = std::move(b);
 }
 
 void HighOrderOutput::build(Built & b) {
-    LagrangeView & view = *b.view;
-    const uint32_t order = view.order;
+    LagrangeView & v = *b.view;
+    const uint32_t order = v.order;
     std::vector<uint32_t> owned = mesh->cells_by_global_id();
     std::erase_if(owned, [&](uint32_t c) { return c >= mesh->n_owned(); });
 
@@ -89,10 +80,10 @@ void HighOrderOutput::build(Built & b) {
         std::vector<double> linear;
     } host[N_SHAPES][2];
     std::vector<lagrange::Point> geometry_points;
-    view.first_entry.assign(1, 0);
-    view.first_node.assign(1, 0);
-    view.types.clear();
-    view.points.clear();
+    v.first_entry.assign(1, 0);
+    v.first_node.assign(1, 0);
+    v.types.clear();
+    v.points.clear();
     const curved::Geometry * curves = mesh->curved_geometry.get();
     for (const uint32_t c : owned) {
         for (const lagrange::Piece & piece : lagrange::pieces(*mesh, curves, c, order)) {
@@ -103,7 +94,7 @@ void HighOrderOutput::build(Built & b) {
             }
             h.cells.push_back(c);
             h.geometry.push_back(static_cast<uint32_t>(geometry_points.size()));
-            h.first_node.push_back(view.first_node.back());
+            h.first_node.push_back(v.first_node.back());
             const size_t m = h.reference.size(), n = piece.points.size();
             for (size_t l = 0; l < m; l++) {
                 for (size_t d = 0; d < 3; d++) {
@@ -113,16 +104,16 @@ void HighOrderOutput::build(Built & b) {
                     } else {
                         for (size_t k = 0; k < n; k++) x += h.linear[l * n + k] * piece.points[k][d];
                     }
-                    view.points.push_back(static_cast<rtype>(x));
+                    v.points.push_back(static_cast<rtype>(x));
                 }
             }
             geometry_points.insert(geometry_points.end(), piece.points.begin(), piece.points.end());
-            view.first_node.push_back(view.first_node.back() + m);
-            view.types.push_back(lagrange::vtk_type(piece.shape));
+            v.first_node.push_back(v.first_node.back() + m);
+            v.types.push_back(lagrange::vtk_type(piece.shape));
         }
-        view.first_entry.push_back(view.types.size());
+        v.first_entry.push_back(v.types.size());
     }
-    b.n_nodes = view.first_node.back();
+    b.n_nodes = v.first_node.back();
 
     b.geometry = Kokkos::View<rtype *[N_DIM]>("high_order_geometry", geometry_points.size());
     {
@@ -173,7 +164,7 @@ void HighOrderOutput::build(Built & b) {
     std::vector<uint8_t> h_codes;
     std::vector<uint32_t> h_columns;
     uint32_t n_columns = 0;
-    for (const std::string & name : view.requested) {
+    for (const std::string & name : v.requested) {
         h_codes.push_back(code_of(name));
         h_columns.push_back(n_columns);
         n_columns += LagrangeView::components(name);
@@ -181,7 +172,7 @@ void HighOrderOutput::build(Built & b) {
     b.codes = upload(h_codes, "high_order_codes");
     b.columns = upload(h_columns, "high_order_columns");
     b.values = Kokkos::View<rtype *, Kokkos::SharedHostPinnedSpace>("high_order_values", b.n_nodes * n_columns);
-    view.values = [values = b.values, n = b.n_nodes, h_columns, names = view.requested](const std::string & name) {
+    v.values = [values = b.values, n = b.n_nodes, h_columns, names = v.requested](const std::string & name) {
         const size_t f = static_cast<size_t>(std::find(names.begin(), names.end(), name) - names.begin());
         return static_cast<const rtype *>(values.data() + uint64_t(h_columns.at(f)) * n);
     };
@@ -191,7 +182,8 @@ void HighOrderOutput::update(FaceReconstruction & reconstruction, Kokkos::View<r
                              const Euler & physics) {
     const Kokkos::View<rtype *[N_DIM]> centroids = mesh->cell_coords;
     const Euler phys = physics;
-    for (const Built & b : built) {
+    if (built) {
+        const Built & b = *built;
         const Kokkos::View<rtype *[N_DIM]> geom = b.geometry;
         const Kokkos::View<uint8_t *> code = b.codes;
         const Kokkos::View<uint32_t *> column = b.columns;

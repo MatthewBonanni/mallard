@@ -597,17 +597,13 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
 
 void Solver::check_outputs(CheckReport & r) const {
     for (const auto & writer : data_writers) {
-        CheckOutput o{writer->get_prefix(), FORMAT_NAMES.at(writer->get_format()), writer->snapshot_bytes(), 0.0, 0};
-        if (const DataWriter * view = writer->high_order_writer()) {
-            o.high_order_bytes = view->snapshot_bytes();
-            o.high_order_degree = writer->high_order_degree();
-        }
+        CheckOutput o{writer->get_prefix(), FORMAT_NAMES.at(writer->get_format()), writer->snapshot_bytes(), 0.0};
+        if (const DataWriter * view = writer->high_order_writer()) o.high_order_bytes = view->snapshot_bytes();
         if (o.high_order_bytes > OUTPUT_SIZE_WARNING) {
             r.warning(diagnostic_code::OUTPUT_SIZE,
                       "[[write_data]] " + o.prefix + " writes a high-order view of " + bytes(o.high_order_bytes) +
-                          " per snapshot (degree " + std::to_string(o.high_order_degree) + "; the cell values: " +
-                          bytes(o.bytes) + "): lower its high_order_degree, write it less often, or set "
-                          "high_order = false to write the cell values alone");
+                          " per snapshot (the cell values: " + bytes(o.bytes) +
+                          "): write it less often, or set high_order = false to write the cell values alone");
         }
         r.outputs.push_back(std::move(o));
     }

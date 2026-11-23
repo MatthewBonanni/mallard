@@ -211,7 +211,7 @@ struct CellSubset {
  *        fills the rest; the values before each snapshot whose writer writes it.
  */
 struct LagrangeView {
-    uint32_t order = 0;                   // the cells' degree
+    uint32_t order = 0;                   // the cells' degree, the polynomials'; 0 without TENO
     std::string method;                   // the reconstruction, as snapshot blocks name it
     int reconstruction_order = 0;         // and its order
     std::vector<std::string> fields;      // those that can be written at the nodes
@@ -255,9 +255,9 @@ class DataWriter {
          *        (default: CONSERVATIVE_NAMES); ignored for other formats.
          * @param subset Only these cells (vtkhdf and vtu), with their fractions as REGION_FRACTION.
          * @param prefix The files' prefix, if not the entry's.
-         * @param views The high-order views by degree (vtkhdf and vtu of the whole mesh, with
-         *        high_order): this writer's fields at the nodes are added to its view's requested
-         *        ones, and each snapshot then also writes the view as <prefix>_high_order.
+         * @param view_in The high-order view (vtkhdf and vtu of the whole mesh, with high_order):
+         *        this writer's fields at the nodes are added to its requested ones, and each
+         *        snapshot then also writes the view as <prefix>_high_order.
          */
         void init(const Input & input,
                   std::vector<Data> & data,
@@ -265,7 +265,7 @@ class DataWriter {
                   const std::vector<std::string> & restart_variables = {},
                   const CellSubset * subset = nullptr,
                   const std::string & prefix = "",
-                  std::vector<LagrangeView> * views = nullptr);
+                  LagrangeView * view_in = nullptr);
 
         /**
          * @brief Write files on a background thread ([output] async), and
@@ -357,8 +357,6 @@ class DataWriter {
         }
         /** @brief The writer of the high-order view, or null. */
         const DataWriter * high_order_writer() const { return high_order.get(); }
-        /** @brief The degree of the high-order view's cells, or 0. */
-        uint32_t high_order_degree() const { return high_order ? high_order->view->order : 0; }
 
         DataFormat get_format() const { return format; }
         /** @brief Whether its region follows the solution: a write reads the solution's cell values. */

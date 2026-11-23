@@ -1,5 +1,5 @@
 # For the key catalog only (tools/dev/input_catalog.py): a [[write_data]] entry
-# writing the high-order view of a TENO run at a degree below its polynomials'.
+# that sets high_order, the high-order view of a TENO run.
 
 [run]
 n_steps = 1
@@ -36,4 +36,3 @@ format = "vtu"
 interval = 1
 fields = ["RHO", "P"]
 high_order = true
-high_order_degree = 2
