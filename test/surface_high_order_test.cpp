@@ -42,6 +42,19 @@ struct Snapshot {
     std::vector<double> values;
 };
 
+Snapshot read(const std::string & file, const std::string & field) {
+    return {h5_values<uint8_t>(file, "VTKHDF/Types"), h5_values<int64_t>(file, "VTKHDF/Offsets"),
+            h5_values<double>(file, "VTKHDF/Points"), h5_values<double>(file, "VTKHDF/PointData/" + field)};
+}
+
+} // namespace
+
+#endif
+
+#if Mallard_DIM == 2 && defined(Mallard_HAS_HDF5)
+
+namespace {
+
 std::string vtkhdf_type(const std::string & file) {
     const hid_t f = H5Fopen(file.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     const hid_t top = H5Gopen2(f, "VTKHDF", H5P_DEFAULT);
@@ -55,19 +68,6 @@ std::string vtkhdf_type(const std::string & file) {
     H5Fclose(f);
     return out.substr(0, out.find('\0'));
 }
-
-Snapshot read(const std::string & file, const std::string & field) {
-    return {h5_values<uint8_t>(file, "VTKHDF/Types"), h5_values<int64_t>(file, "VTKHDF/Offsets"),
-            h5_values<double>(file, "VTKHDF/Points"), h5_values<double>(file, "VTKHDF/PointData/" + field)};
-}
-
-} // namespace
-
-#endif
-
-#if Mallard_DIM == 2 && defined(Mallard_HAS_HDF5)
-
-namespace {
 
 // rho quadratic and u linear: rho, rho u and so u are polynomials of TENO4's degree 3
 double rho_of(double x, double y) { return 1.0 + 0.3 * x - 0.2 * y + 0.4 * x * y + 0.5 * y * y; }

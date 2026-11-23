@@ -618,13 +618,18 @@ coordinates give it), and nodes on a curved wall lie on the straight face.
 The nodes are not shared between elements, so the jumps between neighbors'
 polynomials stay visible, as in the high-order view. In ParaView, raise
 **Nonlinear Subdivision Level** to 2 or 3 to draw each element's polynomial.
-The files are the same on any number of ranks, threads and partitions. A
-Lagrange element of degree `p` holds `p + 1` nodes in 2D and up to
-`(p + 1)^2` in 3D, each with its coordinates and normal: in 2D about `p + 1`
-times the field data of one value per element, in 3D up to `(p + 1)^2` times
-(order 5: 5 and 25 times). Surfaces are small beside the whole mesh, and each
-file also holds the run's metadata, so on small surfaces the files differ
-little in size.
+The files are the same on any number of ranks, threads and partitions.
+
+**Size.** A Lagrange element of degree `p` holds `p + 1` nodes in 2D,
+`(p + 1)^2` as a quadrilateral and `(p + 1)(p + 2)/2` per triangle of a
+polygon with `n` corners (`n - 2` of them) in 3D, each node with its
+coordinates and normal. At order 5 the field data is 5 times that of one
+value per element in 2D, 25 times on a wall of quadrilaterals and about 43
+times on an oblique cut of a hexahedral mesh, whose polygons have 3 to 7
+corners. Each file also holds the run's metadata, so whole files grow less:
+measured on a 64 x 64 mesh, 2D cut and wall files are 0.8 times their size
+with one value per element; on a 24^3 mesh, a wall's files are 2.3 times and
+an oblique cut's 4.4 times. Surfaces stay small beside the whole mesh.
 
 ## Mesh and stencil fields
 
