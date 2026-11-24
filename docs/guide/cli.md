@@ -51,6 +51,7 @@ A few things hold for every command:
 | Run control | `mallard ctl`, control files ([Running](running.md)) | `mallard-run-control` |
 | Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
 | Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
+| Gas models | `mallard list models [INPUT] --format json` ([Gas models](thermochemistry.md#gas-models); JSON Schema [`docs/schemas/gas-models.schema.json`](../schemas/gas-models.schema.json)) | `mallard-gas-models` |
 
 ## Shell completion
 
@@ -137,6 +138,8 @@ Commands:
     mallard list species      The species of a case
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
+    mallard list models       The gas models a case chooses between, and the
+                              keys that select each
     mallard list templates    The case templates of mallard new
     mallard diff              Compare two solutions field by field: norms of the
                               difference, where it is largest, bitwise
@@ -646,6 +649,8 @@ Commands:
   mallard list species        The species of a case
   mallard list keys           The input keys there are, or exactly those of one
                               case: type, units, default, values
+  mallard list models         The gas models a case chooses between, and the
+                              keys that select each
   mallard list templates      The case templates of mallard new
 
 mallard list <command> --help shows the page of a command.
@@ -763,6 +768,39 @@ Exit status:
   2  usage error, or a section with no key
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
+```
+
+### mallard list models
+
+```text
+Usage: mallard list models [INPUT] [--format text|json]
+
+Lists the gas models: perfect gas, frozen mixture, finite-rate chemistry and
+flamelet table (FPV), each with the keys it sets (and their values), the keys it
+requires and the keys and tables it does not read, which switching a case to it
+removes. With an input file, reads its keys (not its mesh or mechanism) and
+marks the model it chooses. --format json gives the same as one object (schema
+mallard-gas-models, version 1), for front ends that offer the choice.
+
+Options:
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list models
+  $ mallard list models flame.toml --format json
+
+Exit status:
+  0  listed
+  1  the input cannot be read (the error is printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-models
 ```
 
 ### mallard list templates

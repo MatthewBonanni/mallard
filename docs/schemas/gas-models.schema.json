@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MatthewBonanni/mallard/blob/main/docs/schemas/gas-models.schema.json",
+  "title": "mallard list models --format json",
+  "description": "The gas models a case chooses between and the keys that select each. Readers ignore fields they do not know.",
+  "type": "object",
+  "required": ["schema", "version", "input", "current", "models"],
+  "properties": {
+    "schema": {"const": "mallard-gas-models"},
+    "version": {"const": 1},
+    "input": {"type": ["string", "null"], "description": "The input file given, or null."},
+    "current": {"type": ["string", "null"], "description": "The name of the model the input chooses; null without an input or when its keys match none."},
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "title", "description", "docs", "sets", "requires", "removes"],
+        "properties": {
+          "name": {"type": "string", "description": "perfect, frozen, finite_rate or flamelet; more may come."},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "docs": {"type": "string", "description": "The guide section, relative to the source tree."},
+          "sets": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Each key the model sets, with its value as TOML."},
+          "requires": {"type": "array", "items": {"type": "string"}, "description": "Keys the model needs that have no default."},
+          "removes": {"type": "array", "items": {"type": "string"}, "description": "Keys and tables the model does not read."}
+        }
+      }
+    }
+  }
+}
