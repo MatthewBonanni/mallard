@@ -520,6 +520,48 @@ TEST(DerivedFields, ScalarDissipationIsTwiceTheDiffusivityForAUnitGradient) {
     EXPECT_GT(checked, 0u);
 }
 
+TEST(DerivedFields, ScalarDissipationOfReconstructionGradientsConverges) {
+    // The blends of the test above, Z = 1/2 + 1/4 sin(2 pi x) on a periodic box: with viscous_gradients =
+    // "reconstruction" the species gradients of chi = 2 D |grad Z|^2 are those of the TENO polynomials
+    const double W_H2 = 2.016, W_O2 = 31.998, W_AR = 39.95;
+    const double a = (1.0 / W_O2 - 1.0 / W_AR) / (1.0 / W_H2 - 1.0 / W_AR);
+    const std::string A = std::to_string(a), B = std::to_string(1.0 - a), Z = "(0.5 + 0.25 * sin(2 * pi * x))";
+    const double pi = 3.14159265358979323846;
+    std::vector<double> errors;
+    for (const uint32_t n : {8u, 16u}) {
+        const std::string prefix = "mallard_derived_chi_teno_" + std::to_string(n);
+        std::ostringstream s;
+        s << "[run]\nn_steps = 10\ncfl = 0.25\n[mesh]\ntype = \"cartesian\"\nNx = " << n << "\nNy = 3\nLx = 1.0\nLy = 1.0\n"
+          << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+          << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+          << "[initialize]\ntype = \"analytical\"\nn_subdivisions = 6\np = \"1.0e5\"\nT = \"400.0\"\nu = "
+          << velocity("0.0", "0.0", "0.0") << "\nY = { H2 = \"" << A << " * " << Z << "\", AR = \"" << B << " * " << Z
+          << "\", O2 = \"1 - " << Z << "\" }\n"
+          << "[numerics]\nriemann_solver = \"HLLC\"\nviscous_gradients = \"reconstruction\"\n"
+          << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n"
+          << "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" << source_dir()
+          << "/mechanisms/h2o2.yaml\"\ntransport = \"unity_lewis\"\n[output]\ncheck_interval = 1000000\n"
+          << "[output.mixture]\nfuel = {Y = {H2 = " << A << ", AR = " << B << "}}\noxidizer = {Y = {O2 = 1.0}}\n"
+          << "[[write_data]]\nprefix = \"" << (rank_scratch_dir() / prefix).string()
+          << "\"\nformat = \"vtu\"\ninterval = 1000000\nfields = [\"SCALAR_DISSIPATION\", \"D_N2\"]\n";
+        Solver solver;
+        solver.set_distributed(false);
+        solver.init(parse_toml(s.str()));
+        solver.write_output_of_state(false);
+        const output::Contents contents = output::open((rank_scratch_dir() / (prefix + "_000000.vtu")).string());
+        const std::vector<double> chi = output::read(contents, "SCALAR_DISSIPATION", 0);
+        const std::vector<double> D = output::read(contents, "D_N2", 0);
+        double error = 0.0;
+        const uint32_t n_cells = solver.get_mesh()->n_owned();
+        for (uint32_t c = 0; c < n_cells; c++) {
+            const double dZ = 0.5 * pi * std::cos(2.0 * pi * x_of(solver, c));
+            error += std::fabs(chi[c] / (2.0 * D[c]) - dZ * dZ) / n_cells;
+        }
+        errors.push_back(error);
+    }
+    EXPECT_GT(std::log2(errors[0] / errors[1]), 3.0) << errors[0] << " " << errors[1];
+}
+
 TEST(DerivedFields, MixtureEntropyOfMixingAndPressure) {
     // s(T, p) of an ideal mixture: the mass-weighted entropies of its pure
     // species at the same T and p plus R ln 2 of the equimolar mixing, and

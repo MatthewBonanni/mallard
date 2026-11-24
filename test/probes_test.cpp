@@ -2762,3 +2762,49 @@ TEST(ProbesTest, RejectsPointSamplingAndGridsOfMovingAndSolutionRegionsAndUnknow
                                        "\nn_points = \"faces\"\n");
     EXPECT_NE(cells.find("n_points = \"cells\""), std::string::npos) << cells;
 }
+
+// Vorticity (derived fields, statistics, resolution diagnostics) of a wall-bounded flow with viscous_gradients =
+// "reconstruction": the TENO polynomials' gradients at the centroids, through the wall cells
+TEST(ProbesTest, VorticityOfReconstructionGradientsConvergesThroughTheWallCells) {
+    const std::vector<std::string> meshes = N_DIM == 2 ? std::vector<std::string>{"cartesian", "cartesian_tri"}
+                                                       : std::vector<std::string>{"cartesian"};
+    const double k = 2.0 * 3.14159265358979323846;
+    for (const std::string & mesh : meshes) {
+        double errors[2][2] = {};
+        for (uint32_t m = 0; m < 2; m++) {
+            const uint32_t n = 8u << m;
+            const std::string dir = fresh_dir("vorticity");
+            std::string text = couette_case(n, "[[write_data]]\nprefix = \"" + dir +
+                                                   "/v\"\nformat = \"vtu\"\ninterval = 1000\nfields = [\"VORTICITY\"]\n");
+            text.replace(text.find("Nx = 4"), 6, "Nx = " + std::to_string(n));
+            text.replace(text.find("type = \"cartesian\""), 18, "type = \"" + mesh + "\"");
+            text.replace(text.find("type = \"MUSCL\""), 14, "type = \"TENO\"\norder = 5");
+            const std::string u = "\"0.5 * y\"";
+            text.replace(text.find(u), u.size(), "\"0.5 * y + 0.3 * sin(2 * pi * x) * y * (1 - y)\"");
+            const std::string v = "\"0\"";
+            text.replace(text.find(v, text.find("u = [")), v.size(), "\"0.1 * cos(2 * pi * x) * y^2 * (1 - y)^2\"");
+            text.insert(text.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+            text.insert(text.find("[initialize]\n") + 13, "n_subdivisions = 6\n");
+            Solver solver;
+            solver.init(parse_toml(text));
+            solver.update_velocity_gradients();
+            solver.update_vortex_fields();
+            const auto w = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.vortex_fields);
+            const Mesh & grid = *solver.get_mesh();
+            uint32_t counts[2] = {};
+            for (uint32_t c = 0; c < grid.n_owned(); c++) {
+                const double x = double(grid.h_cell_coords(c, 0)), y = double(grid.h_cell_coords(c, 1));
+                const double dvdx = -0.1 * k * std::sin(k * x) * y * y * (1 - y) * (1 - y);
+                const double dudy = 0.5 + 0.3 * std::sin(k * x) * (1 - 2 * y);
+                const uint32_t wall = (y < 1.0 / n || y > 1.0 - 1.0 / n) ? 1 : 0;
+                errors[m][wall] += std::fabs(double(w(c, N_DIM == 2 ? 0 : 2)) - (dvdx - dudy));
+                counts[wall]++;
+            }
+            for (uint32_t r = 0; r < 2; r++) errors[m][r] /= counts[r];
+        }
+        for (uint32_t r = 0; r < 2; r++) {
+            EXPECT_GT(std::log2(errors[0][r] / errors[1][r]), 3.0)
+                << mesh << (r ? " wall" : " interior") << " cells: " << errors[0][r] << " " << errors[1][r];
+        }
+    }
+}

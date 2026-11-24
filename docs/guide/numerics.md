@@ -441,6 +441,14 @@ On 32 × 32 × 2 triangles, TENO5's shear-wave error is 24 times smaller with
 `reconstruction` than with least squares (1.9e-8 against 4.4e-7), and the gap
 grows with resolution.
 
+Derived fields, statistics and resolution diagnostics (vorticity, Q, strain
+rate, dissipation, `SCALAR_DISSIPATION`, ...) take each smooth cell's
+polynomial gradients at its centroid, wall cells' from the one-sided wall
+fits, and mixtures' species gradients from the species polynomials; troubled
+cells keep least squares. On a wall-bounded TENO5 flow (8 to 16 cells across
+the channel) the vorticity error converges at fourth order in the wall cells
+and the interior, against 1.5 to 2 with least squares.
+
 Cost: TENO's smooth pass evaluates each smooth cell's polynomial gradients
 at its face points while it holds the coefficients, and keeps those of u and
 T for the stage, per face side, with their values (for the wall fits): 7.0 KB
