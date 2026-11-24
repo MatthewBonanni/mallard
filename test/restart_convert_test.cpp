@@ -221,6 +221,29 @@ TEST(CompositionMapTest, OverlappingSetsMoveTheMassOntoTheOnlyCarriers) {
     for (const char * carbon : {"CH4", "CO", "CO2"}) EXPECT_EQ(of(to, out, carbon), 0.0) << carbon;
 }
 
+// GRI-Mech 3.0 into the CH4 mechanism of BFER, fresh CH4/H2/air: the hydrogen of H2 can only go into H2O, which the
+// source lacks (chi-square weight 1e-12), since carbon pins CH4; the answer is unique, Y_H2O = mu_H(H2) Y_H2 /
+// mu_H(H2O), Y_O2 = Y_O2^0 - mu_O(H2O) Y_H2O, CH4 and N2 unchanged. Catches a projection that stalls short of
+// element conservation when a species absent from the source must take mass (the dual's multipliers ~ z / 1e-12).
+TEST(CompositionMapTest, SpeciesAbsentFromTheSourceTakeTheMassOnlyTheyCanCarry) {
+    const auto & from = mechanism("gri30.yaml").species, & to = mechanism("ch4_bfer.yaml").species;
+    const CompositionMap map(from, to);
+    const std::vector<double> Y = by_name(from, {{"CH4", 0.04}, {"H2", 0.005}, {"O2", 0.22}, {"N2", 0.735}});
+    std::vector<double> out(to.size());
+    const CompositionMap::Result r = map.map(Y.data(), out.data());
+    EXPECT_TRUE(r.projected);
+    expect_conserved(map, Y, out);
+    expect_projection(map, Y, out);
+    const Species & hydrogen = from[static_cast<size_t>(mechanism("gri30.yaml").species_index("H2"))];
+    const Species & water = to[static_cast<size_t>(mechanism("ch4_bfer.yaml").species_index("H2O"))];
+    const double H2O = mu(hydrogen, "H") * 0.005 / mu(water, "H");
+    EXPECT_NEAR(of(to, out, "H2O"), H2O, 1e-15);
+    EXPECT_NEAR(of(to, out, "O2"), 0.22 - mu(water, "O") * H2O, 1e-15);
+    EXPECT_NEAR(of(to, out, "CH4"), 0.04, 1e-15);
+    EXPECT_EQ(of(to, out, "N2"), 0.735);
+    for (const char * carbon : {"CO", "CO2"}) EXPECT_EQ(of(to, out, carbon), 0.0) << carbon;
+}
+
 // A name both sets have for species of different compositions is an error unless an alias maps it elsewhere;
 // an element no target species carries cannot be conserved. Catches matching by name alone.
 TEST(CompositionMapTest, NamesOfOtherCompositionsAndUncarriedElementsAreErrors) {

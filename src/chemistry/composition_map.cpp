@@ -248,13 +248,11 @@ CompositionMap::Result CompositionMap::map(const double * Y_from, double * Y_to)
         return residual;
     };
     const double tolerance = 2e-15 * std::max(z_sum, 1e-300);
-    double dual = 0.0;
-    double residual = evaluate(lambda, dual);
-    for (int iteration = 0; iteration < 200 && residual > tolerance; iteration++) {
-        // A generalized Jacobian: carriers at their kink (Y0 = 0 at lambda = 0) count as active
-        std::vector<double> J(m * m, 0.0), step(m);
+    // m x m matrix sum_k w_k mu_ik mu_jk over the species k that pass, plus regularization times its trace
+    auto jacobian = [&](auto && counts, const double regularization) {
+        std::vector<double> J(m * m, 0.0);
         for (size_t k = 0; k < n; k++) {
-            if (!allowed[k] || Y0[k] + w[k] * s[k] < 0.0) continue;
+            if (!counts(k)) continue;
             for (size_t i = 0; i < m; i++) {
                 const double a = w[k] * m_mu_to[active[i]][k];
                 if (a == 0.0) continue;
@@ -263,10 +261,58 @@ CompositionMap::Result CompositionMap::map(const double * Y_from, double * Y_to)
         }
         double trace = 0.0;
         for (size_t i = 0; i < m; i++) trace += J[i * m + i];
-        for (size_t i = 0; i < m; i++) {
-            J[i * m + i] += 1e-14 * trace + 1e-300;
-            step[i] = -F[i];
+        for (size_t i = 0; i < m; i++) J[i * m + i] += regularization * trace + 1e-300;
+        return J;
+    };
+    // Species absent from the source weigh FLOOR, so where they must take mass the multipliers grow to about
+    // z / FLOOR, and Y_k = Y0_k + w_k sum_e mu_ek lambda_e of the abundant species cancels terms of that size: the
+    // dual iteration stalls at a residual of about eps z / FLOOR. Once its set of positive species settles, the
+    // composition is refined in place on that set, by corrections of the same form w_k sum_e mu_ek dlambda_e
+    // (so it stays the projection), computed from the residual rather than from the large multipliers.
+    std::vector<double> refined(n);
+    auto refine = [&](const std::vector<bool> & positive) {
+        refined.assign(Y_to, Y_to + n);
+        for (int pass = 0; pass < 8; pass++) {
+            std::vector<double> gap(m);
+            double worst = 0.0;
+            for (size_t i = 0; i < m; i++) {
+                gap[i] = z_all[active[i]];
+                for (size_t k = 0; k < n; k++) gap[i] -= m_mu_to[active[i]][k] * refined[k];
+                worst = std::max(worst, std::abs(gap[i]));
+            }
+            if (worst <= tolerance) {
+                std::copy(refined.begin(), refined.end(), Y_to);
+                return worst;
+            }
+            std::vector<double> J = jacobian([&](const size_t k) { return bool(positive[k]); }, 0.0);
+            solve(J, gap, m);
+            for (size_t k = 0; k < n; k++) {
+                if (!positive[k]) continue;
+                double d = 0.0;
+                for (size_t i = 0; i < m; i++) d += m_mu_to[active[i]][k] * gap[i];
+                refined[k] += w[k] * d;
+                if (!(refined[k] >= 0.0)) return -1.0;  // the set is not the projection's yet
+            }
         }
+        return -1.0;
+    };
+    double dual = 0.0;
+    double residual = evaluate(lambda, dual);
+    std::vector<bool> positive(n, false), previous;
+    for (int iteration = 0; iteration < 200 && residual > tolerance; iteration++) {
+        for (size_t k = 0; k < n; k++) positive[k] = allowed[k] && Y_to[k] > 0.0;
+        if (positive == previous) {
+            const double after = refine(positive);
+            if (after >= 0.0) {
+                residual = after;
+                break;
+            }
+        }
+        previous = positive;
+        // A generalized Jacobian: carriers at their kink (Y0 = 0 at lambda = 0) count as active
+        std::vector<double> J = jacobian([&](const size_t k) { return allowed[k] && Y0[k] + w[k] * s[k] >= 0.0; }, 1e-14);
+        std::vector<double> step(m);
+        for (size_t i = 0; i < m; i++) step[i] = -F[i];
         solve(J, step, m);
         double slope = 0.0;
         for (size_t i = 0; i < m; i++) slope -= F[i] * step[i];

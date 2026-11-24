@@ -136,8 +136,10 @@ proportion to their own mass fraction: a minor species absorbs little, and a
 species the source lacks takes mass only when nothing else can carry an
 element. The problem is strictly convex, so its solution is unique and
 independent of the species' order; it is solved by a semismooth Newton
-iteration on its dual ([Qi & Sun 1993](../references.md#qi-sun-1993)) to
-round-off. A species carrying an element the source has none of stays zero,
+iteration on its dual ([Qi & Sun 1993](../references.md#qi-sun-1993)),
+whose composition is then refined on its positive species to round-off of
+the element mass fractions, also where a species the source lacks must take
+mass and the dual's multipliers become large. A species carrying an element the source has none of stays zero,
 and an element no species of the target carries is an error. Cells where the
 dropped species hold no mass copy their mass fractions unchanged.
 
