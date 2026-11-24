@@ -210,8 +210,11 @@ through shear, `forces` adds the forces of
 | `"added_mass"` | half the displaced gas mass, accelerated with the gas: `rho_p` becomes `rho_p + rho / 2` in `tau` and the inertia, and `(rho g - grad p) / 2` is added to the force | `rho / rho_p` is not small (bubbles, light particles in dense gas) |
 | `"saffman_lift"` | the shear lift of [Saffman (1965)](../references.md#saffman-1965), `1.615 (6 / (pi d)) sqrt(rho mu / abs(w)) (u - v) x w` per volume, `w` the vorticity | particles slip through shear layers and boundary layers |
 
-The gradients come from the cell's least-squares gradient. The Basset history
-force is not included.
+The gradients are those of the polynomial the particle reads its gas from, at
+its position: one order below the reconstruction (order `k - 1` with TENO of
+order `k`), and first order in troubled cells and with `FO` and `MUSCL`, whose
+linear fit has a gradient constant over the cell. The Basset history force is
+not included.
 
 **Heat transfer.** With `specific_heat`, each particle carries a temperature
 `T_p`, which convection relaxes toward the gas temperature at the rate of the
@@ -533,6 +536,7 @@ flow's orders:
 |---|---|---|
 | Gas at the particle, TENO of order `k` | `k` | 2.95 to 5.23 for TENO3 to TENO5 on quadrilaterals, triangles, hexahedra and tetrahedra |
 | Gas at the particle, `FO` and `MUSCL` | 2 | 1.96 to 3.07 (the linear least-squares fit) |
+| Pressure-gradient, added-mass and lift forces, TENO of order `k` | `k - 1` (their gradients) | 1.89 to 1.99 (TENO3) and 2.66 to 3.10 (TENO4), pressure gradient and lift, on quadrilaterals, triangles, hexahedra and tetrahedra; 0.63 to 1.16 with the cell's least-squares gradient of earlier versions |
 | Pathlines in space | the flow's: 1 (`FO`), 2 (`MUSCL`), `k` (TENO) | 0.92 to 0.94 (`FO`), 2.28 to 3.19 (`MUSCL`), 2.94 to 5.09 (TENO3 to TENO5) |
 | Trajectories in time | the integrator's: 1 (`FE`), 3 (`SSPRK3`, `RDPK3Sp35`), 4 (`RK4`, `SSPRK54`, `CK45`) | 1.02 to 1.05, 2.97 to 3.14 and 3.96 to 4.22: tracers, drag relaxation, settling and Schiller-Naumann response, also at `dt = tau / 2` |
 | Stiff particles (`tau < dt`), exponential | 3, exact for a gas velocity and force linear over the step | 2.90 (position) and 2.79 (velocity), RK4 at `dt / tau` = 12.5 to 3.1 |
@@ -558,8 +562,10 @@ In practice:
   stage and a walk of a cell or two per step, independent of the other
   particles. Kernels run over every slot, so a `capacity` far above the number
   of particles costs memory and time.
-- **Linear fits.** With `FO`, `MUSCL` or troubled TENO cells, the cells
-  holding particles (only those) compute a least-squares gradient each stage.
+- **Linear fits.** With `FO`, `MUSCL` or troubled TENO cells, the particles
+  read the stage's least-squares gradients, which viscous runs compute anyway;
+  in inviscid runs the cells holding particles (only those) compute one each
+  stage.
 - **Several ranks.** Particles that change rank go through the host at every
   step, which takes distributed runs with particles out of CUDA graphs. On one
   GPU, steps with particles are graphed.

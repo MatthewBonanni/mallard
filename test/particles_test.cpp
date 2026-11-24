@@ -1168,6 +1168,123 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_Verification, ParticleSpaceOrder,
                       std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO4"},
                       std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO5"}));
 
+namespace {
+
+/**
+ * @brief 9 x 9 (x 4) points from lo spanning about span on the mesh of n cells per side (cells of size 1 / n), each
+ *        point at the same offsets in its cell on every n, so that the largest error compares like with like:
+ *        x_j = (round(lo n) + xi_0 + j s) / n with s = delta + floor(span n / (m - 1) - delta), or delta if smaller.
+ */
+std::vector<std::array<double, 3>> self_similar_points(uint32_t n, const std::array<double, 3> & lo,
+                                                       const std::array<double, 3> & span) {
+    const uint32_t m[3] = {9, 9, 4};
+    const double xi0[3] = {0.13, 0.31, 0.57}, delta[3] = {0.37, 0.29, 0.43};
+    std::vector<std::array<double, 3>> points;
+    const uint32_t total = N_DIM == 3 ? m[0] * m[1] * m[2] : m[0] * m[1];
+    for (uint32_t k = 0; k < total; k++) {
+        std::array<double, 3> x{};
+        uint32_t rest = k;
+        for (size_t c = 0; c < N_DIM; c++) {
+            const double step = std::max(0.0, std::floor(span[c] * n / (m[c] - 1) - delta[c])) + delta[c];
+            x[c] = (std::round(lo[c] * n) + xi0[c] + double(rest % m[c]) * step) / n;
+            rest /= m[c];
+        }
+        points.push_back(x);
+    }
+    return points;
+}
+
+/**
+ * @brief The largest error of the acceleration of the solid particles of self_similar_points over one forward
+ *        Euler step, on the periodic box of box() with n cells per side, against that in the exact gas: with
+ *        "pressure_gradient", in gas at rest with p = 1 + 0.1 sin(2 pi x) cos(2 pi y) (cos(4 pi z)), particles at
+ *        rest, -grad p / rho_p; with "saffman_lift", in the shear u = (0.1 cos(2 pi y), 0.03 sin(2 pi x)
+ *        (, 0.05 sin(2 pi (x + y)))), whose vorticity has no zero where the particles are, particles moving at
+ *        V = 0.5 along x, the Saffman lift and the drag (u - V) / tau, which tau = 1e4 keeps negligible.
+ */
+double force_error(const std::string & mesh_type, const std::string & scheme, uint32_t n, const std::string & force) {
+    const bool lift = force == "saffman_lift";
+    const double density = 10.0, tau = 1e4, dt = 0.01, V = lift ? 0.5 : 0.0, d = diameter_for(tau, density);
+    const auto points = self_similar_points(n, {0.04, lift ? 0.11 : 0.05, 0.02}, {0.9, lift ? 0.27 : 0.9, 0.3});
+    std::ostringstream keys;
+    keys.precision(17);
+    keys << "forces = [\"" << force << "\"]\nvelocity = " << numbers(V, 0.0, 0.0) << "\npoints = [";
+    for (size_t k = 0; k < points.size(); k++) keys << (k ? ", " : "") << numbers(points[k][0], points[k][1], points[k][2]);
+    keys << "]\n";
+    const std::string u = lift ? vec("0.1 * cos(2 * pi * y)", "0.03 * sin(2 * pi * x)", "0.05 * sin(2 * pi * (x + y))")
+                               : vec("0.0", "0.0", "0.0");
+    std::ostringstream run;
+    run.precision(17);
+    run << "n_steps = 1\ndt = " << dt << "\n";
+    std::string input = solid(on_mesh(box(n, u, "xy", "", run.str(), "", particle_scheme(scheme).first, "FE"), mesh_type),
+                              density, d, "stokes", keys.str());
+    if (!lift) {
+        const std::string uniform = "p = \"1.0\"";
+        input.replace(input.find(uniform), uniform.size(),
+                      std::string("p = \"1 + 0.1 * sin(2 * pi * x) * cos(2 * pi * y)") +
+                          (N_DIM == 3 ? " * cos(4 * pi * z)\"" : "\""));
+    }
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(input));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    EXPECT_EQ(records.size(), points.size());
+    const double pi = std::numbers::pi, pi2 = 2.0 * pi;
+    double error = 0.0;
+    for (const auto & r : records) {
+        const std::array<double, 3> & x = points[r.id];
+        std::array<double, 3> a{};
+        if (lift) {
+            const double s[3] = {0.1 * std::cos(pi2 * x[1]) - V, 0.03 * std::sin(pi2 * x[0]),
+                                 N_DIM == 3 ? 0.05 * std::sin(pi2 * (x[0] + x[1])) : 0.0};
+            const double dw = N_DIM == 3 ? 0.1 * pi * std::cos(pi2 * (x[0] + x[1])) : 0.0;
+            const double w[3] = {dw, -dw, 0.06 * pi * std::cos(pi2 * x[0]) + 0.2 * pi * std::sin(pi2 * x[1])};
+            const double w_norm = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+            const double k = 1.615 * 6.0 / (pi * d) * std::sqrt(MU / w_norm);
+            const double cross[3] = {s[1] * w[2] - s[2] * w[1], s[2] * w[0] - s[0] * w[2], s[0] * w[1] - s[1] * w[0]};
+            for (size_t i = 0; i < 3; i++) a[i] = s[i] / tau + k * cross[i] / density;
+        } else {
+            const double z = N_DIM == 3 ? std::cos(2.0 * pi2 * x[2]) : 1.0;
+            a[0] = -0.1 * pi2 * std::cos(pi2 * x[0]) * std::cos(pi2 * x[1]) * z / density;
+            a[1] = 0.1 * pi2 * std::sin(pi2 * x[0]) * std::sin(pi2 * x[1]) * z / density;
+            a[2] = 0.4 * pi * std::sin(pi2 * x[0]) * std::cos(pi2 * x[1]) * std::sin(2.0 * pi2 * x[2]) / density;
+        }
+        const double v0[3] = {V, 0.0, 0.0};
+        for (size_t i = 0; i < N_DIM; i++) error = std::max(error, std::abs((r.v[i] - v0[i]) / dt - a[i]));
+    }
+    return error;
+}
+
+} // namespace
+
+class ParticleForceOrder : public ::testing::TestWithParam<std::tuple<std::string, std::string, std::string>> {};
+
+TEST_P(ParticleForceOrder, ForcesReadTheGradientOfTheReconstructionAtTheParticles) {
+    // The gradient of the polynomial whose value the particles read, one order below it; the cell's
+    // least-squares gradient, constant in the cell, would make these forces first order
+    SKIP_IN_SINGLE_PRECISION("the errors of the finest level are near single-precision round-off");
+    const auto [mesh_type, scheme, force] = GetParam();
+    // The lift goes as |w|^(1/2), whose varying constant the levels' points sample differently: finer levels in 3D
+    const bool lift = force == "saffman_lift";
+    const auto n = lift && N_DIM == 3 ? std::array<uint32_t, 3>{8, 16, 32} : space_levels(mesh_type);
+    const double p = particle_scheme(scheme).second - 1.0;
+    const double slack = lift || N_DIM == 3 ? 0.5 : 0.25;
+    verification::expect_order({"particles", scheme, verification::cells_of(mesh_type),
+                                "max " + force + " acceleration error", {double(n[0]), double(n[1]), double(n[2])},
+                                {force_error(mesh_type, scheme, n[0], force), force_error(mesh_type, scheme, n[1], force),
+                                 force_error(mesh_type, scheme, n[2], force)},
+                                p, p - slack});
+}
+
+INSTANTIATE_TEST_SUITE_P(Particles, ParticleForceOrder,
+    ::testing::Values(std::tuple{"cartesian", "TENO3", "pressure_gradient"},
+                      std::tuple{"cartesian", "TENO4", "pressure_gradient"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO3", "pressure_gradient"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO4", "pressure_gradient"},
+                      std::tuple{"cartesian", "TENO4", "saffman_lift"},
+                      std::tuple{N_DIM == 2 ? "cartesian_tri" : "cartesian_tet", "TENO4", "saffman_lift"}));
+
 TEST(SolidParticlesTest, RelaxationsStifferThanTheStepAreIntegratedExponentially) {
     SKIP_IN_SINGLE_PRECISION("the errors at 40 steps are near single-precision round-off");
     // tau = 0.01 at dt = 1/40 and 1/80 (dt / tau = 2.5, 1.25), where RK4 is unstable or barely stable: the
@@ -1233,7 +1350,7 @@ namespace {
 std::string hydrostatic(const std::string & keys) {
     const std::string walls = "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
                               "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n";
-    std::string input = box(12, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 40\ndt = 0.005\n",
+    std::string input = box(24, vec("0.0", "0.0", "0.0"), "x", walls, "n_steps = 40\ndt = 0.005\n",
                             "points = [" + numbers(0.5, 0.5, 0.25) + "]\n");
     input.replace(input.find("p = \"1.0\""), 9, "p = \"2.0 - y\"");
     input.insert(input.find("[numerics]"), "[source]\ngravity = " + numbers(0.0, -1.0, 0.0) + "\n");
@@ -1313,7 +1430,8 @@ TEST(ParticleForcesTest, PressureGradientAddedMassAndSaffmanLift) {
 }
 
 TEST(SolidParticlesTest, PressureGradientAndAddedMassForcesInAHydrostaticGas) {
-    // To within 0.2%: the gas strays from rest by about 0.05%, as the scheme does not balance it exactly
+    // To within 0.2%: the scheme does not balance the gas exactly, and the gradient at the particle, at a cell
+    // corner, reads the imbalance: 0.06% on 24 cells per side, 0.3% on 12
     const double tau = 0.1, t = 0.2, rho_p = 2.0;
     // The pressure gradient alone, without the particle's weight: the buoyancy -grad p / rho_p = g / rho_p lifts it
     const double lifted = tau / rho_p * (1.0 - std::exp(-t / tau));

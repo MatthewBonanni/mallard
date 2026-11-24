@@ -1183,7 +1183,7 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             const bool admissible = Wq[0] > 0.0_r && Wq[E] > 0.0_r;
             FOR_I_CONSERVATIVE in_W(j, i) = admissible ? Wq[i] : Wc(c, i);
         });
-        if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W);
+        if (fields.reconstruction) fields.reconstruction->point_values(Wc, in_cells, in_offsets, in_W, {});
         const auto in = inside;
         gated::parallel_for("probe_point_W", in.extent(0), KOKKOS_LAMBDA(const uint32_t j) {
             if (counted && j >= *counted) return;

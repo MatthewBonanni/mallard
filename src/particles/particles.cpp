@@ -90,23 +90,6 @@ std::vector<Point> seed_points(const Input & table) {
 /** @brief Unsigned integer of the width of rtype, to send positions bit for bit. */
 using Bits = std::conditional_t<sizeof(rtype) == sizeof(uint64_t), uint64_t, uint32_t>;
 
-/** @brief W at a particle from the linear least-squares fit of its cell, or the cell's W where that is inadmissible. */
-struct LinearW {
-    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
-    Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> G;
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()(const uint32_t c, const rtype * r, rtype * out) const {
-        rtype Wq[N_CONSERVATIVE];
-        FOR_I_CONSERVATIVE {
-            Wq[i] = W(c, i);
-            for (uint8_t d = 0; d < N_DIM; d++) Wq[i] += G(c, i, d) * r[d];
-        }
-        const bool admissible = Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r;
-        FOR_I_CONSERVATIVE out[i] = admissible ? Wq[i] : W(c, i);
-    }
-};
-
 constexpr int MAX_BOUNCES = 8;
 
 const std::string SOLID_DOCS = "docs/guide/particles.md#solid-particles";
@@ -391,6 +374,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     point_cell = Kokkos::View<uint32_t *>("particle_point_cell", capacity);
     offsets = Kokkos::View<rtype *[N_DIM]>("particle_offsets", capacity);
     W_point = Kokkos::View<rtype *[N_CONSERVATIVE]>("particle_W", capacity);
+    if (is_solid && solid.reads_gradients()) G_point = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("particle_G", capacity);
     marked = Kokkos::View<uint32_t *>("particle_marked_cells", mesh->n_cells);
     aux = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_aux", capacity, n_aux);
     if (distributed) slots = Kokkos::View<uint32_t *>("particle_slots", capacity);
@@ -425,7 +409,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
 
 void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                              FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
+                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const bool gradients_current) {
     const auto ids = id;
     const auto start = cell;
     const auto pc = point_cell;
@@ -443,31 +427,41 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
         const uint32_t c = start(s);
         pc(s) = c;
         FOR_I_DIM off(s, i) = xs(w * s + i) - cell_coords(c, i);
-        Kokkos::atomic_store(&mark(c), 1u);
+        if (!gradients_current) Kokkos::atomic_store(&mark(c), 1u);
     });
-    const LSQVertexGradientFunctor grad = gradient;
-    gated::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
-        if (mark(c) == 0) return;
-        mark(c) = 0;
-        grad(c);
-    });
-    const LinearW linear{W, gradients};
+    if (!gradients_current) {
+        const LSQVertexGradientFunctor grad = gradient;
+        gated::parallel_for("particle_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            if (mark(c) == 0) return;
+            mark(c) = 0;
+            grad(c);
+        });
+    }
+    // The cell's linear least-squares fit, or its W where that is inadmissible, and the fit's gradient
     const auto Wp = W_point;
+    const auto Gp = G_point;
+    const bool with_gradients = Gp.extent(0) > 0;
     gated::parallel_for("particle_linear_W", capacity, KOKKOS_LAMBDA(const uint32_t s) {
-        rtype r[N_DIM], out[N_CONSERVATIVE];
-        FOR_I_DIM r[i] = off(s, i);
-        linear(pc(s), r, out);
-        FOR_I_CONSERVATIVE Wp(s, i) = out[i];
+        const uint32_t c = pc(s);
+        rtype Wq[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE {
+            Wq[i] = W(c, i);
+            for (uint8_t d = 0; d < N_DIM; d++) Wq[i] += gradients(c, i, d) * off(s, d);
+        }
+        const bool admissible = Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r;
+        FOR_I_CONSERVATIVE Wp(s, i) = admissible ? Wq[i] : W(c, i);
+        if (with_gradients) FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) Gp(s, i, d) = gradients(c, i, d);
     });
-    reconstruction.point_values(W, pc, off, Wp);
+    reconstruction.point_values(W, pc, off, Wp, Gp);
 }
 
 void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                          FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const bool first_stage,
-                         const Kokkos::View<rtype> & time, const rtype dt, const rtype * dt_device) {
+                         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const bool gradients_current,
+                         const bool first_stage, const Kokkos::View<rtype> & time, const rtype dt,
+                         const rtype * dt_device) {
     if (capacity == 0) return;
-    evaluate_gas(x_stage, W, reconstruction, gradient, gradients);
+    evaluate_gas(x_stage, W, reconstruction, gradient, gradients, gradients_current);
     const auto ids = id;
     const auto xs = x_stage;
     const auto a = aux;
@@ -480,8 +474,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const uint32_t n_aux = quantities.n_aux();
     const bool inertia = is_solid, heat = heated;
     const particles::Solid sphere = solid;
-    const bool read_gradients = solid.reads_gradients();
-    const auto pc = point_cell;
+    const auto Gp = G_point;
     const auto start = step_start;
     const uint32_t n_start = is_solid ? solid.n_start() : 0;
     gated::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
@@ -495,8 +488,8 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
         if (inertia) {
             rtype G[N_CONSERVATIVE * N_DIM] = {};
-            if (read_gradients) {
-                FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = gradients(pc(s), i, d);
+            if (Gp.extent(0) > 0) {
+                FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = Gp(s, i, d);
             }
             sphere.rates(Ws, G, values + N_DIM, dt_device ? *dt_device : dt, first_stage,
                          start.data() + size_t(n_start) * s, rate);
@@ -518,7 +511,7 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
 void Particles::sample(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
                        const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
     if (capacity == 0) return;
-    evaluate_gas(x, W, reconstruction, gradient, gradients);
+    evaluate_gas(x, W, reconstruction, gradient, gradients, false);
 }
 
 void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,

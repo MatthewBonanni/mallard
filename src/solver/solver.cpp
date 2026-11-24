@@ -1733,8 +1733,10 @@ void Solver::init_numerics() {
         if (particles) {
             if (particles->reads_time()) set_stage_time(t_stage, c);
             // The first stage of every integrator is the step's start, c = 0
+            // calc_rhs left the least-squares gradients of the stage where the fluxes or the hybrid sensor read them
+            const bool gradients_current = !is_mixture() && (physics.is_viscous() || hybrid_flux);
             particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient,
-                                viscous_gradients, c == 0.0_r, stage_time, dt,
+                                viscous_gradients, gradients_current, c == 0.0_r, stage_time, dt,
                                 recording_step ? step_dt_device() : nullptr);
         }
     };
