@@ -202,7 +202,9 @@ in an expression that fails to parse is pointed out in the error.
 (`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Say so with
 `units = "nondimensional"` in `[physics]`: the terminal output then states it
 and labels no number with an SI unit (the progress table's units row shows
-`-`), instead of calling a time of 0.2 "0.2 s". Units in the input make no
+`-`, and the units lines of the CSV files, the units metadata of snapshot
+and probe files and the run log say `1`), instead
+of calling a time of 0.2 "0.2 s". Units in the input make no
 sense then; write them only in dimensional inputs. Gas mixtures read real
 thermochemistry and are always dimensional, so `units = "nondimensional"` is
 an error with `gas = "mixture"`.
@@ -301,7 +303,8 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
 ```
 
 When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings.
+listed under it as possible misspellings. `mallard reactor` checks its input
+the same way.
 
 ## Error messages
 
@@ -627,6 +630,19 @@ A region short of the DNS target is a `W-DNS-ETA` warning of its own. The
 dissipation of a region is its own share of the field's (the statistics', or the
 initial state's); with the forcing's power, which only balances over the whole
 domain, it is the domain's.
+
+![A developing channel flow checked in two regions: cell size over the Kolmogorov length per cell, above 2 in the wall layers and below in the core; first-cell y+ along the bottom wall, above 1 near the inlet and below downstream; the checked rows of the domain and each region against their DNS targets](../images/guide/check_resolution-light.svg#gh-light-mode-only)
+![A developing channel flow checked in two regions: cell size over the Kolmogorov length per cell, above 2 in the wall layers and below in the core; first-cell y+ along the bottom wall, above 1 near the inlet and below downstream; the checked rows of the domain and each region against their DNS targets](../images/guide/check_resolution-dark.svg#gh-dark-mode-only)
+
+Air at 20 m/s entering a 50 mm × 10 mm channel of 80 × 48 cells, checked
+from the restart file of an earlier run that averaged the strain rate, with
+`regions` `entrance` (the first 12.5 mm) and `downstream`. Top: the
+`DELTA_OVER_ETA` of `--mesh-fields` (the line is the DNS target, 2). Bottom:
+`Y_PLUS` along the bottom wall, and the rows of the report with a target, as
+a ratio to it. The wall shear near the inlet makes the `entrance` region's
+first cells 3.5 wall units high, while the `downstream` region's pass (0.88);
+both regions miss the Kolmogorov target, the `entrance` the most, through
+their wall layers.
 
 The initial state of a turbulent case seldom has the dissipation the run will
 reach. An earlier run, on a coarser mesh or for a shorter time, gives a better
