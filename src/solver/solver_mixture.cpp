@@ -169,6 +169,7 @@ struct MixtureTimeStepFunctor {
     BoundaryData boundaries;
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
+    rtype viscous_stiffness = 1.0_r;  // as TimeStepFunctor's
 
     KOKKOS_INLINE_FUNCTION
     rtype wave_speed(const int32_t c, const rtype * n) const {
@@ -201,7 +202,7 @@ struct MixtureTimeStepFunctor {
         }
         // As TimeStepFunctor, with nu_eff = max(4/3 mu / rho, lambda / (rho cv), max_k D_k)
         if (transport.extent(0) > 0) {
-            sum += 4.0_r * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
+            sum += 4.0_r * viscous_stiffness * transport(c, NU_EFF) * sum_area2 / cell_volume(c);
             // Decay of u_r by the hoop stress
             if (radius_coords.extent(0) > 0) {
                 const rtype r = radius_coords(c, 1);
@@ -540,6 +541,9 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
     face_reconstruction->image_point_values(W_cells, face_solution);
     // The characteristic faces read the reconstructed gamma of this stage
     scalar_reconstruction.calc(cell_scalars, W_cells, face_solution, face_thermo);
+    if (polynomial_viscous) {
+        scalar_reconstruction.point_gradients(cell_scalars, dynamic_cast<const TENO &>(*face_reconstruction).point_gradients);
+    }
     if (!budget_pass) update_characteristic_boundaries(t_stage);
     if (hybrid_flux) update_upwind_sensor();
 
@@ -563,6 +567,11 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
                 transport_gradients, cell_transport, cell_diffusion, face_flux, species_slots, axisymmetric,
                 mesh->cell_covariance, les_coefficients, sgs_only,
                 double_flux ? face_energy_1 : Kokkos::View<rtype *>()};
+            if (polynomial_viscous) {
+                functor.point_gradients = dynamic_cast<const TENO &>(*face_reconstruction).point_gradients;
+                functor.quad_weights = face_reconstruction->quadrature_face.weights;
+                functor.face_weights = flux_weights;
+            }
             parallel_for_set("mixture_viscous_flux", rhs_faces, functor);
         });
     };
@@ -649,6 +658,7 @@ rtype Solver::calc_dt_cfl1_mixture(const Kokkos::View<rtype> & on_device) {
                                    cell_scalars, cfl_local, mixture.n_species, cell_transport,
                                    axisymmetric ? mesh->cell_coords : Kokkos::View<rtype *[N_DIM]>(), boundary_data,
                                    mesh->periodic_maps(), mesh->face_shift};
+    if (polynomial_viscous) functor.viscous_stiffness = 2.05_r;
     gated::parallel_reduce("time_step", mesh->n_owned(), functor,
                             Kokkos::Min<rtype, Kokkos::DefaultExecutionSpace::memory_space>(
                                 on_device.data() ? on_device : dt_reduce_slot()));

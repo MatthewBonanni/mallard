@@ -94,7 +94,7 @@ struct TENOScalarValues {
         return scalars(c, j);
     }
 
-    /** @brief 3D meshes without curved faces: the nodes of face f, which face_point_basis places its points from. */
+    /** @brief 3D meshes without curved faces: the nodes of face f, which face_point places its points from. */
     KOKKOS_INLINE_FUNCTION
     PlanarFace planar_nodes(const uint32_t f) const {
         if constexpr (N_DIM == 2) {
@@ -104,30 +104,22 @@ struct TENOScalarValues {
         }
     }
 
-    /** @brief Monomials minus their cell means at point q of face f (nodes: planar_nodes(f)), in cell c's frame. */
+    /** @brief Point q of face f (nodes: planar_nodes(f)) in cell c's frame; false for padding points. */
     KOKKOS_INLINE_FUNCTION
-    bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, const PlanarFace & nodes,
-                          rtype * psi) const {
-        const rtype h = scale(c);
-        const uint32_t row = cell_shape(c);
+    bool face_point(const uint32_t f, const uint8_t q, const uint32_t c, const PlanarFace & nodes, rtype * p) const {
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
-        rtype x[N_DIM], p[N_DIM];
+        rtype x[N_DIM];
         if constexpr (N_DIM == 2) {
             if (face_quad_points.extent(0) > 0) {
                 // Curved meshes: the faces' own points
                 FOR_I_DIM x[i] = face_quad_points(f, q, i);
-                periodic.backward(s, x, p);
-                teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
-                for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
-                return true;
+            } else {
+                const uint32_t node_0 = face_nodes(f, 0);
+                const uint32_t node_1 = face_nodes(f, 1);
+                const rtype s_q = 0.5_r * quad_points(q, 0);
+                x[0] = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
+                x[1] = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
             }
-            const uint32_t node_0 = face_nodes(f, 0);
-            const uint32_t node_1 = face_nodes(f, 1);
-            const rtype s_q = 0.5_r * quad_points(q, 0);
-            x[0] = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
-            x[1] = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
-            periodic.backward(s, x, p);
-            teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
         } else {
             if (face_quad_weights(f, q) == 0.0_r) return false;
             if (face_quad_points.extent(0) > 0) {
@@ -135,11 +127,26 @@ struct TENOScalarValues {
             } else {
                 planar_face_point(nodes, face_rule, q, x);
             }
-            periodic.backward(s, x, p);
+        }
+        periodic.backward(s, x, p);
+        return true;
+    }
+
+    /** @brief Monomials minus their cell means at point q of face f (nodes: planar_nodes(f)), in cell c's frame. */
+    KOKKOS_INLINE_FUNCTION
+    bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, const PlanarFace & nodes,
+                          rtype * psi) const {
+        rtype p[N_DIM];
+        if (!face_point(f, q, c, nodes, p)) return false;
+        const rtype h = scale(c);
+        if constexpr (N_DIM == 2) {
+            teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
+        } else {
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = (p[i] - cell_coords(c, i)) / h;
             teno::monomials(DEG, xi, psi);
         }
+        const uint32_t row = cell_shape(c);
         for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
         return true;
     }

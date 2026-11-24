@@ -757,7 +757,8 @@ void Solver::init_rhs_split() {
         face_exchange = FaceExchange(plan, static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
         if (polynomial_viscous) {
             point_gradient_exchange = FaceExchange(
-                plan, FacePointGradients::n_slots(face_reconstruction->n_face_quadrature_points()), halo.uses_nccl(), 2);
+                plan, static_cast<uint8_t>(FacePointGradients::n_slots(face_reconstruction->n_face_quadrature_points())),
+                halo.uses_nccl(), 2);
         }
     }
     if (polynomial_viscous) allocate_point_gradients();
@@ -787,9 +788,11 @@ void Solver::init_rhs_split() {
 
 void Solver::allocate_point_gradients() {
     auto & teno = dynamic_cast<TENO &>(*face_reconstruction);
-    const uint8_t n_slots = FacePointGradients::n_slots(teno.n_face_quadrature_points());
+    const uint32_t n_species = is_mixture() ? mixture.n_species : 0;
+    const uint32_t n_slots = FacePointGradients::n_slots(teno.n_face_quadrature_points(), n_species);
     teno.point_gradients.values =
         Kokkos::View<rtype **[2][N_CONSERVATIVE]>("point_gradients", mesh->n_state_faces(), n_slots);
+    teno.point_gradients.n_species = n_species;
     teno.point_gradients.R = physics.R;
     teno.point_gradients.gamma = physics.gamma;
     teno.init_wall_fits();
@@ -1769,8 +1772,10 @@ void Solver::init_viscous_gradients(const TENO * teno) {
                            .fix = fix + ", or remove viscous_gradients",
                            .docs = "docs/guide/numerics.md#viscous-gradients"});
     };
-    if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
-    if (!physics.is_viscous()) {
+    if (is_mixture() && mixture.tabulated()) {
+        throw unavailable("is not available for flamelet gases yet", "Use gas = \"mixture\" or \"perfect\"");
+    }
+    if (!is_viscous()) {
         throw unavailable("has no effect without viscosity", "Set type = \"navier_stokes\" in [physics]");
     }
     if (teno == nullptr) {

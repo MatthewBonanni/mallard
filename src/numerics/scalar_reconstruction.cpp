@@ -14,6 +14,7 @@
 
 #include "launch_bounds.h"
 #include "mixture_flux.h"
+#include "mixture_point_gradients.h"
 #include "scratch_arena.h"
 #include "teno_scalars.h"
 
@@ -486,6 +487,23 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
     }
     gated::parallel_for("face_thermo", mesh->n_state_faces(),
                          FaceThermoFunctor{face_values(scalars), density_slope, face_W, face_thermo, n_species});
+}
+
+template <uint8_t DEG>
+void ScalarReconstruction::launch_point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const {
+    gated::parallel_for("mixture_point_gradients", HeavyRange<>(0, mesh->n_reconstructed()),
+                         MixturePointGradientsFunctor<DEG>{
+                             make_teno_scalar_values<DEG>(*teno, *mesh, boundaries, scalars, theta, n_species),
+                             point_gradients, thermo, mesh->face_normals});
+}
+
+void ScalarReconstruction::point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const {
+    switch (teno->degree) {
+        case 3: launch_point_gradients<3>(scalars, point_gradients); break;
+        case 4: launch_point_gradients<4>(scalars, point_gradients); break;
+        case 5: launch_point_gradients<5>(scalars, point_gradients); break;
+        default: throw std::logic_error("ScalarReconstruction: point gradients need TENO of order 4 to 6.");
+    }
 }
 
 template <typename Eval>

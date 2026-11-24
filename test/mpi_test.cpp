@@ -228,6 +228,12 @@ TEST(MPITest, MixtureWallsMatchSerial) {
     }
 }
 
+TEST(MPITest, MixtureReconstructionGradientsMatchSerial) {
+    // Halo layer 1 reconstructs its own species polynomials and point gradients
+    expect_matches_serial(mixture_input("viscous_gradients = \"reconstruction\"\n", "type = \"TENO\"\norder = 5\n", "",
+                                        "navier_stokes"));
+}
+
 TEST(MPITest, MUSCLMatchesSerial) {
     // Also MUSCL's rows: the outermost halo layer has none, since its missing faces would look like boundary
     // faces and give it rows, equal on the grid to its owners' but not bitwise, that its owners' cells could share

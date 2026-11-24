@@ -267,6 +267,13 @@ struct MixtureViscousFluxFunctor {
     Kokkos::View<rtype *[3]> sgs;         // LES: (cell, [mu_t, lambda_t, mu_t / (Sc_t W)]; flamelet: mu_t / Sc_t), else empty
     bool sgs_only = false;                // LES budget: the SGS fluxes alone
     Kokkos::View<rtype *> face_energy_1;  // double flux: side 1's energy flux (MixtureDoubleFluxFunctor), else empty
+    // viscous_gradients = "reconstruction": u, T, X_k and their gradients of the cells' polynomials at the face
+    // points (MixturePointGradientsFunctor) and the face quadrature; faces between two smooth cells then
+    // integrate the flux over the face points (polynomial_flux)
+    FacePointGradients point_gradients = {};
+    Kokkos::View<rtype *> quad_weights = {};
+    FaceWeights<> face_weights = {};
+    rtype jump_damping = 4.0_r / 3.0_r;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
 
@@ -385,6 +392,11 @@ struct MixtureViscousFluxFunctor {
     KOKKOS_INLINE_FUNCTION
     void flux(const uint32_t i_face, const Out & out) const {
         const int32_t c0 = cells_of_face(i_face, 0);
+        if (point_gradients.on() && cells_of_face(i_face, 1) >= 0 && point_gradients.usable(i_face, 0) &&
+            point_gradients.usable(i_face, 1)) {
+            polynomial_flux(i_face, out);
+            return;
+        }
         rtype n[N_DIM], n_vec[N_DIM];
         FOR_I_DIM n_vec[i] = normals(i_face, i);
         unit<N_DIM>(n_vec, n);
@@ -546,6 +558,102 @@ struct MixtureViscousFluxFunctor {
             }
             energy -= static_cast<rtype>(enthalpy);
         }
+        out.energy(A, energy);
+    }
+
+    /**
+     * @brief The fluxes of interior face i_face between two cells with
+     *        polynomials, as flux(): their means over the face's quadrature
+     *        points, each from the mean of the two sides' values and gradients
+     *        of u, T and X_k, the normal derivatives plus the jump of the
+     *        values over the distance of the cell centers along the normal, by
+     *        jump_damping (Nishikawa 2010), as
+     *        ViscousFluxFunctor::polynomial_flux. The transport coefficients
+     *        are the means of the two cells', the mass fractions those of the
+     *        mean mole fractions.
+     */
+    template <typename Out>
+    KOKKOS_INLINE_FUNCTION
+    void polynomial_flux(const uint32_t i_face, const Out & out) const {
+        constexpr uint8_t MAX_Q = teno::MAX_FACE_QUAD;
+        const Geometry G = geometry(i_face);
+        const rtype inv_d = jump_damping / Kokkos::fabs(G.d_n);
+        const uint32_t ns = gas.n_species;
+        const bool soret = gas.transport.thermal_diffusion;
+        const rtype mu = 0.5_r * (coefficients(G.c0, MU) + coefficients(G.c1, MU));
+        const rtype lambda = 0.5_r * (coefficients(G.c0, LAMBDA) + coefficients(G.c1, LAMBDA));
+        auto point_X = [&](const uint8_t q, const uint32_t k, double & dX_dn) {
+            const rtype Xa = point_gradients.at(i_face, q, 0, FacePointGradients::species(k));
+            const rtype Xb = point_gradients.at(i_face, q, 1, FacePointGradients::species(k));
+            const rtype ga = point_gradients.at(i_face, q, 0, FacePointGradients::species(ns + k));
+            const rtype gb = point_gradients.at(i_face, q, 1, FacePointGradients::species(ns + k));
+            dX_dn = static_cast<double>(0.5_r * (ga + gb) + (Xb - Xa) * inv_d);
+            return 0.5 * (static_cast<double>(Xa) + static_cast<double>(Xb));
+        };
+        uint8_t n_quad;
+        if constexpr (N_DIM == 2) {
+            n_quad = static_cast<uint8_t>(quad_weights.extent(0));
+        } else {
+            n_quad = static_cast<uint8_t>(face_weights.extent(1));
+        }
+        // Each point's weight in the mean over the face (the weights sum to 2), its T and d ln T / dn, and
+        // sum_k c_k dX_k/dn and sum_k X_k W_k of the species fluxes
+        double w[MAX_Q] = {}, T[MAX_Q] = {}, dlnT_dn[MAX_Q] = {}, correction[MAX_Q] = {}, molar_mass[MAX_Q] = {};
+        rtype traction[N_DIM] = {}, energy = 0.0_r;
+        for (uint8_t q = 0; q < n_quad; q++) {
+            rtype w_q;
+            if constexpr (N_DIM == 2) {
+                w_q = face_weights.extent(0) ? face_weights(i_face, q) : quad_weights(q);
+            } else {
+                w_q = face_weights(i_face, q);
+                if (w_q == 0.0_r) continue;
+            }
+            w[q] = 0.5 * static_cast<double>(w_q);
+            rtype qa[NQ], ga[NQ][N_DIM], qb[NQ], gb[NQ][N_DIM], q_f[NQ], g_f[NQ][N_DIM];
+            point_gradients.load(i_face, q, 0, qa, ga);
+            point_gradients.load(i_face, q, 1, qb, gb);
+            for (uint8_t k = 0; k < NQ; k++) {
+                q_f[k] = 0.5_r * (qa[k] + qb[k]);
+                const rtype jump = (qb[k] - qa[k]) * inv_d;
+                FOR_I_DIM g_f[k][i] = 0.5_r * (ga[k][i] + gb[k][i]) + jump * G.n[i];
+            }
+            rtype tau_n[N_DIM];
+            viscous_traction(mu, g_f, G.n, tau_n, 0.0_r);
+            const rtype dT_dn = dot<N_DIM>(g_f[N_DIM], G.n);
+            const rtype w_r = static_cast<rtype>(w[q]);
+            FOR_I_DIM traction[i] += w_r * tau_n[i];
+            energy += w_r * (dot<N_DIM>(q_f, tau_n) + lambda * dT_dn);
+            T[q] = static_cast<double>(q_f[N_DIM]);
+            dlnT_dn[q] = soret ? static_cast<double>(dT_dn) / T[q] : 0.0;
+            for (uint32_t k = 0; k < ns; k++) {
+                double dX;
+                const double X = point_X(q, k, dX);
+                correction[q] += 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k)) * dX;
+                molar_mass[q] += X / gas.thermo.inv_W(k);
+            }
+        }
+        const rtype A = face_area(i_face);
+        FOR_I_DIM out.momentum(i, A, traction[i]);
+        // j_k . n = -c_k dX_k/dn + Y_k sum_j c_j dX_j/dn, Y_k = X_k W_k / sum_j X_j W_j
+        double enthalpy = 0.0;
+        for (uint32_t k = 0; k < ns; k++) {
+            const double c = 0.5 * (diffusion(G.c0, k) + diffusion(G.c1, k));
+            const double DT = soret ? 0.5 * (diffusion(G.c0, ns + k) + diffusion(G.c1, ns + k)) : 0.0;
+            const double inv_W = gas.thermo.inv_W(k);
+            double j_mean = 0.0;
+            for (uint8_t q = 0; q < n_quad; q++) {
+                if (w[q] == 0.0) continue;
+                double dX;
+                const double X = point_X(q, k, dX);
+                double j = -c * dX + X / inv_W / molar_mass[q] * correction[q];
+                if (soret) j -= DT * dlnT_dn[q];
+                const auto p = chemistry::ThermoTable<>::powers(T[q]);
+                enthalpy += w[q] * gas.thermo.h_RT(k, p) * chemistry::GAS_CONSTANT * p.T * inv_W * j;
+                j_mean += w[q] * j;
+            }
+            out.species(k, A, j_mean);
+        }
+        energy -= static_cast<rtype>(enthalpy);
         out.energy(A, energy);
     }
 };
