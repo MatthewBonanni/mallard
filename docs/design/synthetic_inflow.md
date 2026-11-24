@@ -128,17 +128,18 @@ profile once, and from the generator at every stage:
   [Guézennec & Poinsot (2009)](../references.md#guezennec-poinsot-2009)
   propose, the target's own incoming wave enters the face's:
 
-  ```
-  dw-/dt = K Z (u_n - u_n,t) - Z du_n,t/dt - beta T-,   w- = p - Z u_n
-  ```
+    ```
+    dw-/dt = K Z (u_n - u_n,t) - Z du_n,t/dt - beta T-,   w- = p - Z u_n
+    ```
 
-  If the interior carries the target, the face's pressure stays at the
-  target and its normal velocity follows `u_n,t`. Each step adds
-  `-Z (u_n,t(t + dt) - u_n,t(t))`, with the generator evaluated at both
-  times.
+    If the interior carries the target, the face's pressure stays at the
+    target and its normal velocity follows `u_n,t`. Each step adds
+    `-Z (u_n,t(t + dt) - u_n,t(t))`, with the generator evaluated at both
+    times.
+
 - **Transverse terms.** The target's own incoming wave already holds the
   target's transverse terms; adding the face's (`beta T-`) counts them
-  twice. Turbulent inlets therefore default to `beta = 0`.
+  twice. Inlets default to `beta = 0` ([nscbc.md](nscbc.md#transverse-terms-at-inlets)).
 - **Temperature** stays imposed (no temperature fluctuations).
 
 Restart files carry the faces' `p_b` and `u_b` ([nscbc.md](nscbc.md)), and
@@ -160,9 +161,9 @@ negative (next to walls) become zero.
 - **Inlet statistics.** Anisotropic `R_ij` with a shear stress, and length
   scales that differ by component and direction (3D, 40 x 40 faces, 3000
   samples, `zero_net_flux = false`):
-  - `R_xx`, `R_yy`, `R_zz`, `R_xy` within 1% of the targets
-  - `L_y` of `u` 0.193 for 0.2; `U_c T` of `u` 0.507 for 0.5
-  - 2D: within 1% (stresses), 5% (scales)
+    - `R_xx`, `R_yy`, `R_zz`, `R_xy` within 1% of the targets
+    - `L_y` of `u` 0.193 for 0.2; `U_c T` of `u` 0.507 for 0.5
+    - 2D: within 1% (stresses), 5% (scales)
 - **Zero net flux** to round-off (1e-14) with it; 0.003 or more without.
 - **Determinism.** The field at a time is the same whatever the generator
   evaluated before, and differs for another inlet.
@@ -174,12 +175,14 @@ negative (next to walls) become zero.
 ### Decaying turbulence in a duct (DNS, `examples/turbulent_inflow_duct`)
 
 **Setup.**
+
 - Box `6 x 2 x 2`, periodic across, 384 x 128 x 128 hexahedra.
 - `U = 1`, `M = 0.2`, isotropic `u' = 0.1`, `L = 0.25`, `Re_L = u' L / nu = 100`.
 - MUSCL (no limiter), HLLC, SSPRK3; `inlet_state` with `nscbc` and `outlet_pressure` with `nscbc`, no sponge.
 - Statistics over `t = 8-30` (3.7 flow-throughs), averaged over y and z.
 
 **Inlet.**
+
 - **Reynolds stresses.** The cells next to the inlet carry `R_uu, R_vv, R_ww = 0.0097, 0.0106, 0.0094` for 0.01 (`k` within 1%); `R_uv` is `2e-5`.
 - **Scales.** Probes in those cells give `L_y = 0.23` for 0.25. The integral time `U T = 0.32` is longer than at the faces: the first cell averages over a cell and smooths.
 
@@ -213,6 +216,7 @@ negative (next to walls) become zero.
 `examples/channel_inflow_retau180`.
 
 **Setup.**
+
 - Box `8 pi h x 2h x 4 pi / 3 h`, periodic in z, isothermal walls, 384 x 96 x 128 hexahedra (the mesh of the periodic channel example, repeated twice along x).
 - `Re_b = 5600`, `M_b = 0.2`. MUSCL (no limiter), HLLC, SSPRK3.
 - The inlet's `profile` holds the statistics of Mallard's periodic channel (`Re_tau = 172`). The length scales are `0.5h, 0.15h, 0.15h` for `u` and `0.1-0.2h` for `v`, `w`.

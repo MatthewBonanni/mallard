@@ -13,6 +13,7 @@
 #define TENO_SETUP_H
 
 #include <array>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -21,6 +22,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "boundary.h"
+#include "face_weights.h"
 #include "mesh.h"
 #include "teno.h"
 
@@ -212,6 +214,21 @@ inline bool one_sided_face(const Mesh & mesh, const BoundaryCondition & bc, cons
            (bc.is_wall() || bc.type == BoundaryType::SYMMETRY);
 }
 
+/** @brief A cell's size h, which scales its tables: the cube root of its volume (2D: square root of its area). */
+inline double cell_scale(const Mesh & mesh, const uint32_t c) {
+    return N_DIM == 3 ? std::cbrt(double(mesh.h_cell_volume(c))) : std::sqrt(double(mesh.h_cell_volume(c)));
+}
+
+#if N_DIM == 2
+/**
+ * @brief (face): whether it is a boundary face with other boundary faces of the
+ *        domain in the strip behind it, which can drop its mirror images past
+ *        the far side of a thin body: the fit then depends on more than the
+ *        cells and faces around it.
+ */
+std::vector<uint8_t> boundary_behind(const Mesh & mesh, const BoundaryData & boundaries);
+#endif
+
 /** @brief Whether batches interleave their cells (GPUs). */
 bool batch_interleaved();
 
@@ -240,6 +257,7 @@ struct Options {
     uint16_t wall_ns = 0;            // central stencil size to start from at that degree
     double stencil_factor = 2.0;     // central stencil size per fitted monomial
     std::vector<double> face_points;  // 2D: the face quadrature's points on [-1, 1]
+    bool sector_stencils = true;      // false: the central stencils alone, without sectors or smoothness matrices
 };
 
 /** @brief Timings of the last setup, in seconds. */
@@ -264,7 +282,7 @@ class Setup3D;
 class SetupHandle {
     public:
         SetupHandle(const Mesh & mesh, const BoundaryData & boundaries, Kokkos::View<rtype ***> face_quad_points,
-                      Kokkos::View<rtype **> face_quad_weights, const Options & options);
+                      FaceWeights<> face_quad_weights, const Options & options);
         ~SetupHandle();
 
         /**
@@ -281,11 +299,12 @@ class SetupHandle {
         const Timings & timings() const;
 
         /**
-         * @brief The central moments of cells [0, n_rows), from which the
-         *        troubled passes form the smoothness matrices: the setup's own
-         *        array if it has n_rows rows (3D; empty in 2D).
+         * @brief The central moments of cells [0, n_direct) followed by those of
+         *        the cells extra, from which the troubled passes form the
+         *        smoothness matrices: the setup's own array if that is all of
+         *        them (3D; empty in 2D).
          */
-        teno::Moments moments(uint32_t n_rows) const;
+        teno::Moments moments(uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const;
 
     private:
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;
@@ -314,7 +333,8 @@ constexpr bool metric_on_every_cell(const uint8_t degree, const CellType type) {
  * @brief Metric (3 x 3, row-major) in which the stencil candidates of cell i
  *        are ranked by distance: unless every_cell, the identity unless the
  *        spacing of its vertex neighbors (completed across its boundary faces
- *        by mirror images) is markedly anisotropic.
+ *        by mirror images) is markedly anisotropic. Callers on several
+ *        threads build the mesh's vertex neighbors first.
  */
 std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32_t *>::host_mirror_type & face_bc,
                                      const Kokkos::View<BoundaryCondition *>::host_mirror_type & bcs, uint32_t i,

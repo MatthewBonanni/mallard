@@ -1,0 +1,62 @@
+# For the key catalog only (tools/dev/input_catalog.py): sponges of a gas
+# mixture, with a reference composition by mole and by mass fractions.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 4
+Lx = 0.1
+Ly = 0.05
+
+[initialize]
+p = 101325.0
+T = 300.0
+u = [10.0, 0.0]
+X = { O2 = 0.21, N2 = 0.79 }
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = [10.0, 0.0]
+p = 101325.0
+T = 300.0
+X = { O2 = 0.21, N2 = 0.79 }
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+preset = "second_order"
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../../../mechanisms/h2o2.yaml"
+
+[[sponges]]
+strength = "x > 0.08 ? 100 * ((x - 0.08) / 0.02)^2 : 0"
+u = [10.0, 0.0]
+p = 101325.0
+T = 300.0
+X = { O2 = 0.21 }
+balance = "N2"
+
+[[sponges]]
+strength = "x < 0.02 ? 100 * ((0.02 - x) / 0.02)^2 : 0"
+u = [10.0, 0.0]
+p = 101325.0
+T = 300.0
+Y = { O2 = 0.233, N2 = 0.767 }

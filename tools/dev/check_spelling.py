@@ -36,7 +36,7 @@ OUR_ETC = re.compile(r"\b(" + "|".join(BRITISH) + r")s?\b", re.IGNORECASE)
 EXCLUDED_PREFIXES = ("src/external/", "licenses/", "mechanisms/", "test/data/")
 EXCLUDED_SUFFIXES = (".svg", ".png", ".jpg", ".pdf", ".h5", ".cgns", ".msh", ".vtu", ".vtkhdf")
 ALLOWED = [
-    (re.compile(r"^src/mesh/read_openfoam\.cpp$|^test/(fuzz/|mesh_import_test)|^docs/input\.md$"), "neighbour"),
+    (re.compile(r"^src/mesh/read_openfoam\.cpp$|^test/(fuzz/|mesh_import_test|mesh_file_formats_test)|^docs/input\.md$"), "neighbour"),
     (re.compile(r"^\.github/workflows/|^tools/dev/ci_status\.sh$"), "cancelled"),
     (re.compile(r"^src/common/units\.cpp$"), "metre"),
     (re.compile(r"^src/common/units\.cpp$"), "litre"),

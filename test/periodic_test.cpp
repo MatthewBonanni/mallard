@@ -20,6 +20,7 @@
 #include <string>
 #include <tuple>
 
+#include "memory_tracker.h"
 #include "periodic_fixtures.h"
 #include "solver.h"
 #include "test_fixtures.h"
@@ -51,6 +52,17 @@ struct Case {
     std::string integrator = "SSPRK3";
     std::string boundaries;
 };
+
+uint64_t vertex_neighbor_bytes(const memory::Tracker & tracker) {
+    // Kernels keep the device views alone, which are host memory only in host builds
+    uint64_t bytes = 0;
+    for (const bool device : {false, true}) {
+        for (const auto & [label, n] : tracker.live(device)) {
+            bytes += label.find("cells_of_cell") != std::string::npos ? n : 0;
+        }
+    }
+    return bytes;
+}
 
 std::string make_input(const Case & c) {
     std::ostringstream s;
@@ -108,6 +120,54 @@ TEST_P(PeriodicMesh2D, SeamFacesAndVertexNeighborsMeetAfterTheirShift) {
 INSTANTIATE_TEST_SUITE_P(Periodic, PeriodicMesh2D,
     ::testing::Values(MeshParam{"cartesian", "x"}, MeshParam{"cartesian", "xy"},
                       MeshParam{"cartesian_tri", "y"}, MeshParam{"cartesian_tri", "xy"}));
+
+TEST(PeriodicSetup2D, VertexNeighborShiftsAreStoredOnlyWithPeriodicPairs) {
+    for (const std::string type : {"cartesian", "cartesian_tri"}) {
+        const VertexNeighbors plain = periodic_mesh(type, 5, "")->vertex_neighbors();
+        EXPECT_GT(plain.cells.extent(0), 0u) << type;
+        EXPECT_EQ(plain.shift.rows.extent(0), 0u) << type;
+        const VertexNeighbors periodic = periodic_mesh(type, 5, "x")->vertex_neighbors();
+        EXPECT_EQ(periodic.shift.rows.extent(0), periodic.cells.extent(0)) << type;
+    }
+}
+
+TEST(PeriodicSetup2D, VertexNeighborsAreBuiltOnFirstUseAndTheSameAfterARelease) {
+    // The mesh build does not hold them (they were up to half of a built mesh); one built again after
+    // release_setup_data must match the first, shift rows included, since kernels may have kept the first
+    memory::Tracker tracker;
+    const auto mesh = periodic_mesh("cartesian_tri", 6, "xy");
+    EXPECT_EQ(vertex_neighbor_bytes(tracker), 0u);
+    auto copy = [](const VertexNeighbors & v) {
+        return std::make_tuple(std::vector<uint32_t>(v.h_offsets.data(), v.h_offsets.data() + v.h_offsets.size()),
+                               std::vector<uint32_t>(v.h_cells.data(), v.h_cells.data() + v.h_cells.size()),
+                               std::vector<uint8_t>(v.h_shift.rows.data(), v.h_shift.rows.data() + v.h_shift.rows.size()));
+    };
+    const auto first = copy(mesh->vertex_neighbors());
+    EXPECT_GT(vertex_neighbor_bytes(tracker), 0u);
+    EXPECT_FALSE(std::get<2>(first).empty());
+    mesh->release_setup_data();
+    EXPECT_EQ(vertex_neighbor_bytes(tracker), 0u);
+    EXPECT_EQ(copy(mesh->vertex_neighbors()), first);
+}
+
+TEST(PeriodicSetup2D, StepsWithoutVertexNeighborKernelsHoldNoVertexNeighbors) {
+    // Inviscid TENO reads them only in its setup; the viscous gradients keep their own
+    memory::Tracker tracker;
+    Case c;
+    c.recon = "TENO";
+    c.run = "n_steps = 1\ncfl = 0.25\n";
+    Solver solver;
+    solver.set_distributed(false);
+    solver.init(parse_toml(make_input(c)));
+    solver.run();
+    EXPECT_EQ(vertex_neighbor_bytes(tracker), 0u);
+    c.physics = "type = \"navier_stokes\"\nmu = 1e-3\nPr = 0.71\n";
+    Solver viscous;
+    viscous.set_distributed(false);
+    viscous.init(parse_toml(make_input(c)));
+    viscous.run();
+    EXPECT_GT(vertex_neighbor_bytes(tracker), 0u);
+}
 
 TEST(PeriodicSetup2D, InvalidSetupsAreRejected) {
     // Two cells across a periodic direction touch both directly and across the seam

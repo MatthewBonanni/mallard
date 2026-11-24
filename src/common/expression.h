@@ -17,8 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -28,19 +28,32 @@
 #include "units.h"
 
 /**
+ * @brief The program of an expression read from the input at key (a path, as
+ *        "initialize.rho") on line (0 if unknown).
+ * @throws InputError naming the key, its line and docs/guide/expressions.md
+ *         if the text does not compile.
+ */
+kexpr::Program compile_expression(const std::string & key, std::size_t line, const std::string & text,
+                                  const std::vector<std::string> & variables,
+                                  kexpr::SymbolHint hint = expression_unit_hint, std::size_t first_shadowable = SIZE_MAX);
+
+/**
  * @brief An expression of named variables (by default x, y, z and t), so
  *        that every section accepts the same language with the same errors.
- *        Errors are std::runtime_error.
  */
 class Expression {
     public:
+        /** @brief The expression of the input's key on line, as compile_expression. */
+        Expression(const std::string & key, const std::size_t line, const std::string & text,
+                   const std::vector<std::string> & variables = {"x", "y", "z", "t"},
+                   const std::size_t first_shadowable = SIZE_MAX) :
+            Expression(compile_expression(key, line, text, variables, expression_unit_hint, first_shadowable),
+                       variables) {}
+
+        /** @brief An expression from elsewhere (a command-line option); errors are kexpr::SyntaxError. */
         Expression(const std::string & name, const std::string & text,
                    const std::vector<std::string> & variables = {"x", "y", "z", "t"}) :
-            m_program(check(name, text, variables)), n_variables(variables.size()) {
-            for (uint16_t i = 0; i < variables.size(); i++) {
-                if (variables[i] == "t" && m_program.uses(i)) time_dependent = true;
-            }
-        }
+            Expression(kexpr::Program(name, text, variables, expression_unit_hint), variables) {}
 
         /** @brief Whether the value can depend on t. */
         bool depends_on_time() const { return time_dependent; }
@@ -102,22 +115,14 @@ class Expression {
         }
 
     private:
-        double evaluate(const double * v) const {
-            try {
-                return m_program(v);
-            } catch (const std::invalid_argument & e) {
-                throw std::runtime_error(e.what());
+        Expression(kexpr::Program program, const std::vector<std::string> & variables) :
+            m_program(std::move(program)), n_variables(variables.size()) {
+            for (uint16_t i = 0; i < variables.size(); i++) {
+                if (variables[i] == "t" && m_program.uses(i)) time_dependent = true;
             }
         }
 
-        static kexpr::Program check(const std::string & name, const std::string & text,
-                                   const std::vector<std::string> & variables) {
-            try {
-                return kexpr::Program(name, text, variables, expression_unit_hint);
-            } catch (const std::invalid_argument & e) {
-                throw std::runtime_error(e.what());
-            }
-        }
+        double evaluate(const double * v) const { return m_program(v); }
 
         kexpr::Program m_program;
         size_t n_variables;

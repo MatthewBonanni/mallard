@@ -12,8 +12,10 @@
 #include "distributed_mesh.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <span>
@@ -31,6 +33,16 @@ constexpr uint32_t NO_ZONE = ~uint32_t(0);
 // A face's sorted node ids, padded with NONE (triangles in 3D)
 constexpr int KEY = N_DIM == 2 ? 2 : 4;
 using FaceKey = std::array<uint64_t, KEY>;
+
+// The face matching tags each face with one word: a cell face with its cell
+// and local face, a boundary face with ZONE | zone, so cell faces sort first
+constexpr uint64_t ZONE = uint64_t(1) << 63;
+constexpr int FACE_BITS = 3;
+constexpr uint64_t MAX_CELLS = ZONE >> FACE_BITS;
+// Rounds of the face matching: each sends about 60 B per hexahedron (3D) and receives as much
+constexpr uint64_t MATCH_ROUNDS = 4;
+
+uint64_t face_tag(uint64_t cell, uint64_t k) { return cell << FACE_BITS | k; }
 
 uint64_t mix(uint64_t x) {
     x += 0x9e3779b97f4a7c15ull;
@@ -413,6 +425,9 @@ DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPa
     for (uint64_t node : block.cell_nodes) {
         if (node >= node_dist.back()) error = "Mesh: node id " + std::to_string(node) + " out of range.";
     }
+    // Face tags, and the node directory's cell * ranks + owner
+    const uint64_t max_cells = std::min(MAX_CELLS, ~uint64_t(0) / p);
+    if (cell_dist.back() > max_cells) error = "Mesh: more than " + std::to_string(max_cells) + " cells.";
     check_all(error);
     zones = block.zone_names;
     const uint32_t unassigned = static_cast<uint32_t>(zones.size());
@@ -424,99 +439,129 @@ DistributedMesh::DistributedMesh(MeshBlock b, const std::vector<Mesh::PeriodicPa
     }
 
     // Every cell face and boundary face goes to the rank its node set hashes
-    // to, as (key, cell, local face) or (key, NONE, zone); faces of periodic
-    // zones are found as interior faces instead
-    constexpr int WIDTH = KEY + 2;
-    std::vector<std::vector<uint64_t>> send(p);
+    // to, as (key, tag); faces of periodic zones are found as interior faces
+    // instead. In rounds, by another part of the hash, so that the messages,
+    // sent and received at once, stay small next to the block
+    constexpr int WIDTH = KEY + 1;
     std::vector<uint64_t> face;
-    // Two passes: count, then fill lists of exactly the right size
-    std::vector<uint64_t> count(p, 0);
-    auto for_each_face = [&](auto && post) {
+    // post(key, tag) for every face numbered i (cell faces, then boundary faces) that visit(i) takes
+    auto for_each_face = [&](auto && visit, auto && post) {
+        uint64_t i = 0;
         for (uint64_t c = 0; c < block.n_cells(); c++) {
             const uint32_t n = static_cast<uint32_t>(block.cell_offsets[c + 1] - block.cell_offsets[c]);
             for (uint32_t k = 0; k < n_cell_faces(n); k++) {
+                if (!visit(i++)) continue;
                 cell_face(&block.cell_nodes[block.cell_offsets[c]], n, k, face);
                 for (uint64_t & node : face) node = node_key(node);
-                post(face_key(face), block.first_cell + c, k);
+                post(face_key(face), face_tag(block.first_cell + c, k));
             }
         }
         for (uint64_t f = 0; f < block.n_faces(); f++) {
-            if (periodic_zone[block.face_zone[f]]) continue;
+            if (periodic_zone[block.face_zone[f]] || !visit(i++)) continue;
             face.assign(block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f]),
                         block.face_nodes.begin() + static_cast<std::ptrdiff_t>(block.face_offsets[f + 1]));
             for (uint64_t & node : face) node = node_key(node);
-            post(face_key(face), NONE, block.face_zone[f]);
+            post(face_key(face), ZONE | block.face_zone[f]);
         }
     };
-    for_each_face([&](const FaceKey & key, uint64_t, uint64_t) { count[hash(key) % p] += WIDTH; });
-    for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
-    for_each_face([&](const FaceKey & key, uint64_t cell, uint64_t k_or_zone) {
-        auto & out = send[hash(key) % p];
-        out.insert(out.end(), key.begin(), key.end());
-        out.push_back(cell);
-        out.push_back(k_or_zone);
+    // Per block cell, in local face order: the other cell or ZONE | zone. Each
+    // local face has one reply, so it goes straight to the face's slot
+    std::vector<uint64_t> half_offsets(block.n_cells() + 1, 0);
+    for (uint64_t c = 0; c < block.n_cells(); c++) {
+        half_offsets[c + 1] = half_offsets[c] + n_cell_faces(static_cast<uint32_t>(block.cell_offsets[c + 1] - block.cell_offsets[c]));
+    }
+    std::vector<uint64_t> half_other(half_offsets.back());
+    uint64_t n_neighbors = 0, n_boundary = 0;
+    // The round of every face, and the words each round sends to each rank: the lists get exactly their size
+    std::vector<uint8_t> face_round(half_offsets.back() + block.n_faces());
+    std::vector<uint64_t> round_count(MATCH_ROUNDS * p, 0);
+    for_each_face([](uint64_t) { return true; }, [&, i = uint64_t(0)](const FaceKey & key, uint64_t) mutable {
+        const uint64_t h = hash(key);
+        face_round[i++] = static_cast<uint8_t>(h / p % MATCH_ROUNDS);
+        round_count[h / p % MATCH_ROUNDS * p + h % p] += WIDTH;
     });
-    comm::Received<uint64_t> received = comm::exchange(std::move(send));
+    std::vector<uint64_t> count(p, 0);
+    for (uint64_t round = 0; round < MATCH_ROUNDS; round++) {
+        std::vector<std::vector<uint64_t>> send(p);
+        for (size_t q = 0; q < p; q++) send[q].reserve(round_count[round * p + q]);
+        for_each_face([&](uint64_t i) { return face_round[i] == round; }, [&](const FaceKey & key, uint64_t tag) {
+            const uint64_t h = hash(key);
+            auto & out = send[h % p];
+            out.insert(out.end(), key.begin(), key.end());
+            out.push_back(tag);
+        });
+        comm::Received<uint64_t> received = comm::exchange(std::move(send));
 
-    // Sorted by key, then cell: each face's cells come first, then the
-    // boundary faces matching it. Two cells make a graph edge; one cell a
-    // boundary face in the zone of the first matching boundary face (lowest
-    // zone index), else unassigned.
-    const uint64_t n_records = received.data.size() / WIDTH;
-    const uint64_t * r = received.data.data();
-    std::vector<uint32_t> order(n_records);
-    std::iota(order.begin(), order.end(), 0u);
-    std::sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) {
-        return std::lexicographical_compare(r + x * WIDTH, r + (x + 1) * WIDTH, r + y * WIDTH, r + (y + 1) * WIDTH);
-    });
-    send.assign(p, {});
-    for (uint64_t i = 0; i < n_records;) {
-        uint64_t j = i + 1;
-        while (j < n_records && std::equal(r + order[i] * WIDTH, r + order[i] * WIDTH + KEY, r + order[j] * WIDTH)) j++;
-        uint32_t n_cells = 0;
-        while (i + n_cells < j && r[order[i + n_cells] * WIDTH + KEY] != NONE) n_cells++;
-        const bool zoned = i + n_cells < j;
-        const uint64_t zone = zoned ? r[order[i + n_cells] * WIDTH + KEY + 1] : unassigned;
-        if (n_cells == 0) {
-            error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
-        } else if (n_cells > 2) {
-            error = "Mesh: a face is shared by more than two cells.";
-        } else if (n_cells == 2 && r[order[i] * WIDTH + KEY] == r[order[i + 1] * WIDTH + KEY]) {
-            error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
-        } else if (n_cells == 2 && zoned) {
-            error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
-        } else {
-            for (uint32_t m = 0; m < n_cells; m++) {
-                const uint64_t * rec = r + order[i + m] * WIDTH;
-                const uint64_t other = n_cells == 2 ? r[order[i + 1 - m] * WIDTH + KEY] : NONE;
-                auto & out = send[rank_of_cell(rec[KEY])];
-                out.insert(out.end(), {rec[KEY], rec[KEY + 1], other, n_cells == 2 ? uint64_t(NO_ZONE) : zone});
+        // Sorted by key, then tag: each face's cells come first, then the
+        // boundary faces matching it. Two cells make a graph edge; one cell a
+        // boundary face in the zone of the first matching boundary face (lowest
+        // zone index), else unassigned. Each cell face gets the reply
+        // (its tag, the other cell or ZONE | zone). Equal records are the same
+        // words, so any sort gives the same order; std::sort takes twice as
+        // long on some meshes' rounds.
+        std::vector<std::array<uint64_t, WIDTH>> records(received.data.size() / WIDTH);
+        std::memcpy(records.data(), received.data.data(), received.data.size() * sizeof(uint64_t));
+        received = {};
+        std::stable_sort(records.begin(), records.end());
+        const uint64_t n_records = records.size();
+        send.assign(p, {});
+        {
+            // Each record of a cell face sends one reply
+            std::fill(count.begin(), count.end(), 0);
+            for (uint64_t i = 0; i < n_records; i++) {
+                if (records[i][KEY] < ZONE) count[rank_of_cell(records[i][KEY] >> FACE_BITS)] += 2;
             }
+            for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
         }
-        i = j;
+        for (uint64_t i = 0; i < n_records;) {
+            uint64_t j = i + 1;
+            while (j < n_records && std::equal(records[i].begin(), records[i].begin() + KEY, records[j].begin())) j++;
+            uint32_t n_cells = 0;
+            while (i + n_cells < j && records[i + n_cells][KEY] < ZONE) n_cells++;
+            const bool zoned = i + n_cells < j;
+            const uint64_t zone = zoned ? records[i + n_cells][KEY] & ~ZONE : unassigned;
+            if (n_cells == 0) {
+                error = "Mesh: boundary face of " + zones[zone] + " is not a cell face.";
+            } else if (n_cells > 2) {
+                error = "Mesh: a face is shared by more than two cells.";
+            } else if (n_cells == 2 &&
+                       records[i][KEY] >> FACE_BITS == records[i + 1][KEY] >> FACE_BITS) {
+                error = "Mesh: a cell touches itself across a periodic boundary; periodic directions need at least 3 cells.";
+            } else if (n_cells == 2 && zoned) {
+                error = "Mesh: boundary face of " + zones[zone] + " is an interior face.";
+            } else {
+                for (uint32_t m = 0; m < n_cells; m++) {
+                    const uint64_t tag = records[i + m][KEY];
+                    const uint64_t other = n_cells == 2 ? records[i + 1 - m][KEY] >> FACE_BITS : ZONE | zone;
+                    auto & out = send[rank_of_cell(tag >> FACE_BITS)];
+                    out.insert(out.end(), {tag, other});
+                }
+            }
+            i = j;
+        }
+        release(records);
+        check_all(error);
+        received = comm::exchange(std::move(send));
+        if (round + 1 == MATCH_ROUNDS) release(face_round);
+        for (size_t i = 0; i < received.data.size(); i += 2) {
+            const uint64_t tag = received.data[i], other = received.data[i + 1];
+            half_other[half_offsets[(tag >> FACE_BITS) - block.first_cell] + (tag & ((uint64_t(1) << FACE_BITS) - 1))] = other;
+            (other < ZONE ? n_neighbors : n_boundary)++;
+        }
     }
-    received = {};
-    release(order);
-    check_all(error);
-    received = comm::exchange(std::move(send));
-
-    // Per block cell, in local face order: neighbors and boundary faces
-    std::vector<std::array<uint64_t, 4>> entries(received.data.size() / 4);
-    for (size_t i = 0; i < entries.size(); i++) {
-        const uint64_t * e = &received.data[4 * i];
-        entries[i] = {e[0] - block.first_cell, e[1], e[2], e[3]};
-    }
-    received = {};
-    std::sort(entries.begin(), entries.end());
     graph_offsets_.assign(block.n_cells() + 1, 0);
     boundary_offsets.assign(block.n_cells() + 1, 0);
-    for (const auto & [c, k, other, zone] : entries) {
-        if (other != NONE) {
-            graph_offsets_[c + 1]++;
-            graph_neighbors_.push_back(other);
-        } else {
-            boundary_offsets[c + 1]++;
-            boundary.push_back({uint32_t(k), uint32_t(zone)});
+    graph_neighbors_.reserve(n_neighbors);
+    boundary.reserve(n_boundary);
+    for (uint64_t c = 0; c < block.n_cells(); c++) {
+        for (uint64_t h = half_offsets[c]; h < half_offsets[c + 1]; h++) {
+            if (half_other[h] < ZONE) {
+                graph_offsets_[c + 1]++;
+                graph_neighbors_.push_back(half_other[h]);
+            } else {
+                boundary_offsets[c + 1]++;
+                boundary.push_back({uint32_t(h - half_offsets[c]), static_cast<uint32_t>(half_other[h] & ~ZONE)});
+            }
         }
     }
     std::partial_sum(graph_offsets_.begin(), graph_offsets_.end(), graph_offsets_.begin());
@@ -627,6 +672,12 @@ void DistributedMesh::distribute(const std::vector<int> & cell_owner) {
 
 void DistributedMesh::release_cells() {
     cells = Cells();
+    release_search();
+    layers = 0;
+    sent = false;
+}
+
+void DistributedMesh::release_search() {
     release(halo_index);
     release(owned_nodes);
     release(searched_nodes);
@@ -634,8 +685,6 @@ void DistributedMesh::release_cells() {
     release(directory_offsets);
     release(directory_cells);
     release(directory_owners);
-    layers = 0;
-    sent = false;
 }
 
 void DistributedMesh::send_to_owners() {
@@ -654,34 +703,57 @@ void DistributedMesh::send_to_owners() {
     owned_nodes.shrink_to_fit();
 
     // Node directory: the cells using each block node (all nodes of a
-    // periodic class count as its key), and their owners
-    send.assign(p, {});
-    {
-        std::vector<uint64_t> count(p, 0);
-        for (uint64_t node : block.cell_nodes) count[rank_of_node(node_key(node))] += 3;
-        for (size_t q = 0; q < p; q++) send[q].reserve(count[q]);
+    // periodic class count as its key), and their owners, sent as
+    // (key, cell * ranks + owner). In rounds of increasing nodes of every
+    // block, each filling the directory of its nodes, so that the messages
+    // stay small next to the block. First the round of every node use and the
+    // words each round sends to each rank
+    std::vector<uint8_t> use_round(block.cell_nodes.size());
+    std::vector<uint64_t> round_count(MATCH_ROUNDS * p, 0);
+    for (size_t k = 0; k < block.cell_nodes.size(); k++) {
+        const uint64_t key = node_key(block.cell_nodes[k]);
+        const size_t q = rank_of_node(key);
+        use_round[k] = static_cast<uint8_t>((key - node_dist[q]) * MATCH_ROUNDS / (node_dist[q + 1] - node_dist[q]));
+        round_count[use_round[k] * p + q] += 2;
     }
-    for (uint32_t c = 0; c < block.n_cells(); c++) {
-        for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
-            const uint64_t key = node_key(block.cell_nodes[k]);
-            send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, block.first_cell + c, uint64_t(owner[c])});
+    {
+        std::vector<std::vector<uint64_t>> counts(p, std::vector<uint64_t>(1, 0));
+        for (size_t q = 0; q < p; q++) {
+            for (uint64_t round = 0; round < MATCH_ROUNDS; round++) counts[q][0] += round_count[round * p + q] / 2;
+        }
+        uint64_t total = 0;
+        for (uint64_t n : comm::exchange(std::move(counts)).data) total += n;
+        directory_offsets.assign(block.n_nodes() + 1, 0);
+        directory_cells.reserve(total);
+        directory_owners.reserve(total);
+    }
+    for (uint64_t round = 0; round < MATCH_ROUNDS; round++) {
+        send.assign(p, {});
+        for (size_t q = 0; q < p; q++) send[q].reserve(round_count[round * p + q]);
+        for (uint32_t c = 0; c < block.n_cells(); c++) {
+            for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                if (use_round[k] != round) continue;
+                const uint64_t key = node_key(block.cell_nodes[k]);
+                send[rank_of_node(key)].insert(send[rank_of_node(key)].end(), {key, (block.first_cell + c) * p + uint64_t(owner[c])});
+            }
+        }
+        const std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
+        // This round's nodes of the block: [lo, hi)
+        const uint64_t n = block.n_nodes(), lo = (round * n + MATCH_ROUNDS - 1) / MATCH_ROUNDS,
+                       hi = ((round + 1) * n + MATCH_ROUNDS - 1) / MATCH_ROUNDS;
+        for (size_t i = 0; i < uses.size(); i += 2) directory_offsets[uses[i] - block.first_node + 1]++;
+        for (uint64_t m = lo; m < hi; m++) directory_offsets[m + 1] += directory_offsets[m];
+        directory_cells.resize(directory_offsets[hi]);
+        directory_owners.resize(directory_offsets[hi]);
+        std::vector<uint64_t> fill(directory_offsets.begin() + static_cast<std::ptrdiff_t>(lo),
+                                   directory_offsets.begin() + static_cast<std::ptrdiff_t>(hi));
+        for (size_t i = 0; i < uses.size(); i += 2) {
+            const uint64_t j = fill[uses[i] - block.first_node - lo]++;
+            directory_cells[j] = uses[i + 1] / p;
+            directory_owners[j] = int(uses[i + 1] % p);
         }
     }
-    std::vector<uint64_t> uses = comm::exchange(std::move(send)).data;
-    directory_offsets.assign(block.n_nodes() + 1, 0);
-    for (size_t i = 0; i < uses.size(); i += 3) directory_offsets[uses[i] - block.first_node + 1]++;
-    std::partial_sum(directory_offsets.begin(), directory_offsets.end(), directory_offsets.begin());
-    directory_cells.assign(directory_offsets.back(), 0);
-    directory_owners.assign(directory_offsets.back(), 0);
-    {
-        std::vector<uint64_t> fill(directory_offsets.begin(), directory_offsets.end() - 1);
-        for (size_t i = 0; i < uses.size(); i += 3) {
-            const uint64_t j = fill[uses[i] - block.first_node]++;
-            directory_cells[j] = uses[i + 1];
-            directory_owners[j] = int(uses[i + 2]);
-        }
-    }
-    release(uses);
+    release(use_round);
 
     // Halo layer 1: at every node shared by several owners, each owner gets
     // the cells there that it does not own
@@ -758,35 +830,54 @@ void DistributedMesh::grow_layer() {
     layers = layer;
 }
 
-std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order) {
+std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist,
+                                                        const CellNumbering & cell_order) & {
+    return local_mesh(halo_layers, dist, cell_order, false);
+}
+
+std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distribution & dist,
+                                                        const CellNumbering & cell_order) && {
+    return local_mesh(halo_layers, dist, cell_order, true);
+}
+
+std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution & dist, const CellNumbering & cell_order,
+                                                  bool last) {
     if (!sent) send_to_owners();
     while (layers < halo_layers) grow_layer();
+    release_search();
     const uint32_t n_local = static_cast<uint32_t>(std::count_if(cells.layer.begin(), cells.layer.end(),
                                            [&](uint8_t l) { return l <= halo_layers; }));
 
     // Nodes, numbered in order of first use
-    std::unordered_map<uint64_t, uint32_t> local_node;
+    std::vector<uint64_t> sorted_ids(cells.nodes.begin(), cells.nodes.begin() + static_cast<std::ptrdiff_t>(cells.node_offsets[n_local]));
+    std::sort(sorted_ids.begin(), sorted_ids.end());
+    sorted_ids.erase(std::unique(sorted_ids.begin(), sorted_ids.end()), sorted_ids.end());
+    sorted_ids.shrink_to_fit();
+    constexpr uint32_t UNNUMBERED = ~uint32_t(0);
+    std::vector<uint32_t> local_of_sorted(sorted_ids.size(), UNNUMBERED);
+    auto local_node = [&](uint64_t g) -> uint32_t & {
+        return local_of_sorted[static_cast<size_t>(std::lower_bound(sorted_ids.begin(), sorted_ids.end(), g) - sorted_ids.begin())];
+    };
     std::vector<uint64_t> node_ids;
+    node_ids.reserve(sorted_ids.size());
     CellNodes local_cells;
     local_cells.offsets.reserve(n_local + 1);
     local_cells.nodes.reserve(cells.node_offsets[n_local]);
     for (uint32_t i = 0; i < n_local; i++) {
         for (uint64_t k = cells.node_offsets[i]; k < cells.node_offsets[i + 1]; k++) {
-            const auto [it, inserted] = local_node.emplace(cells.nodes[k], node_ids.size());
-            if (inserted) node_ids.push_back(cells.nodes[k]);
-            local_cells.nodes.push_back(it->second);
+            uint32_t & local = local_node(cells.nodes[k]);
+            if (local == UNNUMBERED) {
+                local = static_cast<uint32_t>(node_ids.size());
+                node_ids.push_back(cells.nodes[k]);
+            }
+            local_cells.nodes.push_back(local);
         }
         local_cells.offsets.push_back(static_cast<uint32_t>(local_cells.nodes.size()));
     }
     std::vector<std::array<rtype, N_DIM>> nodes(node_ids.size());
     {
-        std::vector<uint64_t> sorted_ids(node_ids);
-        std::sort(sorted_ids.begin(), sorted_ids.end());
         const auto coords = fetch_nodes(sorted_ids);
-        for (size_t j = 0; j < node_ids.size(); j++) {
-            const auto & x = coords[static_cast<size_t>(std::lower_bound(sorted_ids.begin(), sorted_ids.end(), node_ids[j]) - sorted_ids.begin())];
-            FOR_I_DIM nodes[j][i] = static_cast<rtype>(x[i]);
-        }
+        for (size_t j = 0; j < sorted_ids.size(); j++) FOR_I_DIM nodes[local_of_sorted[j]][i] = static_cast<rtype>(coords[j][i]);
     }
 
     // Faces on the global boundary; the remaining one-sided faces border other ranks
@@ -797,22 +888,28 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
         for (uint32_t b = cells.boundary_offsets[i]; b < cells.boundary_offsets[i + 1]; b++) {
             cell_face(&cells.nodes[cells.node_offsets[i]], n, cells.boundary[b][0], face);
             std::vector<uint32_t> local;
-            for (uint64_t node : face) local.push_back(local_node.at(node));
+            for (uint64_t node : face) local.push_back(local_node(node));
             boundary_faces.push_back({std::move(local), zones[cells.boundary[b][1]]});
         }
     }
-    release(local_node);
+    release(sorted_ids);
+    release(local_of_sorted);
     // Periodic classes of the local nodes, keyed by their first local node
     PeriodicNodes classes = periodic_classes;
     if (!classes.zones.empty()) {
-        std::unordered_map<uint64_t, uint32_t> local_key;
+        std::vector<std::pair<uint64_t, uint32_t>> by_key(node_ids.size());  // (global key, local node)
         classes.key.resize(node_ids.size());
         classes.lattice.resize(node_ids.size());
         for (uint32_t j = 0; j < node_ids.size(); j++) {
             const auto it = cells.periodic.find(node_ids[j]);
             const bool found = it != cells.periodic.end();
-            classes.key[j] = local_key.emplace(found ? it->second.first : node_ids[j], j).first->second;
+            by_key[j] = {found ? it->second.first : node_ids[j], j};
             classes.lattice[j] = found ? it->second.second : std::array<int8_t, 3>{0, 0, 0};
+        }
+        std::sort(by_key.begin(), by_key.end());
+        for (size_t i = 0; i < by_key.size(); i++) {
+            classes.key[by_key[i].second] = i > 0 && by_key[i - 1].first == by_key[i].first ? classes.key[by_key[i - 1].second]
+                                                                                           : by_key[i].second;
         }
     }
     // Owned cells and each halo layer, each numbered by locality
@@ -820,7 +917,7 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     for (uint32_t i = 0; i < n_local; i++) {
         if (i + 1 == n_local || cells.layer[i + 1] != cells.layer[i]) group_ends.push_back(i + 1);
     }
-    const LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends, classes.key);
+    LocalityOrder numbered = locality_order(cell_order, nodes, local_cells, group_ends, classes.key);
     const std::vector<uint32_t> & order = numbered.order;
     CellNodes ordered_cells;
     ordered_cells.offsets.reserve(n_local + 1);
@@ -839,14 +936,25 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     local_cells = {};
     dist.n_owned = static_cast<uint32_t>(std::count(dist.layer.begin(), dist.layer.end(), 0));
     plan_halo_exchange(dist, std::vector<int>(owners.begin() + dist.n_owned, owners.end()));
+    release(owners);
 
     std::vector<uint32_t> cell_zone;
     if (!block.cell_zone_names.empty()) {
         cell_zone.resize(n_local);
         for (uint32_t i = 0; i < n_local; i++) cell_zone[i] = cells.zone[order[i]];
     }
+    release(numbered.order);
     // Deeper halos later start again from the block and the owners
     release_cells();
+    if (last) {
+        MeshBlock names;
+        names.cell_zone_names = std::move(block.cell_zone_names);
+        block = std::move(names);
+        release(block_periodic);
+        release(boundary_offsets);
+        release(boundary);
+        release(owner);
+    }
 
     auto mesh = std::make_shared<Mesh>();
     // Global ids first: they order the faces and neighbor lists like the serial mesh's
@@ -858,13 +966,16 @@ std::shared_ptr<Mesh> DistributedMesh::build_local_mesh(int halo_layers, Distrib
     mesh->n_global_nodes = node_dist.back();
     mesh->n_owned_cells = dist.n_owned;
     mesh->n_interior_cells = numbered.n_interior;
-    mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, classes);
+    mesh->init_from_connectivity(std::move(nodes), std::move(ordered_cells), boundary_faces, PARTITION_ZONE, std::move(classes));
     if (!block.cell_zone_names.empty()) {
         mesh->cell_zone_names = block.cell_zone_names;
         mesh->h_cell_zone = std::move(cell_zone);
     }
     mesh->n_reconstructed_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [](uint8_t l) { return l <= 1; }));
+    for (uint32_t k = 0; k < mesh->h_offsets_faces_of_cell(mesh->n_reconstructed_cells); k++) {
+        mesh->n_state_faces_count = std::max(mesh->n_state_faces_count, mesh->h_faces_of_cell(k) + 1);
+    }
     mesh->n_complete_cells =
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; }));
     return mesh;

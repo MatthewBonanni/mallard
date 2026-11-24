@@ -6,6 +6,7 @@
  */
 
 #include "stencils.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -185,16 +186,17 @@ bool zero_lattice(const std::array<int, 3> & l) { return l[0] == 0 && l[1] == 0 
 struct Lattices {
     const Mesh & mesh;
     Kokkos::View<uint32_t *>::host_mirror_type offsets, neighbors;
-    Kokkos::View<uint8_t *>::host_mirror_type shifts;
+    HostShiftRows shifts;
     std::vector<uint32_t> stamp;
     std::vector<std::array<int, 3>> lattice;
     std::vector<uint32_t> front, next;
 
     explicit Lattices(const Mesh & m)
         : mesh(m), stamp(m.n_cells, 0), lattice(m.n_cells) {
-        offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.offsets_cells_of_cell);
-        neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell);
-        shifts = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), m.cells_of_cell_shift);
+        const VertexNeighbors & v = m.vertex_neighbors();
+        offsets = v.h_offsets;
+        neighbors = v.h_cells;
+        shifts = v.h_shift;
     }
 
     /** @brief Search depth layers from cell c; periodic(cell) then tells about the cells it met. */
@@ -274,13 +276,13 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     Kokkos::deep_copy(unit_states, 1.0_r);
     LSQVertexGradientFunctor g = muscl.gradient;
     g.faces = make_gradient(mesh, boundaries, unit_states, muscl.gradients);
-    Kokkos::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
+    gated::parallel_for("stencil_face_flags", mesh.n_faces, KOKKOS_LAMBDA(const uint32_t f) {
         if (g.faces.cells_of_face(f, 1) >= 0) return;
         flags(f) = static_cast<uint8_t>((g.faces.one_sided(f) ? 2 : 0) |
                                         (g.faces.boundaries.image_stencil(f) ? 4 : 0));
     });
     Kokkos::View<rtype *[N_DIM]> face_fit("stencil_face_fit_weights", mesh.faces_of_cell.extent(0));
-    Kokkos::parallel_for("stencil_face_fit_weights", mesh.n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("stencil_face_fit_weights", mesh.n_owned(), KOKKOS_LAMBDA(const uint32_t c) {
         g.faces.weights(c, face_fit);
     });
     auto h_flags = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), flags);
@@ -292,7 +294,8 @@ void build_muscl(const MUSCL & muscl, const Mesh & mesh, const BoundaryData & bo
     auto ghost_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.weights.ghost_faces);
     auto offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.offsets_cells_of_cell);
     auto neighbors = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell);
-    auto neighbor_shift = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift);
+    const HostShiftRows neighbor_shift{
+        Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.cells_of_cell_shift.rows)};
     auto image_offsets = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbor_offsets);
     auto images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.image_neighbors);
     const std::vector<int32_t> face_image = boundaries.host_images().cell;

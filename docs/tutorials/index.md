@@ -29,9 +29,9 @@ each with what it demonstrates and how long it takes, and the
 The tutorials assume a build of Mallard (see the
 [first simulation](first_simulation.md)), here with MPI for the
 multi-rank runs, and Python 3 with the packages of
-`tutorials/requirements.txt` (numpy, scipy, matplotlib, h5py, gmsh, cantera), which
+`tutorials/requirements.txt` (numpy, scipy, matplotlib, gmsh, cantera), which
 also provide the `gmsh` command, and the [Python package](../guide/python.md) of `tools/`, which reads
-the output through Mallard's own reader: tutorial 9's scripts use it, and so can your own analysis.
+the output through Mallard's own reader: every tutorial's scripts use it, and so can your own analysis.
 The builds below make its library:
 
 ```bash
@@ -41,8 +41,8 @@ cmake --build build -j
 cmake -S . -B build-3d -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
       -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3
 cmake --build build-3d -j
-python3 -m venv .venv
-.venv/bin/pip install -r tutorials/requirements.txt -e tools
+uv venv
+uv pip install -r tutorials/requirements.txt -e tools
 export PATH=$PWD/.venv/bin:$PATH
 ```
 

@@ -1,0 +1,14 @@
+{
+ "dimension": "length (m)",
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
+  "examples/particle_vortex/input.toml",
+  "examples/tracer_vortex/input.toml"
+ ],
+ "type": "array"
+}

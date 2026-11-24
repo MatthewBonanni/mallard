@@ -3,8 +3,9 @@
  "dims": [
   2
  ],
- "required": true,
  "set_in": [
+  "examples/channel_inlet/input.toml",
+  "examples/channel_inlet_data/input.toml",
   "examples/heated_duct/closed.toml"
  ],
  "type": "number"

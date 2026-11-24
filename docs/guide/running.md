@@ -6,7 +6,7 @@ A running `mallard` takes requests from signals, from `mallard ctl` and, optiona
 |---|---|
 | `SIGUSR1` | Write a restart after the current step and continue |
 | `SIGTERM`, `SIGINT`, `SIGUSR2` | Write a restart and the final output after the current step, then exit with status 3. A second `SIGINT` (Ctrl-C twice) exits at once. Before the time loop starts, these signals end the run at once |
-| `mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's process (and of its GPU), and the diagnostics of the last progress row |
+| `mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's process (and of its GPU), the diagnostics of the last progress row, and the state of each [trigger](#triggers) |
 | `mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once it is written |
 | `mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
 | `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
@@ -35,8 +35,9 @@ Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [
 A `[[triggers]]` entry is a request the run makes of itself: a condition on
 the run, and what to do once it is true. Use one to stop a run when it has
 reached what it was for (a temperature, a force that has settled), to keep a
-restart or a snapshot of the moment something happens, or to start the
-statistics once the flow has developed.
+restart or a snapshot of the moment something happens, to start the
+statistics once the flow has developed and stop them at a time, or to note an
+event in the log or change a setting (an output's interval) when it happens.
 
 ```toml
 [[probes]]
@@ -55,12 +56,17 @@ name = "settled"
 when = "t > 0.02 and abs(forces_cylinder_Fx_pressure) < 1e-3"
 for = 0.005                       # held this long (seconds of simulated time)
 do = "stop"
+
+[[triggers]]
+name = "window"
+when = "t >= 0.05"                # a step lands on t = 0.05 exactly
+do = ["stop statistics", "log averages from 0 to {t} s", "set write_data.flow.time_interval=1e-3"]
 ```
 
 | Key | Meaning |
 |---|---|
 | `when` | The condition, in [kexpr](expressions.md); true when not 0. Required |
-| `do` | An action, or a list of them done in order: `"stop"`, `"checkpoint"`, `"write <prefix>"` (that `[[write_data]]` entry, now), `"start statistics"`. Required |
+| `do` | An action, or a list of them done in order: `"stop"`, `"checkpoint"`, `"write <prefix>"` (that `[[write_data]]` entry, now), `"start statistics"`, `"stop statistics"`, `"log <message>"`, `"set <key>=<value> ..."`. Required |
 | `name` | In the log, the run record and restart files; letters, digits and `_`. Default `trigger_<index>` (from 0) |
 | `for` | Seconds of simulated time the condition must hold before the trigger fires, counted from the step it last turned true. Default 0 |
 | `repeat` | `false` fires once; `true` fires again each time the condition turns true after being false. Default `false` |
@@ -82,6 +88,15 @@ Characters other than letters, digits and `_` in these names become `_`.
 A misspelled name is an input error (also of `mallard check`) that lists
 the names the run has.
 
+**Steps land on the times a condition names.** Every number a condition
+compares `t` with (`t >= 0.05`, `0.05 <= t`, `t == 0.05`, also inside a longer
+condition) is a time a step ends at, as `t_stop` and time-based outputs are:
+the step before it is shortened to end there, so `t >= 0.05` holds at
+`t = 0.05` exactly, not at whichever step passes it. Only comparisons of `t`
+itself with a number count (not `t - 0.05 >= 0`), and only while the trigger
+can still fire. In single precision the step ends at the first `float` at or
+after the number.
+
 **When conditions are evaluated.** After every step, once that step's
 monitors and probes are written, from the values they wrote: a monitor
 written every 10 steps keeps its value in between. A condition that reads a
@@ -93,8 +108,7 @@ the same step. There `wall` is rank 0's as its host last posted it before the
 step. The device also reduces the probes a condition reads at their writes,
 time-averaged probes and probes of `[statistics]` outputs included, to the
 values the host writes, so they do not stop the queue either, except probes
-reading cell data or `[statistics]` confidence intervals: the steps queued
-ahead stop at their writes, where rank 0's host reduces them and sends their
+reading cell data: the steps queued ahead stop at their writes, where rank 0's host reduces them and sends their
 values to every rank.
 
 **Actions.** `stop` ends the run after that step as `t_stop` would: the
@@ -104,6 +118,18 @@ checkpoint`). `write <prefix>` writes that `[[write_data]]` entry's file at
 once, besides its own schedule. `start statistics` discards the averages so
 far and starts them at that step, in `[statistics]` and its `spectra` and
 `phase`: they wait for the trigger, so `t_start` cannot be given as well.
+`stop statistics` stops their sampling after that step: the averages keep
+the values they had there, the same bit for bit as those of a run that ended
+at that step, and later output and restart files carry them (also of a run
+resumed from those files). A later `start statistics` starts them afresh.
+Time-averaged probes follow neither. `log <message>` writes the message as a
+line of the log and an `event` record of kind `log` (with the `trigger`'s
+name); `{<name>}` in it is replaced by the value of any name a condition can
+read, e.g. `"log outlet at {outlet_T} K"`. `set <key>=<value> ...` changes
+settings from the next step on, exactly as [`mallard ctl set`](#running-and-controlling-jobs)
+does and with the same keys (`n_steps`, `t_stop`, an output's or probe's
+`interval` or `time_interval`, ...), each recorded as an `event` of kind
+`set`; a key or value `mallard ctl set` would refuse is an input error.
 
 **Record.** Each firing is a line of the log and an `event` record of kind
 `trigger` in [`mallard.jsonl`](output.md#run-record-mallardjsonl), with the
@@ -112,9 +138,24 @@ condition read. Restart files carry each trigger's state (fired, how many
 times, since when its condition has held), so a resumed run neither fires a
 `repeat = false` trigger again nor restarts a `for` clock.
 
+**State.** `mallard ctl <run-dir> status` ends with a line per trigger:
+`trigger <name>: armed` (with `condition true since t = ... s` while a `for`
+clock runs, and when it will fire), `fired 2x, last at step 1200, t = 0.012
+s; armed` for one with `repeat`, `...; done` once a `repeat = false` trigger
+has fired. It is the state at the last step the host took; with the steps
+queued on a GPU, the clock of a holding condition can lag by the queue.
+
+**Checks.** `mallard check` reports a misspelled name or action, a `set` it
+would refuse and a `{<name>}` of a `log` that is not a name as input errors,
+and warns (`W-TRIGGER-NEVER`) of a trigger that cannot fire before `t_stop`:
+one whose `for` is longer than the run, or whose condition reads only `t`,
+compared with numbers, and is false at every time to `t_stop` (`t >= 5` in a
+run to 0.5 s: milliseconds meant?).
+
 Pitfalls: a run still needs `n_steps`, `t_stop` or `t_wall_stop` in
 `[run]`, the limit if no trigger fires; `wall` is only as reproducible as
-the machine's speed; `==` on `t` rarely holds exactly (use `>=`).
+the machine's speed; `==` on `t` holds only for a number the condition
+compares `t` with (a landing time), so prefer `>=`.
 
 ## MPI launchers and Slurm
 
@@ -151,14 +192,14 @@ nondimensional case); `divergence_report.json` gives them as `units`.
   valid state.
 - **Likely causes, most likely first**, each with a weight from 0 to 1, the evidence behind it and what to try:
 
-  | Cause | Evidence |
-  |---|---|
-  | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
-  | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
-  | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
-  | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
-  | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
-  | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
+    | Cause | Evidence |
+    |---|---|
+    | Time step | The failing step's CFL number against the integrator's largest stable one for smooth flow (1.2 for SSPRK3, 1.35 for RK4, 2.2 for SSPRK54, CK45 and RDPK3Sp35, 1 for FE; [table](../numerics/overview.md#time-step)), and how many cells exceeded it: many is the time step, a few is the cells (next row) |
+    | Mesh | The [quality](meshes.md#mesh-quality) of the invalid cells and their neighbors, against the questionable values and the mesh's worst; stronger when the CFL excess or the failure is confined to those cells |
+    | Boundary condition | Invalid cells within two cells of a boundary zone, and the exterior state of its faces there (inflow, far field, Dirichlet, outlet pressure) against the cell next to it: not a valid state, or a pressure or density ratio above 10, or a velocity jump above 3 sound speeds |
+    | Initial state | Cells of the initial state (or the restart's) with a non-positive density or pressure, a failure within ten steps of the start, and neighbors that differ by more than a factor 100 |
+    | Chemistry | Reacting runs: a temperature or mass fraction that failed first, a cell that needed ten times the mean chemistry sub-steps, rejected Rosenbrock sub-steps |
+    | Scheme | [Repairs](output.md#numerical-repairs) in the invalid cells since the last progress row, TENO's troubled cells and the MUSCL limiter there; always listed last, as the general remedy (`numerics.preset = "second_order"`, or `"first_order"` as the last resort) |
 
 - **Evidence:** a table of the cell closest to failing, its face neighbors and the next invalid cells in the last
   valid state (density, speed, pressure, temperature, local CFL number), with their centroids, quality metrics,
@@ -245,13 +286,14 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-format-vtu"></a>`W-FORMAT-VTU` | `[[write_data]]` without a `format` writes VTU files: the default, VTKHDF, needs HDF5 (parallel HDF5 on several ranks) | Set `format = "vtu"`, or build with HDF5 ([Which format](output.md#which-format)) |
 | <a id="w-key-ignored"></a>`W-KEY-IGNORED` | A key that is read but has no effect: `source.time_dependent` (expressions of `t` are evaluated at every stage) | Remove it |
 | <a id="w-spectra-restarted"></a>`W-SPECTRA-RESTARTED` | A probe's time spectra got a sample that is not `dt` after the last one (a resumed run, a changed interval): its history starts afresh | Keep the probe's interval fixed over a run and its restarts ([Time spectra](probes.md#time-spectra)) |
-| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel; or NCCL failed under a graph's conditional node, so the graph runs one step per launch. Slower, with the same results | Report it with the message: every step is meant to be graphed |
+| <a id="w-cuda-graph"></a>`W-CUDA-GRAPH` | The step could not be captured as a CUDA graph, so steps run kernel by kernel. Slower, with the same results | Report it with the message: every step is meant to be graphed |
 | <a id="w-teno-cache"></a>`W-TENO-CACHE` | TENO's stencil cache file cannot be written; the next run of the mesh builds its stencils again | Check the directory and its permissions ([Reconstruction](numerics.md#reconstruction)) |
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
 | <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
+| <a id="w-convergence-nonfinite"></a>`W-CONVERGENCE-NONFINITE` | A signal of `[statistics.convergence]` had a sample that is not finite (NaN or infinite, or so large its sums overflow): the run diverged. `converged` stays 0 for the rest of the run, `<signal>_nonfinite` counts such samples, and they are left out of the other values | Find why the monitored value is not finite: a diverging solution, a probe without a value at a write ([Convergence statistics](statistics.md#convergence-statisticsconvergence)) |
 | <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |
 
 The other commands' errors have codes too, printed the same way: `error E-USAGE: mallard check: unknown option
@@ -273,6 +315,32 @@ command's own failure status (1, or 3 for `mallard diff`; [Command line](cli.md)
 | <a id="e-convergence"></a>`E-CONVERGENCE` | `mallard post convergence` cannot read a run or compare the runs | The message names the run ([Grid convergence](convergence.md)) |
 | <a id="e-pack"></a>`E-PACK` | `mallard pack` cannot write the archive, or `--verify` finds one that is not of `mallard pack` or of a newer version | The message names the file |
 | <a id="w-option-deprecated"></a>`W-OPTION-DEPRECATED` | An option that is being removed: `mallard check --quality`, `mallard info --quality`, `mallard new --list` | Use the option the message names |
+
+## compute-sanitizer
+
+To check a CUDA build's kernels with NVIDIA's `compute-sanitizer` (`memcheck`, `racecheck`, `synccheck`,
+`initcheck`), turn the step graphs off so that the steps run kernel by kernel, with the same results:
+
+```toml
+[run]
+cuda_graphs = false
+```
+
+```bash
+compute-sanitizer --tool memcheck mallard2d -i input.toml   # mallard3d in 3D
+```
+
+With step graphs on, each step runs in the body of a CUDA graph conditional node, and compute-sanitizer
+(tested with 2026.4 on driver 595) misreports kernels there: `synccheck` and `initcheck` stop correct kernels
+with an illegal memory access or report divergent barriers, `racecheck` reports hazards across `__syncthreads()`
+or aborts with heap corruption in its own library, and `memcheck` reports reads of a kernel's own parameters.
+A body of two kernels is enough; the same kernels in a graph without conditional nodes, or launched one by one,
+are clean ([#1076](https://github.com/MatthewBonanni/mallard/issues/1076)). Reports on the step graph's
+kernels (a host backtrace through `cuGraphLaunch`) are therefore not to be trusted: check those kernels with
+`cuda_graphs = false`.
+
+The test suite takes `MALLARD_TEST_CUDA_GRAPHS=off` to run every test's solver this way;
+`tools/dev/gpu_runtime_tests.sh` checks a CUDA build so ([Contributing](../../CONTRIBUTING.md)).
 
 ## Kubernetes
 

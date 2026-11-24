@@ -17,6 +17,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <random>
 #include <set>
 #include <sstream>
 #include <string>
@@ -26,6 +28,7 @@
 #include "compression.h"
 #include "data_paths.h"
 #include "device_comm.h"
+#include "file_hash.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
 #include "mesh_block.h"
@@ -36,6 +39,7 @@
 #include "renumbered_mesh.h"
 #include "test_fixtures.h"
 #include "solver.h"
+#include "teno_shapes.h"
 #include "scratch.h"
 
 namespace {
@@ -176,7 +180,7 @@ TEST(MPITest, GasMixtureMatchesSerialWithAndWithoutStepGraphs) {
 TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     // The hot half of the channel reacts and the cold half does not, so ranks
     // integrate each other's cells; each cell's reactor gives the same bits
-    // wherever it runs, also with fused half steps, the thickened flame's
+    // wherever it runs, also with fused half steps, explicit steps, the thickened flame's
     // multiplier of dt and SIMPLER's forcing. The capacities grow after the
     // first step, which records the step graph again
     const std::string balanced = "[chemistry]\nload_balance = true\n";
@@ -184,6 +188,8 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
     const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
+                                                "navier_stokes"),
+                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "explicit_step = true\n",
                                                 "navier_stokes"),
                                   mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
                                   mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
@@ -223,9 +229,25 @@ TEST(MPITest, MixtureWallsMatchSerial) {
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
+    // Also MUSCL's rows: the outermost halo layer has none, since its missing faces would look like boundary
+    // faces and give it rows, equal on the grid to its owners' but not bitwise, that its owners' cells could share
     expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 30));
+}
+
+TEST(MPITest, FusedMUSCLMatchesSerial) {
+    // Large meshes reconstruct in one kernel per cell, over every local cell: the halo cells past layer 1 fill
+    // the outer sides of layer 1's faces but have faces without face states. Mixtures take that path every stage
+    struct Fused {
+        const uint32_t saved = MUSCL::fused_cells;
+        Fused() { MUSCL::fused_cells = 1; }
+        ~Fused() { MUSCL::fused_cells = saved; }
+    } fused;
+    expect_matches_serial(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER,
+                                    bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                        "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 10));
+    expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "", "euler"));
 }
 
 TEST(MPITest, TENOOnQuadsMatchesSerial) {
@@ -240,6 +262,157 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
+}
+
+TEST(MPITest, StreamsWaitForEachOtherWhenOneRunsLate) {
+#ifndef KOKKOS_ENABLE_CUDA
+    GTEST_SKIP() << "other backends fence instead of enqueuing waits";
+#else
+    // The halo exchange, the early cells' reconstruction and the face exchange run on their own streams. With
+    // every stream held back after each wait, the reconstruction and the fluxes read nothing a wait does not order
+    struct Delay {
+        Delay() { comm::set_wait_delay(uint64_t(1) << 18); }
+        ~Delay() { comm::set_wait_delay(0); }
+    } delay;
+    const std::string sides = bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                  "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n");
+    expect_matches_serial_with_and_without_step_graphs(box_input("cartesian", "type = \"TENO\"\norder = 3\n", NS, sides, 8));
+    expect_matches_serial_with_and_without_step_graphs(box_input("cartesian_tri", "type = \"MUSCL\"\n", EULER, sides, 8));
+    expect_matches_serial_with_and_without_step_graphs(
+        mixture_input("", "type = \"TENO\"\norder = 3\n", "", "navier_stokes"));
+#endif
+}
+
+namespace {
+
+/**
+ * @brief Gmsh file of nx x ny quadrilaterals of [0, 1] x [0, ly], clustered
+ *        toward x = 0 and x = 1 alike, with zones left/right/bottom/top; the
+ *        interior nodes move by up to 1e-13 of a cell, far below the stencil
+ *        shapes' grid, so that cells of one shape have fits that differ at
+ *        round-off.
+ */
+std::string clustered_quads(const uint32_t nx, const uint32_t ny, const double ly) {
+    std::mt19937 rng(3);
+    std::uniform_real_distribution<double> jitter(-1e-13, 1e-13);
+    auto id = [&](uint32_t i, uint32_t j) { return std::to_string(j * (nx + 1) + i + 1); };
+    std::ostringstream s;
+    s << "$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$PhysicalNames\n4\n"
+      << "1 1 \"bottom\"\n1 2 \"right\"\n1 3 \"top\"\n1 4 \"left\"\n$EndPhysicalNames\n"
+      << "$Nodes\n" << (nx + 1) * (ny + 1) << "\n";
+    s.precision(17);
+    for (uint32_t j = 0; j <= ny; j++) {
+        for (uint32_t i = 0; i <= nx; i++) {
+            double x = 0.5 + 0.5 * std::tanh(1.2 * (2.0 * i / nx - 1.0)) / std::tanh(1.2), y = ly * j / ny;
+            if (i > 0 && i < nx && j > 0 && j < ny) {
+                x += jitter(rng) / nx;
+                y += jitter(rng) * ly / ny;
+            }
+            s << id(i, j) << " " << x << " " << y << " 0\n";
+        }
+    }
+    std::vector<std::string> elements;
+    for (uint32_t i = 0; i < nx; i++) {
+        elements.push_back("1 2 1 1 " + id(i, 0) + " " + id(i + 1, 0));
+        elements.push_back("1 2 3 3 " + id(i + 1, ny) + " " + id(i, ny));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        elements.push_back("1 2 4 4 " + id(0, j + 1) + " " + id(0, j));
+        elements.push_back("1 2 2 2 " + id(nx, j) + " " + id(nx, j + 1));
+    }
+    for (uint32_t j = 0; j < ny; j++) {
+        for (uint32_t i = 0; i < nx; i++) {
+            elements.push_back("3 2 0 1 " + id(i, j) + " " + id(i + 1, j) + " " + id(i + 1, j + 1) + " " + id(i, j + 1));
+        }
+    }
+    s << "$EndNodes\n$Elements\n" << elements.size() << "\n";
+    for (size_t k = 0; k < elements.size(); k++) s << k + 1 << " " << elements[k] << "\n";
+    s << "$EndElements\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(MPITest, TENOStencilShapesAtWallsAndInHalosMatchSerial) {
+    // Order 3: each cell takes the fit of its stencil shape's cell with the lowest
+    // global id, which differs from its own fit at round-off, so every rank must
+    // give a cell the same shape and tables, halo cells included (gas mixtures
+    // reconstruct halo layer 1 locally). Each column and its mirror image have a
+    // shape of their own: on 3 ranks the first rank's halo column has a shape
+    // that the rank owns no cell of
+    const std::string teno3 = "type = \"TENO\"\norder = 3\n";
+    auto on_file = [](std::string input, const std::string & mesh, const std::string & file) {
+        return input.replace(input.find(mesh), mesh.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    };
+    expect_matches_serial(on_file(box_input("cartesian", teno3, EULER,
+                                            bcs("type = \"wall_adiabatic\"\n", "type = \"symmetry\"\n",
+                                                "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15),
+                                  "type = \"cartesian\"\nNx = 24\nNy = 18\nLx = 1.0\nLy = 0.8\n",
+                                  write_temp_shared("mallard_mpi_clustered.msh", clustered_quads(24, 18, 0.8))));
+    expect_matches_serial(on_file(mixture_input("", teno3, "", "euler"),
+                                  "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n",
+                                  write_temp_shared("mallard_mpi_clustered_strip.msh", clustered_quads(24, 24, 0.3))));
+}
+
+TEST(MPITest, TENOStencilShapeKeysOfReconstructedHaloCellsAreTheirOwnersKeys) {
+    // A gas mixture reconstructs halo layer 1: each rank must give every cell it
+    // reconstructs its owner's key, or none where the owner has none, halo cells
+    // whose key the rank owns no cell of included
+    if (comm::size() == 1) GTEST_SKIP() << "needs several ranks";
+    const uint32_t nx = 24, ny = 24;
+    const double ly = 0.3;
+    std::string input = mixture_input("", "type = \"TENO\"\norder = 3\n", "", "euler");
+    const std::string grid = "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n";
+    input.replace(input.find(grid), grid.size(),
+                  "type = \"file\"\nfilename = \"" +
+                      write_temp_shared("mallard_mpi_clustered_keys.msh", clustered_quads(nx, ny, ly)) + "\"\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    const auto mesh = solver.get_mesh();
+    const uint32_t n = mesh->n_reconstructed(), n_owned = mesh->n_owned();
+    ASSERT_GT(n, n_owned);
+    // The solver releases the device's node views after the setup
+    auto restore = [](auto & device, const auto & host) {
+        device = std::remove_reference_t<decltype(device)>("restored", host.extent(0));
+        Kokkos::deep_copy(device, host);
+    };
+    restore(mesh->node_coords, mesh->h_node_coords);
+    restore(mesh->nodes_of_cell, mesh->h_nodes_of_cell);
+    restore(mesh->offsets_nodes_of_cell, mesh->h_offsets_nodes_of_cell);
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, 1.4_r);
+    const std::vector<teno::ShapeKey> keys = teno::ShapeKeys(*mesh, bd, 18, 10, 256).keys(n);
+    std::set<std::pair<uint64_t, uint64_t>> owned_keys;
+    for (uint32_t c = 0; c < n_owned; c++) owned_keys.insert({keys[c].hash, keys[c].check});
+    // (global id, owned, hash, check, column, row) of each reconstructed cell; the
+    // columns invert clustered_quads' clustering
+    std::vector<uint64_t> local;
+    uint64_t halo_only = 0;
+    for (uint32_t c = 0; c < n; c++) {
+        const double x = double(mesh->h_cell_coords(c, 0)), y = double(mesh->h_cell_coords(c, 1));
+        const double i = 0.5 * nx * (std::atanh((2.0 * x - 1.0) * std::tanh(1.2)) / 1.2 + 1.0);
+        local.insert(local.end(), {mesh->h_global_cell(c), uint64_t(c < n_owned), keys[c].hash, keys[c].check,
+                                   uint64_t(std::floor(i)), uint64_t(std::floor(y / ly * ny))});
+        if (c >= n_owned && keys[c] && !owned_keys.count({keys[c].hash, keys[c].check})) halo_only++;
+    }
+    EXPECT_GT(comm::allreduce(halo_only, comm::Op::SUM), 0u) << "no halo cell has a key its rank owns no cell of";
+    const std::vector<uint64_t> all = comm::allgatherv(local);
+    std::map<uint64_t, std::pair<uint64_t, uint64_t>> owner_key;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        if (all[k + 1]) owner_key[all[k]] = {all[k + 2], all[k + 3]};
+    }
+    ASSERT_EQ(owner_key.size(), size_t(nx) * ny);
+    // Away from the walls, the cells of a column have one shape
+    std::map<uint64_t, std::set<std::pair<uint64_t, uint64_t>>> column_keys;
+    for (size_t k = 0; k < all.size(); k += 6) {
+        EXPECT_EQ(std::make_pair(all[k + 2], all[k + 3]), owner_key.at(all[k]))
+            << "cell " << all[k] << (all[k + 1] ? ", owned" : ", in a halo");
+        if (all[k + 5] >= 8 && all[k + 5] < ny - 8) column_keys[all[k + 4]].insert({all[k + 2], all[k + 3]});
+    }
+    EXPECT_EQ(column_keys.size(), size_t(nx));
+    for (const auto & [column, set] : column_keys) {
+        EXPECT_EQ(set.size(), 1u) << "column " << column;
+        EXPECT_NE(set.begin()->first, 0u) << "column " << column;
+    }
 }
 
 namespace {
@@ -502,6 +675,26 @@ TEST(MPITest, ThickenedFlameMatchesSerial) {
     }
     expect_matches_serial(mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame +
                           "efficiency = \"charlette\"\n");
+}
+
+TEST(MPITest, ReactionSensorMatchesSerialWithAndWithoutStepGraphs) {
+    // The consumption rates, the mixture fraction and the flame table are local; the sensor's filter passes exchange
+    // the filtered field. The table's small omega_max lets the slow reactions of the hot H2/O2 half fire the sensor,
+    // the N2 half not
+    const std::string table = (rank_scratch_dir() / "flames.csv").string();
+    std::ofstream(table) << "Z,s_L,delta_L,omega_max\n0,2,0.001,0.001\n1,2,0.001,0.001\n";
+    const std::string flame = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\nsensor = \"reaction\"\n"
+                              "flame_table = \"" + table + "\"\n"
+                              "fuel = {X = {H2 = 1.0}}\noxidizer = {X = {O2 = 1.0}}\nefficiency_max = 1.5\n";
+    expect_matches_serial_with_and_without_step_graphs(
+        mixture_input("", "type = \"MUSCL\"\n", "[chemistry]\n", "navier_stokes") + flame, [](const Solver & s) {
+            const auto & fields = s.get_tfles_fields();
+            uint32_t thickened = 0;
+            for (uint32_t c = 0; c < s.get_mesh()->n_owned(); c++) thickened += fields(c, 2) > 0.0_r;
+            const uint32_t n = s.get_mesh()->n_owned();
+            EXPECT_GT(comm::allreduce(thickened, comm::Op::SUM), 0u);
+            EXPECT_LT(comm::allreduce(thickened, comm::Op::SUM), comm::allreduce(n, comm::Op::SUM));
+        });
 }
 
 TEST(MPITest, HybridConvectiveFluxMatchesSerial) {
@@ -1132,6 +1325,51 @@ TEST(MPITest, OutputRecordsListEveryRanksPieceWithItsSizeAndHash) {
     EXPECT_EQ(records, 1u);
 }
 
+TEST(MPITest, SharedFilesAreHashedAsChunkTreesByEveryRank) {
+    const std::string dir = io_dir() + "_chunks";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    constexpr uint64_t chunk = 4096;
+    struct ChunkBytes {
+        ChunkBytes() { file_hash::set_chunk_bytes(chunk); }
+        ~ChunkBytes() { file_hash::set_chunk_bytes(file_hash::DEFAULT_CHUNK_BYTES); }
+    } chunk_bytes;
+    const bool vtkhdf = have_hdf5() && (comm::size() == 1 || have_parallel_hdf5());
+    Solver solver;
+    solver.init(parse_toml(restart_case(
+        2, "run_log = \"" + dir + "/run.jsonl\"\n[[write_data]]\nprefix = \"" + dir +
+               "/r\"\nformat = \"restart\"\ninterval = 2\n" +
+               (vtkhdf ? "[[write_data]]\nprefix = \"" + dir + "/v\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\nfields = [\"RHO\", \"U\"]\n"
+                       : std::string()))));
+    solver.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    std::ifstream in(dir + "/run.jsonl");
+    std::set<std::string> trees;
+    for (std::string line; std::getline(in, line);) {
+        const json::Value r = json::parse(line);
+        if (r["type"].string != "output" || r["step"].number != 2.0) continue;
+        for (const json::Value & f : r["files"].array) {
+            const std::string file = f["path"].string;
+            const uint64_t bytes = std::filesystem::file_size(file);
+            EXPECT_EQ(f["bytes"].number, double(bytes)) << file;
+            if (bytes <= chunk) {
+                EXPECT_EQ(f["sha256"].string, provenance::sha256_file(file)) << file;
+                continue;
+            }
+            const file_hash::Hash expected = file_hash::of_file(file, chunk);
+            EXPECT_FALSE(f.has("sha256")) << file;
+            EXPECT_EQ(f["sha256_tree"].string, expected.sha256_tree) << file;
+            EXPECT_EQ(f["chunk_bytes"].number, double(chunk)) << file;
+            ASSERT_EQ(f["chunks"].array.size(), file_hash::n_chunks(bytes, chunk)) << file;
+            for (size_t c = 0; c < expected.chunks.size(); c++) EXPECT_EQ(f["chunks"].array[c].string, expected.chunks[c]);
+            trees.insert(r["kind"].string);
+        }
+    }
+    EXPECT_TRUE(trees.contains("restart"));
+    EXPECT_EQ(trees.contains("vtkhdf"), vtkhdf);
+}
+
 TEST(MPITest, HDF5OutputDoesNotDependOnTheRankCount) {
     // Cells and nodes of every rank land at their global ids: triangles and
     // quads, vectors, statistics and species
@@ -1321,13 +1559,45 @@ TEST(MPITest, CurvedWallsMatchSerial) {
                                       "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
         const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
-        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & s) {
+            EXPECT_TRUE(s.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(s);
+        });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, AxisymmetricCurvedWallsMatchSerial) {
+    // The meridian half-plane of a spherical shell, walls projected onto the
+    // circles or P2 lines of the file: revolved curved cells and faces, the
+    // r-weighted flux points and TENO's curved source rules of halo cells
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 2.0\n";
+    const std::string boundaries = "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n"
+                                   "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+                                   "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n";
+    const std::string blast = "exp(-40 * ((x + 0.5)^2 + (y - 1.3)^2))";
+    for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{2, std::string()}}) {
+        const std::string file = write_temp_shared("mallard_mpi_half_annulus_" + std::to_string(order) + ".msh",
+                                                   half_annulus_gmsh(5, 15, 1.0, 2.0, order, order == 2));
+        for (const std::string recon : {"type = \"TENO\"\norder = 4\n", "type = \"MUSCL\"\n"}) {
+            std::string input = box_input("cartesian", recon, NS + "axisymmetric = true\n", boundaries, 10);
+            const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+            input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
+            const std::string centered = "exp(-40 * ((x - 0.35)^2 + (y - 0.45)^2))";
+            for (size_t at; (at = input.find(centered)) != std::string::npos;) input.replace(at, centered.size(), blast);
+            expect_matches_serial(input, [](const Solver & s) {
+                EXPECT_TRUE(s.get_mesh()->curved_geometry);
+                EXPECT_TRUE(s.get_mesh()->axisymmetric);
+                expect_halo_geometry_matches_owners(s);
+            });
         }
     }
     comm::barrier();

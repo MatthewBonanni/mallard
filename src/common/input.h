@@ -63,6 +63,7 @@ class InputTable : public std::map<K, V> {
         struct Lookups {
             std::set<K> keys;
             std::map<K, KeyUse> uses;
+            std::set<K> optional;
             bool all = false;
         };
 
@@ -75,6 +76,11 @@ class InputTable : public std::map<K, V> {
         const V & at(const K & k) const { note(k); return Base::at(k); }
         std::size_t count(const K & k) const { note(k); return Base::count(k); }
         bool contains(const K & k) const { note(k); return Base::contains(k); }
+        /** @brief Whether the table holds k, an optional key: a read of it that follows records no requirement. */
+        bool contains_optional(const K & k) const {
+            lookups->optional.insert(k);
+            return contains(k);
+        }
         V & operator[](const K & k) { note(k); return Base::operator[](k); }
 
         auto begin() { lookups->all = true; return Base::begin(); }
@@ -87,6 +93,7 @@ class InputTable : public std::map<K, V> {
         const Lookups & lookups_made() const { return *lookups; }
         void record_use(const K & k, KeyUse use) const {
             note(k);
+            if (lookups->optional.contains(k)) use.required = false;
             lookups->uses[k] = std::move(use);
         }
         void forget_lookups() { lookups = std::make_shared<Lookups>(); }
@@ -107,6 +114,15 @@ struct InputConfig : toml::type_config {
  *        no setup code read are known afterwards (see unused_keys).
  */
 using Input = toml::basic_value<InputConfig>;
+
+/**
+ * @brief Whether the table holds an optional key. Setup tests a key it reads only
+ *        if present with this rather than contains(), so that the read, which
+ *        would otherwise record the key as required, records it as optional.
+ */
+inline bool contains_optional(const Input & table, const std::string & key) {
+    return table.as_table().contains_optional(key);
+}
 
 /** @brief Parse an input file, with no key counted as read. */
 Input parse_input(const std::string & filename);
@@ -178,6 +194,18 @@ struct InputError : std::runtime_error {
     Diagnostic diagnostic;  // empty key for errors given as text only
     const char * code = diagnostic_code::INPUT;
 };
+
+/**
+ * @brief Throws an InputError (E-KEY-UNUSED) listing the keys no setup code
+ *        read, if there are any: once the setup has read every key it takes.
+ */
+void reject_unused_keys(const Input & input);
+
+/**
+ * @brief The unused keys with a suggestion, for an error that stopped the setup:
+ *        "\npossibly misspelled:\n  line 3: mesh.Nxx (did you mean mesh.Nx?)", or empty.
+ */
+std::string possibly_misspelled(const Input & input);
 
 /** @brief A required key that is absent: names it, the line of its table, and its docs. */
 InputError missing_key(const Input & table, const std::string & key, const std::string & fix = "");
@@ -296,6 +324,22 @@ inline const InputTable<std::string, Input> * table_of(const Input & v, const st
     return v.is_table() && v.contains(table) && v.at(table).is_table() ? &v.at(table).as_table() : nullptr;
 }
 
+/**
+ * @brief The table the accessors read key from: v, or nullptr if v is empty (no
+ *        table given); an InputError naming key if v is a value of another type.
+ */
+const Input * holder(const Input & v, const std::string & key);
+/** @brief v's table named table, or nullptr if it is absent; an InputError if it is not a table. */
+const Input * holder(const Input & v, const std::string & table, const std::string & key);
+
+/** @brief The value of key in table (nullptr: no table), recording how it is read; nullptr if absent. */
+inline const Input * lookup(const Input * table, const std::string & key, KeyUse use) {
+    if (!table) return nullptr;
+    const auto & t = table->as_table();
+    t.record_use(key, std::move(use));
+    return t.contains(key) ? &t.at(key) : nullptr;
+}
+
 /** @brief The KeyUse of a real-valued key of this dimension, with this fallback text or required. */
 inline KeyUse real_use(const std::string & type, const Dimension & dimension, std::string fallback, bool required) {
     return {type, dimension, std::move(fallback), required};
@@ -372,33 +416,26 @@ template <typename T, typename... Tables>
 T find_value(const Input & v, const Tables &... keys) {
     static_assert(sizeof...(Tables) == 1 || sizeof...(Tables) == 2, "find_value(v, [table,] key)");
     const std::string path[] = {keys...};
-    const auto * table = sizeof...(Tables) == 1 ? input_detail::table_of(v) : input_detail::table_of(v, path[0]);
     const std::string & key = path[sizeof...(Tables) - 1];
-    if (table) table->record_use(key, {input_detail::type_name<T>(), {}, "", true});
-    if constexpr (sizeof...(Tables) == 2) {
-        if (!table) throw missing_key(v, path[0] + "." + key);
-        if (!table->contains(key)) throw missing_key(v.at(path[0]), path[0] + "." + key);
-        return input_detail::get<T>(table->at(key), path[0] + "." + key);
-    } else {
-        if (!table || !table->contains(key)) throw missing_key(v, key);
-        return input_detail::get<T>(table->at(key), key);
-    }
+    const Input * table = sizeof...(Tables) == 1 ? input_detail::holder(v, key) : input_detail::holder(v, path[0], key);
+    const std::string name = sizeof...(Tables) == 1 ? key : path[0] + "." + key;
+    const Input * value = input_detail::lookup(table, key, {input_detail::type_name<T>(), {}, "", true});
+    if (!value) throw missing_key(table ? *table : v, name);
+    return input_detail::get<T>(*value, name);
 }
 
 template <typename T>
 T find_value_or(const Input & v, const std::string & key, const T & fallback) {
-    const auto * table = input_detail::table_of(v);
-    if (!table) return fallback;
-    table->record_use(key, {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
-    return table->contains(key) ? input_detail::get<T>(table->at(key), key) : fallback;
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
+                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
+    return value ? input_detail::get<T>(*value, key) : fallback;
 }
 
 template <typename T>
 T find_value_or(const Input & v, const std::string & table_name, const std::string & key, const T & fallback) {
-    const auto * table = input_detail::table_of(v, table_name);
-    if (!table) return fallback;
-    table->record_use(key, {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
-    return table->contains(key) ? input_detail::get<T>(table->at(key), table_name + "." + key) : fallback;
+    const Input * value = input_detail::lookup(input_detail::holder(v, table_name, key), key,
+                                               {input_detail::type_name<T>(), {}, input_detail::toml_text(fallback), false});
+    return value ? input_detail::get<T>(*value, table_name + "." + key) : fallback;
 }
 
 /**
@@ -432,78 +469,69 @@ inline double as_double(const Input & v, const std::string & key, const Dimensio
 }
 
 inline double find_double(const Input & v, const std::string & key, const Dimension & dimension) {
-    if (const auto * t = input_detail::table_of(v)) {
-        t->record_use(key, input_detail::real_use("number", dimension, "", true));
-    }
-    if (!v.contains(key)) throw missing_key(v, key);
-    return as_double(v.at(key), key, dimension);
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
+                                               input_detail::real_use("number", dimension, "", true));
+    if (!value) throw missing_key(v, key);
+    return as_double(*value, key, dimension);
 }
 
 inline double find_double_or(const Input & v, const std::string & key, const Dimension & dimension,
                              const double fallback) {
-    if (const auto * t = input_detail::table_of(v)) {
-        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
-    }
-    return v.contains(key) ? as_double(v.at(key), key, dimension) : fallback;
+    const Input * value = input_detail::lookup(
+        input_detail::holder(v, key), key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    return value ? as_double(*value, key, dimension) : fallback;
 }
 
 inline rtype find_real(const Input & v, const std::string & key, const Dimension & dimension) {
-    if (const auto * t = input_detail::table_of(v)) {
-        t->record_use(key, input_detail::real_use("number", dimension, "", true));
-    }
-    if (!v.contains(key)) throw missing_key(v, key);
-    return as_real(v.at(key), key, dimension);
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
+                                               input_detail::real_use("number", dimension, "", true));
+    if (!value) throw missing_key(v, key);
+    return as_real(*value, key, dimension);
 }
 
 inline rtype find_real(const Input & v, const std::string & table, const std::string & key,
                        const Dimension & dimension) {
-    if (const auto * t = input_detail::table_of(v, table)) {
-        t->record_use(key, input_detail::real_use("number", dimension, "", true));
-    }
-    if (!v.contains(table)) throw missing_key(v, table + "." + key);
-    if (!v.at(table).contains(key)) throw missing_key(v.at(table), table + "." + key);
-    return as_real(v.at(table).at(key), table + "." + key, dimension);
+    const Input * t = input_detail::holder(v, table, key);
+    const Input * value = input_detail::lookup(t, key, input_detail::real_use("number", dimension, "", true));
+    if (!value) throw missing_key(t ? *t : v, table + "." + key);
+    return as_real(*value, table + "." + key, dimension);
 }
 
 inline rtype find_real_or(const Input & v, const std::string & key, const Dimension & dimension,
                           const rtype fallback) {
-    if (const auto * t = input_detail::table_of(v)) {
-        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
-    }
-    return v.contains(key) ? as_real(v.at(key), key, dimension) : fallback;
+    const Input * value = input_detail::lookup(
+        input_detail::holder(v, key), key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    return value ? as_real(*value, key, dimension) : fallback;
 }
 
 inline rtype find_real_or(const Input & v, const std::string & table, const std::string & key,
                           const Dimension & dimension, const rtype fallback) {
-    if (const auto * t = input_detail::table_of(v, table)) {
-        t->record_use(key, input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
-    }
-    if (!v.contains(table) || !v.at(table).contains(key)) return fallback;
-    return as_real(v.at(table).at(key), table + "." + key, dimension);
+    const Input * value = input_detail::lookup(
+        input_detail::holder(v, table, key), key,
+        input_detail::real_use("number", dimension, input_detail::toml_text(fallback), false));
+    return value ? as_real(*value, table + "." + key, dimension) : fallback;
 }
 
 inline std::vector<rtype> as_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {
+    if (!v.is_array()) throw input_detail::wrong_type(v, key, "an array of numbers", 0, 0);
     std::vector<rtype> out;
     for (const auto & item : v.as_array()) out.push_back(as_real(item, key, dimension));
     return out;
 }
 
 inline std::vector<rtype> find_real_vector(const Input & v, const std::string & key, const Dimension & dimension) {
-    if (const auto * t = input_detail::table_of(v)) {
-        t->record_use(key, input_detail::real_use("array", dimension, "", true));
-    }
-    if (!v.contains(key)) throw missing_key(v, key);
-    return as_real_vector(v.at(key), key, dimension);
+    const Input * value = input_detail::lookup(input_detail::holder(v, key), key,
+                                               input_detail::real_use("array", dimension, "", true));
+    if (!value) throw missing_key(v, key);
+    return as_real_vector(*value, key, dimension);
 }
 
 inline std::vector<rtype> find_real_vector(const Input & v, const std::string & table, const std::string & key,
                                            const Dimension & dimension) {
-    if (const auto * t = input_detail::table_of(v, table)) {
-        t->record_use(key, input_detail::real_use("array", dimension, "", true));
-    }
-    if (!v.contains(table)) throw missing_key(v, table + "." + key);
-    if (!v.at(table).contains(key)) throw missing_key(v.at(table), table + "." + key);
-    return as_real_vector(v.at(table).at(key), table + "." + key, dimension);
+    const Input * t = input_detail::holder(v, table, key);
+    const Input * value = input_detail::lookup(t, key, input_detail::real_use("array", dimension, "", true));
+    if (!value) throw missing_key(t ? *t : v, table + "." + key);
+    return as_real_vector(*value, table + "." + key, dimension);
 }
 
 #endif // INPUT_H

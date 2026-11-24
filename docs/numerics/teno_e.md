@@ -23,6 +23,8 @@ faces, and its own stencil selection by a Lebesgue bound.
 | `src/numerics/teno.h` | Monomials, Euler eigenvectors, the adaptive cutoff, packed stencil storage |
 | `src/numerics/teno.cpp` | Options, the cache, and the reconstruction kernels |
 | `src/numerics/teno_setup.h`, `teno_setup.cpp` | The setup on the device: stencil search, ranking metric, moments, fits |
+| `src/numerics/teno_shapes.h`, `teno_shapes.cpp` | Stencil-shape keys, so that the setup fits one cell per shape |
+| `src/numerics/teno_sharing.h` | The store of tables shared by the cells of one stencil shape |
 | `src/numerics/teno_scalars.h` | Mixture scalars reconstructed with the flow's stencil choices |
 | `src/numerics/face_reconstruction.h`, `face_reconstruction.cpp` | Face quadrature, and the interface shared with first order and MUSCL |
 
@@ -157,6 +159,20 @@ touches, except:
     across the other side land next to the cells on the first. Both gave an
     odd-even mode in the wall pressure of the NACA 0012 tutorial mesh at
     order 3;
+- in 2D, images deeper behind the line than the body under their foot: the
+    path from the foot to the image crosses another boundary face, so the
+    image lands past the far side of the body, among the flow there (#976).
+    Near a closed trailing edge the body is thinner than the stencils, and
+    the cells on one side mirrored across their own side land beyond the
+    other side, where cells of the other side and of the wake are also in
+    the stencil. On the NACA 0012 tutorial mesh this gave an odd-even mode
+    in the wall pressure at order 4 from x = 0.9 to the trailing edge,
+    largest at x = 0.975 (6% of the dynamic pressure at t = 20, against 1%
+    for order 5 anywhere on the wall). The setup finds, for each mirror face,
+    the parts of the other boundary faces in the strip behind it
+    (`boundary_behind_faces`), whose least depth over the foot bounds the
+    body; it searches every boundary face of the rank's mesh, so the far side
+    must lie within its halo;
 - boundaries between MPI ranks (`PARTITION` faces), which are not boundaries
     of the domain;
 - curved wall and symmetry faces, which take no images unless
@@ -340,7 +356,11 @@ the bound or stencil depth. Cells whose first $n_0$ candidates include a
 cell with a curved wall or symmetry face (without `curved_mirrors`) fit at
 most degree `curved_wall_degree` (default 3), from
 $\lceil f N_{r'}\rceil$ entries for that degree $r'$; their coefficients above
-it are zero, so the run-time kernels are unchanged.
+it are zero, so the run-time kernels are unchanged. A stencil that the
+search grows past $n_0$ to such a cell is searched again (#1202): in 2D at
+that degree; in 3D below that cell's position at the full degree, and only if
+no size there fits, at the wall degree, so the full degree is kept where it
+can be. No other stencil changes.
 
 **Meshes one cell thick.** A cell whose central-stencil candidates (mirror
 images aside) all lie level with it along a coordinate axis, as on a 2D strip
@@ -406,7 +426,7 @@ multiply-adds, so it equals the entry the setup would have stored.
 
 Each step, every reconstructed cell runs the smooth pass; the troubled cells
 it queues then run the troubled passes, in rounds of at most
-`troubled_capacity` of the cells (default 0.5 in 3D, 1 in 2D) to bound
+`troubled_capacity` of the cells (default 0.25 in 3D, 1 in 2D) to bound
 their scratch memory.
 
 ### Troubled-cell measure
@@ -497,6 +517,32 @@ stencil. Renormalizing over the sectors alone in the second case
 the smoothest sector, so $\mathcal{K}$ is never empty. The face values
 $\mathbf{U}_q = \mathbf{R}\,\mathbf{v}_q$ return through the right
 eigenvectors.
+
+**Order 4: faces that look away from a discontinuity.** At order 4 the
+central polynomial is also rejected on a face whose own sector has the
+smallest indicator of all the candidates (ties to round-off included, so
+that mirror-image faces decide alike) while another sector is cut
+($\gamma_k/\sum_{k'}\gamma_{k'} < C_T$). The downstream face of the cell a
+shock is crossing is such a face. The cubic's indicator, an integral over the
+cell, stays within the cut-off there (7.6 to 9.9 times the downstream
+sector's for the $u_n + a$ wave of a Mach 3 shock), but at that face the cubic
+undershoots the state ahead (a density of 0.68 and a pressure of 0.29 against
+1.17 and 1.02 ahead), and the Riemann problem with the cell ahead then drains
+it (#977). Lowest values over every step on 200 × 4 quadrilaterals
+(`examples/sod`, `examples/shu_osher`):
+
+| | Order 4 without the rule | Order 4 | Order 5 |
+|---|---|---|---|
+| Sod, density (0.125 ahead) | 0.1236 | 0.1249 | 0.1249 |
+| Shu–Osher, pressure (1 ahead) | 0.9528 | 0.9976 | 0.9988 |
+
+The rule does not act in smooth flow: every convergence study of the
+[verification manual](../verification/index.md) is unchanged to the last
+bit, and so is a convected density wave of 90% amplitude at 16 to 64 cells
+per wavelength, on quadrilaterals and triangles, with 44 to 100% of the cells
+troubled. Orders 3, 5 and 6 do not have the rule. The [order-4 study](../design/teno4_robustness.md#shocks-undershoots)
+compares the orders' undershoots, and gives what the rule changes in order 4's
+errors on shocks and the one undershoot it leaves.
 
 **Adaptive cutoff.** Unless `C_T` fixes it,
 ([Liang, Shyy & Fu 2025](../references.md#liang-shyy-fu-2025); `teno::adaptive_CT`)
@@ -594,10 +640,12 @@ and bounding boxes in 3D) once, then the stencils, fits, Lebesgue constants
 and, in 2D, smoothness-indicator matrices of batches of cells sized to the
 free device memory: a thread per cell in 2D, a team of threads per cell on
 GPUs in 3D. In 2D each cell's scratch is sized from the stencil sizes (twice
-the cells the searches gather), and a batch takes as many cells as fit what
-16,384 cells take with twice that scratch, up to one wave of threads on the
-GPU; meshes of at least 16,384 cells share one batch size, so that the
-setup's workspace does not grow with the mesh. Cells whose search
+the cells the searches gather). On CUDA a batch is one wave of the kernel's
+threads (as many as the GPU holds at once with the kernel's registers: 41,472
+on an A100), within a quarter of the free memory; on other GPUs it takes as
+many cells as fit what 16,384 cells take with twice that scratch. Meshes of
+at least 16,384 cells share one batch size, so that the setup's workspace
+does not grow with the mesh. Cells whose search
 outgrows their scratch are redone on the host with more room. Every table is
 computed with the same sequence of floating-point operations on the device
 and on the host, so it is independent of the batch, the thread count and
@@ -628,6 +676,9 @@ which costs memory only. The tables of the shapes are packed like the cells'
 stencils, in blocks of 32 interleaved tables on GPUs, and each cell reaches its
 own through `pinv_index` (block and lane); on a mesh with a shape per cell this
 is the cells' own packing. A cell keeps its own slots' cells and mirror faces.
+The device setup ranks, hashes and compares the tables where it computes them;
+only the hashes, and the tables that the shapes keep, reach the host, which
+matches the hashes in cell order.
 A caller that knows its stencil shapes, such as a structured block's offset
 pattern, can key a shape itself (`TableStore::add_keyed`) instead of comparing
 tables; such shapes are agreed over the ranks by their key in the same way.
@@ -638,8 +689,41 @@ orientation, whatever its size. They form one row per cell shape, in double prec
 (equal on the grid, the lowest global id's, agreed over the ranks); each cell
 reaches its row through `cell_shape`. The scale $h$ stays per cell.
 
+**One fit per stencil shape.** With shared tables the setup groups the cells
+before fitting any table (`teno_shapes.h`), on the device, so that every backend
+groups them alike and gives the same tables. A cell's search reads the geometry of the cells in its
+vertex-neighbor layers, as many as the layers' cell counts make it take, and
+its own faces; its key hashes exactly that, relative to the cell and in units of
+its size $h$, on a grid of $2^{-30}$: each cell's layer and centroid, its nodes
+and its boundary faces with their conditions, sorted by position so that the
+key does not depend on the numbering, and the cell's own faces in its own order.
+The cell with the lowest global id of each key, over the ranks, is fitted, and
+the other cells of the key take its stencil, each entry mapped to the cell at
+the same position of their own sorted layers, its pseudo-inverses, basis means
+and smoothness-indicator matrix. Batches of fitted cells and cells taken from their
+keys then go through the table comparison above. The tables of a key are
+bitwise equal, so a batch ranks and compares them once, at the key's first cell
+there: the store sees each table once, with the lowest global id of its cells,
+which gives the shapes of ranking every cell, and the key's other cells take its
+shape and canonical order. Cells whose key no other cell
+has, whose layers reach the outermost halo layer or hold two periodic copies of
+a cell, and cells whose layers do not match their key's representative, are
+fitted on their own, so a mesh with a shape per cell is set up as before; so
+are the cells of axisymmetric meshes, whose tables depend on the radius. Once
+the halo is as deep as the searches need, the layers of every reconstructed
+halo cell lie within the complete layers, and the cell counts that decide
+whether a cell has a key are taken over the ranks, halo cells' included, so
+each cell has the same key and the same tables on every rank. Cells of one
+key have geometries that agree to within $2^{-30} h$ in every coordinate the
+key reads, so the tables a cell takes differ from its own fit by what such a
+difference changes, besides round-off. The shared tables are those of the table
+comparison, except where the cells of one key fall on either side of its grid:
+they take one table instead of two. In 2D, a cell whose search reads a wall
+with another boundary behind it (a thin body, whose far side can drop mirror
+images) has no key and is fitted on its own.
+
 **Cache.** `cache_file` writes the tables after the setup and reads them back
-on later runs (format version 20; one file per MPI rank). The file is used
+on later runs (format version 27; one file per MPI rank). The file is used
 only if its key matches: the options that change the tables, the precision,
 the rank count and rank, and a hash of the mesh (nodes, connectivity,
 boundary conditions, partition, curved geometry, periodic shifts,
@@ -672,6 +756,12 @@ sound speed over the box size, with the bound of 10 and of 4:
 | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 | 8e-8 / 0.022 |
 | mixed tilings (4³), walls, order 4 / 6 | 0.19 / 0.08 | 8e-4 / 1e-7 |
 
+The same growth rates on a log scale, with those of the pyramid lattice's odd
+degrees (below) against the central stencil size:
+
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-light.svg#gh-light-mode-only)
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-dark.svg#gh-dark-mode-only)
+
 Making only the near-degenerate cells first order removes these modes, and
 in the walled boxes the energy is produced at their wall faces. Bounds of 5
 to 7 do not remove them. Order 6 on tetrahedra and pyramids reaches only
@@ -681,17 +771,15 @@ with the best stencil).
 
 **Pyramids at odd degrees** (#236). On the `cartesian_pyramid` lattice the
 odd degrees grow with every stencil within the Lebesgue bound below a size
-found empirically, about $2.5\,N_{r+1}$ entries. Cell symmetry says only where
-the leading error of an odd-degree fit, of the even degree $r + 1$, jumps
-across a face: not across faces whose two cells are point images of each
-other through the face's center, which every face of the hexahedral and prism
-tilings is, and so are the bases of the pyramid tiling, but across the
-pyramids' side faces, where the image of a centroid lies $0.75\,h_i$ from the
-neighbor's. It does not explain the threshold: the face-averaged jump grows
-with the stable sizes, and even degrees jump as much and are stable. On the
-infinite lattice, the largest real part of the eigenvalues of the linearized
-operator (acoustics at rest, HLLC; sound speeds over the block size), by the
-size of the central stencil:
+found empirically, about $2.5\,N_{r+1}$ entries. The face jump of the
+leading error of an odd-degree fit (of the even degree $r + 1$, which cancels
+between cells that are point images of each other through the face) does not
+explain it: the face-averaged jump grows with the stable sizes, and the
+`cartesian_tri` lattice, whose faces are all point-symmetric, grows as well.
+What decides is the sign of the scheme's lowest even term (see odd degrees on
+other lattices, below). On the infinite lattice, the largest real part of the
+eigenvalues of the linearized operator (acoustics at rest, HLLC; sound speeds
+over the block size), by the size of the central stencil:
 
 | Order 4: entries | 57 | 65 | 77 | 85 | 89 |
 |---|---|---|---|---|---|
@@ -711,10 +799,10 @@ order 4 are 2.5 $N_4$, hence the start from $2.5\,N_{r+1}$
 leads the search to 185 entries, which leave slow modes: $2.0\times10^{-7}$ on
 the lattice and $6.8\times10^{-7}$ (sound speed over the box size) on the
 walled 4³ box, against $3\times10^{-9}$ from 209.
-The Lebesgue constants of the stable and the unstable stencils overlap: Kuhn
-tetrahedra are stable at order 4 from 58 entries with $\Lambda = 3.84$, and
-the hexahedral and prism lattices are stable at orders 4 and 6 with their
-default stencils. With the pyramids' start from $2.5\,N_{r+1}$, the largest
+The Lebesgue constants of the stable and the unstable stencils overlap (Kuhn
+tetrahedra at order 4 still grow with 58 entries, $\Lambda = 3.84$; see below). A
+finer scan of the wavevectors confirms 85 and 209 entries (largest real part
+below $4\times10^{-9}$). With the pyramids' start from $2.5\,N_{r+1}$, the largest
 real part on whole boxes (sound speed over the box size):
 
 | Case | From $\lceil f N_r\rceil$ | From $2.5\,N_{r+1}$ |
@@ -732,6 +820,142 @@ and 209 instead of 145 at order 6. A pyramid needs at least 85 or 208 cells
 and mirror images within reach of its search, against 38 and 110 for other
 cells; on smaller meshes setup stops with "could not build a full-rank large
 stencil (mesh too small for this order?)".
+
+**Odd degrees on other lattices** (#1136). Scanning the Bloch symbol finely
+near $k = 0$ and near the grid scale, rather than at the box's own
+wavevectors, shows slow growing modes on other lattices at the even orders.
+Largest real part (sound speeds over the block size), by central stencil
+size; the defaults are the first entries:
+
+| Lattice | Order | Entries: largest real part |
+|---|---|---|
+| Kuhn tetrahedra | 4 | 46: 1.3e-5; 58: 5.0e-7; 66: 5.2e-7; 78 and 86: < 2e-9 |
+| `cartesian_tri` (squares split in two) | 4 | 18: 1.25e-5; 24 to 30: < 2e-9 |
+| squares split into four triangles at their centers | 4 | 18: 1.0e-6; 23: 1.6e-7; 27: < 1e-9 |
+| hexahedra | 6 | 122: 5.25e-5 |
+| squares split into four triangles | 6 | 42: 2.8e-8 |
+
+Hexahedra at order 4, prisms at orders 4 and 6, Kuhn tetrahedra at order 6,
+pyramids with the start above, and 2D quadrilaterals and `cartesian_tri` at
+order 6 stay below $4\times10^{-9}$.
+
+The order-4 modes are long acoustic waves. The eigenvalue's imaginary part is
+the exact $2\pi\lvert k\rvert$, and its real part grows as $(kh)^6$ up to a
+cut-off of 0.06 to 0.13 cycles per block, beyond which the mode is damped.
+The scheme's lowest even term, $h^5\partial^6$, is then anti-dissipative. An
+odd-degree fit's even error of degree $r + 1$ cancels in the face jump
+only between point images, but the `cartesian_tri` lattice, where it cancels
+at every face, grows as much as the Kuhn lattice: the sign of that term is a
+sum over the whole lattice, which no check of one face or one stencil
+decides. Larger stencils shrink both the growth and the cut-off before the
+term changes sign, so the band of growing waves moves toward $k = 0$.
+
+The hexahedral mode at order 6 is a vortical mode: transverse velocity
+alternating cell by cell along one axis ($k = 1/2$ there) and slowly varying
+across it, growing as the square of the transverse wavenumber up to about
+0.07 cycles per block. HLLC at rest does not damp shear, so only the
+reconstruction can.
+
+Both bands are narrow: the analysis behind the
+[pyramid tables](#3d-stability) sampled $12^3$ wavevectors, multiples of
+$1/12$, which fall outside them, and a test of
+$\max\lVert\exp(5000\,S)\rVert$ sees $1.3\times10^{-5}$ only as a 6% rise.
+Detecting them takes the eigenvalues at wavevectors interpolated between the
+box's (the Jacobian's columns reach only a few blocks), down to about $0.02$
+cycles per block. The growth is slow: $1.3\times10^{-5}$ e-folds once in
+$8\times10^4\,h/c$, about 800 acoustic crossings of a 100-cell domain, and
+the hexahedral order-6 mode ($5.25\times10^{-5}$) in about 190.
+
+The growth comes from the Riemann solver's jump term alone: with the left
+and right states averaged before HLLC (a central flux, in a scratch build),
+the long waves are neutral on all three lattices (below $5\times10^{-9}$).
+The jump of the unweighted degree-3 fits is slightly anti-dissipative for
+them. Its sign is erratic in the stencil size, not a threshold as on
+pyramids (order 4, largest real part):
+
+| Entries | `cartesian_tri` | squares split in four |
+|---|---|---|
+| 14, 16 | < 1e-9 | 1.75 |
+| 18 (default) | 1.25e-5 | 1.0e-6 |
+| 19 or 20 | 1.0e-5 (20) | 4.7e-4 (19) |
+| 23 or 24 | < 1e-9 (24) | 1.6e-7 (23) |
+| 26 to 31 | < 1e-9 | < 1e-9 (27, 31) |
+
+Larger starts, like the pyramids', therefore stabilize these lattices only
+from about 27 entries on triangles and 78 on Kuhn tetrahedra, and they cost
+accuracy. Maximum density error of the
+[advection study](../verification/index.md) on the finer mesh, against the
+default: triangles +46% from 24 entries and +136% from 27; Kuhn tetrahedra
++11% (58 entries), +24% (66) and +37% (78). Weighting the fit by the inverse
+centroid distance lowers the triangles' errors (advection −16%) and the
+growth to $1.5\times10^{-7}$ and $5\times10^{-8}$, but does not remove it,
+and on Kuhn tetrahedra it leaves $2.4\times10^{-7}$. Neither is adopted,
+and neither was tried on the hexahedral mode. A criterion tied to the sign of
+the jump's dissipation, covering every cell shape, is the planned fix (#1268).
+
+With SSPRK3 the time integrator damps the order-4 modes at `cfl = 1`: the
+amplification factor of the full step leaves no growth on either triangle
+lattice (it appears below `cfl` of about 0.8 on `cartesian_tri` and between
+0.6 and 0.7 on squares split in four) and $5.5\times10^{-7}$ on Kuhn tetrahedra. The tests
+`TENOLattice` (2D) and `TENO3DKuhnLattice` record the semi-discrete rates
+above and fail when they change.
+
+**Graded hexahedra** (#1232). Orders 4 and 6 grow on hexahedra graded along
+one axis from 5% cell-to-cell growth, the default order 5 and order 3 do not.
+On a periodic box of 24 cells along x with `stretching = [β, 0, 0]` and cells
+of the mean spacing across, the fastest mode is a sound wave along the grading,
+uniform across, of 4 to 6 cells per wavelength. Largest real part of the
+eigenvalues of the linearized operator (acoustics at rest, HLLC; sound speeds
+over the mean cell size), the column as the block of a Bloch analysis:
+
+| β (largest cell-to-cell ratio) | 0.6 (1.05) | 0.9 (1.11) | 1.5 (1.25) |
+|---|---|---|---|
+| order 3, order 5 | < 1e-9 | < 1e-9 | < 1e-9 |
+| order 4 | 7.5e-7 | 5.7e-2 | 5.1e-2 |
+| order 6 | 5.7e-2 | 4.7e-2 | 5.1e-5 |
+
+The cause is the ranking by physical distance. On the uniform box every cell
+takes the same 56 entries, symmetric along x (5, 13, 20, 13 and 5 cells at
+x offsets −2 to 2). Grading splits each equidistant shell of the lattice by
+the side and the direction of its members: at β = 1.5 neighbors take 39 to 79
+entries, mostly three layers along x plus single cells two or three layers
+away on the finer side only, and the size jumps between neighbors (39, 43, 63
+entries in a row). An odd degree's own dissipation does not cover the
+mismatch between the face values of such neighbors. Ranking experiments (a
+scratch build, both orders, β = 0.6 / 0.9 / 1.5):
+
+| Ranking | Order 4 | Order 6 |
+|---|---|---|
+| physical distance | 7.5e-7 / 5.7e-2 / 5.1e-2 | 5.7e-2 / 4.7e-2 / 5.1e-5 |
+| no cut within 1% of the cut distance | < 1e-9 / 3.9e-2 / 8.1e-3 | 5.7e-2 / 4.1e-2 / 4.1e-5 |
+| offsets scaled per axis by $2s_i/(s_i + s_j)$ | < 1e-9 / 4.1e-2 / 3.3e-3 | 3.2e-2 / 4.2e-2 / 1.1e-6 |
+| both | < 1e-9 / < 1e-9 / 1.4e-9 | < 1e-9 / < 1e-9 / 3.8e-7 |
+| both, with $s$ the cube root of the volume | < 1e-9 / 4.0e-2 / 4.6e-2 | 5.9e-3 / 4.1e-2 / 1.1e-2 |
+
+with $s_i$ and $s_j$ the widths of the target cell and of the candidate
+along each axis, a distance in which a geometric grading leaves every shell
+whole. Neither part removes the growth alone, and a scalar size does not:
+the ranking has to undo the grading direction by direction and close the
+shells it nearly restores. None of it is adopted:
+
+- Widths per axis exist only for hexahedra aligned with the axes. The
+    tensor spacing of the vertex neighbors (the [ranking metric's](#candidates)
+    second moment) differs between the cells of the Kuhn and pyramid tilings,
+    so it changes their stencils: the Kuhn rate of #1136 rises from 1.20e-5 to
+    1.48e-5, and pyramids at order 4 grow again. A spacing summed over the
+    centroids around each node of the cell keeps every regular tiling's
+    stencils, but it needs a 2% closure, still grows at β = 1.8 (2.1e-2 at
+    order 4, 1.0e-3 at order 6), and fails to set up order 6 on walled
+    $8^3$ and $16^3$ boxes.
+- Accuracy is not kept everywhere. Order 4's face-value error on walled
+    graded boxes changes by −3% to +7%; applied to every degree it raises
+    order 5's by 35% to 100% at `stretching = [1, 1, 1]`.
+- Each key needs the spacing of every candidate, which a partition's
+    outermost halo layer lacks.
+
+`TENO3DGradedLattice` records the rates of order 4 at β = 0.9 and 1.5 and of
+order 6 at β = 0.6 and 0.9, and keeps orders 3 and 5 below 1e-7 at β = 1.5;
+a fix gives orders 4 and 6 that bound.
 
 **Ranking metric.** Physical distance on thin cells takes the whole
 wall-normal column first and resolves the other directions only through
@@ -775,12 +999,24 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     converge at any order ([curved boundaries](../design/curved_boundaries.md)).
     With curved walls (high-order Gmsh faces or `[[mesh.curved]]`) and the
     degree cap above, orders 5 and 6 are stable: fifth order in $L_1$ and
-    fourth at the walls. The fine cylinder at order 5 keeps a small drag
-    noise (rms $7\times 10^{-4}$) from the outermost ring's odd-even mode
-    along the far field, which every far-field condition tried (`inlet_state`,
-    `outlet_pressure`, `farfield`) shows, mirrored or not.
+    fourth at the walls. On the fine cylinder with curved walls and far
+    field, order 5's drag is as smooth as order 3's
+    ([curved boundaries](../design/curved_boundaries.md#cylinder-at-re-100)).
 
-- **Thin cells.** Before the ranking metric, a 1% pressure pulse at rest in
+- **Order 4.** `high_order` stays at order 5 because order 4 fails two
+    robustness checks that order 5 passes
+    ([order-4 study](../design/teno4_robustness.md)): it amplifies an
+    outgoing acoustic wave on a radially stretched O-grid (#975) and grows
+    acoustic modes on graded hexahedra from 5% cell-to-cell grading, as
+    order 6 does ([graded hexahedra](#3d-stability), #1232). Its undershoots
+    ahead of plane shocks, once about 10 times order 5's (#977), are down to
+    order 5's on quads ([troubled cells](#troubled-cells)); where shocks start
+    from a corner it still undershoots. The odd-even wall
+    pressure it left at the closed trailing edge of the NACA 0012 tutorial
+    mesh (#976) came from mirror images past the far side of the body, which
+    the setup now rejects ([candidates](#candidates)).
+
+- **Thin cells** (#427). Before the ranking metric, a 1% pressure pulse at rest in
     a 16 × 16 × 4 box of `cartesian_prism` cells of
     $0.0625\times 0.0625\times 0.01$ (symmetry walls) reached Mach 0.8 by
     $t = 2$ at order 3, and `cartesian_tet` cells of the same size Mach 1.2.
@@ -798,11 +1034,13 @@ changed by +10% (hexahedra, walls only), +22% (prisms), +11% (tetrahedra),
     6.25:1, since a ball holds the same density in every direction, so its
     radius would need to follow the spacing.
 
-- **Odd degrees on other cells whose faces are not point-symmetric.** The
-    pyramid rule above is tied to the cell type. The infinite Kuhn
-    tetrahedral lattice at order 4 keeps a slow growing mode with its default
-    stencil (46 entries, $\Lambda = 3.87$: $+1.3\times 10^{-5}$ sound speeds
-    over the block size; 58 entries, $\Lambda = 3.84$, are stable), and a 2D
-    tiling of squares split into four triangles at their centers grows at
-    order 4 (#1136). A criterion computed from a stencil and its face
-    neighbors would cover every cell shape.
+- **Slow growing modes at the even orders on lattices.** The pyramid rule
+    above is tied to the cell type. With their default stencils, Kuhn
+    tetrahedra and `cartesian_tri` triangles at order 4 grow at about
+    $1.3\times 10^{-5}$ sound speeds over the block size, squares split into
+    four triangles at $10^{-6}$, and hexahedra at order 6 at
+    $5.25\times10^{-5}$ (#1136;
+    [3D stability](#3d-stability)). The cause is the Riemann solver's jump
+    term; larger stencils remove the order-4 modes only at 37% to 136% more
+    error, so the defaults stay, and SSPRK3 at `cfl = 1` damps them on
+    triangles.

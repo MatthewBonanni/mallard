@@ -27,7 +27,8 @@ namespace {
  * What completes an option's value or a positional argument, from its placeholder
  * ("FILE|latest", "[DIRECTORY]"): lowercase alternatives are literal words; files,
  * directories, templates, input keys and comma-separated output fields are kinds, written
- * "@files[:GLOB]", "@dirs", "@templates", "@keys", "@fields".
+ * "@files[:GLOB]", "@dirs", "@templates", "@keys", "@fields", and "@derive_fields" for the fields mallard post
+ * derive writes.
  */
 using Values = std::vector<std::string>;
 
@@ -53,6 +54,9 @@ constexpr std::pair<std::string_view, std::string_view> FILE_GLOBS[] = {{"-i", "
 /** @brief The options whose value is a list of output fields, whatever the command. */
 constexpr std::string_view FIELD_LISTS[] = {"--fields"};
 
+/** @brief The commands whose field lists take only the fields mallard post derive writes. */
+constexpr std::string_view DERIVE_COMMANDS[] = {"post derive"};
+
 bool literal(std::string_view word) {
     return !word.empty() && std::all_of(word.begin(), word.end(), [](char c) {
         return std::islower(static_cast<unsigned char>(c)) || std::isdigit(static_cast<unsigned char>(c)) || c == '-' ||
@@ -72,14 +76,18 @@ std::vector<std::string> split(std::string_view text, char separator) {
     return out;
 }
 
-Values values_of(std::string_view spec, std::string_view option = {}) {
+Values values_of(std::string_view spec, std::string_view option = {}, std::string_view command = {}) {
     std::string s(spec);
     if (s.starts_with('[')) s = s.substr(1);
     if (s.ends_with("...]")) s.resize(s.size() - 4);
     if (s.ends_with(']')) s.pop_back();
     if (s.starts_with('=')) s = s.substr(1);
     Values v;
-    if (std::find(std::begin(FIELD_LISTS), std::end(FIELD_LISTS), option) != std::end(FIELD_LISTS)) return {"@fields"};
+    if (std::find(std::begin(FIELD_LISTS), std::end(FIELD_LISTS), option) != std::end(FIELD_LISTS)) {
+        const bool derive =
+            std::find(std::begin(DERIVE_COMMANDS), std::end(DERIVE_COMMANDS), command) != std::end(DERIVE_COMMANDS);
+        return {derive ? "@derive_fields" : "@fields"};
+    }
     for (const std::string & alt : split(s, '|')) {
         if (literal(alt)) {
             v.push_back(alt);
@@ -112,7 +120,7 @@ std::string brief(std::string_view help) {
     return out;
 }
 
-void add_option(std::vector<Flag> & out, const Option & o) {
+void add_option(std::vector<Flag> & out, const Option & o, std::string_view command = {}) {
     if (o.name.ends_with('*')) {
         // A prefix row: the options its help names ("--kokkos-num-threads=8"), each taking its value attached
         const std::string_view prefix = o.name.substr(0, o.name.size() - 1);
@@ -132,7 +140,7 @@ void add_option(std::vector<Flag> & out, const Option & o) {
     if (!o.alias.empty()) f.names.emplace_back(o.alias);
     f.takes_value = !o.value.empty();
     f.attached = o.value.starts_with('=');
-    if (f.takes_value) f.values = values_of(o.value, o.name);
+    if (f.takes_value) f.values = values_of(o.value, o.name, command);
     f.help = brief(o.help);
     out.push_back(f);
 }
@@ -168,14 +176,16 @@ std::vector<Node> nodes() {
             path += (path.empty() ? "" : " ") + w[i];
         }
         Node & n = node(path);
-        for (const Option & o : c.options) add_option(n.options, o);
+        for (const Option & o : c.options) add_option(n.options, o, c.name);
         for (const std::string_view a : c.arguments) n.positional.push_back(values_of(a));
         n.variadic = !c.arguments.empty() && c.arguments.back().ends_with("...]");
     }
     Node & root = out.front();
     for (const Option & o : global_options()) add_option(root.options, o);
     for (const Command & c : commands()) {
-        if (c.name.starts_with('-')) root.options.push_back({{std::string(c.name)}, false, false, {}, brief(c.summary)});
+        for (const std::string_view name : {c.name, c.alias}) {
+            if (name.starts_with('-')) root.options.push_back({{std::string(name)}, false, false, {}, brief(c.summary)});
+        }
     }
     for (Node & n : out) n.options.push_back({{"--help", "-h"}, false, false, {}, "Show the page of this command"});
     return out;
@@ -227,11 +237,11 @@ std::vector<std::string> catalog_keys() {
     return out;
 }
 
-/** @brief The fields of the field catalog, without the patterns (Y_<s>, MEAN_<A>). */
-std::vector<std::string> catalog_fields() {
+/** @brief The fields of the field catalog, or only those mallard post derive writes, without the patterns (Y_<s>). */
+std::vector<std::string> catalog_fields(bool derive = false) {
     std::vector<std::string> out;
     for (const CatalogField & f : field_units::catalog()) {
-        if (f.name.find('<') == std::string::npos) out.push_back(f.name);
+        if (f.name.find('<') == std::string::npos && (!derive || field_units::post_derive(f.name))) out.push_back(f.name);
     }
     return out;
 }
@@ -316,6 +326,7 @@ std::string bash() {
     s << "_mallard_catalog() {\n    case $1 in\n";
     s << "        keys) REPLY=" << quote(join(catalog_keys())) << " ;;\n";
     s << "        fields) REPLY=" << quote(join(catalog_fields())) << " ;;\n";
+    s << "        derive_fields) REPLY=" << quote(join(catalog_fields(true))) << " ;;\n";
     s << "    esac\n}\n\n";
     s << R"SH(_mallard_add() {
     local IFS=' ' token words='' tokens
@@ -327,9 +338,9 @@ std::string bash() {
             @files:*) COMPREPLY+=($(compgen -d -- "$2") $(compgen -f -X "!${token#@files:}" -- "$2")) ;;
             @dirs) COMPREPLY+=($(compgen -d -- "$2")) ;;
             @keys) _mallard_catalog keys; words+=" $REPLY" ;;
-            @fields)
+            @fields|@derive_fields)
                 # The item after the last comma, the ones before it kept
-                _mallard_catalog fields
+                _mallard_catalog "${token#@}"
                 COMPREPLY+=($(IFS=' '; compgen -W "$REPLY" -P "${2%"${2##*,}"}" -- "${2##*,}"))
                 compopt -o nospace 2>/dev/null ;;
             @templates) COMPREPLY+=($(compgen -W "$("${COMP_WORDS[0]}" new 2>/dev/null | )SH"
@@ -454,6 +465,7 @@ std::string zsh() {
     s << "_mallard_catalog() {\n    case $1 in\n";
     s << "        (keys) reply=(" << quoted(join(catalog_keys())) << ") ;;\n";
     s << "        (fields) reply=(" << quoted(join(catalog_fields())) << ") ;;\n";
+    s << "        (derive_fields) reply=(" << quoted(join(catalog_fields(true))) << ") ;;\n";
     s << "    esac\n}\n\n";
     s << R"SH(_mallard_add() {
     local token
@@ -464,7 +476,7 @@ std::string zsh() {
             (@files:*) _files -g "${token#@files:}" ;;
             (@dirs) _files -/ ;;
             (@keys) _mallard_catalog keys; lits+=("${reply[@]}") ;;
-            (@fields) _mallard_catalog fields; compset -P '*,'; compadd -q -S , -a reply ;;
+            (@fields|@derive_fields) _mallard_catalog "${token#@}"; compset -P '*,'; compadd -q -S , -a reply ;;
             (@templates) lits+=(${(f)"$(${(Q)words[1]} new 2>/dev/null | )SH"
       << TEMPLATES << R"SH()"}) ;;
             (*) lits+=("$token") ;;
@@ -542,8 +554,8 @@ std::string fish_args(const Values & v, bool & files) {
             out += " -a '(__mallard_templates)'";
         } else if (t == "@keys") {
             out += " -a '(__mallard_catalog keys)'";
-        } else if (t == "@fields") {
-            out += " -a '(__mallard_list fields)'";
+        } else if (t == "@fields" || t == "@derive_fields") {
+            out += " -a '(__mallard_list " + t.substr(1) + ")'";
         } else {
             words.push_back(t);
         }
@@ -570,7 +582,8 @@ std::string fish() {
     for (const auto & [key, spec] : global_value_entries()) keys.push_back(fish_quote(key));
     s << "        case " << join(keys) << "\n            return 0\n    end\n    return 1\nend\n\n";
     s << "function __mallard_catalog\n    switch $argv[1]\n";
-    for (const auto & [kind, words] : {std::pair{"keys", catalog_keys()}, std::pair{"fields", catalog_fields()}}) {
+    for (const auto & [kind, words] : {std::pair{"keys", catalog_keys()}, std::pair{"fields", catalog_fields()},
+                                       std::pair{"derive_fields", catalog_fields(true)}}) {
         if (words.empty()) continue;
         std::vector<std::string> quoted_words;
         for (const std::string & w : words) quoted_words.push_back(fish_quote(w));

@@ -21,6 +21,7 @@
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
+#include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mpi_compare.h"
 #include "partition.h"
@@ -76,6 +77,50 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, TENOPlacesPlanarFacePointsAlikeWithAndWithoutStepGraphs) {
+    // The kernels place the quadrature points of planar faces from the faces'
+    // nodes, in the step graph too: smooth and troubled cells, triangles and
+    // quadrilaterals, the troubled cells over several rounds
+    expect_matches_serial_with_and_without_step_graphs(
+        blast_input("cartesian_mixed", "type = \"TENO\"\norder = 5\ntroubled_capacity = 0.05\n"));
+}
+
+TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
+    // With owner-computes partition faces no halo cell is reconstructed, and every
+    // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
+    memory::Tracker tracker;
+    Solver solver;
+    solver.init(parse_toml(blast_input("cartesian", "type = \"TENO\"\norder = 3\n")));
+    const Mesh & mesh = *solver.get_mesh();
+    constexpr bool device = !Kokkos::SpaceAccessibility<Kokkos::HostSpace, Kokkos::DefaultExecutionSpace::memory_space>::accessible;
+    const auto live = tracker.live(device);
+    EXPECT_EQ(live.at("teno_scale"), sizeof(rtype) * mesh.n_owned());
+    EXPECT_EQ(live.at("teno_stencil_large_size"), sizeof(uint16_t) * mesh.n_owned());
+    if (comm::size() > 1) {
+        EXPECT_GT(mesh.n_reconstructed(), mesh.n_owned());
+    }
+}
+
+TEST(MPI3DTest, TENOBlockPathAcrossPeriodicSeamsMatchesSerial) {
+    // The partition cuts the box along x; the y and z seams, split across the
+    // ranks, close each rank's block on itself, and every cell away from the
+    // partition faces takes the block path. On up to 4 ranks, each rank's
+    // interior is whole slabs (48 is a multiple of the ranks) at least
+    // 2 layers + 1 = 5 cells thick, a block's least extent. The serial run
+    // numbers its cells as the input does, which leaves them all on the
+    // unstructured path
+    std::string input = blast_input("cartesian", "type = \"TENO\"\norder = 5\n");
+    const std::string generated = "Nx = 12\nNy = 12\nNz = 12\nLx = 1.0\n";
+    input.replace(input.find(generated), generated.size(), "Nx = 48\nNy = 8\nNz = 8\nLx = 6.0\ncell_order = \"auto\"\n");
+    input.erase(input.find("[[boundaries]]"), input.find("[numerics]") - input.find("[[boundaries]]"));
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+             "[[periodic]]\nzones = [\"back\", \"front\"]\n[parallel]\npartitioner = \"multijagged\"\n";
+    expect_matches_serial(input, [](const Solver & solver) {
+        const auto & teno = dynamic_cast<const TENO &>(solver.get_face_reconstruction());
+        EXPECT_EQ(teno.n_block_cells, solver.get_mesh()->n_interior());
+    });
+}
+
 TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
     // Every rank's cells of a stencil shape read the table of the shape's cell
     // with the lowest global id, which another rank may own
@@ -107,6 +152,14 @@ TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     expect_matches_serial(blast_input("cartesian_tet", "type = \"MUSCL\"\n") + layers);
 }
 
+TEST(MPI3DTest, MUSCLTablesOnHexahedraMatchSerial) {
+    // Rows shared over the ranks, with block cells and boundary cells
+    expect_matches_serial(blast_input("cartesian", "type = \"MUSCL\"\n"), [](const Solver & s) {
+        const auto & muscl = dynamic_cast<const MUSCL &>(s.get_face_reconstruction());
+        EXPECT_EQ(muscl.n_table_cells, uint64_t(s.get_mesh()->n_reconstructed()));
+    });
+}
+
 TEST(MPI3DTest, MUSCLOnMixedCellsMatchesSerial) {
     expect_matches_serial(box_input("cartesian_mixed", "type = \"MUSCL\"\n", "type = \"euler\"\n"));
 }
@@ -126,18 +179,53 @@ TEST(MPI3DTest, NavierStokesOnTetrahedraMatchesSerial) {
                                     "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n"));
 }
 
-TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
-    // Global ids in random order carry no locality: partitions, halos and the
-    // global orders of faces and stencils must not lean on them
+namespace {
+
+/** @brief TENO Navier-Stokes on a jittered mixed mesh whose global ids are in random order. */
+std::string renumbered_teno_input() {
     const RenumberedMesh mesh = renumbered_gmsh(jittered_box(MeshType::CARTESIAN_MIXED, {6, 4, 3}, {1.0, 0.8, 0.6}), 2026);
     const std::string file = write_temp_shared("mallard_mpi3d_renumbered.msh", mesh.gmsh);
     std::string input = box_input("cartesian_mixed", "type = \"TENO\"\norder = 3\n",
                                   "type = \"navier_stokes\"\nmu = 0.01\nPr = 0.72\n");
     const std::string generated = "type = \"cartesian_mixed\"\nNx = 6\nNy = 4\nNz = 3\nLx = 1.0\nLy = 0.8\nLz = 0.6\n";
     input.replace(input.find(generated), generated.size(), "type = \"file\"\nfilename = \"" + file + "\"\n");
+    return input;
+}
+
+} // namespace
+
+TEST(MPI3DTest, RenumberedMeshesMatchSerialWithEveryPartitioner) {
+    // Global ids in random order carry no locality: partitions, halos and the
+    // global orders of faces and stencils must not lean on them
+    const std::string input = renumbered_teno_input();
     for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
         if (partitioner == "graph" && !have_graph_partitioner()) continue;
         expect_matches_serial(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n");
+    }
+    comm::barrier();
+}
+
+TEST(MPI3DTest, TENOTableRowsOfHaloCellsCarryTheirCellsGlobalIds) {
+    // Halo cells whose polynomials transmissive faces of prisms read get rows after the owned cells;
+    // shared tables give a stencil shape the table of its cell with the lowest global id
+    const std::string input = renumbered_teno_input();
+    uint64_t n_extra = 0;
+    for (const std::string partitioner : {"hilbert", "multijagged", "graph"}) {
+        if (partitioner == "graph" && !have_graph_partitioner()) continue;
+        Solver solver;
+        solver.init(parse_toml(input + "[parallel]\npartitioner = \"" + partitioner + "\"\n"));
+        const auto & teno = dynamic_cast<const TENO &>(solver.get_face_reconstruction());
+        const Mesh & mesh = *solver.get_mesh();
+        n_extra += comm::allreduce(uint64_t(teno.extra_cells.size()), comm::Op::SUM);
+        const uint64_t * ids = teno.global_cell_ids();
+        if (comm::size() == 1) continue;
+        ASSERT_NE(ids, nullptr);
+        for (uint32_t r = 0; r < teno.n_rows(); r++) {
+            EXPECT_EQ(ids[r], mesh.h_global_cell_id[teno.cell_of_row(r)]) << partitioner << " row " << r;
+        }
+    }
+    if (comm::size() > 1) {
+        EXPECT_GT(n_extra, 0u);
     }
     comm::barrier();
 }
@@ -246,6 +334,24 @@ TEST(MPI3DTest, PeriodicZonePairsOfAGmshMeshMatchSerial) {
                  (d == 2 ? "1.0" : "0.0") + "]\n";
     }
     expect_matches_serial(input + "[parallel]\npartitioner = \"hilbert\"\n");
+    comm::barrier();
+}
+
+TEST(MPI3DTest, StencilShapeKeysAcrossRanksTakeTheTablesOfTheirLowestGlobalId) {
+    // Tetrahedra periodic along x, numbered along a Hilbert curve: keys whose tables are equal on the
+    // comparison grid share the table of the cell with the lowest global id, which is seldom the first
+    // cell of its key in a rank's batch
+    std::string input = blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n");
+    for (const std::string zone : {"left", "right"}) {
+        const std::string bc = "[[boundaries]]\nname = \"" + zone + "\"\n";
+        const size_t at = input.find(bc);
+        input.erase(at, input.find("[", at + bc.size()) - at);
+    }
+    const std::string box = "Lz = 1.0\n";
+    input.insert(input.find(box) + box.size(), "cell_order = \"hilbert\"\n");
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+             "[parallel]\npartitioner = \"hilbert\"\n";
+    expect_matches_serial(input);
     comm::barrier();
 }
 
@@ -369,7 +475,10 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
             "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n";
-        expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & solver) {
+            EXPECT_TRUE(solver.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(solver);
+        });
     }
     comm::barrier();
 }

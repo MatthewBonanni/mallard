@@ -15,6 +15,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "face_weights.h"
 #include "boundary.h"
 #include "periodic_maps.h"
 #include "riemann_solver.h"
@@ -32,14 +33,14 @@
  */
 KOKKOS_INLINE_FUNCTION
 void low_mach_correction(rtype * W_l, rtype * W_r, const rtype gamma, const rtype M_cut) {
-    const rtype M_l2 = dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma * W_l[N_DIM + 1]);
-    const rtype M_r2 = dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma * W_r[N_DIM + 1]);
+    const rtype M_l2 = fma_dot<N_DIM>(W_l + 1, W_l + 1) * W_l[0] / (gamma * W_l[N_DIM + 1]);
+    const rtype M_r2 = fma_dot<N_DIM>(W_r + 1, W_r + 1) * W_r[0] / (gamma * W_r[N_DIM + 1]);
     const rtype z = Kokkos::fmin(1.0_r, Kokkos::fmax(M_cut, Kokkos::sqrt(Kokkos::fmax(M_l2, M_r2))));
     FOR_I_DIM {
         const rtype mean = 0.5_r * (W_l[1 + i] + W_r[1 + i]);
         const rtype half_jump = 0.5_r * (W_l[1 + i] - W_r[1 + i]);
-        W_l[1 + i] = mean + z * half_jump;
-        W_r[1 + i] = mean - z * half_jump;
+        W_l[1 + i] = fmadd(z, half_jump, mean);
+        W_r[1 + i] = fmadd(-z, half_jump, mean);
     }
 }
 
@@ -71,15 +72,24 @@ rtype face_upwind_fraction(const Kokkos::View<rtype *> & upwind, const BoundaryD
 /**
  * @brief Upwind fraction of each cell for the hybrid convective flux: 1 where
  *        the Ducros sensor restricted to compressions (Ducros et al. 1999;
- *        Bhagatwala & Lele 2009), theta = (div u)^2 / ((div u)^2 + |omega|^2)
- *        for div u < 0, exceeds the threshold (shocks), else the floor.
+ *        Bhagatwala & Lele 2009), theta = (div u)^2 / ((div u)^2 + |omega|^2
+ *        + eps) for div u < 0, exceeds the threshold (shocks), else the floor.
+ *        eps = (dilatation_scale c / h)^2, with the cell's sound speed c and
+ *        size h = V^(1/N_DIM), a rate squared in any units: round-off
+ *        compressions of uniform flow, where omega is round-off too, are
+ *        not shocks.
  *        gradients(c, 1 + k, i) = d u_k / d x_i.
  */
 struct UpwindSensorFunctor {
     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+    Kokkos::View<rtype *> volume;
+    rtype gamma;
+    Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;  // gas mixtures, else empty (gamma)
     Kokkos::View<rtype *> upwind;
     rtype threshold;
     rtype floor;
+    rtype dilatation_scale;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
@@ -97,8 +107,17 @@ struct UpwindSensorFunctor {
                 omega2 += w * w;
             }
         }
+        const rtype g = cell_gamma.extent(0) > 0 ? cell_gamma(c) : gamma;
+        rtype h2;
+        if constexpr (N_DIM == 2) {
+            h2 = volume(c);
+        } else {
+            const rtype h = Kokkos::cbrt(volume(c));
+            h2 = h * h;
+        }
+        const rtype eps = dilatation_scale * dilatation_scale * g * W(c, N_DIM + 1) / (W(c, 0) * h2);
         const rtype div2 = div * div;
-        const bool shock = div < 0.0_r && div2 > threshold * (div2 + omega2);
+        const bool shock = div < 0.0_r && div2 > threshold * (div2 + omega2 + eps);
         upwind(c) = shock ? 1.0_r : floor;
     }
 };
@@ -145,7 +164,7 @@ struct ConvectiveFluxFunctor {
     Kokkos::View<rtype *> face_area;
     Kokkos::View<int32_t *[2]> cells_of_face;
     Kokkos::View<rtype *> quad_weights;
-    Kokkos::View<rtype **> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
+    FaceWeights<> face_weights;  // (face, q): 3D, zero on padding points; 2D axisymmetric, Gauss weight times r; else empty
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution;
     BoundaryData boundaries;
     Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
@@ -213,11 +232,11 @@ struct ConvectiveFluxFunctor {
                     low_mach_correction(W_l, W_r, gamma, low_mach_cutoff);
                 }
                 T_riemann_solver::calc_flux(flux_q, n_point, W_l, W_r, gamma);
-                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = central[i] + phi * (flux_q[i] - central[i]);
+                if (hybrid) FOR_I_CONSERVATIVE flux_q[i] = fmadd(phi, flux_q[i] - central[i], central[i]);
             } else {
                 FOR_I_CONSERVATIVE flux_q[i] = central[i];
             }
-            FOR_I_CONSERVATIVE total[i] += w_q * flux_q[i];
+            FOR_I_CONSERVATIVE total[i] = fmadd(w_q, flux_q[i], total[i]);
         }
 
         // Weights sum to 2 (Gauss-Legendre on [-1, 1] in 2D), on curved faces

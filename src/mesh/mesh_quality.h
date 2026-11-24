@@ -54,15 +54,24 @@ struct QualityCell {
 };
 
 struct QualitySummary {
+    static constexpr size_t N_BINS = 20;
+    double min = 0.0;
     double max = 0.0;
     double mean = 0.0;
     uint64_t n_over_limit = 0;
     std::vector<QualityCell> worst;  // largest first
+    std::vector<uint64_t> counts;    // cells per bin of N_BINS equal bins from min to max (one bin if they are equal)
 };
 
-/** @brief Over all ranks: largest, mean, cells over the limit and the n_worst worst cells of each metric. */
+/**
+ * @brief Over all ranks: smallest, largest, mean, cells over the limit, the histogram and the n_worst worst
+ *        cells of each metric.
+ */
 std::array<QualitySummary, MeshQuality::N_METRICS> summarize(const Mesh & mesh, const MeshQuality & quality,
                                                               size_t n_worst);
+
+/** @brief The histogram as JSON: {"edges": [N_BINS + 1 bin edges], "counts": [cells per bin]}. */
+std::string histogram_json(const QualitySummary & summary);
 
 /** @brief A point as the quality report prints it: "(0.5, 1.25)". */
 std::string quality_point(const std::array<double, N_DIM> & x);

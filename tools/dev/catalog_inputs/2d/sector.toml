@@ -1,0 +1,40 @@
+# For the key catalog only (tools/dev/input_catalog.py): a rotational periodic
+# pair with its angle and center given.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "annulus"
+angle = 90.0
+Ntheta = 8
+Nr = 4
+
+[[periodic]]
+zones = ["start", "end"]
+angle = 90.0
+center = [0.0, 0.0]
+
+[initialize]
+p = 1.0
+T = 1.0
+u = [0.0, 0.0]
+
+[[boundaries]]
+name = "inner"
+type = "symmetry"
+
+[[boundaries]]
+name = "outer"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "euler"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0

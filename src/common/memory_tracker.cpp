@@ -42,6 +42,7 @@ constexpr Rule RULES[] = {
     {"positivity_kappa", false, C::STATE}, {"cell_upwind", false, C::STATE},
     {"frozen_thermo", false, C::STATE}, {"stage_time", false, C::STATE}, {"step_", true, C::STATE},
     {"geometric_source", false, C::STATE}, {"cell_mu", false, C::STATE}, {"rhoY", false, C::STATE},
+    {"particle_", true, C::STATE},
     // Faces, gradients and reconstruction buffers
     {"face_solution", false, C::FACES}, {"face_flux", false, C::FACES}, {"face_thermo", false, C::FACES},
     {"face_mdot", false, C::FACES}, {"face_energy_1", false, C::FACES},
@@ -49,7 +50,7 @@ constexpr Rule RULES[] = {
     {"scalar_", true, C::FACES}, {"image_point_W", false, C::FACES}, {"teno_troubled", true, C::FACES},
     {"teno_n_troubled", false, C::FACES}, {"teno_selection", false, C::FACES}, {"cell_transport", false, C::FACES},
     {"cell_diffusion", false, C::FACES}, {"transport_values", false, C::FACES},
-    {"transport_gradients", false, C::FACES},
+    {"transport_gradients", false, C::FACES}, {"stage_scratch", false, C::FACES},
     // TENO setup's workspace
     {"teno_batch_", true, C::SETUP},
     // The setup's geometry of every cell (freed with it)
@@ -60,7 +61,12 @@ constexpr Rule RULES[] = {
     {"teno_small_size_rows", false, C::SETUP}, {"teno_scale_rows", false, C::SETUP},
     {"teno_basis_mean_rows", false, C::SETUP}, {"teno_si_rows", false, C::SETUP},
     {"teno_entry_rotations", false, C::SETUP}, {"teno_boundary_faces", false, C::SETUP},
+    // Stencil shape searches: slots sized by the device and the setup's batch
+    {"teno_shape_cells", false, C::SETUP}, {"teno_shape_lattice", false, C::SETUP}, {"teno_shape_order", false, C::SETUP},
+    {"teno_shape_q", false, C::SETUP}, {"teno_shape_hash", false, C::SETUP}, {"teno_shape_sizes", false, C::SETUP},
+    {"teno_shape_bad", false, C::SETUP},
     {"teno_", true, C::TABLES},
+    {"muscl_table_", true, C::SETUP}, {"muscl_", true, C::TABLES},
     // Mesh, geometry and quadrature
     {"node_coords", false, C::MESH}, {"nodes_of_", true, C::MESH}, {"cells_of_", true, C::MESH},
     {"faces_of_cell", false, C::MESH}, {"offsets_", true, C::MESH}, {"cell_coords", false, C::MESH},
@@ -69,7 +75,7 @@ constexpr Rule RULES[] = {
     {"face_quad_", true, C::MESH}, {"face_image", true, C::MESH}, {"image_", true, C::MESH},
     {"face_bc", false, C::MESH}, {"face_shift", false, C::MESH}, {"shift", true, C::MESH},
     {"rotated_faces", false, C::MESH}, {"local_faces", false, C::MESH}, {"partition_faces", false, C::MESH},
-    {"zone_", true, C::MESH}, {"flux_weights", false, C::MESH},
+    {"zone_", true, C::MESH}, {"flux_weights", true, C::MESH}, {"flux_normals", false, C::MESH},
     {"vertex_gradient_weights", true, C::MESH}, {"points", false, C::MESH}, {"weights", false, C::MESH},
     // Boundaries, sources, sponges, LES and wall models
     {"face_char", false, C::MODELS}, {"face_state", true, C::MODELS}, {"bc_", true, C::MODELS},
@@ -81,7 +87,7 @@ constexpr Rule RULES[] = {
     {"profile_", true, C::MODELS}, {"inflow_", true, C::MODELS}, {"wall_", true, C::MODELS}, {"expr_", true, C::MODELS},
     {"region_moving_", true, C::MODELS}, {"region_motions", false, C::MODELS}, {"region_steps", false, C::MODELS},
     // Chemistry, thermodynamics and transport
-    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", false, C::WORK}, {"chem_pivot", false, C::WORK}, {"chem_", true, C::CHEMISTRY},
+    {"kinetics_", true, C::CHEMISTRY}, {"lu_", true, C::CHEMISTRY}, {"chem_work", true, C::WORK}, {"chem_", true, C::CHEMISTRY},
     {"chemistry_", true, C::CHEMISTRY}, {"thermo_", true, C::CHEMISTRY}, {"transport_", true, C::CHEMISTRY},
     {"production", false, C::CHEMISTRY}, {"hrr", false, C::CHEMISTRY}, {"radiation_", true, C::CHEMISTRY},
     // Statistics, probes and run health

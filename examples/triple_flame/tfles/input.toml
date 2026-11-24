@@ -1,0 +1,118 @@
+# Triple flame: fuel H2:0.5,N2:0.5 / oxidizer O2:1,N2:3.76 at 300 K, 1 atm; Z_st = 0.30427.
+# Planar flame at Z_st (Cantera): S_L = 1.19142 m/s, delta_L = 0.3847 mm, rho_u / rho_b = 5.9416.
+# Inlet mixing thickness delta_M = 12 delta_L, inflow 1.6 S_L, 3 cells per delta_L.
+#
+# The triple flame of ../thick/input.toml on a mesh four times coarser, with
+# thickened flames for partially premixed combustion ([les.combustion] sensor =
+# "reaction"): the premixed tip and wings are thickened with the s_L and
+# delta_L of their own mixture, from h2n2_air.csv (tools/setup/flame_table.py:
+# 51 Cantera flames, Z = 0.144 to 0.644), by F = 5 Delta / delta_L(Z) = 1.67
+# at Z_st; the trailing diffusion flame (opposed fuel and oxygen gradients) is
+# not. The two stages are those of ../input.toml (the continuation from the
+# restart at 4 flame times with u = [2.97855, 0]). From examples/triple_flame:
+#
+#   python triple_flame.py ../../mechanisms/h2o2.yaml ohmech tfles/gen --mixing 12 --fuel H2:0.5,N2:0.5 \
+#       --u-in 1.6 --upstream 12 --downstream 20 --flame-times 10 --cfl 0.8 --cells 3 --planar planar_full.csv
+#   mv tfles/gen/flame.restart tfles/gen/planar_full.csv tfles/
+#   (run this file in tfles/, then the continuation in tfles/matched/)
+#   python triple_flame_analysis.py tfles/matched --fuel H2:0.5,N2:0.5 --fit 5 10
+#
+# Results, fitted over 5-10 flame times (over the S_L above):
+#
+#   cells per delta_L  model                   U_F / S_L  S_tip / S_L  U_F / S_tip
+#   3                  thickened (this file)   2.10       1.28         1.64
+#   3                  none                    2.11       1.29         1.63
+#   4                  thickened               2.24       1.30         1.72
+#   4                  none                    2.25       1.31         1.72
+#   12                 none (../thick)         2.45       1.30         1.90
+#
+# The tip burns at the resolved speed on both coarse meshes. What they miss,
+# with or without the model, is the streamlines' divergence ahead of it (U_F /
+# S_tip): U_F falls short by 14% at 3 cells and 8% at 4 (second order in the
+# cell size), and holding the flame in place with u_in = 2.1 S_L instead gives
+# the same (2.09). Thickening at these F (1.67, 1.25) changes U_F by less than
+# 1%. A planar flame at Z_st on this mesh burns 4.8% slow with the model (the
+# n_res = 5 cells across the thickened flame) and 11.6% slow without it.
+#
+# Cost on 7 CPU threads: about an hour per stage.
+
+
+[run]
+t_stop = 0.003229200853122519
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 96
+Ny = 180
+Lx = 0.012311440575815289
+Ly = 0.023083951079653667
+
+[initialize]
+type = "restart"
+file = "flame.restart"
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = [1.9062673918084994, 0.0]
+p = 101325.0
+T = 300
+Y = { "H2" = "(0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845))) * 0.067132867132867133 + (1 - (0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845)))) * 0", "O2" = "(0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845))) * 0 + (1 - (0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845)))) * 0.23299971514004453", "N2" = "(0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845))) * 0.93286713286713274 + (1 - (0.5 * (1 + tanh((y - 0.012350271104944046) / 0.0019546535749287845)))) * 0.76700028485995553" }
+
+[[boundaries]]
+name = "right"
+type = "outlet_pressure"
+p = 101325.0
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "MUSCL"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../mechanisms/h2o2.yaml"
+phase = "ohmech"
+transport = "mixture_averaged"
+
+[chemistry]
+rtol = 1.0e-6
+atol = 1.0e-10
+explicit_step = true
+
+[output]
+check_interval = 2000
+
+[[write_data]]
+prefix = "./solut/flame"
+time_interval = 2.6910007109354326e-05
+fields = ["RHO", "U", "T", "HRR", "Y_H2", "Y_O2", "Y_H2O", "Y_N2", "TF_F", "TF_OMEGA"]
+
+[[write_data]]
+prefix = "./restart/flame"
+format = "restart"
+time_interval = 0.00016146004265612596
+
+[les]
+model = "vreman"
+C = 1e-12  # no eddy viscosity: a laminar flame
+
+[les.combustion]
+model = "tfles"
+sensor = "reaction"
+flame_table = "h2n2_air.csv"
+fuel = {X = {H2 = 0.5, N2 = 0.5}}
+oxidizer = {X = {O2 = 1.0, N2 = 3.76}}
+efficiency = "none"

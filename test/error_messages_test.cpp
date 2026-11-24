@@ -9,15 +9,24 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <initializer_list>
+#include <iterator>
+#include <map>
+#include <regex>
+#include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "check.h"
 #include "data_paths.h"
 #include "gmsh_fixtures.h"
 #include "input.h"
+#include "input_upgrade.h"
 #include "mixture.h"
 #include "scratch.h"
 #include "solver.h"
@@ -96,6 +105,90 @@ TEST(ErrorMessages, ArrayOfTablesWrittenAsATableSaysToDoubleTheBrackets) {
         FAIL() << "no error";
     } catch (const InputError & e) {
         expect_parts(e.what(), {"line 1: boundaries: is a table, but must be an array", "double brackets: [[boundaries]]"});
+    }
+}
+
+TEST(ErrorMessages, EveryAccessorReportsAValueOfTheWrongTypeWithItsKeyAndLine) {
+    using Read = std::function<void(const Input &)>;
+    const auto first = [](const Input & in) { return find_value<std::vector<Input>>(in, "boundaries")[0]; };
+    const std::string element = "x = 0\nboundaries = [1]\n";
+    const std::string not_in_a_table = "is looked up in 1 (an integer), which is not a table";
+    const std::string mesh_number = "x = 0\nmesh = 1\n";
+    const std::string not_a_table = "line 2: mesh: is 1 (an integer), but must be a table";
+    struct Case {
+        std::string name, input;
+        Read read;
+        std::vector<std::string> parts;
+    };
+    const std::vector<Case> cases = {
+        {"find_value in a non-table", element, [&](const Input & in) { find_value<std::string>(first(in), "name"); },
+         {"line 2: name: " + not_in_a_table, "{ name = ... }"}},
+        {"find_value_or in a non-table", element,
+         [&](const Input & in) { find_value_or<std::string>(first(in), "name", ""); }, {"line 2: name: " + not_in_a_table}},
+        {"find_real in a non-table", element, [&](const Input & in) { find_real(first(in), "p", dim::pressure); },
+         {"line 2: p: " + not_in_a_table}},
+        {"find_real_or in a non-table", element,
+         [&](const Input & in) { find_real_or(first(in), "p", dim::pressure, 1.0_r); }, {"line 2: p: " + not_in_a_table}},
+        {"find_double in a non-table", element, [&](const Input & in) { find_double(first(in), "T", dim::temperature); },
+         {"line 2: T: " + not_in_a_table}},
+        {"find_double_or in a non-table", element,
+         [&](const Input & in) { find_double_or(first(in), "T", dim::temperature, 1.0); }, {"line 2: T: " + not_in_a_table}},
+        {"find_real_vector in a non-table", element,
+         [&](const Input & in) { find_real_vector(first(in), "axis", dim::none); }, {"line 2: axis: " + not_in_a_table}},
+        {"find_value of a table that is a number", mesh_number,
+         [](const Input & in) { find_value<int>(in, "mesh", "Nx"); }, {not_a_table, "mesh = { ... }"}},
+        {"find_value_or of a table that is a number", mesh_number,
+         [](const Input & in) { find_value_or<int>(in, "mesh", "Nx", 4); }, {not_a_table}},
+        {"find_real of a table that is a number", mesh_number,
+         [](const Input & in) { find_real(in, "mesh", "Lx", dim::length); }, {not_a_table}},
+        {"find_real_or of an array of tables", "x = 0\n[[mesh]]\nLx = 1.0\n",
+         [](const Input & in) { find_real_or(in, "mesh", "Lx", dim::length, 1.0_r); },
+         {"mesh: is an array, but must be a table", "single brackets: [mesh]", "See docs/input.md#mesh"}},
+        {"find_real_vector of a table that is a number", mesh_number,
+         [](const Input & in) { find_real_vector(in, "mesh", "stretching", dim::none); }, {not_a_table}},
+        {"find_real_vector of a number", "x = 0\ntranslation = 2.5\n",
+         [](const Input & in) { find_real_vector(in, "translation", dim::length); },
+         {"line 2: translation: is 2.5 (a float), but must be an array of numbers", "square brackets"}},
+        {"find_real_vector in a table, of a number", "[mesh]\nstretching = 2.5\n",
+         [](const Input & in) { find_real_vector(in, "mesh", "stretching", dim::none); },
+         {"line 2: mesh.stretching: is 2.5 (a float), but must be an array of numbers"}},
+        {"as_real_vector of a string", "x = 0\naxis = \"z\"\n",
+         [](const Input & in) { as_real_vector(in.at("axis"), "axis", dim::none); },
+         {"line 2: axis: is \"z\" (a string), but must be an array of numbers"}},
+        {"find_real of an array", "x = 0\np = [1.0]\n", [](const Input & in) { find_real(in, "p", dim::pressure); },
+         {"line 2: p: is an array, but must be a number, or a string of a number and a unit"}},
+        {"find_double_or of a boolean", "x = 0\nT = true\n",
+         [](const Input & in) { find_double_or(in, "T", dim::none, 1.0); }, {"line 2: T: is true, but must be a number."}},
+        {"find_value of an integer out of range", "x = 0\nn = 5000000000\n",
+         [](const Input & in) { find_value<int>(in, "n"); }, {"line 2: n: 5000000000 is out of range"}},
+    };
+    for (const Case & c : cases) {
+        SCOPED_TRACE(c.name);
+        const Input input = parse_input_string(c.input);
+        try {
+            c.read(input);
+            ADD_FAILURE() << "no error";
+        } catch (const InputError & e) {
+            for (const auto & part : c.parts) EXPECT_NE(std::string(e.what()).find(part), std::string::npos) << e.what();
+        } catch (const std::exception & e) {
+            ADD_FAILURE() << "not an InputError: " << e.what();
+        }
+    }
+}
+
+TEST(ErrorMessages, ARemovedKeyWhoseValueCannotBeConvertedNamesTheKey) {
+    for (const std::string value : {"\"two\"", "2.5", "true"}) {
+        SCOPED_TRACE(value);
+        Input input = parse_input_string("[numerics.face_reconstruction]\nbasis_order = " + value + "\n");
+        try {
+            input_upgrade::apply(input);
+            ADD_FAILURE() << "no error";
+        } catch (const InputError & e) {
+            expect_parts(e.what(), {"line 2: numerics.face_reconstruction.basis_order: is " + value +
+                                    ", but must be an integer"});
+        } catch (const std::exception & e) {
+            ADD_FAILURE() << "not an InputError: " << e.what();
+        }
     }
 }
 
@@ -255,7 +348,7 @@ TEST(ErrorMessages, BoundaryOptionsThatDontComposeNameBoth) {
     expect_parts(error("type = \"wall_adiabatic\"\nu = 1.0\n"),
                  {".u: is a speed, so the wall needs a direction", "Add direction = [...], or give u as a vector"});
     expect_parts(error("type = \"outlet_pressure\"\np = \"1 + 0.1 * y\"\naverage = true\n"),
-                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y or z"});
+                 {".p: with average = true is one area-averaged pressure: it may depend on t, not on x, y, z or the local coordinates"});
     expect_parts(error("type = \"outlet_pressure\"\np = 1.0\nnscbc = { L = 1.0, sigma_T = 1.0 }\n"),
                  {".nscbc.sigma_T: doesn't apply to an outlet's nscbc"});
 }
@@ -283,6 +376,105 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("[[periodic]] angle must be nonzero.").what()),
               "[[periodic]] angle must be nonzero. See docs/input.md#periodic.");
     EXPECT_EQ(std::string(InputError("cannot read the file.").what()), "cannot read the file.");
+}
+
+TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
+    const std::string input =
+        replaced(replaced(box(), "[initialize]\n", "[initialize]\ntype = \"analytical\"\n"), "T = 1.0", "T = \"(1 + x\"");
+    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"(1 + x\": expected ')'",
+                                    "at position 7", "See docs/guide/expressions.md."});
+    CheckOptions options;
+    options.input_file = "case.toml";
+    Solver solver;
+    const CheckReport report = solver.check(parse_input_string(input), options);
+    ASSERT_EQ(report.errors().size(), 1u);
+    EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+    const std::string dirichlet =
+        replaced(box(), "name = \"left\"\ntype = \"symmetry\"\n",
+                 std::string("name = \"left\"\ntype = \"dirichlet\"\nrho = \"(1 + y\"\np = 1.0\nu = [1.0, 0.0") +
+                     (N_DIM == 3 ? ", 0.0" : "") + "]\n");
+    expect_parts(run_error(dirichlet), {line_prefix(dirichlet, "rho = \"") + "left.rho: \"(1 + y\": expected ')'"});
+}
+
+TEST(ErrorMessages, DataFileErrorsLinkTheDocsOfTheKeyThatReadsThem) {
+    const std::filesystem::path previous = std::filesystem::current_path();
+    std::filesystem::current_path(scratch_dir());
+    std::ofstream("inflow.csv") << "r,T\n0,2\n1\n";
+    const std::string error = run_error(box() + "[[initialize.data]]\nname = \"flame\"\nfile = \"inflow.csv\"\n");
+    std::filesystem::current_path(previous);
+    EXPECT_EQ(error, "inflow.csv:3: 1 value for 2 columns. See docs/guide/initialization.md#tabulated-data-and-point-clouds.");
+}
+
+TEST(ErrorMessages, UnusedKeysOfMallardReactorLinkItsDocs) {
+    for (const std::string & section : {std::string("reactor"), std::string("benchmark")}) {
+        const Input input = parse_input_string("[" + section + "]\nT = 1000.0\nTT = 1.0\n");
+        find_value<double>(input, section, "T");
+        const std::vector<Diagnostic> unused = unused_keys(input);
+        ASSERT_EQ(unused.size(), 1u) << section;
+        EXPECT_EQ(unused[0].docs, "docs/input.md#mallard-reactor") << section;
+    }
+}
+
+namespace {
+
+/** @brief The anchors of a Markdown page: its headings as GitHub links them, and its <a id="...">. */
+std::set<std::string> anchors_of(const std::filesystem::path & page) {
+    std::ifstream file(page);
+    std::set<std::string> anchors;
+    std::map<std::string, int> seen;
+    const std::regex id("<a id=\"([^\"]+)\">");
+    bool fenced = false;
+    for (std::string line; std::getline(file, line);) {
+        for (std::sregex_iterator it(line.begin(), line.end(), id), end; it != end; ++it) anchors.insert((*it)[1]);
+        if (line.rfind("```", 0) == 0 || line.rfind("~~~", 0) == 0) fenced = !fenced;
+        if (fenced || line.empty() || line[0] != '#') continue;
+        const size_t text = line.find_first_not_of('#');
+        if (text == std::string::npos || line[text] != ' ') continue;
+        std::string slug;
+        for (const char c : line.substr(text + 1)) {
+            const auto u = static_cast<unsigned char>(c);
+            if (std::isalnum(u) || c == '_' || c == '-') slug += static_cast<char>(std::tolower(u));
+            else if (c == ' ') slug += '-';
+        }
+        const int n = seen[slug]++;
+        anchors.insert(n == 0 ? slug : slug + "-" + std::to_string(n));
+    }
+    return anchors;
+}
+
+} // namespace
+
+TEST(ErrorMessages, EveryDocsLinkTheCodeWritesExists) {
+    const std::filesystem::path root = source_dir();
+    if (!std::filesystem::exists(root / "src") || !std::filesystem::exists(root / "docs" / "input.md")) {
+        GTEST_SKIP() << "no sources or docs in an install tree";
+    }
+    std::map<std::string, std::set<std::string>> anchors;
+    const auto exists = [&](const std::string & link) {
+        const size_t hash = link.find('#');
+        const std::string page = link.substr(0, hash);
+        if (!std::filesystem::exists(root / page)) return false;
+        if (!anchors.count(page)) anchors[page] = anchors_of(root / page);
+        return hash == std::string::npos || anchors[page].count(link.substr(hash + 1)) > 0;
+    };
+    std::set<std::string> sections = {"reactor", "benchmark"};
+    for (const auto & entry : std::filesystem::directory_iterator(root / "docs" / "input-keys")) {
+        const std::string name = entry.path().filename().string();
+        sections.insert(name.substr(0, name.find_first_of(".")));
+    }
+    for (const auto & section : sections) {
+        EXPECT_TRUE(exists(docs_of(section + ".key"))) << docs_of(section + ".key") << " (docs_of(\"" << section << ".key\"))";
+    }
+    const std::regex link("docs/[A-Za-z0-9_./-]+\\.md#[A-Za-z0-9_-]+");
+    for (const auto & entry : std::filesystem::recursive_directory_iterator(root / "src")) {
+        const std::string path = entry.path().generic_string();
+        if (!entry.is_regular_file() || path.find("/src/external/") != std::string::npos) continue;
+        std::ifstream file(entry.path());
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        for (std::sregex_iterator it(text.begin(), text.end(), link), end; it != end; ++it) {
+            EXPECT_TRUE(exists(it->str())) << it->str() << " in " << std::filesystem::relative(entry.path(), root).string();
+        }
+    }
 }
 
 TEST(ErrorMessages, CheckReportsInputErrorsAsARunDoes) {

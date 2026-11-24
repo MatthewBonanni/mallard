@@ -3,8 +3,9 @@ that Mallard computes on coarse unstructured meshes, read back from runs of
 one step whose source is 1 per unit volume over the region (SOURCE_RHOE is
 then the fraction), with the exact outline drawn over them; and the density
 of an initial state built layer by layer ([[initialize.data]] and
-[[initialize.regions]]) on the same mesh; and regions defined by the solution,
-with the probes' measures of them under refinement.
+[[initialize.regions]]) on the same mesh; regions defined by the solution,
+with the probes' measures of them under refinement; and regions from CAD
+surfaces, closed and open.
 
     python tools/docs/regions.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_rgb
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay
@@ -1279,6 +1281,199 @@ def region_solution(P, args):
     return fig
 
 
+# ------------------------------------------------------ regions from CAD surfaces
+
+def nozzle_profile(n_x=40):
+    """A thick-walled converging-diverging nozzle along x, in mm: x and the inner and outer radii."""
+    x = np.linspace(100.0, 900.0, n_x)
+    s = np.sin(np.pi * (x - 100.0) / 800.0) ** 2
+    return x, 200.0 - 110.0 * s, 290.0 - 50.0 * s
+
+
+def nozzle_surface(n_theta=48):
+    """The nozzle's closed surface about the axis y = 500 mm, z = 0: triangles (n, 3, 3) in mm."""
+    x, r_in, r_out = nozzle_profile()
+    theta = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+
+    def ring(xi, r):
+        return np.column_stack([np.full(n_theta, xi), 500.0 + r * np.cos(theta), r * np.sin(theta)])
+
+    outer = [ring(xi, r) for xi, r in zip(x, r_out)]
+    inner = [ring(xi, r) for xi, r in zip(x, r_in)]
+    tris = []
+    for j in range(n_theta):
+        k = (j + 1) % n_theta
+        for i in range(len(x) - 1):
+            a, b = outer[i], outer[i + 1]
+            tris += [(a[j], b[j], b[k]), (a[j], b[k], a[k])]
+            a, b = inner[i], inner[i + 1]
+            tris += [(a[j], a[k], b[k]), (a[j], b[k], b[j])]
+        for end, sign in ((0, -1), (len(x) - 1, 1)):
+            o, n = outer[end], inner[end]
+            quad = (o[j], o[k], n[k], n[j]) if sign < 0 else (o[j], n[j], n[k], o[k])
+            tris += [(quad[0], quad[1], quad[2]), (quad[0], quad[2], quad[3])]
+    return np.array(tris)
+
+
+def write_stl(path, tris):
+    lines = ["solid nozzle"]
+    for t in tris:
+        lines += ["facet normal 0 0 0", "outer loop"] + [f"vertex {p[0]:.17g} {p[1]:.17g} {p[2]:.17g}" for p in t]
+        lines += ["endloop", "endfacet"]
+    path.write_text("\n".join(lines + ["endsolid nozzle"]) + "\n")
+
+
+CAD_REGION = '{type = "stl", file = "nozzle.stl", units = "mm"}'
+
+
+@functools.cache
+def data_cad_surface(mallard):
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=20)
+    tris = nozzle_surface()
+    write_stl(work / "nozzle.stl", tris)
+    return tris, fractions(mallard, mesh.name, CAD_REGION, work, "cad", 2)
+
+
+def cad_surface(P, args):
+    """The nozzle's STL surface cut open at z = 0, and the cell volume fractions of its section in a 2D run."""
+    tris, (pts, cells, f) = data_cad_surface(args.mallard)
+    fig = plt.figure(figsize=(11.0, 4.4))
+    ax = fig.add_axes([0.0, 0.02, 0.5, 0.86], projection="3d", computed_zorder=False)
+    back = tris[(tris[:, :, 2] <= 1e-9).all(axis=1)] / 1000.0
+    normals = np.cross(back[:, 1] - back[:, 0], back[:, 2] - back[:, 0])
+    normals /= np.linalg.norm(normals, axis=1)[:, None]
+    light = np.array([-0.4, 0.5, 0.75]) / np.linalg.norm([-0.4, 0.5, 0.75])
+    shade = 0.35 + 0.65 * np.abs(normals @ light)
+    colors = np.clip(shade[:, None] * np.array(to_rgb(P["teal"]))[None, :], 0, 1)
+    ax.add_collection3d(Poly3DCollection(back[:, :, [0, 2, 1]], facecolors=colors, edgecolors=P["mesh"],
+                                         linewidths=0.15, rasterized=True))
+    ax.set_xlim(0.05, 0.95)
+    ax.set_ylim(-0.35, 0.35)
+    ax.set_zlim(0.15, 0.85)
+    ax.set_box_aspect((0.9, 0.7, 0.7), zoom=1.2)
+    ax.view_init(elev=28, azim=-62)
+    ax.set_axis_off()
+    ax.set_title("nozzle.stl (mm), cut open at z = 0", fontsize=12)
+    ax2 = fig.add_axes([0.53, 0.08, 0.36, 0.8])
+    panel(ax2, P, pts, cells, f, None, "2D run: its section z = 0")
+    x, r_in, r_out = nozzle_profile()
+    for sign in (1, -1):
+        wall = np.vstack([np.column_stack([x, 500.0 + sign * r_out]), np.column_stack([x[::-1], 500.0 + sign * r_in[::-1]])])
+        wall = np.vstack([wall, wall[:1]]) / 1000.0
+        ax2.plot(wall[:, 0], wall[:, 1], color=P["fg"], lw=1.4)
+    colorbar(fig, [ax2], P)
+    return fig
+
+
+def baffle_surface(n_x=36, n_z=6):
+    """An open S-shaped baffle in mm: the curve y(x) across the square, extruded over |z| <= h(x); triangles."""
+    x = np.linspace(150.0, 850.0, n_x)
+    y = 500.0 + 190.0 * np.sin(2.0 * np.pi * (x - 150.0) / 700.0)
+    h = 140.0 + 50.0 * np.cos(np.pi * (x - 150.0) / 350.0)
+    rows = [np.column_stack([x, y, s * h]) for s in np.linspace(-1.0, 1.0, n_z + 1)]
+    tris = []
+    for j in range(n_z):
+        for i in range(n_x - 1):
+            a, b, c, d = rows[j][i], rows[j][i + 1], rows[j + 1][i + 1], rows[j + 1][i]
+            tris += [(a, b, c), (a, c, d)]
+    return np.array(tris), x, y
+
+
+CAD_OPEN_REGION = '{type = "stl", file = "baffle.stl", units = "mm", filled = false}'
+
+
+@functools.cache
+def data_cad_open_surface(mallard):
+    """The case view of a check whose probe is the baffle: its segments, normals and lengths, and the mesh."""
+    import h5py
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=14)
+    tris, _, _ = baffle_surface()
+    write_stl(work / "baffle.stl", tris)
+    toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "{mesh.name}"
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+[[boundaries]]
+name = "wall"
+type = "symmetry"
+[[probes]]
+name = "baffle"
+fields = ["P"]
+region = {CAD_OPEN_REGION}
+{PHYSICS}"""
+    (work / "case.toml").write_text(toml)
+    subprocess.run([str(mallard), "check", "case.toml", "--view", "view", "--kokkos-num-threads=2"], cwd=work,
+                   check=True, stdout=subprocess.DEVNULL)
+    block = 'probes[name = "baffle"].region'
+    if (work / "view" / "case.vtkhdf").exists():
+        with h5py.File(work / "view" / "case.vtkhdf") as f:
+            b = f["VTKHDF"][block]
+            pts, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
+            segs = np.array([pts[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
+            normals, lengths = b["CellData"]["normal"][:, :2], b["CellData"]["length"][:]
+    else:  # builds without HDF5 write the case view's blocks as VTK files
+        pts, conn, offs, _, data = read_vtu_cells(str(work / "view" / "case_blocks" / f"{block}.vtu"))
+        starts = np.concatenate([[0], offs[:-1]])
+        segs = np.array([pts[conn[a:b], :2] for a, b in zip(starts, offs)])
+        normals, lengths = data["normal"][:, :2], data["length"]
+    mesh_pts, cells, _ = fractions(mallard, mesh.name, '"domain"', work, "dom", 2)
+    return tris, segs, normals, lengths, mesh_pts, cells
+
+
+def cad_open_surface(P, args):
+    """The open baffle from an STL file, and in a 2D run its section: segments, normals and the cells they select."""
+    from matplotlib.path import Path as Outline
+    tris, segs, normals, lengths, pts, cells = data_cad_open_surface(args.mallard)
+    fig = plt.figure(figsize=(11.0, 4.4))
+    ax = fig.add_axes([0.0, 0.02, 0.48, 0.86], projection="3d", computed_zorder=False)
+    m = tris / 1000.0
+    n = np.cross(m[:, 1] - m[:, 0], m[:, 2] - m[:, 0])
+    n /= np.linalg.norm(n, axis=1)[:, None]
+    light = np.array([-0.4, 0.5, 0.75]) / np.linalg.norm([-0.4, 0.5, 0.75])
+    shade = 0.35 + 0.65 * np.abs(n @ light)
+    colors = np.clip(shade[:, None] * np.array(to_rgb(P["teal"]))[None, :], 0, 1)
+    ax.add_collection3d(Poly3DCollection(m[:, :, [0, 2, 1]], facecolors=colors, edgecolors=P["mesh"],
+                                         linewidths=0.15, rasterized=True))
+    _, x, y = baffle_surface()
+    ax.plot(x / 1000.0, np.zeros_like(x), y / 1000.0, color=P["flame"], lw=1.8, zorder=5)
+    ax.set_xlim(0.1, 0.9)
+    ax.set_ylim(-0.4, 0.4)
+    ax.set_zlim(0.2, 0.8)
+    ax.set_box_aspect((0.8, 0.8, 0.6), zoom=1.45)
+    ax.view_init(elev=24, azim=-58)
+    ax.set_axis_off()
+    ax.set_title("baffle.stl (mm), open; its section z = 0", fontsize=12)
+    ax2 = fig.add_axes([0.5, 0.06, 0.44, 0.82])
+    polys = [pts[c, :2] for c in cells]
+    centers = segs.mean(axis=1)
+    selected = np.array([Outline(q).contains_points(centers).any() for q in polys])
+    faces = [to_rgb(P["teal"]) + (0.35,) if s else (0, 0, 0, 0) for s in selected]
+    ax2.add_collection(PolyCollection(polys, facecolors=faces, edgecolors=P["mesh"], linewidths=0.5))
+    for sgm in segs:
+        ax2.plot(sgm[:, 0], sgm[:, 1], color=P["flame"], lw=1.8, solid_capstyle="round")
+    ax2.plot(centers[:, 0], centers[:, 1], "o", color=P["fg"], ms=1.6)
+    step = max(1, len(centers) // 18)
+    ax2.quiver(centers[::step, 0], centers[::step, 1], normals[::step, 0], normals[::step, 1], color=P["blue"],
+               angles="xy", scale_units="xy", scale=20.0, width=0.005)
+    bare(ax2)
+    ax2.set_xlim(0, 1)
+    ax2.set_ylim(0, 1)
+    ax2.set_aspect("equal")
+    ax2.set_title(f"2D run: {len(segs)} segments ({lengths.sum():.3f} m) in {selected.sum()} cells", fontsize=12)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -1289,7 +1484,7 @@ class Args(tuple):
     mallard3d = property(lambda self: self[1])
 
 
-FIGURES = {"region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
+FIGURES = {"region_cad_open_surface": cad_open_surface, "region_cad_surface": cad_surface, "region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
            "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
            "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
            "region_control_surface": region_control_surface, "region_outside": region_outside,

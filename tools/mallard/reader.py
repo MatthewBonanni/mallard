@@ -1,6 +1,7 @@
 """Every file Mallard writes or reads, through its C++ reader (src/io/output_reader.h)."""
 import builtins
 import ctypes
+import fnmatch
 import json
 import os
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ class Field:
     - `name`: `"RHO"`, `"U"`, `"MEAN_P"`, a table's column (`"Fx_pressure"`).
     - `components`: 1, or 3 for vectors (z is zero in 2D).
     - `units`: [UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) units in SI base units (`"kg m-3"`,
-      `"1"` for dimensionless); `""` where the file records none.
+      `"1"` for dimensionless and for every quantity of a nondimensional case); `""` where the file records none.
     - `long_name`: `"density"`, `"velocity"`, ...
     - `location`: `"cell"`, `"point"` or `"column"` (tables).
     """
@@ -78,9 +79,54 @@ class Geometry:
         np.add.at(sums, cell, self.points[self.connectivity])
         return sums / counts[:, None]
 
+    def triangles(self):
+        """A triangle fan of each 2D cell, of its outline for quadratic cells (corners and edge points in turn):
+        `(triangles, cell)`, the `(n_triangles, 3)` point indices and the cell of each triangle, for
+        matplotlib's `tripcolor(points[:, 0], points[:, 1], triangles, facecolors=values[cell])`. Raises
+        `ValueError` for 3D cells."""
+        if np.isin(self.types, list(_VOLUME_TYPES)).any():
+            raise ValueError("triangles() draws 2D cells; these are 3D cells")
+        starts, sizes = self.offsets[:-1], np.diff(self.offsets)
+        tris, cells = [], []
+        for t, n in sorted(set(zip(self.types.tolist(), sizes.tolist()))):
+            sel = np.nonzero((self.types == t) & (sizes == n))[0]
+            outline = self.connectivity[starts[sel, None] + np.array(_OUTLINE.get(t, range(n)))]
+            for k in range(1, n - 1):
+                tris.append(outline[:, [0, k, k + 1]])
+                cells.append(sel)
+        if not tris:
+            return np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
+        return np.vstack(tris), np.concatenate(cells)
 
-def _array(ptr, n, dtype):
-    return np.ctypeslib.as_array(ptr, shape=(n,)).astype(dtype, copy=True) if n else np.zeros(0, dtype)
+
+_VOLUME_TYPES = {10, 12, 13, 14, 27, 71, 72, 73}
+_OUTLINE = {69: [0, 3, 1, 4, 2, 5], 70: [0, 4, 1, 5, 2, 6, 3, 7]}
+
+
+class _Result:
+    """A result of the reader library (a mallard_array): the arrays it returns view its memory, without a copy,
+    and the last of them to go frees it."""
+
+    def __init__(self, lib, array):
+        self._lib = lib
+        self.handle = array
+        lib.check(array)
+
+    def array(self, ptr, n, dtype):
+        if not n:
+            return np.zeros(0, dtype)
+        return np.asarray(_View(self, ctypes.cast(ptr, ctypes.c_void_p).value, n, dtype))
+
+    def __del__(self):
+        if self.handle:
+            self._lib.lib.mallard_array_free(self.handle)
+
+
+class _View:
+    def __init__(self, result, address, n, dtype):
+        self.result = result
+        self.__array_interface__ = {"shape": (n,), "typestr": np.dtype(dtype).str, "data": (address, False),
+                                    "version": 3}
 
 
 class File:
@@ -140,13 +186,10 @@ class File:
         return snapshot % n
 
     def _values(self, array):
-        lib = self._lib.lib
-        try:
-            n = ctypes.c_uint64()
-            ptr = lib.mallard_array_values(array, ctypes.byref(n))
-            return _array(ptr, n.value, np.float64)
-        finally:
-            lib.mallard_array_free(array)
+        result = _Result(self._lib, array)
+        n = ctypes.c_uint64()
+        ptr = self._lib.lib.mallard_array_values(result.handle, ctypes.byref(n))
+        return result.array(ptr, n.value, np.float64)
 
     def _shape(self, values, field, leading=()):
         k = self.fields[field].components if field in self.fields else 1
@@ -157,14 +200,13 @@ class File:
         of `geometry()` (cells, points, or a table's rows of that snapshot). `snapshot` is a position in
         `snapshots`, negative from the end (default: the last). Values come as float64 whatever precision
         wrote them; restart files hold the conservative variables (`RHO`, `RHOU_X`, ..., `RHOE`, `RHOY_<s>`)."""
-        array = self._lib.check(self._lib.lib.mallard_read(self._handle, field.encode(), self._snapshot(snapshot)))
+        array = self._lib.lib.mallard_read(self._handle, field.encode(), self._snapshot(snapshot))
         return self._shape(self._values(array), field)
 
     def read_all(self, field):
         """A field at every snapshot: `(n_snapshots, n)` or `(n_snapshots, n, components)`; for a table, its
         whole column `(n_rows,)`. One read for tables and probe HDF5 files."""
-        array = self._lib.check(self._lib.lib.mallard_read_all(self._handle, field.encode()))
-        values = self._values(array)
+        values = self._values(self._lib.lib.mallard_read_all(self._handle, field.encode()))
         if self.kind == "table":
             return values
         n = len(self.snapshots)
@@ -176,20 +218,18 @@ class File:
         """The `Geometry` of a snapshot (default the last): the cells of snapshots and mesh files, the points
         and cells of probe files. Restart files and tables hold none: the error says where to look."""
         index = 0 if self.kind == "mesh" else self._snapshot(snapshot)
-        lib = self._lib
-        array = lib.check(lib.lib.mallard_read_geometry(self._handle, index))
-        try:
-            dp = ctypes.POINTER(ctypes.c_double)()
-            op, cp = ctypes.POINTER(ctypes.c_uint64)(), ctypes.POINTER(ctypes.c_uint64)()
-            tp = ctypes.POINTER(ctypes.c_uint8)()
-            n = [ctypes.c_uint64() for _ in range(4)]
-            lib.lib.mallard_array_geometry(array, ctypes.byref(dp), ctypes.byref(n[0]), ctypes.byref(op),
-                                           ctypes.byref(n[1]), ctypes.byref(cp), ctypes.byref(n[2]), ctypes.byref(tp),
-                                           ctypes.byref(n[3]))
-            return Geometry(_array(dp, n[0].value, np.float64).reshape(-1, 3), _array(op, n[1].value, np.int64),
-                            _array(cp, n[2].value, np.int64), _array(tp, n[3].value, np.uint8))
-        finally:
-            lib.lib.mallard_array_free(array)
+        result = _Result(self._lib, self._lib.lib.mallard_read_geometry(self._handle, index))
+        dp = ctypes.POINTER(ctypes.c_double)()
+        op, cp = ctypes.POINTER(ctypes.c_uint64)(), ctypes.POINTER(ctypes.c_uint64)()
+        tp = ctypes.POINTER(ctypes.c_uint8)()
+        n = [ctypes.c_uint64() for _ in range(4)]
+        self._lib.lib.mallard_array_geometry(result.handle, ctypes.byref(dp), ctypes.byref(n[0]), ctypes.byref(op),
+                                             ctypes.byref(n[1]), ctypes.byref(cp), ctypes.byref(n[2]),
+                                             ctypes.byref(tp), ctypes.byref(n[3]))
+        # Offsets and connectivity are uint64, read as int64 (indices below 2^63) for numpy's indexing
+        return Geometry(result.array(dp, n[0].value, np.float64).reshape(-1, 3),
+                        result.array(op, n[1].value, np.int64), result.array(cp, n[2].value, np.int64),
+                        result.array(tp, n[3].value, np.uint8))
 
     def __getitem__(self, field):
         """`f["RHO"]` is `f.read("RHO")`: the last snapshot."""
@@ -245,6 +285,29 @@ def run_files(directory):
         return json.loads(lib.lib.mallard_array_text(array).decode())
     finally:
         lib.lib.mallard_array_free(array)
+
+
+def series(path, pattern="*"):
+    """The snapshots of a series, as `(File, index)` pairs in time order (then step): of a series index or
+    snapshot file, or of every series index and snapshot file in a directory (not its subdirectories) whose
+    name matches `pattern`, as `run_files` lists them, but files still being written. `file.read(field, index)`
+    reads one."""
+    path = os.fspath(path)
+    if os.path.isdir(path):
+        paths = [p for p in run_files(path) if os.path.samefile(os.path.dirname(p), path)
+                 and fnmatch.fnmatch(os.path.basename(p), pattern) and not p.endswith(".partial")]
+    else:
+        paths = [path]
+    pairs = []
+    for p in paths:
+        f = open(p)
+        if f.kind == "snapshot":
+            pairs += [(f, i) for i in range(len(f.snapshots))]
+
+    def order(pair):
+        s = pair[0].snapshots[pair[1]]
+        return s.t, -1 if s.step is None else s.step
+    return sorted(pairs, key=order)
 
 
 def run_record(path):

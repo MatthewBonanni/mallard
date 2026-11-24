@@ -10,6 +10,7 @@
  */
 
 #include "initial_state.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <array>
@@ -26,6 +27,7 @@
 #include "comm.h"
 #include "kexpr.h"
 #include "curved.h"
+#include "expression.h"
 #include "log.h"
 #include "mesh.h"
 #include "mixture.h"
@@ -76,6 +78,7 @@ struct Layer {
     uint32_t fractions = 0, n_fractions = 0;  // composition: (species, program) pairs; none: unset
     int32_t balance = -1;
     uint8_t mole = 0;
+    uint8_t burnt = 0;  // flamelet: C is the table's burnt value at Z
     uint32_t modes = 0, n_modes = 0;  // synthetic turbulence added to the velocity
 };
 
@@ -315,10 +318,21 @@ struct Evaluator {
         }
     }
 
-    /** @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted). */
+    /**
+     * @brief Mass fractions of layer L at x into Y (normalized; mole fractions converted); a flamelet
+     *        gas's scalars [Z, C] as given.
+     */
     KOKKOS_INLINE_FUNCTION void composition(const Layer & L, const double * x, double * Y,
                                             const double * lanes = nullptr) const {
         for (uint32_t k = 0; k < n_species; k++) Y[k] = 0.0;
+        if (gas.tabulated()) {
+            for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
+                const double v = value(static_cast<int32_t>(fractions(i, 1)), x, lanes);
+                Y[fractions(i, 0)] = v > 0.0 ? v : 0.0;
+            }
+            if (L.burnt) Y[1] = gas.flamelet.burnt(Y[0]);
+            return;
+        }
         double total = 0.0;
         for (uint32_t i = L.fractions; i < L.fractions + L.n_fractions; i++) {
             const uint32_t k = fractions(i, 0);
@@ -346,7 +360,7 @@ struct Evaluator {
     }
 
     KOKKOS_INLINE_FUNCTION double gas_constant(const double * Y) const {
-        return mixture ? gas.thermo.gas_constant(chemistry::MassFractions{Y}) : static_cast<double>(physics.R);
+        return mixture ? gas.gas_constant(chemistry::MassFractions{Y}) : static_cast<double>(physics.R);
     }
 
     /** @brief Pressure and temperature of a state from its pair. */
@@ -455,14 +469,14 @@ struct Evaluator {
         rtype cons[N_CONSERVATIVE];
         if (mixture) {
             const chemistry::MassFractions y{Y};
-            const double R = gas.thermo.gas_constant(y);
+            const double R = gas.gas_constant(y);
             double p = (s.mask & PRESSURE) ? s.p : 0.0;
             double T = (s.mask & TEMPERATURE) ? s.T : 0.0;
             if (!(s.mask & PRESSURE)) p = s.rho * R * T;
             if (!(s.mask & TEMPERATURE)) T = p / (s.rho * R);
             const double rho = p / (R * T);
             double e, cv, u2 = 0.0;
-            gas.thermo.e_cv(T, y, e, cv);
+            gas.e_cv(T, y, e, cv);
             rtype u[N_DIM];
             FOR_I_DIM {
                 u[i] = static_cast<rtype>(s.u[i]);
@@ -864,9 +878,9 @@ struct Evaluator {
             FOR_I_DIM u2 += b[1 + i] * b[1 + i];
             const double e = static_cast<double>(U[N_DIM + 1]) / rho - 0.5 * u2;
             const chemistry::MassFractions y{Y};
-            const double T = gas.thermo.T_from_e(e, y, base_cells(row, n_vars));
+            const double T = gas.T_from_e(e, y, base_cells(row, n_vars));
             b[5] = T;
-            b[4] = rho * gas.thermo.gas_constant(y) * T;
+            b[4] = rho * gas.gas_constant(y) * T;
         } else {
             rtype W[N_CONSERVATIVE];
             physics.compute_W_from_conservatives(W, U);
@@ -989,14 +1003,6 @@ std::string number(const double v) {
     return text;
 }
 
-std::string identifier(const std::string & name) {
-    std::string out = name;
-    for (char & c : out) {
-        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
-    }
-    return out;
-}
-
 template <typename T>
 Kokkos::View<const T *> upload(const std::vector<T> & v, const std::string & label) {
     Kokkos::View<T *> d(label, v.size());
@@ -1115,8 +1121,9 @@ struct InitialState::Impl {
     Impl(const Mesh & m, const Euler & p, const MixtureModel * mix, bool cells) :
         mesh(m), physics(p), mixture(mix), from_cells(cells) {}
 
-    int32_t add_program(const std::string & where, const std::string & text, const std::vector<std::string> & vars) {
-        programs.emplace_back(where, text, vars, expression_unit_hint);
+    int32_t add_program(const std::string & where, const std::size_t line, const std::string & text,
+                        const std::vector<std::string> & vars) {
+        programs.push_back(compile_expression(where, line, text, vars));
         return static_cast<int32_t>(programs.size() - 1);
     }
 
@@ -1140,7 +1147,7 @@ struct InitialState::Impl {
         count = static_cast<uint32_t>(h.nodes.extent(0));
         for (uint32_t i = 0; i < count; i++) {
             region::Node n = h.nodes(i);
-            if (n.kind == region::Kind::POLYGON) n.first += vertex_offset;
+            if (n.kind == region::Kind::POLYGON || n.kind == region::Kind::TRIANGLES) n.first += vertex_offset;
             if (n.kind == region::Kind::IMPLICIT) n.first += program_offset;
             nodes.push_back(n);
         }
@@ -1161,124 +1168,8 @@ struct InitialState::Impl {
     }
 
     std::string add_data(const Input & e, const std::string & where) {
-        if (!e.is_table()) {
-            throw InputError({.key = where, .line = line_of(e), .message = "must be a table",
-                              .fix = "Write [[initialize.data]] with name and file", .docs = DATA_DOCS});
-        }
-        if (!e.contains("name")) throw missing_key(e, where + ".name", "Add name = \"...\": the prefix of the variables");
-        if (!e.contains("file")) throw missing_key(e, where + ".file", "Add file = \"...\": a CSV file");
-        const std::string name = find_value<std::string>(e, "name");
-        if (name.empty() || identifier(name) != name || std::isdigit(static_cast<unsigned char>(name[0]))) {
-            throw invalid(e, where + ".name", "name", "\"" + name + "\" is not an identifier",
-                          "Use letters, digits and _, starting with a letter: the variables are <name>_<column>",
-                          DATA_DOCS);
-        }
-        const std::string file = find_value<std::string>(e, "file");
-        const std::string type = find_value_or<std::string>(e, "type", "table");
-        record_options(where + ".type", {"table", "points"});
-        if (type != "table" && type != "points") throw not_accepted(e, where + ".type", type, {"points", "table"});
-        const bool points = type == "points";
-        const tabulated::Csv csv = tabulated::read_csv(file);
-        std::vector<std::string> coordinates;
-        if (e.contains("coordinates")) {
-            coordinates = find_value<std::vector<std::string>>(e, "coordinates");
-        } else if (points) {
-            coordinates = N_DIM == 2 ? std::vector<std::string>{"x", "y"} : std::vector<std::string>{"x", "y", "z"};
-        } else {
-            coordinates = {csv.names[0]};
-        }
-        if (coordinates.empty() || coordinates.size() > tabulated::MAX_DIMS) {
-            throw invalid(e, where + ".coordinates", "coordinates",
-                          "names " + std::to_string(coordinates.size()) + " columns", "Name 1 to 3 columns of " + file,
-                          DATA_DOCS);
-        }
-        std::vector<int32_t> coordinate_columns;
-        for (const auto & c : coordinates) {
-            const int32_t i = csv.column(c);
-            if (i < 0) {
-                throw InputError({.key = where + ".coordinates",
-                                  .line = line_of(e, e.contains("coordinates") ? "coordinates" : "file"),
-                                  .message = file + " has no column " + c,
-                                  .valid = csv.names,
-                                  .suggestion = suggest_value(c, csv.names),
-                                  .fix = "Name the coordinate columns with coordinates = [...]",
-                                  .docs = DATA_DOCS});
-            }
-            coordinate_columns.push_back(i);
-        }
-        // Units of columns, as affine maps to SI (a + b v)
-        std::vector<double> offset(csv.names.size(), 0.0), factor(csv.names.size(), 1.0);
-        if (e.contains("units")) {
-            const Input & units = e.at("units");
-            if (!units.is_table()) {
-                throw invalid(e, where + ".units", "units", "must be a table of columns and their units",
-                              "Write units = {x = \"mm\", T = \"degC\"}", DATA_DOCS);
-            }
-            for (const auto & [column, unit] : units.as_table()) {
-                const int32_t i = csv.column(column);
-                if (i < 0) {
-                    throw InputError({.key = where + ".units." + column,
-                                      .line = line_of(units, column),
-                                      .message = file + " has no column " + column,
-                                      .valid = csv.names,
-                                      .suggestion = suggest_value(column, csv.names),
-                                      .docs = DATA_DOCS});
-                }
-                const std::string text = find_value<std::string>(units, column);
-                try {
-                    const Quantity q0 = parse_quantity("0 " + text), q1 = parse_quantity("1 " + text);
-                    offset[size_t(i)] = q0.value;
-                    factor[size_t(i)] = q1.value - q0.value;
-                } catch (const UnitError & err) {
-                    throw invalid(units, where + ".units." + column, column, err.what(),
-                                  "Give a unit such as \"mm\", \"bar\" or \"degC\"", DATA_DOCS);
-                }
-            }
-        }
-        auto column = [&](const size_t i) {
-            std::vector<double> c = csv.columns[i];
-            for (double & v : c) v = offset[i] + factor[i] * v;
-            return c;
-        };
-        std::vector<std::vector<double>> coords, fields;
-        for (const int32_t i : coordinate_columns) coords.push_back(column(size_t(i)));
-        std::vector<std::string> field_names;
-        for (size_t i = 0; i < csv.names.size(); i++) {
-            if (std::find(coordinate_columns.begin(), coordinate_columns.end(), int32_t(i)) != coordinate_columns.end()) continue;
-            fields.push_back(column(i));
-            field_names.push_back(csv.names[i]);
-        }
-        if (fields.empty()) {
-            throw invalid(e, where + ".file", "file", file + " has no columns besides the coordinates",
-                          "Add value columns to the file, or name fewer coordinates", DATA_DOCS);
-        }
-        uint32_t set;
-        std::string kind;
-        if (points) {
-            if (e.contains("interpolation")) {
-                throw invalid(e, where + ".interpolation", "interpolation", "is for tables (type = \"table\")",
-                              "Remove it; point clouds take neighbors = k", DATA_DOCS);
-            }
-            const uint32_t neighbors = find_value_or<uint32_t>(e, "neighbors", 1);
-            set = data.add_points(coords, fields, neighbors, where);
-            kind = logging::count(coords[0].size(), "point") + ", " +
-                   (neighbors == 1 ? "nearest" : std::to_string(neighbors) + " nearest by inverse distance");
-        } else {
-            if (e.contains("neighbors")) {
-                throw invalid(e, where + ".neighbors", "neighbors", "is for point clouds (type = \"points\")",
-                              "Remove it; tables take interpolation = \"linear\" or \"cubic\"", DATA_DOCS);
-            }
-            const std::string interpolation = find_value_or<std::string>(e, "interpolation", "linear");
-            record_options(where + ".interpolation", {"linear", "cubic"});
-            if (interpolation != "linear" && interpolation != "cubic") {
-                throw not_accepted(e, where + ".interpolation", interpolation, {"cubic", "linear"});
-            }
-            set = data.add_table(coords, fields, interpolation == "cubic", where);
-            const tabulated::Set & s = data.set(set);
-            std::string shape;
-            for (uint32_t d = 0; d < s.dims; d++) shape += (d ? " x " : "") + std::to_string(s.n_axis[d]);
-            kind = "table " + shape + ", " + interpolation;
-        }
+        const tabulated::Entry entry = tabulated::read_entry(e, where, DATA_DOCS, data);
+        const std::vector<std::string> & coordinates = entry.coordinates;
         Mapping m;
         m.dims = static_cast<uint32_t>(coordinates.size());
         std::string at_text;
@@ -1295,22 +1186,25 @@ struct InitialState::Impl {
             }
             double edge;
             bool bounded;
-            at_text = "distance to " + add_region(e.at("region"), where + ".region", m.nodes, m.n_nodes, edge, bounded);
+            at_text = " column " + coordinates[0] + " <- cell distance to " + add_region(e.at("region"), where + ".region", m.nodes, m.n_nodes, edge, bounded);
             if (edge > 0.0) {
                 throw invalid(e, where + ".region", "region", "has an edge, which a distance does not use",
                               "Remove edge from the region", DATA_DOCS);
             }
         } else {
             std::vector<std::string> at;
-            if (e.contains("at")) {
+            if (contains_optional(e, "at")) {
                 at = find_value<std::vector<std::string>>(e, "at");
+            } else if (!entry.at.empty()) {
+                at = entry.at;
             } else {
                 for (const auto & c : coordinates) {
                     if (c != "x" && c != "y" && c != "z") {
                         throw invalid(e, where + ".at", "at",
-                                      "is missing, and the coordinate " + c + " is not x, y or z",
-                                      "Add at = [...], an expression of x, y, z for each coordinate, or region = {...} "
-                                      "for the distance to a region",
+                                      "is missing, and the table's coordinate column " + c +
+                                          " is not named like a cell coordinate (x, y, z)",
+                                      "Add at = [...], one expression of the cell's x, y, z per coordinate column, "
+                                      "or region = {...} for the distance to a region",
                                       DATA_DOCS);
                     }
                 }
@@ -1320,26 +1214,27 @@ struct InitialState::Impl {
                 throw invalid(e, where + ".at", "at",
                               "has " + std::to_string(at.size()) + " expressions for " +
                                   std::to_string(coordinates.size()) + " coordinates",
-                              "Give one expression of x, y, z per coordinate", DATA_DOCS);
+                              "Give one expression of the cell's x, y, z per coordinate column", DATA_DOCS);
             }
             for (size_t d = 0; d < at.size(); d++) {
-                m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", at[d], {"x", "y", "z"});
-                at_text += (d ? ", " : "") + coordinates[d] + " = " + at[d];
+                m.at[d] = add_program(where + ".at[" + std::to_string(d) + "]", line_of(e, "at"), at[d], {"x", "y", "z"});
+                at_text += std::string(d ? "," : "") + " column " + coordinates[d] + " <- cell " +
+                           tabulated::at_text(at[d], {"x", "y", "z"});
             }
         }
         mappings.push_back(m);
         std::string vars;
-        for (uint32_t f = 0; f < field_names.size(); f++) {
-            const std::string var = name + "_" + identifier(field_names[f]);
+        for (uint32_t f = 0; f < entry.variables.size(); f++) {
+            const std::string & var = entry.variables[f];
             if (std::find(names.begin(), names.end(), var) != names.end()) {
-                throw invalid(e, where + ".name", "name", "makes the variable " + var + ", which is already defined",
-                              "Give each [[initialize.data]] entry its own name", DATA_DOCS);
+                throw tabulated::taken(e, where, DATA_DOCS, entry, var, var == "x" || var == "y" || var == "z",
+                                       "cell");
             }
             names.push_back(var);
-            variables.push_back({set, f});
+            variables.push_back({entry.set, f});
             vars += (f ? ", " : "") + var;
         }
-        return name + " (" + file + ": " + kind + "; " + at_text + "): " + vars;
+        return "data \"" + entry.name + "\" (" + entry.file + ", " + entry.kind + "):" + at_text + "; values " + vars;
     }
 
     /** @brief The programs of a state table: the base (complete) or a region's layer (any fields). */
@@ -1356,12 +1251,12 @@ struct InitialState::Impl {
                                                  std::to_string(N_DIM) + "D",
                                       .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
                 }
-                FOR_I_DIM L.u[i] = add_program(where + ".u", number(double(u[i])), names);
+                FOR_I_DIM L.u[i] = add_program(where + ".u", line_of(t, "u"), number(double(u[i])), names);
             } else {
                 if (!t.at("u").is_array() || t.at("u").as_array().size() != N_DIM) throw u_error(t, where);
                 const auto & u = t.at("u").as_array();
                 for (size_t i = 0; i < N_DIM; i++) {
-                    L.u[i] = add_program(where + ".u[" + std::to_string(i) + "]",
+                    L.u[i] = add_program(where + ".u[" + std::to_string(i) + "]", line_of(u[i]),
                                          quantity_or_expression(u[i], where + ".u", dim::velocity), names);
                 }
             }
@@ -1384,7 +1279,7 @@ struct InitialState::Impl {
             n_thermo++;
             const std::string text = constant ? number(double(find_real(t, key, dimension)))
                                               : quantity_or_expression(t.at(key), where + "." + key, dimension);
-            *slots[i] = add_program(where + "." + key, text, names);
+            *slots[i] = add_program(where + "." + key, line_of(t, key), text, names);
         }
         if (type == "analytical" && n_thermo != 2) {
             throw InputError({.key = "initialize",
@@ -1409,10 +1304,37 @@ struct InitialState::Impl {
             return;
         }
         L.fractions = static_cast<uint32_t>(fractions.size());
+        if (mixture->tabulated() && !constant) {
+            // Z and C, each a number or an expression; C defaults to fresh (0) where Z is given
+            for (const char * key : {"X", "Y", "balance"}) {
+                if (t.contains(key)) {
+                    throw invalid(t, where + "." + key, key, "sets species, but a flamelet gas carries Z and C",
+                                  "Give the composition as Z = ... and C = ...", REGIONS_DOCS);
+                }
+            }
+            if (!t.contains("Z") && !t.contains("C")) {
+                if (base) {
+                    throw InputError({.key = where, .line = line_of(t), .message = "has no composition",
+                                      .fix = "Give Z (mixture fraction) and C (progress variable)"});
+                }
+                return;
+            }
+            L.burnt = t.contains("C") && t.at("C").is_string() && find_value<std::string>(t, "C") == "burnt";
+            const char * keys[2] = {"Z", "C"};
+            for (uint32_t k = 0; k < 2; k++) {
+                const std::string text = t.contains(keys[k]) && !(k == 1 && L.burnt)
+                                             ? quantity_or_expression(t.at(keys[k]), keys[k], dim::none)
+                                             : std::string("0");
+                const int32_t slot = add_program(where + "." + keys[k], line_of(t, keys[k]), text, names);
+                fractions.push_back({k, static_cast<uint32_t>(slot)});
+            }
+            L.n_fractions = 2;
+            return;
+        }
         if (constant) {
             const std::vector<double> Y = mixture->mass_fractions(t, where);
             for (uint32_t k = 0; k < Y.size(); k++) {
-                fractions.push_back({k, static_cast<uint32_t>(add_program(where + ".Y", number(Y[k]), names))});
+                fractions.push_back({k, static_cast<uint32_t>(add_program(where + ".Y", line_of(t), number(Y[k]), names))});
             }
             L.n_fractions = static_cast<uint32_t>(Y.size());
             return;
@@ -1440,11 +1362,12 @@ struct InitialState::Impl {
         for (const auto & [name, value] : t.at(key).as_table()) {
             const int32_t k = mixture->mechanism().species_index(name);
             if (k < 0) throw mixture->unknown_species(t.at(key), where + "." + key + "." + name, name);
-            const int32_t p = add_program(where + "." + key + "." + name, quantity_or_expression(value, name, dim::none), names);
+            const int32_t p = add_program(where + "." + key + "." + name, line_of(value),
+                                          quantity_or_expression(value, name, dim::none), names);
             fractions.push_back({static_cast<uint32_t>(k), static_cast<uint32_t>(p)});
         }
         L.n_fractions = static_cast<uint32_t>(fractions.size()) - L.fractions;
-        if (t.contains("balance")) {
+        if (contains_optional(t, "balance")) {
             const std::string name = find_value<std::string>(t, "balance");
             L.balance = mixture->mechanism().species_index(name);
             if (L.balance < 0) throw mixture->unknown_species(t, where + ".balance", name);
@@ -1531,7 +1454,7 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
             const std::string name = find_value_or<std::string>(e, "name", where);
             impl->add_state(e, where, L, "region");
             std::string fields;
-            for (const char * key : {"u", "rho", "p", "T", "X", "Y"}) {
+            for (const char * key : {"u", "rho", "p", "T", "X", "Y", "Z", "C"}) {
                 if (e.contains(key)) fields += (fields.empty() ? "" : ", ") + std::string(key);
             }
             if (e.contains("turbulence")) {
@@ -1559,20 +1482,23 @@ InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler &
         impl->layers.push_back(e.layer);
         summary << (summary.tellp() > 0 ? "; " : "") << e.text;
     }
-    for (const auto & d : data_text) summary << (summary.tellp() > 0 ? "; " : "") << "data " << d;
+    for (const auto & d : data_text) summary << (summary.tellp() > 0 ? "; " : "") << d;
 
     // Data no expression reads are a mistake
     const uint16_t n_fixed = 3;
     for (size_t s = 0; s < impl->mappings.size(); s++) {
         bool used = false;
+        std::vector<std::string> set_names;
         for (uint16_t v = 0; v < impl->variables.size(); v++) {
             if (impl->variables[v].set != s) continue;
+            set_names.push_back(impl->names[n_fixed + v]);
             for (const auto & p : impl->programs) used = used || p.uses(static_cast<uint16_t>(n_fixed + v));
         }
         if (!used) {
             const Input & entry = init.at("data").as_array()[s];
             throw invalid(entry, "initialize.data[" + std::to_string(s) + "].name", "name",
-                          "no expression of [initialize] or its regions reads its variables",
+                          "no expression of [initialize] or its regions reads " + tabulated::one_of(set_names) +
+                              ", the values of this table",
                           "Read them as <name>_<column> in an expression, or remove the entry", DATA_DOCS);
         }
     }
@@ -1719,6 +1645,9 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
                     std::vector<curved::Vec3> x;
                     std::vector<double> w;
                     mesh.curved_geometry->cell_rule(c, N_DIM == 2 ? 10 : 8, x, w);
+                    if (mesh.axisymmetric) {
+                        for (size_t q = 0; q < w.size(); q++) w[q] *= x[q][1];
+                    }
                     curved_points.insert(curved_points.end(), x.begin(), x.end());
                     curved_weights.insert(curved_weights.end(), w.begin(), w.end());
                 }
@@ -1746,7 +1675,7 @@ void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesVie
             }
             Kokkos::deep_copy(e.base_cells, h_base_cells);
         }
-        Kokkos::parallel_for("initial_state", Kokkos::RangePolicy<>(0, n), e);
+        gated::parallel_for("initial_state", Kokkos::RangePolicy<>(0, n), e);
         Kokkos::deep_copy(h_result, e.result);
         Kokkos::deep_copy(h_kept, e.kept);
         for (uint32_t r = 0; r < n; r++) {

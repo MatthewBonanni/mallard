@@ -1,0 +1,13 @@
+{
+ "dimension": "length (m)",
+ "dims": [
+  2,
+  3
+ ],
+ "required": true,
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/sector.toml",
+  "tools/dev/catalog_inputs/3d/sector.toml"
+ ],
+ "type": "array"
+}

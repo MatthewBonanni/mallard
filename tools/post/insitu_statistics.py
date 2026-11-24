@@ -41,7 +41,7 @@ import tomllib
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from mallard import restart  # noqa: E402
+import mallard  # noqa: E402
 
 AXES = "xyz"
 
@@ -119,8 +119,9 @@ def spectra_from_restarts(cfg, files):
     weight, t_last, n_samples = 0.0, t_start, 0
     step = 0
     for path in files:
-        r = restart.read(path)
-        cons, t, step = r.fields, r.t, r.step
+        r = mallard.open(path)
+        cons = {name: r.read(name) for name in r.fields}
+        t, step = r.snapshots[-1].t, r.snapshots[-1].step
         if t <= t_start:
             continue
         vals = variables(cons, fields, cfg.get("physics", {}), dim)

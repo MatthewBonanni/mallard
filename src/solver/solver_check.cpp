@@ -27,12 +27,14 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "periodic.h"
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
 #include "region_motion.h"
 #include "run_status.h"
 #include "units.h"
+#include "view_entries.h"
 
 namespace {
 
@@ -51,14 +53,7 @@ constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'0
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
-/** @brief Largest CFL number of each integrator for smooth flow (docs/numerics/overview.md#time-step). */
-double cfl_limit(const TimeIntegratorType type) {
-    switch (type) {
-        case TimeIntegratorType::SSPRK3: return 1.2;
-        case TimeIntegratorType::RK4: return 1.35;
-        default: return std::numeric_limits<double>::infinity();
-    }
-}
+std::vector<CheckPeriodic> periodic_summary(const Mesh & mesh);
 
 } // namespace
 
@@ -66,16 +61,20 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     const comm::SelfScope scope = communication_scope();
     CheckReport r;
     r.input_file = options.input_file;
+    r.geometry_only = options.geometry_only;
     struct Restore {
         bool files = output_files_enabled();
         bool * check;
+        bool * geometry;
         ~Restore() {
             set_output_files_enabled(files);
             *check = false;
+            *geometry = false;
         }
-    } restore{output_files_enabled(), &check_only};
+    } restore{output_files_enabled(), &check_only, &geometry_only};
     set_output_files_enabled(false);
     check_only = true;
+    geometry_only = options.geometry_only;
 
     memory::Tracker tracker;
     try {
@@ -86,7 +85,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     } catch (const std::exception & e) {
         r.error(diagnostic_code::SETUP, error_text(e));
     }
-    for (const Diagnostic & key : unused_keys(input)) {
+    // A geometry-only setup leaves the keys of the numerics and the initial state unread
+    for (const Diagnostic & key : options.geometry_only ? std::vector<Diagnostic>{} : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
         r.error(diagnostic_code::KEY_UNUSED, describe(key));
@@ -99,11 +99,30 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         file << key_catalog(resolved);
         if (!file) r.error(diagnostic_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
+    r.unassigned = unassigned_zones;
+    if (!r.setup_done && mesh && !options.view_dir.empty()) {
+        // The mesh alone, so that what the setup stopped on (a zone without a condition) can be seen
+        try {
+            const std::vector<case_view::Block> blocks = mesh_view(*mesh, region::MeshRegions(*mesh)).blocks;
+            const std::vector<std::string> files = case_view::write_view(
+                options.view_dir, blocks, options.input_file.empty() ? "case view" : options.input_file);
+            r.view_file = files[0];
+            r.view_images.assign(files.begin() + 1, files.end());
+            r.view_blocks = case_view::describe(blocks);
+        } catch (const std::exception &) {
+            // A mesh read only in part draws nothing; the setup's error says why
+        }
+    }
     if (!r.setup_done || !mesh) return r;
 
-    check_memory(r, options, tracker);
+    if (!options.geometry_only) check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
+    r.periodic = periodic_summary(*mesh);
     r.t = static_cast<double>(t);
+    if (options.geometry_only) {
+        check_regions(r, options);
+        return r;
+    }
     check_time_step(r);
     const CheckFields resolution = check_resolution(r);
     check_mesh_quality(r, options, resolution);
@@ -113,7 +132,34 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
+    check_initial(r, options);
     return r;
+}
+
+void Solver::check_initial(CheckReport & r, const CheckOptions & options) {
+    if (options.initial.empty()) return;
+    try {
+        update_primitives();
+        copy_device_to_host();
+        std::vector<std::string> fields = {"RHO", "U", "P", "T"};
+        if (is_mixture()) fields.emplace_back("Y_*");
+        Input writer_input(Input::table_type{});
+        writer_input.as_table()["prefix"] = options.initial;
+        writer_input.as_table()["interval"] = 1;
+        writer_input.as_table()["fields"] = fields;
+        writer_input.as_table()["series"] = false;
+        set_output_files_enabled(true);
+        DataWriter writer;
+        writer.init(writer_input, data, mesh);
+        writer.omit_snapshot_block();
+        writer.write(0, t, true);
+        writer.finish();
+        set_output_files_enabled(false);
+        r.initial_file = writer.last_written();
+    } catch (const std::exception & e) {
+        set_output_files_enabled(false);
+        r.error(diagnostic_code::INITIAL_WRITE, error_text(e));
+    }
 }
 
 std::string Solver::setup_check() {
@@ -303,10 +349,29 @@ Model model(const CheckReport & r, const memory::Bytes & b) {
     return m;
 }
 
+/**
+ * @brief The steady state's bytes as the sized run holds them: a host build
+ *        sizing a GPU leaves out what device builds free after setup.
+ */
+memory::Bytes sized_steady(const CheckReport & r) {
+    memory::Bytes b = r.steady_bytes;
+    if (r.sizing_gpu && !r.device_memory) {
+        for (size_t c = 0; c < memory::N_CATEGORIES; c++) b[c] -= std::min(b[c], r.released_on_devices[c]);
+    }
+    return b;
+}
+
+/** @brief The rank's bytes that device builds free after setup but this host build keeps, by category. */
+memory::Bytes released_on_devices(const CheckReport & r, const Mesh & mesh) {
+    memory::Bytes b{};
+    if (!r.device_memory) b[static_cast<size_t>(memory::Category::MESH)] = mesh.released_on_devices;
+    return b;
+}
+
 } // namespace
 
 double predicted_peak(const CheckReport & r, const double local_cells) {
-    double peak = model(r, r.steady_bytes).at(local_cells);
+    double peak = model(r, sized_steady(r)).at(local_cells);
     for (const memory::Bytes & phase : r.setup_phases) peak = std::max(peak, model(r, phase).at(local_cells));
     return peak;
 }
@@ -331,6 +396,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     r.bytes_peak = comm::allreduce(usage.peak, comm::Op::MAX);
     r.setup_bytes = of_largest_rank(usage.at_peak, usage.peak);
     r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
+    r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
     for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
     r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
     r.local_owned = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_owned()) : 0, comm::Op::MAX);
@@ -373,6 +439,21 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
 }
 
 void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
+    r.view_entries_per_cell = comm::allreduce(view_entries::entries_per_cell(), comm::Op::MAX);
+    if (r.view_entries_per_cell > 0.0) {
+        r.view_max_local_cells = static_cast<uint64_t>(static_cast<double>(view_entries::MAX) / r.view_entries_per_cell);
+    }
+    const uint64_t target_cells = r.target_owned + r.target_halo;
+    if (r.view_max_local_cells > 0 && target_cells > r.view_max_local_cells) {
+        r.error(diagnostic_code::VIEW_ENTRIES,
+                "the largest part on " + std::to_string(r.target_ranks) + " ranks holds " +
+                    logging::count(target_cells, "cell") + ", halo included, and a multi-dimensional View of " +
+                    logging::format("%.0f", r.view_entries_per_cell) + " entries per cell addresses " +
+                    logging::count(view_entries::MAX) + " entries, at most " +
+                    logging::count(r.view_max_local_cells, "cell") + " per rank: run on at least " +
+                    std::to_string((target_cells + r.view_max_local_cells - 1) / r.view_max_local_cells) +
+                    " times as many ranks");
+    }
     if (options.memory > 0) {
         r.sizing_name = options.memory_name;
         r.sizing_memory = options.memory;
@@ -394,7 +475,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     const double usable = (1.0 - SIZING_MARGIN) * static_cast<double>(r.sizing_memory);
     double n_max = std::numeric_limits<double>::infinity();
     std::vector<memory::Bytes> snapshots = r.setup_phases;
-    snapshots.push_back(r.steady_bytes);
+    snapshots.push_back(sized_steady(r));
     for (size_t k = 0; k < snapshots.size(); k++) {
         const Model m = model(r, snapshots[k]);
         const double n_fit = (usable - overhead - m.fixed) / m.per_cell;
@@ -411,9 +492,16 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
                                                 ": size the run for a larger memory (--memory)");
         return;
     }
+    if (r.view_max_local_cells > 0 && static_cast<double>(r.view_max_local_cells) < n_max) {
+        n_max = static_cast<double>(r.view_max_local_cells);
+        r.sizing_view_entries = true;
+    }
     r.max_local_cells = static_cast<uint64_t>(n_max);
 
-    auto fits = [&](const PartSize & p) { return peak(double(p.owned + p.halo)) <= usable; };
+    auto fits = [&](const PartSize & p) {
+        return peak(double(p.owned + p.halo)) <= usable &&
+               (r.view_max_local_cells == 0 || p.owned + p.halo <= r.view_max_local_cells);
+    };
     auto record = [&](const int n, const PartSize & p) {
         r.min_ranks = n;
         r.min_owned = p.owned;
@@ -476,6 +564,7 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
         const uint64_t peak = comm::allreduce(usage.peak, comm::Op::MAX);
         r.steady_bytes = of_largest_rank(usage.at_peak, usage.peak);
+        r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
         // The time stepping's kernels add their local memory to CUDA's reservation
         if (r.device_memory) {
             r.outside_kokkos =
@@ -520,6 +609,22 @@ void Solver::check_settings(CheckReport & r) const {
         r.warning(diagnostic_code::CFL_LIMIT, logging::format("CFL %.3g at the initial state is above %.3g, the stability "
                                                          "limit of %s for smooth flow: lower run.cfl (or run.dt)",
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
+    }
+    const double t0 = static_cast<double>(t);
+    const double t_end = t_stop > 0 ? static_cast<double>(t_stop) : std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < triggers.size(); i++) {
+        const Triggers::Trigger & trigger = triggers[i];
+        const std::string which = "triggers[" + std::to_string(i) + "] (" + trigger.name + ")";
+        if (trigger.hold > t_end - t0) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + " must hold for " + logging::real(trigger.hold) + " s, longer than the run's " +
+                          logging::real(t_end - t0) + " s to t_stop: lower its for, or raise run.t_stop");
+        } else if (triggers.never_true(i, t0, t_end)) {
+            r.warning(diagnostic_code::TRIGGER_NEVER,
+                      which + ": \"" + trigger.when + "\" is false at every t from " + logging::real(t0) +
+                          (std::isfinite(t_end) ? " s to t_stop = " + logging::real(t_end) + " s" : " s on") +
+                          ": check its numbers and their units (seconds)");
+        }
     }
 }
 
@@ -712,6 +817,97 @@ std::vector<case_view::Block> periodic_blocks(const Mesh & mesh) {
     return blocks;
 }
 
+/** @brief The periodic pairs as the mesh joined them (check's periodic): map, faces, area and node offset. */
+std::vector<CheckPeriodic> periodic_summary(const Mesh & mesh) {
+    const size_t n_directions = mesh.periodic_translations.size();
+    std::vector<CheckPeriodic> out(n_directions);
+    if (n_directions == 0) return out;
+    const bool named = mesh.periodic_zones.size() == 2 * n_directions;
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = out[j];
+        if (named) {
+            p.zone_a = mesh.periodic_zones[2 * j];
+            p.zone_b = mesh.periodic_zones[2 * j + 1];
+        }
+        p.rotation = mesh.periodic_rotation.direction == int(j);
+        if (p.rotation) {
+            p.angle = mesh.periodic_rotation.angle * 180.0 / std::numbers::pi;
+            p.center = mesh.periodic_rotation.center;
+            p.axis = mesh.periodic_rotation.axis;
+        }
+        for (size_t i = 0; i < N_DIM; i++) p.translation[i] = double(mesh.periodic_translations[j][i]);
+    }
+    std::vector<double> sums(2 * n_directions, 0.0);  // faces, area
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const uint8_t shift = mesh.h_face_shift(f);
+        const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+        if (shift == 0 || c1 < 0 || uint32_t(c0) >= mesh.n_owned()) continue;
+        if (uint32_t(c1) >= mesh.n_owned() && mesh.h_global_cell(uint32_t(c1)) < mesh.h_global_cell(uint32_t(c0))) continue;
+        const auto & lattice = mesh.shift_lattice[shift];
+        size_t j = 0;
+        while (j + 1 < n_directions && lattice[j] == 0) j++;
+        sums[2 * j] += 1.0;
+        sums[2 * j + 1] += double(mesh.h_face_area(f));
+    }
+    // A node and its class's key: x_n = M(L) x_key, up to the matching tolerance
+    std::vector<double> offsets(n_directions, 0.0);
+    for (uint32_t n = 0; n < mesh.h_node_key.size() && n < mesh.h_node_lattice.size(); n++) {
+        const uint32_t key = mesh.h_node_key[n];
+        const auto & L8 = mesh.h_node_lattice[n];
+        const std::array<int, 3> L = {L8[0], L8[1], L8[2]};
+        if (key == n || key >= mesh.h_node_key.size() || std::count(L.begin(), L.end(), 0) != 2) continue;
+        const size_t j = static_cast<size_t>(std::find_if(L.begin(), L.end(), [](int l) { return l != 0; }) - L.begin());
+        if (j >= n_directions) continue;
+        double Q[3][3], t[3];
+        periodic_lattice_map(mesh.periodic_translations, mesh.periodic_rotation, L, Q, t);
+        double d2 = 0.0;
+        for (size_t i = 0; i < N_DIM; i++) {
+            double y = t[i];
+            for (size_t m = 0; m < N_DIM; m++) y += Q[i][m] * double(mesh.h_node_coords(key, m));
+            d2 += (y - double(mesh.h_node_coords(n, i))) * (y - double(mesh.h_node_coords(n, i)));
+        }
+        offsets[j] = std::max(offsets[j], std::sqrt(d2));
+    }
+    if (mesh.n_global_cells > 0) {
+        comm::allreduce(std::span<double>(sums), comm::Op::SUM);
+        comm::allreduce(std::span<double>(offsets), comm::Op::MAX);
+    }
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = out[j];
+        p.faces = static_cast<uint64_t>(sums[2 * j]);
+        p.area = sums[2 * j + 1];
+        p.node_offset_max = offsets[j];
+        const double size = p.faces > 0 ? (N_DIM == 3 ? std::sqrt(p.area / double(p.faces)) : p.area / double(p.faces)) : 0.0;
+        p.node_offset_relative = size > 0.0 ? p.node_offset_max / size : 0.0;
+    }
+    return out;
+}
+
+/**
+ * @brief The first-cell y+ of a wall zone's faces as the block's field y_plus, in the block's order (the zone's
+ *        faces of owned cells); nothing unless every face has one.
+ */
+void add_wall_y_plus(const Mesh & mesh, const std::vector<double> & face_y_plus, const std::string & zone,
+                     case_view::Block & block) {
+    if (face_y_plus.size() != mesh.n_faces) return;
+    std::vector<double> values;
+    for (const FaceZone & z : mesh.h_face_zones()) {
+        if (z.get_type() != FaceZoneType::BOUNDARY || z.get_name() != zone) continue;
+        for (uint32_t i = 0; i < z.n_faces(); i++) {
+            const uint32_t f = z.h_faces(i);
+            if (uint32_t(mesh.h_cells_of_face(f, 0)) >= mesh.n_owned()) continue;
+            values.push_back(face_y_plus[f]);
+        }
+    }
+    const bool all = values.size() == block.n_cells() &&
+                     std::all_of(values.begin(), values.end(), [](double v) { return std::isfinite(v); });
+    if (comm::allreduce(int(all || values.empty()), comm::Op::MIN) == 0 ||
+        comm::allreduce(uint64_t(values.size()), comm::Op::SUM) == 0) {
+        return;
+    }
+    block.field("y_plus", 1).values = std::move(values);
+}
+
 /** @brief Boundary entry i as the view labels it: its type and the keys the input sets, "inlet_mass_flow, mdot = 0.2 kg/s". */
 std::string condition_text(const ResolvedInput & resolved, const size_t i, const CheckBoundary & b) {
     const std::string prefix = "boundaries[" + std::to_string(i) + "].";
@@ -813,6 +1009,87 @@ void follow_curved_faces(const Mesh & mesh, case_view::Block & block) {
     block = std::move(out);
 }
 
+/**
+ * @brief Warnings for a region from a surface file whose box (in m) is likely in the wrong units, far smaller
+ *        or larger than the domain's, or reaches outside it (covers: it touches cells).
+ */
+void check_surface_file(CheckReport & r, const std::string & label, const Box & b, const Box & domain, const bool covers) {
+    double size = 0.0, across = 0.0;
+    bool beyond = false;
+    for (size_t i = 0; i < N_DIM; i++) {
+        if (!std::isfinite(b[0][i]) || !std::isfinite(b[1][i])) return;
+        size += (b[1][i] - b[0][i]) * (b[1][i] - b[0][i]);
+        across += (domain[1][i] - domain[0][i]) * (domain[1][i] - domain[0][i]);
+        const double margin = 1e-9 * (domain[1][i] - domain[0][i]);
+        beyond = beyond || b[0][i] < domain[0][i] - margin || b[1][i] > domain[1][i] + margin;
+    }
+    size = std::sqrt(size);
+    across = std::sqrt(across);
+    const std::string spans = "region " + label + " spans " + box_text(b) + " m (" + logging::real(size) +
+                              " m across), the domain " + box_text(domain) + " m (" + logging::real(across) + " m across)";
+    if (size > 10.0 * across || size < 1e-3 * across) {
+        r.warning(diagnostic_code::REGION_SCALE,
+                  spans + ": " + logging::real(size > across ? size / across : across / size) + " times " +
+                      (size > across ? "larger" : "smaller") + ", which is likely a unit error: check its units");
+    } else if (beyond && covers) {
+        r.warning(diagnostic_code::REGION_PARTLY_OUTSIDE,
+                  spans + ": its part outside the domain is left out (--view shows both)");
+    }
+}
+
+/**
+ * @brief The input element that holds the block's key and its index in its array of tables: the table whose
+ *        index, name or prefix the key selects it by (sponges[0].region, probes[name = "s"].region), found
+ *        without reading any key.
+ */
+void link_to_element(const Input & input, case_view::Block & b) {
+    const size_t open = b.key.find('[');
+    if (open == std::string::npos) {
+        const size_t dot = b.key.rfind('.');
+        b.element = dot == std::string::npos ? "" : b.key.substr(0, dot);
+        return;
+    }
+    const std::string array = b.key.substr(0, open);
+    const Input * node = &input;
+    for (size_t at = 0; node && at <= array.size();) {
+        const size_t dot = std::min(array.find('.', at), array.size());
+        const Input * next = nullptr;
+        if (node->is_table()) {
+            const auto & entries = node->as_table().entries();
+            const auto it = entries.find(array.substr(at, dot - at));
+            if (it != entries.end()) next = &it->second;
+        }
+        node = next;
+        at = dot + 1;
+    }
+    auto selects = [&](const std::string & element) {
+        return b.key.starts_with(element) &&
+               (b.key.size() == element.size() || b.key[element.size()] == '.' || b.key[element.size()] == '[');
+    };
+    if (node && node->is_array()) {
+        const auto & tables = node->as_array();
+        for (size_t i = 0; i < tables.size(); i++) {
+            std::vector<std::string> names = {array + "[" + std::to_string(i) + "]"};
+            for (const char * field : {"name", "prefix"}) {
+                if (!tables[i].is_table()) continue;
+                const auto & entries = tables[i].as_table().entries();
+                const auto it = entries.find(field);
+                if (it != entries.end() && it->second.is_string()) {
+                    names.push_back(array + "[" + field + " = \"" + it->second.as_string() + "\"]");
+                }
+            }
+            for (const std::string & element : names) {
+                if (!selects(element)) continue;
+                b.element = element;
+                b.index = static_cast<int64_t>(i);
+                return;
+            }
+        }
+    }
+    const size_t close = b.key.find(']', open);
+    b.element = close == std::string::npos ? b.key : b.key.substr(0, close + 1);
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -824,6 +1101,8 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, con
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
+        if (name != "domain") m.block.zone = name;
+        if (name != "domain") m.block.zone = name;
         if (zone && mesh.curved_geometry) follow_curved_faces(mesh, m.block);
         v.regions.push_back(entry(mesh, name, region, m, true));
         v.blocks.push_back(std::move(m.block));
@@ -847,22 +1126,38 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         std::string conditions;
         for (size_t i = 0; i < boundary_summary.size(); i++) {
             if (block_name(boundary_summary[i].zone) != b.name) continue;
-            if (b.condition.empty()) b.condition = boundary_summary[i].condition;
+            if (b.condition.empty()) {
+                b.condition = boundary_summary[i].condition;
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
+                if (drawn) add_wall_y_plus(*mesh, r.face_y_plus, boundary_summary[i].zone, b);
+            }
             conditions += (conditions.empty() ? "" : "; ") + condition_text(resolved, i, boundary_summary[i]);
         }
         if (!conditions.empty()) b.label = b.name + ": " + conditions;
     }
     const std::vector<std::string> mesh_names = automatic.names();
+    const Input * names = region::named_regions(input);
+    auto link_input = [&](case_view::Block & b, const std::string & label) {
+        if (names && names->is_table() && names->as_table().entries().contains(label)) {
+            b.key = b.element = "regions." + label;
+        } else {
+            b.key = label;
+            link_to_element(input, b);
+        }
+    };
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
         const case_view::Kind kind = label.starts_with("probes[")       ? case_view::Kind::PROBE
                                      : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                                         : case_view::Kind::REGION;
         if (region->solution()) {
+            if (options.geometry_only) continue;
             const auto levels =
                 std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
             OnMesh m = on_mesh(*mesh, *region, block_name(label), false, false, levels, static_cast<double>(t));
             m.block.kind = kind;
+            link_input(m.block, label);
             CheckRegion g = entry(*mesh, label, *region, m, false);
             g.resolution = 0;
             g.solution = true;
@@ -872,7 +1167,15 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
-        r.regions.push_back(entry(*mesh, label, *region, m, false));
+        link_input(m.block, label);
+        CheckRegion g = entry(*mesh, label, *region, m, false);
+        g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
+                                  [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
+        if (g.from_file) {
+            g.box = region::bounds(*region);
+            check_surface_file(r, label, g.box, domain, m.cells > 0);
+        }
+        r.regions.push_back(g);
         if (m.cells == 0) {
             const Box b = region::bounds(*region);
             bool outside = false;
@@ -884,12 +1187,19 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         blocks.push_back(std::move(m.block));
     }
-    for (case_view::Block & b : probes.view_blocks()) blocks.push_back(std::move(b));
+    for (case_view::Block & b : probes.view_blocks()) {
+        link_input(b, b.name);
+        blocks.push_back(std::move(b));
+    }
+    for (case_view::Block & b : blocks) {
+        if (b.kind == case_view::Kind::BOUNDARY && !b.key.empty()) link_to_element(input, b);
+    }
     if (!options.view_dir.empty()) {
         const std::string title = options.input_file.empty() ? "case view" : options.input_file;
         const std::vector<std::string> files = case_view::write_view(options.view_dir, blocks, title);
         r.view_file = files[0];
         r.view_images.assign(files.begin() + 1, files.end());
+        r.view_blocks = case_view::describe(blocks);
     }
 }
 
