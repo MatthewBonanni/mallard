@@ -43,6 +43,7 @@ A few things hold for every command:
 | Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
 | Check report | `mallard check INPUT --format json` | `mallard-check` |
 | Case view | the `view` of `mallard check INPUT --view DIR --format json` and of `mallard info MESH --view DIR --format json`; each block's field data ([The case view](input_files.md#the-case-view)) | `mallard-case-view` |
+| Restart conversion | `mallard restart convert SOURCE -i INPUT --format json` | `mallard-restart-convert` |
 | Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
 | Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
 | Snapshot block | every snapshot and restart file | `mallard-snapshot` |
@@ -127,6 +128,9 @@ Commands:
                               date
     mallard input resolve     Write the input as a run uses it: every key
                               explicit, defaults and preset included
+    mallard restart convert   A restart file of one gas as a restart file of
+                              another case's: another mechanism, or a flamelet
+                              table
   Inspect
     mallard check             Set up a case without running it and report on it:
                               keys, mesh, time step, memory, cost, environment
@@ -403,6 +407,88 @@ Exit status:
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-resolve
+```
+
+### mallard restart
+
+```text
+Usage: mallard restart <command> [options]
+
+Commands on restart files.
+
+Commands:
+  mallard restart convert     A restart file of one gas as a restart file of
+                              another case's: another mechanism, or a flamelet
+                              table
+
+mallard restart <command> --help shows the page of a command.
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-restart
+```
+
+### mallard restart convert
+
+```text
+Usage: mallard restart convert SOURCE -i INPUT [-o FILE] [--dry-run] [--accept-mapping RULE]
+
+Converts the state of the restart file SOURCE to the gas of the case INPUT, on
+the same mesh, and writes it as a restart file that starts INPUT: finite-rate
+chemistry of one mechanism to another, finite-rate chemistry to a flamelet table
+(gas = "flamelet") or back. SOURCE's run block says which gas wrote it.
+Pressure, temperature and velocity are kept; the species match by name; Z and C
+of a table come from the composition with the table's definitions; density and
+energy are those of the target's thermodynamics. Statistics, particles and the
+other contents of SOURCE carry over.
+
+A conversion that is not exact (mass of species the target lacks moved onto its
+species, aliases, Z or C clamped to a table, the energy of another mechanism's
+thermodynamics) prints its summary and asks to accept its mapping rule,
+element-projection, before writing; without a terminal it needs --accept-mapping
+element-projection. --dry-run prints the summary only. The same conversion runs
+when INPUT starts from SOURCE directly ([initialize] type = "restart", or
+--restart), with [initialize.convert] accept = "element-projection".
+
+Options:
+  -i INPUT                  The target case: its gas (a mechanism, or a flamelet
+                            table) and mesh. Required.
+  -o FILE                   The restart file to write. Default: SOURCE's name
+                            with _mixture or _flamelet before .restart.
+  --dry-run                 Print the summary of the conversion and write
+                            nothing.
+  --accept-mapping RULE     Accept the conversion's mapping rule without asking:
+                            element-projection, the only rule. Needed when the
+                            conversion is not exact and no terminal answers the
+                            question. Default: ask on a terminal, refuse
+                            otherwise.
+  --format text|json        json: the summary, whether it was accepted and the
+                            file written, as one JSON object on stdout (schema
+                            mallard-restart-convert). Default: text.
+  --mechanism FILE          The mechanism of the source's species, where the
+                            source's run block names none that exists here; for
+                            a flamelet source, the mechanism of its table's
+                            species. Default: the run block's.
+  --table FILE              The source's flamelet table, where its run block's
+                            does not exist here. Default: the run block's.
+  --alias SOURCE=TARGET,...
+                            Map source species onto target species of other
+                            names (CH2*=CH2(S)). Default: none.
+  --verbose                 Also print the setup of the target case.
+  --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
+                            per rank) or --kokkos-device-id=1 (the GPU; by
+                            default each rank gets its own).
+  -h, --help                Show this page.
+
+Examples:
+  $ mallard restart convert solut/restart_002000.restart -i fpv/input.toml --dry-run
+  $ mallard restart convert solut/restart_002000.restart -i fpv/input.toml -o fpv/start.restart
+  $ mallard restart convert mix.restart -i skeletal.toml --accept-mapping element-projection --format json
+
+Exit status:
+  0  written, nothing to convert, or --dry-run
+  1  an error, or a conversion not accepted (nothing written)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-restart-convert
 ```
 
 ### mallard check

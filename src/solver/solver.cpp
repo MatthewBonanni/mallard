@@ -160,7 +160,13 @@ void Solver::start_from_restart(Input & input, const std::string & restart_file)
         file = comm::broadcast(file);
         if (file.empty()) return;
     }
-    input.as_table()["initialize"] = Input(Input::table_type{{"type", "restart"}, {"file", file}});
+    Input start(Input::table_type{{"type", "restart"}, {"file", file}});
+    // How a restart of another gas converts carries over
+    if (input.contains("initialize") && input.at("initialize").is_table() &&
+        input.at("initialize").as_table().entries().contains("convert")) {
+        start.as_table()["convert"] = input.at("initialize").as_table().entries().at("convert");
+    }
+    input.as_table()["initialize"] = start;
 }
 
 template <typename F>

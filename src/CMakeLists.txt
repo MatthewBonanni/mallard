@@ -58,6 +58,7 @@ add_library(MallardCore STATIC
     boundary/boundary_fields.cpp
     boundary/synthetic_inflow.cpp
     boundary/wall_exchange.cpp
+    chemistry/composition_map.cpp
     chemistry/flamelet_table.cpp
     chemistry/mechanism.cpp
     chemistry/transport.cpp
@@ -87,6 +88,7 @@ add_library(MallardCore STATIC
     solver/conservation_ledger.cpp
     solver/statistical_convergence.cpp
     solver/derived_fields.cpp
+    solver/gas_conversion.cpp
     solver/numerics_preset.cpp
     solver/repair_audit.cpp
     solver/probe_cells.cpp
@@ -401,7 +403,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp install_verify.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp install_verify.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp restart_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

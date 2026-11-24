@@ -221,6 +221,9 @@ class MixtureModel {
         /** @brief Internal energy per unit mass at T [J/kg]. */
         double energy(double T, const std::vector<double> & Y) const;
 
+        /** @brief Temperature at internal energy e [J/kg] and mass fractions Y, by Newton from T_guess (not a flamelet gas). */
+        double temperature(double e, const std::vector<double> & Y, double T_guess) const;
+
         /** @brief Frozen gamma and energy offset e0 = e - cv T at T. */
         void surrogates(double T, const std::vector<double> & Y, double & gamma, double & e0) const;
 

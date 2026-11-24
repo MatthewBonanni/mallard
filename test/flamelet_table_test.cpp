@@ -484,6 +484,20 @@ TEST(FlameletTableTest, RefusesMalformedTables) {
     }, "attribute \"H2O\" on /model_data/progress_variable");
     expect_refused("stream.h5", [&](hid_t h5) { set_number(h5, "model_data/streams/fuel/Y", "H2", 1.1); },
                    "the mass fraction of H2 in /model_data/streams/fuel/Y is not in [0, 1]");
+    expect_refused("stream_sum.h5", [&](hid_t h5) { set_number(h5, "model_data/streams/fuel/Y", "H2", 0.2); },
+                   "the mass fractions of /model_data/streams/fuel/Y sum to 1.1, not 1");
+    expect_refused("definition.h5", [&](hid_t h5) {
+        const h5::Handle g(H5Gopen2(h5, "model_data", H5P_DEFAULT), H5Gclose, "model_data");
+        set_text(g, "mixture_fraction", "elements");
+    }, "its attribute \"mixture_fraction\" on /model_data is \"elements\", where Mallard reads \"bilger\"");
+    expect_refused("undefined.h5", [&](hid_t h5) {
+        const h5::Handle g(H5Gopen2(h5, "model_data", H5P_DEFAULT), H5Gclose, "model_data");
+        h5::check(H5Adelete(g, "mixture_fraction"), "delete");
+    }, "no valid attribute \"mixture_fraction\" on /model_data");
+    expect_refused("weighs.h5", [&](hid_t h5) { set_number(h5, "model_data/progress_variable", "OH", 1.0); },
+                   "its progress variable weighs OH, which is not in its species block");
+    expect_refused("weighted.h5", set_value(5, "Y_H2O", 0.9),
+                   "its field C (0.02) is not the weighted sum of its mass fractions sum_k w_k Y_k (0.9)");
 
     const std::vector<double> zeros(fixture_table.axes()[0].nodes.size() * fixture_table.axes()[2].nodes.size() *
                                         fixture_table.fields().size(),

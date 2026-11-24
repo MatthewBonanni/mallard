@@ -32,6 +32,7 @@ set(MALLARD_TEST_SOURCES
     flamelet_gas_test.cpp
     flamelet_solver_test.cpp
     flamelet_les_test.cpp
+    restart_convert_test.cpp
     mixture_test.cpp
     radiation_test.cpp
     mixture_transport_test.cpp

@@ -1,0 +1,45 @@
+# For the key catalog only (tools/dev/input_catalog.py): a mixture case restarting
+# from a restart file of its own gas (restart_convert.restart, from
+# restart_convert.sh), with every key of [initialize.convert], which a restart of
+# another gas would convert with.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 4
+Ny = 2
+Lx = 0.1
+Ly = 0.05
+
+[physics]
+type = "euler"
+gas = "mixture"
+mechanism = "../../../../mechanisms/h2o2.yaml"
+
+[initialize]
+type = "restart"
+file = "restart_convert.restart"
+
+[initialize.convert]
+accept = "element-projection"
+mechanism = "../../../../mechanisms/h2o2.yaml"
+table = "../../../../test/data/flamelet/convert_h2.h5"
+aliases = {H2O2 = "H2O2"}
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"

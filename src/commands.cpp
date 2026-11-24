@@ -454,6 +454,25 @@ constexpr Option TEST_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option RESTART_CONVERT_OPTIONS[] = {
+    {"-i", "", "INPUT", "The target case: its gas (a mechanism, or a flamelet table) and mesh. Required."},
+    {"-o", "", "FILE", "The restart file to write. Default: SOURCE's name with _mixture or _flamelet before .restart."},
+    {"--dry-run", "", "", "Print the summary of the conversion and write nothing."},
+    {"--accept-mapping", "", "RULE",
+     "Accept the conversion's mapping rule without asking: element-projection, the only rule. Needed when the "
+     "conversion is not exact and no terminal answers the question. Default: ask on a terminal, refuse otherwise."},
+    {"--format", "", "text|json",
+     "json: the summary, whether it was accepted and the file written, as one JSON object on stdout (schema "
+     "mallard-restart-convert). Default: text."},
+    {"--mechanism", "", "FILE",
+     "The mechanism of the source's species, where the source's run block names none that exists here; for a "
+     "flamelet source, the mechanism of its table's species. Default: the run block's."},
+    {"--table", "", "FILE", "The source's flamelet table, where its run block's does not exist here. Default: the run block's."},
+    {"--alias", "", "SOURCE=TARGET,...", "Map source species onto target species of other names (CH2*=CH2(S)). Default: none."},
+    {"--verbose", "", "", "Also print the setup of the target case."},
+    KOKKOS,
+};
+
 constexpr Option GLOBAL_OPTIONS[] = {
     {"--dim", "", "2|3",
      "--dim 2 runs mallard2d, --dim 3 mallard3d, for any command. Default: the dimension of the case's "
@@ -469,6 +488,7 @@ constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
 constexpr std::string_view CONVERGENCE_ARGUMENTS[] = {"RUN_DIR", "RUN_DIR", "[RUN_DIR...]"};
 constexpr std::string_view CONVERT_ARGUMENTS[] = {"INPUT", "OUTPUT.h5"};
 constexpr std::string_view PACK_ARGUMENTS[] = {"RUN_DIR|FILE"};
+constexpr std::string_view RESTART_ARGUMENTS[] = {"SOURCE"};
 constexpr std::string_view OPTIONAL_INPUT[] = {"[INPUT]"};
 constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
@@ -553,6 +573,7 @@ std::string capabilities_json() {
                                  .raw("run_control", control)
                                  .raw("convergence", entry(interfaces::CONVERGENCE))
                                  .raw("pack", entry(interfaces::PACK))
+                                 .raw("restart_convert", entry(interfaces::RESTART_CONVERT))
                                  .str();
     return json::Object()
         .add("schema", interfaces::CAPABILITIES.name)
@@ -972,6 +993,37 @@ constexpr Command COMMANDS[] = {
         .run = mesh_convert_main,
     },
     {
+        .name = "restart convert",
+        .group = "Set up",
+        .summary = "A restart file of one gas as a restart file of another case's: another mechanism, or a flamelet table",
+        .synopsis = "mallard restart convert SOURCE -i INPUT [-o FILE] [--dry-run] [--accept-mapping RULE]",
+        .description =
+            "Converts the state of the restart file SOURCE to the gas of the case INPUT, on the same mesh, and "
+            "writes it as a restart file that starts INPUT: finite-rate chemistry of one mechanism to another, "
+            "finite-rate chemistry to a flamelet table (gas = \"flamelet\") or back. SOURCE's run block says "
+            "which gas wrote it. Pressure, temperature and velocity are kept; the species match by name; Z and C of "
+            "a table come from the composition with the table's definitions; density and energy are those of the "
+            "target's thermodynamics. Statistics, particles and the other contents of SOURCE carry over.\n"
+            "\n"
+            "A conversion that is not exact (mass of species the target lacks moved onto its species, aliases, Z or "
+            "C clamped to a table, the energy of another mechanism's thermodynamics) prints its summary and asks to "
+            "accept its mapping rule, element-projection, before writing; without a terminal it needs "
+            "--accept-mapping element-projection. --dry-run prints the summary only. The same conversion runs when "
+            "INPUT starts from SOURCE directly ([initialize] type = \"restart\", or --restart), with "
+            "[initialize.convert] accept = \"element-projection\".",
+        .options = RESTART_CONVERT_OPTIONS,
+        .arguments = RESTART_ARGUMENTS,
+        .examples = "$ mallard restart convert solut/restart_002000.restart -i fpv/input.toml --dry-run\n"
+                    "$ mallard restart convert solut/restart_002000.restart -i fpv/input.toml -o fpv/start.restart\n"
+                    "$ mallard restart convert mix.restart -i skeletal.toml --accept-mapping element-projection "
+                    "--format json",
+        .exit_status = "0  written, nothing to convert, or --dry-run\n"
+                       "1  an error, or a conversion not accepted (nothing written)\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = restart_convert_main,
+    },
+    {
         .name = "post extract",
         .group = "Post",
         .summary = "Probes, region integrals and snapshots of existing output, as the run would have written them",
@@ -1325,6 +1377,7 @@ constexpr Family FAMILIES[] = {
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
+    {"restart", "Commands on restart files."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

@@ -327,6 +327,10 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in (these two): the optically thin radiation model of the TNF workshop, `[radiation]` (the Planck-mean absorption coefficients of H2O, CO2, CO and CH4 fitted to RADCAL; `src/chemistry/radiation.h`).
 - <a id="franzelli-2012"></a>B. Franzelli, E. Riber, L. Y. M. Gicquel and T. Poinsot, Large Eddy Simulation of combustion instabilities in a lean partially premixed swirled flame, *Combust. Flame* 159, 621–637 (2012). [doi:10.1016/j.combustflame.2011.08.004](https://doi.org/10.1016/j.combustflame.2011.08.004)
   Used in: `mechanisms/ch4_bfer.yaml`, the two-step mechanism 2S-CH4-BFER (lean branch) of `examples/flame_vortex_quenching`.
+- <a id="kullback-1959"></a>S. Kullback, *Information Theory and Statistics*, Wiley (1959).
+  Used in: the rule `element-projection` of conversions between species sets, whose chi-square distance is the second-order expansion of the relative entropy of the target composition to the source's ([Converting between species sets](guide/thermochemistry.md#converting-between-species-sets); `src/chemistry/composition_map.cpp`).
+- <a id="qi-sun-1993"></a>L. Qi and J. Sun, A nonsmooth version of Newton's method, *Math. Program.* 58, 353–367 (1993). [doi:10.1007/BF01581275](https://doi.org/10.1007/BF01581275)
+  Used in: the semismooth Newton iteration on the dual of that projection.
 
 ## Lagrangian particles
 

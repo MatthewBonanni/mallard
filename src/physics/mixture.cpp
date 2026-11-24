@@ -222,6 +222,10 @@ double MixtureModel::energy(double T, const std::vector<double> & Y) const {
     return e;
 }
 
+double MixtureModel::temperature(const double e, const std::vector<double> & Y, const double T_guess) const {
+    return host_thermo.T_from_e(e, chemistry::MassFractions{Y.data()}, T_guess);
+}
+
 void MixtureModel::surrogates(double T, const std::vector<double> & Y, double & gamma, double & e0) const {
     if (tabulated()) {
         tabulated_gas->surrogates(T, Y[0], Y[1], gamma, e0);

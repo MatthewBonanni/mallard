@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -186,6 +187,17 @@ class Table {
         };
 
         /**
+         * @brief The definitions of an fpv table's control variables, from /model_data: the progress variable
+         *        C = sum_k w_k Y_k, the mixture fraction's definition ("bilger") and the mass fractions of its
+         *        fuel and oxidizer streams, each by species.
+         */
+        struct Definitions {
+            std::vector<std::pair<std::string, double>> progress_variable;
+            std::string mixture_fraction;
+            std::vector<std::pair<std::string, double>> fuel, oxidizer;
+        };
+
+        /**
          * @brief Read a table file and check it against the format and the contract of its
          *        model and thermodynamics tags. Builds for a GPU map the values from the file
          *        when its layout allows (contiguous, unfiltered, native byte order, aligned),
@@ -215,6 +227,8 @@ class Table {
         const std::string & generator() const { return m_generator; }
         /** @brief "<name> sha256:<hash>" of the mechanism the table was generated with, for the run log. */
         const std::string & mechanism() const { return m_mechanism; }
+        /** @brief The definitions of an fpv table's control variables (empty for a table from parts). */
+        const Definitions & definitions() const { return m_definitions; }
         /** @brief Whether the values are float32 (else float64). */
         bool single() const { return m_single; }
         /** @brief Whether the values are mapped from the file (GPU builds), else read into memory. */
@@ -277,6 +291,7 @@ class Table {
         Table() = default;
         void finish();                // container checks, and gathers the axes' nodes
         void check_contract() const;  // the model's and thermodynamics' axes, fields and values
+        void check_definitions() const;  // fpv: the weights name species of the block, and C = sum_k w_k Y_k
         uint32_t fpv_field() const;
         void require_axes(uint32_t d) const;
         void require_value(bool single) const;
@@ -322,6 +337,7 @@ class Table {
         std::string m_generator;
         std::string m_mechanism;
         double m_pressure = 0.0;
+        Definitions m_definitions;
 };
 
 } // namespace flamelet

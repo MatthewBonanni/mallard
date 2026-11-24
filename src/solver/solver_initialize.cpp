@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "composition_map.h"
 #include "initial_state.h"
 #include "log.h"
 #include "provenance.h"
@@ -44,6 +46,7 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
 };
 
 void Solver::init_solution() {
+    conversion.reset();
     if (state_reader) {
         apply_output_state(state_reader(*mesh));
         update_primitives();
@@ -72,6 +75,7 @@ void Solver::init_solution() {
     } else if (it->second == InitType::REMAP) {
         init_solution_remap();
     }
+    if (conversion) initial_state += "; converted from a " + conversion->source_gas + " gas";
     if (!from_file && !(it->second == InitType::CONSTANT && !layered)) {
         const InitialState state(input, *mesh, physics, mixture_model.get(), false);
         state.apply(h_conservatives, h_species, h_T_seed);
@@ -86,7 +90,7 @@ void Solver::init_solution() {
         statistics.start(t);
         probes.start_averages(t);
     }
-    if (!from_file) apply_initial_variance();
+    if (!from_file || conversion) apply_initial_variance();
     if (is_mixture() && (!from_file || layered)) init_temperature_seed();
     update_primitives();
     if (p_max.is_allocated()) update_p_max();
@@ -113,6 +117,7 @@ void Solver::init_solution_restart() {
                                  "use type = \"remap\"",
                           .docs = "docs/input.md#type--remap"});
     }
+    convert_gas(restart, file);
     apply_restart(restart, file, true);
     provenance::read_start_file("restart", file, restart.provenance, restart.step, restart.t);
     provenance::set_restart_of(provenance::find_string(restart.provenance, "run", "run_id"), file, step);
@@ -132,11 +137,41 @@ void Solver::init_solution_restart() {
 
 void Solver::init_solution_remap() {
     remap::Report report;
-    const RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
+    RestartData restart = remap::remap_restart(input, *mesh, mesh->axisymmetric, report);
     const std::string file = find_value<std::string>(input, "initialize", "file");
+    convert_gas(restart, file);
     apply_restart(restart, file, false);
     initial_state = "remap of " + file + " (step " + std::to_string(step) + ", t = " + logging::real(double(t)) +
                     "): " + remap::describe(report, restart.names);
+}
+
+void Solver::convert_gas(RestartData & restart, const std::string & file) {
+    if (!is_mixture()) return;
+    const Input & init = input.at("initialize");
+    const gas_conversion::Options options = gas_conversion::Options::from_input(init);
+    if (!gas_conversion::needed(restart, species_names)) return;
+    std::vector<double> volumes(mesh->n_cells);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) volumes[c] = static_cast<double>(mesh->h_cell_volume(c));
+    gas_conversion::Summary summary =
+        gas_conversion::convert(restart, file, options, *mixture_model, mesh->n_owned(), volumes);
+    const bool approved = conversion_approval ? conversion_approval(summary)
+                                              : summary.exact || options.accept == chemistry::CompositionMap::RULE;
+    if (!approved && conversion_approval) throw gas_conversion::Declined("conversion of " + file + " not accepted");
+    if (!approved) {
+        throw InputError(Diagnostic{
+            .key = "initialize.convert.accept",
+            .line = line_of(init),
+            .message = "is needed: restart file " + file + " holds another gas, and its conversion to this case's "
+                       "is not exact\n" + summary.text(),
+            .fix = std::string("Once the summary is acceptable, add accept = \"") + chemistry::CompositionMap::RULE +
+                   "\" to [initialize.convert] (mallard restart convert --dry-run prints the summary)",
+            .docs = "docs/guide/flamelet.md#converting-between-finite-rate-and-fpv"});
+    }
+    if (comm::is_root()) {
+        std::istringstream lines(summary.text());
+        for (std::string line; std::getline(lines, line);) logging::line(line);
+    }
+    conversion = std::move(summary);
 }
 
 void Solver::apply_restart(const RestartData & restart, const std::string & file, bool resume_output) {

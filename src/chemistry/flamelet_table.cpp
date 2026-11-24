@@ -514,16 +514,33 @@ Table Table::read(const std::string & file) {
             const Handle weights = r.group(model_data, "progress_variable", "/model_data/progress_variable");
             const std::vector<std::string> species = Reader::attribute_names(weights);
             if (species.empty()) fail(file, "its group /model_data/progress_variable has no weights");
-            for (const auto & s : species) r.number(weights, s, "/model_data/progress_variable");
+            for (const auto & s : species) {
+                t.m_definitions.progress_variable.emplace_back(s, r.number(weights, s, "/model_data/progress_variable"));
+            }
+            t.m_definitions.mixture_fraction = r.text(model_data, "mixture_fraction", "/model_data");
+            if (t.m_definitions.mixture_fraction != "bilger") {
+                fail(file, "its attribute \"mixture_fraction\" on /model_data is \"" +
+                               t.m_definitions.mixture_fraction + "\", where Mallard reads \"bilger\"");
+            }
             for (const char * s : {"fuel", "oxidizer"}) {
                 const std::string path = "/model_data/streams/" + std::string(s);
                 const Handle stream = r.group(model_data, "streams/" + std::string(s), path);
                 if (!(r.number(stream, "T", path) > 0.0)) r.missing("T", path);
                 const Handle Y = r.group(stream, "Y", path + "/Y");
+                auto & composition = std::string(s) == "fuel" ? t.m_definitions.fuel : t.m_definitions.oxidizer;
+                double sum = 0.0;
                 for (const auto & k : Reader::attribute_names(Y)) {
-                    if (!within(r.number(Y, k, path + "/Y"), Bound::FRACTION)) {
+                    const double y = r.number(Y, k, path + "/Y");
+                    if (!within(y, Bound::FRACTION)) {
                         fail(file, "the mass fraction of " + k + " in " + path + "/Y is not in [0, 1]");
                     }
+                    composition.emplace_back(k, y);
+                    sum += y;
+                }
+                if (!(std::abs(sum - 1.0) <= 1e-6)) {
+                    std::ostringstream o;
+                    o << sum;
+                    fail(file, "the mass fractions of " + path + "/Y sum to " + o.str() + ", not 1");
                 }
             }
         }
@@ -580,8 +597,46 @@ Table Table::read(const std::string & file) {
     }
     t.finish();
     t.check_contract();
+    if (t.m_model == "fpv") t.check_definitions();
     return t;
 #endif
+}
+
+void Table::check_definitions() const {
+    const std::string & where = m_where;
+    const Definitions & d = m_definitions;
+    std::vector<uint32_t> fields;
+    std::vector<double> weights;
+    for (const auto & [species, w] : d.progress_variable) {
+        const int32_t f = field("Y_" + species);
+        if (f < 0) {
+            fail(where, "its progress variable weighs " + species +
+                            ", which is not in its species block: C = sum_k w_k Y_k needs every Y_k it weighs");
+        }
+        fields.push_back(static_cast<uint32_t>(f));
+        weights.push_back(w);
+    }
+    // The stored C is the weighted sum of the stored mass fractions, to the rounding of the values
+    const size_t n_fields = m_fields.size(), C = static_cast<size_t>(field("C"));
+    const double tolerance = m_single ? 1e-6 : 1e-9;
+    with_values([&](const auto * v) {
+        double scale = 0.0;
+        for (uint64_t i = C; i < m_n_values; i += n_fields) scale = std::max(scale, std::abs(static_cast<double>(v[i])));
+        for (uint64_t node = 0; node < m_n_values / n_fields; node++) {
+            const auto * row = v + node * n_fields;
+            double sum = 0.0, magnitude = 0.0;
+            for (size_t i = 0; i < fields.size(); i++) {
+                sum += weights[i] * static_cast<double>(row[fields[i]]);
+                magnitude += std::abs(weights[i] * static_cast<double>(row[fields[i]]));
+            }
+            if (std::abs(static_cast<double>(row[C]) - sum) > tolerance * std::max(scale, magnitude)) {
+                std::ostringstream o;
+                o << "its field C (" << static_cast<double>(row[C]) << ") is not the weighted sum of its mass "
+                  << "fractions sum_k w_k Y_k (" << sum << ") of /model_data/progress_variable at node " << node;
+                fail(where, o.str());
+            }
+        }
+    });
 }
 
 int32_t Table::field(const std::string & name) const {

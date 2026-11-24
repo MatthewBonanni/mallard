@@ -83,6 +83,7 @@
   "tools/dev/catalog_inputs/2d/flamelet_transported.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
   "tools/dev/catalog_inputs/2d/profile_files.toml",
+  "tools/dev/catalog_inputs/2d/restart_convert.toml",
   "tools/dev/catalog_inputs/2d/solid_particles.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",
   "tools/dev/catalog_inputs/3d/flamelet.toml",
