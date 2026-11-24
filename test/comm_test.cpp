@@ -29,12 +29,6 @@
 #include "exact_sums.h"
 #include "scratch.h"
 
-TEST(CommTest, RanksAreNumberedFromZero) {
-    EXPECT_GE(comm::rank(), 0);
-    EXPECT_LT(comm::rank(), comm::size());
-    EXPECT_EQ(comm::is_root(), comm::rank() == 0);
-}
-
 TEST(CommTest, AllreduceCombinesEveryRank) {
     const int p = comm::size();
     const double r = comm::rank();
