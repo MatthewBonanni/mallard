@@ -1,21 +1,18 @@
 name: Test coverage map
 
-# After each push to main, the coverage map of the test suite (tools/dev/test_coverage.py):
-# for each test of the 2D and 3D suites, the files it depends on, uploaded as the artifact
-# test-coverage. A dispatch of ci.yml can then rerun only the tests a change can affect
-# (its gtest_filter input). One run at a time; a newer push replaces a waiting one.
+# Nightly on main, when main has changed since the last map, the coverage map of the test
+# suite (tools/dev/test_coverage.py): for each test of the 2D and 3D suites, the files it
+# depends on, uploaded as the artifact test-coverage. A dispatch of ci.yml can then rerun only
+# the tests a change can affect (its gtest_filter input); a map a few commits old still selects
+# correctly, it only selects more. Nightly rather than per push: the run holds a runner for up
+# to three hours, which the gate runs of PRs need during the day.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'CITATION.cff'
-      - 'LICENSE'
-      - '.github/workflows/pages.yml'
+  schedule:
+    - cron: '17 10 * * *'
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -23,7 +20,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changed:
+    runs-on: ubuntu-26.04
+    outputs:
+      mapped: ${{ steps.last.outputs.mapped }}
+    steps:
+      - id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list -R "$GITHUB_REPOSITORY" -w coverage.yml -b main -s success -L 1 \
+            --json headSha --jq '.[0].headSha // ""')
+          echo "last map: ${last:-none}; main: $GITHUB_SHA"
+          [ "$GITHUB_EVENT_NAME" != schedule ] || [ "$last" != "$GITHUB_SHA" ] || echo "mapped=true" >> "$GITHUB_OUTPUT"
   coverage:
+    needs: changed
+    if: needs.changed.outputs.mapped != 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     steps:
