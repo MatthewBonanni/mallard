@@ -49,6 +49,7 @@ struct CheckOptions {
     std::string initial;        // prefix of the initial state's snapshot (--initial), or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
+    bool geometry_only = false;  // set up and check only what the case view draws (--geometry-only)
     std::string input_file;     // named before input errors, as a run names it, or empty
     uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
     std::string memory_name;    // what it is ("A100-80GB", "40GB")
@@ -187,6 +188,8 @@ struct CheckReport {
     std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
+    std::vector<case_view::BlockInfo> view_blocks;  // and its blocks
+    bool geometry_only = false;  // the check of geometry alone (CheckOptions::geometry_only)
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 
