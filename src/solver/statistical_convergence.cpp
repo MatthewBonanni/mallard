@@ -121,7 +121,8 @@ Interval batch_means(const double * x, uint64_t n, uint32_t b, double confidence
     return batch_interval(means, m, student_t(confidence, b - 1));
 }
 
-double autocorrelation_time(const double * x, uint64_t n, double c) {
+double autocorrelation_time(const double * x, uint64_t n, double c, uint64_t * window) {
+    if (window) *window = 0;
     if (n < 2) return 1.0;
     double mean = 0.0;
     for (uint64_t i = 0; i < n; i++) mean += x[i];
@@ -138,9 +139,75 @@ double autocorrelation_time(const double * x, uint64_t n, double c) {
         double ck = 0.0;
         for (uint64_t i = 0; i + lag < n; i++) ck += y[i] * y[i + lag];
         tau += 2.0 * ck / c0;
+        if (window) *window = lag;
         if (static_cast<double>(lag) >= c * tau) break;
     }
     return tau;
+}
+
+std::vector<double> autocorrelation(const double * x, uint64_t n, uint64_t max_lag) {
+    if (n == 0) return {};
+    std::vector<double> rho(std::min(max_lag, n - 1) + 1, 0.0);
+    rho[0] = 1.0;
+    double mean = 0.0;
+    for (uint64_t i = 0; i < n; i++) mean += x[i];
+    mean /= static_cast<double>(n);
+    std::vector<double> y(n);
+    double c0 = 0.0;
+    for (uint64_t i = 0; i < n; i++) {
+        y[i] = x[i] - mean;
+        c0 += y[i] * y[i];
+    }
+    if (c0 == 0.0) return rho;
+    for (uint64_t lag = 1; lag < rho.size(); lag++) {
+        double ck = 0.0;
+        for (uint64_t i = 0; i + lag < n; i++) ck += y[i] * y[i + lag];
+        rho[lag] = ck / c0;
+    }
+    return rho;
+}
+
+void prefix_sums(const double * x, uint64_t n, std::vector<double> & s1, std::vector<double> & s2) {
+    s1.assign(1, 0.0);
+    s2.assign(1, 0.0);
+    for (uint64_t i = 0; i < n; i++) {
+        const double v = x[i] - x[0];
+        s1.push_back(s1.back() + v);
+        s2.push_back(s2.back() + v * v);
+    }
+}
+
+WindowStatistics window_statistics(const double * s1, const double * s2, double x0, uint64_t i0, uint64_t end,
+                                   uint32_t batches, double t) {
+    const double NaN = std::numeric_limits<double>::quiet_NaN();
+    WindowStatistics w{NaN, NaN, NaN, NaN, 0};
+    const uint64_t n = end - i0;
+    if (n == 0) return w;
+    const double dn = static_cast<double>(n);
+    const double shifted = (s1[end] - s1[i0]) / dn;
+    w.mean = x0 + shifted;
+    w.variance = std::max((s2[end] - s2[i0]) / dn - shifted * shifted, 0.0);
+    const uint64_t m = n / batches;
+    w.batch_size = m;
+    if (m == 0) return w;
+    std::vector<double> means(batches), variances(batches);
+    const double dm = static_cast<double>(m);
+    uint64_t a = end - batches * m;
+    for (uint32_t j = 0; j < batches; j++, a += m) {
+        const double b1 = s1[a + m] - s1[a], b2 = s2[a + m] - s2[a];
+        means[j] = b1 / dm;
+        // The batch's mean of (x - mean)^2
+        variances[j] = (b2 - 2.0 * shifted * b1) / dm + shifted * shifted;
+    }
+    w.ci = batch_interval(means, m, t).half_width;
+    w.variance_ci = batch_interval(variances, m, t).half_width;
+    return w;
+}
+
+bool converged(const WindowStatistics & w, double tau, double tolerance, double variance_tolerance) {
+    return w.batch_size > 0 && static_cast<double>(w.batch_size) >= BATCH_TAUS * tau &&
+           w.ci <= tolerance * std::fabs(w.mean) &&
+           (variance_tolerance == 0.0 || w.variance_ci <= variance_tolerance * w.variance);
 }
 
 } // namespace time_series
@@ -151,8 +218,7 @@ const std::string DOCS = "docs/guide/statistics.md#convergence-statisticsconverg
 const std::string PREFIX = "CONVERGENCE_";
 const double NaN = std::numeric_limits<double>::quiet_NaN();
 
-/** @brief Each batch spans this many autocorrelation times, so the batch means are nearly independent. */
-constexpr double BATCH_TAUS = 10.0;
+using time_series::BATCH_TAUS;
 
 } // namespace
 
@@ -370,28 +436,14 @@ void Convergence::update(double window_start) {
                     s.n_tau = n;
                     s.window_tau = s.t[i0];
                 }
-                const double dn = static_cast<double>(n);
-                const double shifted = (s.s1[end] - s.s1[i0]) / dn;
-                mean = s.x.front() + shifted;
-                variance = std::max((s.s2[end] - s.s2[i0]) / dn - shifted * shifted, 0.0);
-                n_eff = dn / s.tau;
-                const uint64_t m = n / batches;
-                if (m > 0) {
-                    std::vector<double> means(batches), variances(batches);
-                    const double dm = static_cast<double>(m);
-                    uint64_t a = end - batches * m;
-                    for (uint32_t j = 0; j < batches; j++, a += m) {
-                        const double b1 = s.s1[a + m] - s.s1[a], b2 = s.s2[a + m] - s.s2[a];
-                        means[j] = b1 / dm;
-                        // The batch's mean of (x - mean)^2
-                        variances[j] = (b2 - 2.0 * shifted * b1) / dm + shifted * shifted;
-                    }
-                    ci = time_series::batch_interval(means, m, t_quantile).half_width;
-                    variance_ci = time_series::batch_interval(variances, m, t_quantile).half_width;
-                }
-                converged = converged && m > 0 && static_cast<double>(m) >= BATCH_TAUS * s.tau &&
-                            ci <= tolerance * std::fabs(mean) &&
-                            (variance_tolerance == 0.0 || variance_ci <= variance_tolerance * variance);
+                const time_series::WindowStatistics w =
+                    time_series::window_statistics(s.s1.data(), s.s2.data(), s.x.front(), i0, end, batches, t_quantile);
+                mean = w.mean;
+                ci = w.ci;
+                variance = w.variance;
+                variance_ci = w.variance_ci;
+                n_eff = static_cast<double>(n) / s.tau;
+                converged = converged && time_series::converged(w, s.tau, tolerance, variance_tolerance);
             }
         }
         values.values.emplace_back(s.name + "_mean", mean);

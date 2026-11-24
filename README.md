@@ -93,6 +93,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
     - `mallard post derive`: derived fields
     - `mallard post extract`: probes and region integrals from existing output
     - `mallard post flame`: premixed flame position, thermal thickness, consumption and displacement speeds
+    - `mallard post signal`: spectrum, autocorrelation, windowed statistics with confidence intervals of a probe, force or integral column
     - Tab completion: bash, zsh, fish
 - Triggers on time, probes, forces, integrals: stop, write restart or snapshot, start or stop statistics, log, change a setting; steps land exactly on tested times
 - [Run report](https://matthewbonanni.github.io/mallard/docs/guide/output/#run-report-reporthtml) `report.html` per run: outcome, configuration, health, monitor plots, cost, output; self-contained ([sample](https://matthewbonanni.github.io/mallard/docs/images/guide/run_report_sample.html))

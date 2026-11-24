@@ -379,6 +379,9 @@ Pitfalls:
   close tones need a longer `length`.
 - A spectrum is not written before the history is full: a run shorter than
   `t_start + length` writes none.
+- After a run, [`mallard post signal`](output.md#spectra-and-statistics-of-a-column-mallard-post-signal)
+  computes the same spectrum of any column of a probe file, with a choice of
+  segment, overlap and detrending, and its autocorrelation and statistics.
 
 ### Region probes
 

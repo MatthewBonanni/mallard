@@ -30,6 +30,7 @@ inline constexpr Schema RUN_DIRECTORY = {"mallard-run-directory", 1}; // mallard
 inline constexpr Schema RUN_CONTROL = {"mallard-run-control", 1};     // mallard ctl, control files
 inline constexpr Schema CONVERGENCE = {"mallard-convergence", 1};     // mallard post convergence --format json
 inline constexpr Schema PACK = {"mallard-pack", 1};                   // manifest.json of mallard pack
+inline constexpr Schema SIGNAL = {"mallard-signal", 1};               // mallard post signal --format json
 
 } // namespace interfaces
 

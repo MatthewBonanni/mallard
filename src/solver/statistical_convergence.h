@@ -75,7 +75,47 @@ Interval batch_means(const double * x, uint64_t n, uint32_t b, double confidence
  *        with M >= c tau(M) (Madras and Sokal 1988); at most M = n / 2. A constant
  *        series has tau = 1.
  */
-double autocorrelation_time(const double * x, uint64_t n, double c = 5.0);
+double autocorrelation_time(const double * x, uint64_t n, double c = 5.0, uint64_t * window = nullptr);
+
+/**
+ * @brief The autocorrelations rho(k) = sum_i y_i y_{i+k} / sum_i y_i^2, y = x - mean, of the n values x at lags
+ *        k = 0 .. min(max_lag, n - 1), the sums of autocorrelation_time (1 + 2 sum rho(k) is its tau, bit for
+ *        bit); a constant series has rho(0) = 1 and the others 0.
+ */
+std::vector<double> autocorrelation(const double * x, uint64_t n, uint64_t max_lag);
+
+/** @brief Each batch spans at least this many autocorrelation times, so that the batch means are nearly independent. */
+constexpr double BATCH_TAUS = 10.0;
+
+/** @brief The statistics of a window of a series and their confidence intervals by batch means. */
+struct WindowStatistics {
+    double mean = 0.0;
+    double ci = 0.0;           // half width of the mean's interval (NaN without batches)
+    double variance = 0.0;     // the mean of (x - mean)^2
+    double variance_ci = 0.0;  // half width of the variance's interval, the batches' means of (x - mean)^2
+    uint64_t batch_size = 0;   // 0: fewer values than batches
+};
+
+/**
+ * @brief The prefix sums of x - x[0] and of its square over the n values x, s1[0] = s2[0] = 0, as a
+ *        Convergence signal's history holds them (bit for bit: this file contracts no multiply-add).
+ */
+void prefix_sums(const double * x, uint64_t n, std::vector<double> & s1, std::vector<double> & s2);
+
+/**
+ * @brief The statistics of the values [i0, end) of a series from x0, its first value, and the prefix sums s1 and
+ *        s2 of x - x0 and of its square (s1[0] = s2[0] = 0): the intervals of the latest b m values in b batches of
+ *        m = floor((end - i0) / b), t Student's t quantile with b - 1 degrees of freedom.
+ */
+WindowStatistics window_statistics(const double * s1, const double * s2, double x0, uint64_t i0, uint64_t end,
+                                   uint32_t batches, double t);
+
+/**
+ * @brief Whether a window's mean is converged, as [statistics.convergence] decides: batches of at least BATCH_TAUS
+ *        autocorrelation times tau, the mean's half width at most tolerance |mean| and, if variance_tolerance is
+ *        positive, the variance's at most variance_tolerance times the variance.
+ */
+bool converged(const WindowStatistics & w, double tau, double tolerance, double variance_tolerance);
 
 } // namespace time_series
 

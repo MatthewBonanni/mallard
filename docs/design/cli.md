@@ -34,6 +34,7 @@ Maintain  mallard test | completion | version
 | `post average` | Post | available; on `post extract`'s case setup, with the in-run [statistics](../guide/statistics.md#averages-of-saved-snapshots-mallard-post-average) |
 | `post flame` | Post | available; on `post extract`'s case setup, with the run's production rates through [statistics](../guide/statistics.md); flame surfaces planned ([#942](https://github.com/MatthewBonanni/mallard/issues/942)) |
 | `post convergence` | Post | available (scalars and `--exact` norms); norms against the finest run planned |
+| `post signal` | Post | available; on the output reader's CSV tables, with the probes' [time spectra](../guide/probes.md#time-spectra) and [`[statistics.convergence]`](../guide/statistics.md#convergence-statisticsconvergence) |
 | `post render` | Post | planned ([#516](https://github.com/MatthewBonanni/mallard/issues/516)) |
 | `pack`, `pack --verify` | Share | available; on the run record (the files a run read, the output records) |
 | `test`, `completion`, `version` (`--version`) | Maintain | available |

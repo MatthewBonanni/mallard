@@ -36,6 +36,7 @@ import limiters
 import mesh_fields
 import particles
 import post_flame
+import post_signal
 import probes
 import python
 import regions
@@ -75,6 +76,7 @@ def main():
     limiters.figures()
     particles.figures(args.mallard)
     post_flame.figures()
+    post_signal.figures()
     scaling.figures()
     schematics.figures()
     structured_blocks.figures(args.mallard)
