@@ -132,6 +132,9 @@ enum class System { SI, NONDIMENSIONAL };
 void set_system(System s);
 System system();
 
+/** @brief A dimension's units for a units line or record: its udunits, or "1" in a nondimensional case. */
+std::string of(const Dimension & d);
+
 /** @brief The unit for a units row or column: si, or "-" in a nondimensional case. */
 std::string column(const std::string & si);
 

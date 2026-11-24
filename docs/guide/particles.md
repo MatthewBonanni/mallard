@@ -93,7 +93,7 @@ n = [9, 9]
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
-and 1 more.
+and 2 more.
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -189,7 +189,8 @@ interaction = "stick"
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+and 1 more.
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
@@ -647,7 +648,8 @@ winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step).
 
 Each `[[particles.quantities]]` follows one value along every particle's
 path, for residence times, exposure (the time integral of a temperature or a
@@ -720,7 +722,8 @@ interval = 100
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step).
 
 A particle probe writes, every `interval` steps, the number of particles in
 its region and the mean, standard deviation, minimum and maximum of each field

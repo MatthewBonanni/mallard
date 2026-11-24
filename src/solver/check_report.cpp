@@ -132,11 +132,13 @@ void input_section(report::Text & text, const CheckReport & r) {
     rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, diagnostic_code::INPUT)
                                                                                         ? diagnostic_code::INPUT
                                                                                         : diagnostic_code::SETUP)
-                                             : "completed: mesh, partition, boundaries, numerics, initial state"}});
+                                             : r.geometry_only ? "completed, geometry only: mesh, partition, boundaries, regions, probes"
+                                                               : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
                      n_unused ? count(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
-                              : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
+                     : r.geometry_only ? "not checked: a geometry-only setup reads only the keys of what it draws"
+                     : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
                      n_deprecated ? count(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
@@ -227,11 +229,11 @@ void regions_section(report::Text & text, const CheckReport & r) {
             lo += (i ? ", " : "(") + logging::real(g.box[0][i]);
             hi += (i ? ", " : "(") + logging::real(g.box[1][i]);
         }
-        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")", "m"}});
+        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")"}});
     }
     if (!boxes.empty()) {
         text.note("Regions from surface files (STL, OBJ): their bounding box, placed and in meters.");
-        text.table({"region", "from", "to", {"units", Kind::UNITS}}, boxes);
+        text.table({"region", "from (m)", "to (m)"}, boxes);
     }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
@@ -705,7 +707,7 @@ std::string check_text(const CheckReport & r, const bool color) {
         resolution_section(text, r);
         if (r.bytes > 0) memory_section(text, r);
         sizing_section(text, r);
-        if (r.setup_done) cost_section(text, r);
+        if (r.setup_done && !r.geometry_only) cost_section(text, r);
     }
     if (r.environment.checked) environment_section(text, r);
     diagnostics_section(text, r);
@@ -815,6 +817,10 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.add("geometry_only", r.geometry_only);
+    std::vector<std::string> view_files = r.view_images;
+    if (!r.view_file.empty()) view_files.insert(view_files.begin(), r.view_file);
+    o.raw("view", r.view_file.empty() ? "null" : case_view::json(view_files, r.view_blocks, r.geometry_only));
     o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
