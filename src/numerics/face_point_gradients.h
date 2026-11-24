@@ -55,18 +55,19 @@ KOKKOS_INLINE_FUNCTION constexpr Monomial<DEG> monomial(const uint32_t l) {
 }  // namespace face_point_gradients
 
 /**
- * @brief At every face quadrature point, the gradients of u and T of each
- *        side's central polynomial, which TENO's smooth passes evaluate while
- *        they hold the coefficients and ViscousFluxFunctor reads.
- *        values(face, slot, side, var) packs the NQ x N_DIM values of each
- *        point into slots of N_CONSERVATIVE, so that a FaceExchange sends a
- *        face side as it sends face states. NaN in a side's first value marks
+ * @brief At every face quadrature point, the values and gradients of u and T
+ *        of each side's polynomial, which TENO's smooth passes evaluate while
+ *        they hold the coefficients (near walls, its wall fits: TENO::wall_fits)
+ *        and ViscousFluxFunctor reads.
+ *        values(face, slot, side, var) packs the NQ x (N_DIM + 1) numbers of
+ *        each point into slots of N_CONSERVATIVE, so that a FaceExchange sends
+ *        a face side as it sends face states. NaN in a side's first value marks
  *        a cell without a usable polynomial: troubled, or with face values
  *        that fall back to its mean.
  */
 struct FacePointGradients {
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
-    static constexpr uint8_t PER_POINT = NQ * N_DIM;
+    static constexpr uint8_t PER_POINT = NQ * (N_DIM + 1);
 
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> values;
     rtype R = 0.0_r;
@@ -87,23 +88,26 @@ struct FacePointGradients {
         values(f, 0, side, 0) = Kokkos::Experimental::quiet_NaN_v<rtype>;
     }
 
+    /** @brief The values v and gradients g (g[k][i] = d v_k / d x_i) of v = [u, T] of side `side` of face f at point q. */
     KOKKOS_INLINE_FUNCTION
-    void load(const uint32_t f, const uint8_t q, const uint8_t side, rtype g[NQ][N_DIM]) const {
+    void load(const uint32_t f, const uint8_t q, const uint8_t side, rtype v[NQ], rtype g[NQ][N_DIM]) const {
         const uint32_t j0 = uint32_t(q) * PER_POINT;
         for (uint8_t k = 0; k < NQ; k++) {
+            v[k] = values(f, (j0 + k) / N_CONSERVATIVE, side, (j0 + k) % N_CONSERVATIVE);
             FOR_I_DIM {
-                const uint32_t j = j0 + k * N_DIM + i;
+                const uint32_t j = j0 + NQ + k * N_DIM + i;
                 g[k][i] = values(f, j / N_CONSERVATIVE, side, j % N_CONSERVATIVE);
             }
         }
     }
 
     KOKKOS_INLINE_FUNCTION
-    void store(const uint32_t f, const uint8_t q, const uint8_t side, const rtype g[NQ][N_DIM]) const {
+    void store(const uint32_t f, const uint8_t q, const uint8_t side, const rtype v[NQ], const rtype g[NQ][N_DIM]) const {
         const uint32_t j0 = uint32_t(q) * PER_POINT;
         for (uint8_t k = 0; k < NQ; k++) {
+            values(f, (j0 + k) / N_CONSERVATIVE, side, (j0 + k) % N_CONSERVATIVE) = v[k];
             FOR_I_DIM {
-                const uint32_t j = j0 + k * N_DIM + i;
+                const uint32_t j = j0 + NQ + k * N_DIM + i;
                 values(f, j / N_CONSERVATIVE, side, j % N_CONSERVATIVE) = g[k][i];
             }
         }
@@ -128,6 +132,13 @@ struct FacePointGradients {
         [&]<uint32_t... L>(std::integer_sequence<uint32_t, L...>) {
             (add_monomial<DEG, L>(p, b, dU), ...);
         }(std::make_integer_sequence<uint32_t, NK>{});
+    }
+
+    /** @brief Values v = [u, T] at face state W = [rho, u, p]. */
+    KOKKOS_INLINE_FUNCTION
+    void primitive_value(const rtype * W, rtype v[NQ]) const {
+        for (uint8_t k = 0; k < N_DIM; k++) v[k] = W[1 + k];
+        v[N_DIM] = W[N_DIM + 1] / (W[0] * R);
     }
 
     /**

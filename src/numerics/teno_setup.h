@@ -310,6 +310,12 @@ class SetupHandle {
         std::unique_ptr<std::conditional_t<N_DIM == 2, Setup2D, Setup3D>> impl;
 };
 
+/**
+ * @brief Least-squares pseudo-inverse of the m x n matrix A (row-major) as TENO's tables take theirs: on return
+ *        P(l, s) = X[s * n + l]. False if A is rank deficient or its condition number exceeds max_condition.
+ */
+bool least_squares_inverse(std::vector<double> A, int m, int n, double max_condition, std::vector<double> & X);
+
 /** @brief The terms of every smoothness-matrix entry of the given degree, in the order the setup sums them. */
 teno::SmoothnessTerms smoothness_terms(uint8_t degree);
 

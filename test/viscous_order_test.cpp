@@ -89,6 +89,9 @@ const std::string U[3] = {"0.3 * sin(2 * pi * y) + 0.1 * cos(2 * pi * (x + y - z
                           "0.15 * sin(2 * pi * (x - z)) + 0.1 * cos(2 * pi * y)"};
 const std::string P = "1 + 0.1 * cos(2 * pi * x) * cos(2 * pi * (y - z))";
 
+/** @brief A manufactured state: u and T (R = 1) with their gradients at x. */
+using ExactState = void (*)(const double * x, Dual * u, Dual & T);
+
 /** @brief u and T (R = 1) with their gradients at x. */
 void exact(const double * x, Dual * u, Dual & T) {
     Dual X[3];
@@ -106,10 +109,68 @@ void exact(const double * x, Dual * u, Dual & T) {
     T = p / rho;
 }
 
+/** @brief X = (x, y, z) as duals, z = 0 in 2D. */
+void coordinates(const double * x, Dual * X) {
+    for (size_t i = 0; i < 3; i++) {
+        X[i].v = i < N_DIM ? x[i] : 0.0;
+        if (i < N_DIM) X[i].d[i] = 1.0;
+    }
+}
+
+/**
+ * @brief A state between walls at y = 0 (isothermal, T = 1, at rest) and y = 1 (adiabatic, moving at u_x =
+ *        0.1), periodic along x and z, with nonzero second normal derivatives of u and T at both walls: the
+ *        odd reflection of TENO's mirror images is not smooth there.
+ */
+void exact_walls(const double * x, Dual * u, Dual & T) {
+    Dual X[3];
+    coordinates(x, X);
+    const double k = 2.0 * PI;
+    const Dual y = X[1], b = y * (1.0 + (-1.0) * y);  // y (1 - y)
+    const Dual uu[3] = {0.1 * y + 0.3 * b * (1.0 + 0.2 * cos(k * (X[0] + X[2]))), 0.1 * b * b * sin(k * X[0]),
+                        0.2 * b * sin(k * X[2])};
+    for (size_t i = 0; i < N_DIM; i++) u[i] = uu[i];
+    T = 1.0 + 0.1 * (y + (-0.5) * y * y) * (1.0 + 0.3 * sin(k * X[0]));
+}
+
+/** @brief A state symmetric about y = 0 (a symmetry plane) with an isothermal wall at rest at y = 1 (T = 1). */
+void exact_symmetry(const double * x, Dual * u, Dual & T) {
+    Dual X[3];
+    coordinates(x, X);
+    const double k = 2.0 * PI;
+    const Dual b = 1.0 + (-1.0) * X[1] * X[1];  // 1 - y^2
+    const Dual uu[3] = {0.3 * b * (1.0 + 0.2 * cos(k * (X[0] + X[2]))), 0.1 * X[1] * b * b * sin(k * X[0]),
+                        0.2 * b * sin(k * X[2])};
+    for (size_t i = 0; i < N_DIM; i++) u[i] = uu[i];
+    T = 1.0 + 0.1 * b * (1.0 + 0.3 * sin(k * X[0]));
+}
+
+/** @brief A case of wall_residual_error: its boundaries at y = 0 and 1, and its exact state. */
+struct WallCase {
+    std::string boundaries;
+    std::string u[3], T;
+    ExactState state;
+};
+
+const WallCase WALLS = {"[[boundaries]]\nname = \"bottom\"\ntype = \"wall_isothermal\"\nT = 1.0\n"
+                        "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\nu = [0.1, 0.0" +
+                            std::string(N_DIM == 3 ? ", 0.0" : "") + "]\n",
+                        {"0.1 * y + 0.3 * y * (1 - y) * (1 + 0.2 * cos(2 * pi * (x + z)))",
+                         "0.1 * (y * (1 - y))^2 * sin(2 * pi * x)", "0.2 * y * (1 - y) * sin(2 * pi * z)"},
+                        "1 + 0.1 * (y - 0.5 * y^2) * (1 + 0.3 * sin(2 * pi * x))",
+                        exact_walls};
+const WallCase SYMMETRY = {"[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n"
+                           "[[boundaries]]\nname = \"top\"\ntype = \"wall_isothermal\"\nT = 1.0\n",
+                           {"0.3 * (1 - y^2) * (1 + 0.2 * cos(2 * pi * (x + z)))",
+                            "0.1 * y * (1 - y^2)^2 * sin(2 * pi * x)", "0.2 * (1 - y^2) * sin(2 * pi * z)"},
+                           "1 + 0.1 * (1 - y^2) * (1 + 0.3 * sin(2 * pi * x))",
+                           exact_symmetry};
+const std::string RHO_WALLS = "1 + 0.05 * sin(2 * pi * x) * cos(pi * y)";
+
 /** @brief Viscous flux (momentum, energy) through a surface of unit normal n at x. */
-std::array<double, N_CONSERVATIVE> exact_flux(const double * x, const double * n) {
+std::array<double, N_CONSERVATIVE> exact_flux(const double * x, const double * n, ExactState state = exact) {
     Dual u[N_DIM], T;
-    exact(x, u, T);
+    state(x, u, T);
     const double kappa = MU * GAMMA / (GAMMA - 1.0) / PR;
     double div = 0.0;
     for (size_t i = 0; i < N_DIM; i++) div += u[i].d[i];
@@ -129,7 +190,7 @@ const double GW[6] = {0.1713244923791704, 0.3607615730481386, 0.4679139345726910
                       0.4679139345726910, 0.3607615730481386, 0.1713244923791704};
 
 /** @brief int F . n over face f of the mesh, n out of cell c. */
-std::array<double, N_CONSERVATIVE> face_integral(const Mesh & m, uint32_t f, uint32_t c) {
+std::array<double, N_CONSERVATIVE> face_integral(const Mesh & m, uint32_t f, uint32_t c, ExactState state = exact) {
     double n[N_DIM];
     const double sign = m.h_cells_of_face(f, 0) == int32_t(c) ? 1.0 : -1.0;
     double norm = 0.0;
@@ -153,7 +214,7 @@ std::array<double, N_CONSERVATIVE> face_integral(const Mesh & m, uint32_t f, uin
     }
     std::array<double, N_CONSERVATIVE> sum{};
     auto add = [&](const double * x, double w) {
-        const auto F = exact_flux(x, n);
+        const auto F = exact_flux(x, n, state);
         for (size_t v = 0; v < N_CONSERVATIVE; v++) sum[v] += w * F[v];
     };
     if constexpr (N_DIM == 2) {
@@ -241,6 +302,59 @@ double viscous_residual_error(const std::string & mesh, uint32_t n, uint32_t ord
     return sum / (m.n_owned() * (N_CONSERVATIVE - 1));
 }
 
+std::string walls_input(const WallCase & w, const std::string & mesh, uint32_t n, uint32_t order, double mu,
+                        const std::string & gradients) {
+    std::ostringstream s;
+    s.precision(17);
+    s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = " << n << "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n" << w.boundaries
+      << "[initialize]\ntype = \"analytical\"\nn_subdivisions = " << (N_DIM == 2 ? 8 : 2) << "\nrho = \""
+      << expr(RHO_WALLS) << "\"\nu = [";
+    for (size_t i = 0; i < N_DIM; i++) s << (i ? ", " : "") << "\"" << expr(w.u[i]) << "\"";
+    s << "]\np = \"(" << expr(RHO_WALLS) << ") * (" << expr(w.T) << ")\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = " << mu
+      << "\nPr = " << PR << "\n[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n";
+    if (!gradients.empty()) s << "viscous_gradients = \"" << gradients << "\"\n";
+    s << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    return s.str();
+}
+
+/**
+ * @brief Mean error over the cells at the boundaries of case w, and over momentum and energy, of the viscous
+ *        residual at the exact cell averages: the residual at viscosity 2 MU minus that at MU, which cancels
+ *        the convective terms, against the exact cell averages of the divergence of the viscous flux.
+ */
+double wall_residual_error(const WallCase & w, const std::string & mesh, uint32_t n, uint32_t order,
+                           const std::string & gradients) {
+    Solver once, twice;
+    once.set_distributed(false);
+    twice.set_distributed(false);
+    once.init(parse_toml(walls_input(w, mesh, n, order, MU, gradients)));
+    twice.init(parse_toml(walls_input(w, mesh, n, order, 2.0 * MU, gradients)));
+    const auto a = rhs_of(twice), b = rhs_of(once);
+    const Mesh & m = *once.get_mesh();
+    double sum = 0.0;
+    uint32_t n_wall = 0;
+    for (uint32_t c = 0; c < m.n_owned(); c++) {
+        std::array<double, N_CONSERVATIVE> total{};
+        bool wall = false;
+        for (uint32_t k = m.h_offsets_faces_of_cell(c); k < m.h_offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t f = m.h_faces_of_cell(k);
+            wall = wall || m.h_cells_of_face(f, 1) < 0;
+            const auto F = face_integral(m, f, c, w.state);
+            for (size_t v = 0; v < N_CONSERVATIVE; v++) total[v] += F[v];
+        }
+        if (!wall) continue;
+        n_wall++;
+        const double V = double(m.h_cell_volume(c));
+        for (size_t v = 1; v < N_CONSERVATIVE; v++) sum += std::abs(a[c][v] - b[c][v] - total[v] / V);
+    }
+    return sum / (n_wall * (N_CONSERVATIVE - 1));
+}
+
 /**
  * @brief Mean error of the momentum of a decaying shear wave at t = 0.025:
  *        u = A e sin(k . x) exp(-nu |k|^2 t) with k = 2 pi (1, 1), e
@@ -322,6 +436,28 @@ TEST(ViscousOrder, ShearWaveWithReconstructionGradientsConvergesAtDesignOrder) {
     for (const double k : n) e.push_back(shear_wave_error(mesh, uint32_t(k), 4, "reconstruction"));
     verification::expect_order({"viscous", "TENO4, reconstruction gradients", verification::cells_of(mesh),
                                 "mean momentum error, decaying shear wave", n, e, 4.0, 3.5});
+}
+
+TEST_P(ViscousOrder, ResidualAtWallsAndSymmetryPlanesOfReconstructionGradientsConverges) {
+    // Curved profiles at an isothermal wall and a moving adiabatic one, and at a symmetry plane: face
+    // gradients of order 4 (TENO5), whose error the residual divides by h, from the wall fits and the
+    // symmetry cells' polynomials; least squares does not converge there. Quadrilaterals and hexahedra fit
+    // the density of the first cell layer a degree lower, which the temperature gradients next to the
+    // adiabatic wall lose
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const std::string mesh = GetParam();
+    const bool simplices = mesh != "cartesian";
+    const std::vector<double> n = N_DIM == 2 ? std::vector<double>{16, 32} : std::vector<double>{8, 16};
+    for (const auto & [w, name, design, min] :
+         {std::tuple{WALLS, "walls", simplices ? 3.0 : 2.0, simplices ? 2.5 : 1.6},
+          std::tuple{SYMMETRY, "a symmetry plane and a wall", 3.0, 2.3}}) {
+        std::vector<double> e;
+        for (const double k : n) e.push_back(wall_residual_error(w, mesh, uint32_t(k), 5, "reconstruction"));
+        verification::expect_order({"viscous", "TENO5, reconstruction gradients", verification::cells_of(mesh),
+                                    std::string("mean viscous residual error next to ") + name +
+                                        ", manufactured solution",
+                                    n, e, design, min});
+    }
 }
 
 namespace {
@@ -439,7 +575,6 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     f.face_shift = decltype(f.face_shift)("face_shift", 1);
     f.periodic.shifts = decltype(f.periodic.shifts)("shifts", 1);
     f.face_flux = decltype(f.face_flux)("face_flux", 1);
-    f.face_solution = decltype(f.face_solution)("face_solution", 1, 1);
     f.quad_weights = decltype(f.quad_weights)("quad_weights", 1);
     f.face_weights = share_face_weights("face_weights", 1, 1, [](uint32_t, rtype * w) { w[0] = 2.0_r; });
     f.point_gradients.values = decltype(f.point_gradients.values)("point_gradients", 1, FacePointGradients::n_slots(1));
@@ -447,7 +582,6 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     auto h_area = Kokkos::create_mirror_view(f.face_area);
     auto h_coords = Kokkos::create_mirror_view(f.cell_coords);
     auto h_cells = Kokkos::create_mirror_view(f.cells_of_face);
-    auto h_W = Kokkos::create_mirror_view(f.face_solution);
     FOR_I_DIM {
         h_normals(0, i) = rtype(2.0 * n[i]);
         h_coords(0, i) = 0.0_r;
@@ -456,16 +590,21 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     h_area(0) = rtype(area);
     h_cells(0, 0) = 0;
     h_cells(0, 1) = 1;
-    for (uint8_t k = 0; k < 2; k++) {
-        h_W(0, 0, k, 0) = rtype(rho[k]);
-        FOR_I_DIM h_W(0, 0, k, 1 + i) = rtype(u[k][i]);
-        h_W(0, 0, k, N_DIM + 1) = rtype(p[k]);
-    }
+    const FacePointGradients points = f.point_gradients;
+    const rtype T[2] = {rtype(p[0] / rho[0]), rtype(p[1] / rho[1])};
+    const rtype v[2][3] = {{rtype(u[0][0]), rtype(u[0][1]), rtype(u[0][2])}, {rtype(u[1][0]), rtype(u[1][1]), rtype(u[1][2])}};
+    Kokkos::parallel_for("face_0_points", 1, KOKKOS_LAMBDA(const int) {
+        for (uint8_t k = 0; k < 2; k++) {
+            rtype q[FacePointGradients::NQ], g[FacePointGradients::NQ][N_DIM] = {};
+            FOR_I_DIM q[i] = v[k][i];
+            q[N_DIM] = T[k];
+            points.store(0, 0, k, q, g);
+        }
+    });
     Kokkos::deep_copy(f.normals, h_normals);
     Kokkos::deep_copy(f.face_area, h_area);
     Kokkos::deep_copy(f.cell_coords, h_coords);
     Kokkos::deep_copy(f.cells_of_face, h_cells);
-    Kokkos::deep_copy(f.face_solution, h_W);
     Kokkos::deep_copy(f.quad_weights, 2.0_r);
     const auto flux = flux_of_face_0(f);
 

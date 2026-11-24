@@ -365,9 +365,33 @@ between two cells TENO finds smooth takes the gradients of the two cells'
 TENO polynomials at its quadrature points instead. That is order `order - 1`
 for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
 
+Walls and symmetry planes take polynomial gradients too:
+
+- **Walls.** TENO's stencils near a wall hold mirror images of cells, whose
+  velocity (and, at isothermal walls, temperature) is reflected oddly about
+  the wall's value. That reflection is smooth only where the second normal
+  derivatives vanish, so the polynomials of those cells give first-order
+  gradients. For the viscous flux, every cell whose stencil mirrors cells
+  across a wall takes a one-sided least-squares fit instead: its stencil's
+  own cells, plus the wall velocity (and isothermal temperature) at the
+  quadrature points of the walls it mirrored across. On the wall faces the
+  fit's gradients, with the jump from its values to the wall's as on interior
+  faces, give the shear stress and the heat flux; adiabatic and heat-flux
+  walls keep their prescribed heat flux.
+- **First cell layer.** On quadrilaterals and hexahedra, the first layer of
+  cells at a wall sees one cell layer too few without the mirror images, so
+  its fit of the density drops a degree. Velocity gradients and isothermal
+  walls' temperature gradients keep their order; next to adiabatic and
+  heat-flux walls the temperature gradients there lose one.
+- **Corners.** Cells whose stencils mirror across walls of different
+  conditions keep their TENO polynomial, and their wall faces least squares.
+- **Symmetry planes** take the cell's polynomial, whose mirror images are
+  exact for a symmetric flow, and keep the normal stress only.
+- Inflow, outflow and transmissive faces keep least squares.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials, and at walls from one-sided fits (TENO4 or higher, single gas, planar runs) |
 
 Two convergence studies on periodic boxes of every cell type
 (`tools/docs/viscous_gradients.py`) compare the two paths against their design

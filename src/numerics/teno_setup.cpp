@@ -5568,4 +5568,11 @@ std::array<double, 9> ranking_metric(const Mesh & mesh, const Kokkos::View<int32
     return spacing_metric(spread);
 }
 
+bool least_squares_inverse(std::vector<double> A, const int m, const int n, const double max_condition,
+                           std::vector<double> & X) {
+    if (m < n || n > teno::MAX_NK) return false;
+    X.assign(size_t(m) * size_t(std::max(m, n)), 0.0);
+    return pseudo_inverse(Lane<double>{A.data(), 1}, Lane<double>{X.data(), 1}, m, n, max_condition);
+}
+
 }  // namespace teno_setup
