@@ -1,0 +1,97 @@
+# The flow of particle_step: a planar backward-facing step of height H = 1 and
+# expansion ratio 5:3 (the geometry of Fessler & Eaton 1999) fed with laminar
+# channel flow of centerline velocity U0 = 0.3 (Mach 0.3) at Re_H = 3000, run
+# until the separated shear layer sheds vortices steadily. Its restart file is
+# where input.toml seeds the particles. Generate the mesh first:
+#   python make_step_mesh.py step.msh
+# Nondimensionalization: step height 1, inlet density and sound speed 1, so
+# mu = U0 H / Re_H.
+
+[run]
+t_stop = 250.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "step.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+u = ["y > 1 ? 0.5333333333333333 * (y - 1) * (2.5 - y) : 0", "0"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "inlet"
+type = "inlet_state"
+u = ["0.5333333333333333 * (y - 1) * (2.5 - y)", "0"]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[boundaries.nscbc]
+L = 42.0
+
+[[boundaries]]
+name = "outlet"
+type = "outlet_pressure"
+p = 0.7142857142857143
+
+[boundaries.nscbc]
+L = 42.0
+
+[[boundaries]]
+name = "wall"
+type = "wall_adiabatic"
+
+# A weak transverse forcing at the lip of the step, at the frequency of the
+# shear layer's vortices (f H / U0 = 0.16), locks their roll-up in place of
+# the experiment's turbulent inflow
+[[sources]]
+name = "lip_forcing"
+rhou = ["0", "0.003 * sin(0.30159289474462014 * t) * exp(-((x + 0.3)^2 + (y - 1.15)^2) / 0.02)"]
+
+# Damps the eddies before the outlet, toward the channel flow of the same flux
+[[sponges]]
+strength = "x > 22 ? 0.2 * ((x - 22) / 8)^2 : 0"
+u = ["0.1152 * y * (2.5 - y)", "0"]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 1.0e-4
+Pr = 0.72
+
+[output]
+check_interval = 1000
+
+[[probes]]
+name = "shear_layer"
+point = [4.0, 1.0]
+fields = ["U_Y"]
+interval = 10
+file = "./solut/probe_shear_layer.csv"
+
+[[write_data]]
+prefix = "./solut/flow"
+format = "restart"
+time_interval = 250.0
+
+[[write_data]]
+prefix = "./solut/step"
+format = "vtu"
+time_interval = 10.0
+fields = ["VORTICITY", "U"]
