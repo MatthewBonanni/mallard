@@ -11,13 +11,17 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "cli.h"
 #include "comm.h"
+#include "commands.h"
 #include "data_paths.h"
 #include "field_units.h"
 #include "output_reader.h"
@@ -218,6 +222,47 @@ std::string channel(const std::string & dir) {
     }
 #endif
     return s.str();
+}
+
+
+/** @brief A channel with forces, probes with reductions, spectra and a restart file, in the given units. */
+std::string units_case(const std::string & dir, const std::string & system) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 2\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\np = \"1.0\"\nu = "
+      << (N_DIM == 3 ? "[\"0.5\", \"0.0\", \"0.0\"]" : "[\"0.5\", \"0.0\"]") << "\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nunits = \"" << system
+      << "\"\n[output]\nrun_log = \"\"\n"
+      << "[statistics]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*P\"]\n"
+      << "[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*P\"]\nfile = \"" << dir << "/spectra.csv\"\n"
+      << "[[forces]]\nzone = \"bottom\"\nfile = \"" << dir << "/forces.csv\"\n"
+      << "[[probes]]\nname = \"point\"\nfile = \"" << dir << "/point.csv\"\npoint = " << SIDE_POINT
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\n"
+      << "[[probes]]\nname = \"line\"\nfile = \"" << dir << "/line.csv\"\nstart = "
+      << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = " << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]")
+      << "\nn_points = 4\nfields = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "reductions_file = \"" << dir << "/line_reductions.csv\"\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    return s.str();
+}
+
+/** @brief Runs mallard post extract on words, quietly. */
+int post_extract_quietly(const std::vector<std::string> & words) {
+    cli::Args args;
+    std::string error;
+    EXPECT_TRUE(cli::parse(*cli::command("post extract"), words, args, error)) << error;
+    std::ostringstream report;
+    std::streambuf * out = std::cout.rdbuf(report.rdbuf());
+    const int status = post_extract(args);
+    std::cout.rdbuf(out);
+    comm::barrier();
+    return status;
 }
 
 } // namespace
@@ -678,4 +723,63 @@ TEST(FieldUnitsTest, CatalogGroupsHoldEveryNamedField) {
     std::vector<size_t> ranks;
     for (const CatalogField & f : field_units::catalog()) ranks.push_back(field_units::group_rank(f.group));
     EXPECT_TRUE(std::is_sorted(ranks.begin(), ranks.end()));
+}
+
+TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsLines) {
+    // The run log gives "1" for every physical quantity of a nondimensional case; so must every CSV file
+    for (const std::string system : {"nondimensional", "SI"}) {
+        const std::string dir = (scratch_dir() / ("mallard_units_" + system)).string();
+        const std::string extracted = dir + "/extract";
+        if (comm::is_root()) std::filesystem::remove_all(dir);
+        comm::barrier();
+        {
+            Solver solver;
+            solver.init(parse_toml(units_case(dir, system)));
+            solver.run();
+        }
+        comm::barrier();
+        ASSERT_EQ(post_extract_quietly({dir + "/restart_000002.restart", "-o", extracted}), 0) << system;
+        if (!comm::is_root()) continue;
+        std::map<std::string, std::map<std::string, std::string>> files;
+        for (const char * name : {"/forces.csv", "/point.csv", "/line.csv", "/line_reductions.csv"}) {
+            files[name] = csv_units(dir + name);
+        }
+        for (const char * name : {"/point.csv", "/line.csv", "/line_reductions.csv"}) {
+            files[std::string("/extract") + name] = csv_units(extracted + name);
+        }
+        std::map<std::string, std::string> spectra;
+        {
+            std::ifstream in(dir + "/spectra.csv");
+            bool header = true;
+            for (std::string row; std::getline(in, row);) {
+                if (row.empty() || row[0] == '#') continue;
+                if (!std::exchange(header, false)) {
+                    const auto cells = split(row, ',');
+                    spectra[cells[0] + " " + cells[1]] = cells.back();
+                }
+            }
+        }
+        if (system == "nondimensional") {
+            for (const auto & [file, units] : files) {
+                ASSERT_FALSE(units.empty()) << file;
+                for (const auto & [column, unit] : units) EXPECT_EQ(unit, "1") << file << ": " << column;
+            }
+            for (const auto & [row, unit] : spectra) EXPECT_EQ(unit, "1") << "spectra.csv: " << row;
+        } else {
+            for (const char * file : {"/point.csv", "/extract/point.csv"}) {
+                EXPECT_EQ(files[file]["step"], "1") << file;
+                EXPECT_EQ(files[file]["t"], "s") << file;
+                EXPECT_EQ(files[file]["x"], "m") << file;
+                EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
+            }
+            for (const char * file : {"/line.csv", "/extract/line.csv"}) {
+                EXPECT_EQ(files[file]["x"], "m") << file;
+                EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
+            }
+            EXPECT_EQ(files["/line_reductions.csv"]["length"], "m");
+            EXPECT_EQ(files["/extract/line_reductions.csv"], files["/line_reductions.csv"]);
+            EXPECT_EQ(files["/forces.csv"]["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
+            EXPECT_EQ(spectra["mean P"], "kg m-1 s-2");
+        }
+    }
 }
