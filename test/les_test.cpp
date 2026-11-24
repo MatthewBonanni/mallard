@@ -627,7 +627,9 @@ TEST(LESReconstructionGradients, ViscousReconstructionGradientsCarryTheModelsThr
             const auto grid = solver->get_mesh();
             State rhs("rhs", grid->n_cells, 0);
             solver->calc_rhs(solver->state(), rhs, 0.0_r);
-            const auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+            // A copy: on host backends a mirror view is the view itself, which the state's pass overwrites
+            const auto g = Kokkos::create_mirror(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+            Kokkos::deep_copy(g, solver->get_les_velocity_gradients());
             solver->eddy_viscosity_of_state(grid->n_cells);
             solver->copy_device_to_host();
             const auto mu_t = solver->get_les_coefficients();
