@@ -1366,15 +1366,18 @@ void DataWriter::write_restart_distributed(const std::string & filename, const B
             block.clear();
         }
         const bool root = comm::is_root();
+        std::vector<char> trailer = root ? restart_trailers(snapshot.json()) : std::vector<char>();
         if (root) {
             const int fd = ::open(filename.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0644);
             if (fd < 0) throw cannot_write("the restart file", filename);
-            ::close(fd);
+            const uint64_t size = offsets.back() + ordered.total * (sizeof(uint64_t) + W * sizeof(rtype)) + trailer.size();
+            const bool sized = ::ftruncate(fd, static_cast<off_t>(size)) == 0;
+            if (::close(fd) != 0 || !sized) throw cannot_write("the restart file", filename);
         }
         comm::barrier();
         auto job = [this, filename, root, header = std::move(header), table = std::move(table),
                     offsets = std::move(offsets), block = std::move(block), chunks, ordered,
-                    trailer = root ? restart_trailers(snapshot.json()) : std::vector<char>()]() {
+                    trailer = std::move(trailer)]() {
             const int fd = ::open(filename.c_str(), O_WRONLY);
             if (fd < 0) throw cannot_write("the restart file", filename);
             uint64_t written = 0;
