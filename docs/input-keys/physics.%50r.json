@@ -19,6 +19,8 @@
   "examples/flame_turbulence/hit.toml",
   "examples/heated_wall/input.toml",
   "examples/isotropic_turbulence/input.toml",
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/pulsed_jet/input.toml",
   "examples/taylor_green_3d/coarse.toml",

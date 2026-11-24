@@ -199,6 +199,18 @@ struct InputError : std::runtime_error {
     const char * code = diagnostic_code::INPUT;
 };
 
+/**
+ * @brief Throws an InputError (E-KEY-UNUSED) listing the keys no setup code
+ *        read, if there are any: once the setup has read every key it takes.
+ */
+void reject_unused_keys(const Input & input);
+
+/**
+ * @brief The unused keys with a suggestion, for an error that stopped the setup:
+ *        "\npossibly misspelled:\n  line 3: mesh.Nxx (did you mean mesh.Nx?)", or empty.
+ */
+std::string possibly_misspelled(const Input & input);
+
 /** @brief A required key that is absent: names it, the line of its table, and its docs. */
 InputError missing_key(const Input & table, const std::string & key, const std::string & fix = "");
 

@@ -427,6 +427,24 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("cannot read the file.").what()), "cannot read the file.");
 }
 
+TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
+    const std::string input =
+        replaced(replaced(box(), "[initialize]\n", "[initialize]\ntype = \"analytical\"\n"), "T = 1.0", "T = \"(1 + x\"");
+    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"(1 + x\": expected ')'",
+                                    "at position 7", "See docs/guide/expressions.md."});
+    CheckOptions options;
+    options.input_file = "case.toml";
+    Solver solver;
+    const CheckReport report = solver.check(parse_input_string(input), options);
+    ASSERT_EQ(report.errors().size(), 1u);
+    EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+    const std::string dirichlet =
+        replaced(box(), "name = \"left\"\ntype = \"symmetry\"\n",
+                 std::string("name = \"left\"\ntype = \"dirichlet\"\nrho = \"(1 + y\"\np = 1.0\nu = [1.0, 0.0") +
+                     (N_DIM == 3 ? ", 0.0" : "") + "]\n");
+    expect_parts(run_error(dirichlet), {line_prefix(dirichlet, "rho = \"") + "left.rho: \"(1 + y\": expected ')'"});
+}
+
 TEST(ErrorMessages, DataFileErrorsLinkTheDocsOfTheKeyThatReadsThem) {
     const std::filesystem::path previous = std::filesystem::current_path();
     std::filesystem::current_path(scratch_dir());
