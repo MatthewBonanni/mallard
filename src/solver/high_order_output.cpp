@@ -216,7 +216,7 @@ void HighOrderOutput::update(FaceReconstruction & reconstruction, Kokkos::View<r
                     }
                     FOR_I_CONSERVATIVE W(p, i) = W_cells(c, i);
                 });
-                reconstruction.point_values(W_cells, cells, offsets, W, true);
+                reconstruction.point_values(W_cells, cells, offsets, W, true, false);
                 gated::parallel_for("high_order_fields", g.chunk * m, KOKKOS_LAMBDA(const uint32_t p) {
                     const uint32_t j = p / m;
                     if (a + j >= n_cells) return;

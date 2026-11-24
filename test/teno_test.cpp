@@ -353,7 +353,7 @@ output_points(TENO & teno, Kokkos::View<rtype *[N_CONSERVATIVE]> W, const std::v
     Kokkos::deep_copy(cells, h_cells);
     Kokkos::deep_copy(off, h_off);
     Kokkos::deep_copy(out, h_out);
-    teno.point_values(W, cells, off, out, true);
+    teno.point_values(W, cells, off, out, true, false);
     return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
 }
 

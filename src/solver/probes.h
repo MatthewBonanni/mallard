@@ -335,9 +335,10 @@ class Probes {
         void evaluate_staged(size_t k, const ProbeFields & fields, const uint64_t * seq);
         /**
          * @brief Reduces staged probe k's values just evaluated on the device into out (device memory), as values()
-         *        holds them after the probe's write, if *due (device memory) is nonzero (collective).
+         *        holds them after the probe's write, if *due (device memory) is nonzero; with seq, also into record
+         *        slot (*seq - 1) % n_records of its staged_reductions, if it has them (collective).
          */
-        void reduce_staged(size_t k, const uint32_t * due, double * out) const;
+        void reduce_staged(size_t k, const uint32_t * due, double * out, const uint64_t * seq = nullptr) const;
         /** @brief Writes staged probe k at (step, t) from the values of record slot `slot` (collective). */
         void write_staged(size_t k, uint64_t step, rtype t, uint64_t slot);
 
@@ -571,6 +572,10 @@ class Probes {
                 bool use_nccl = false;
             };
             std::shared_ptr<DeviceReduction> device_reduction;
+            // Reduced on the device for its writes (reduces_on_device): last of each record slot, instead of the
+            // samples' values; reduced_for_triggers: reduce_staged writes them where the triggers read theirs
+            Kokkos::View<double **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staged_reductions;
+            bool reduced_for_triggers = false;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
             uint32_t lagrange_degree = 0;  // snapshots of surfaces and curves: elements as Lagrange cells (0: one sample each)
@@ -697,6 +702,9 @@ class Probes {
             uint64_t n_evaluated() const { return codes.extent(0); }
             bool samples_nodes() const;
             bool samples_quadrature() const;
+            /** @brief Whether its writes need only last (no samples, averages, spectra or moving samples): staged,
+             *         its reductions are those of the device, and its samples' values stay there. */
+            bool reduces_on_device() const;
             /**
              * @brief Evaluates and gathers what a write needs (collective): rank 0 gets node and quadrature values.
              *        With a record slot, the slot's staged values instead.

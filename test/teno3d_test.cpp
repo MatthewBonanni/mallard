@@ -724,6 +724,65 @@ TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
     }
 }
 
+TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
+    // Probes hand point_values their points by cell (by_cell), and each run of a cell is fitted once: runs longer
+    // than a team's groups and across teams, a cell in two runs, troubled cells (left as they are, or given the
+    // output's troubled polynomial), m of 1 and 2
+    auto mesh = make_mesh_3d("cartesian", 6, 6, 6);
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, [](double x, double y, double z, double * U) {
+        quadratic_conservatives(x, y, z, U);
+        U[0] = 1.0 + 0.01 * x * x + 0.02 * y * z - 0.01 * z + (x > 0.7 ? 0.5 : 0.0);
+    });
+    Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    auto h_W = Kokkos::create_mirror_view(W);
+    for (uint32_t c = 0; c < mesh->n_cells; c++) {
+        rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+        for (int v = 0; v < N_CONSERVATIVE; v++) U[v] = avg(c, v);
+        euler.compute_W_from_conservatives(Wc, U);
+        for (int v = 0; v < N_CONSERVATIVE; v++) h_W(c, v) = Wc[v];
+    }
+    Kokkos::deep_copy(W, h_W);
+    auto teno = make_teno(mesh, bd, 5);
+    std::vector<uint32_t> cells;
+    const uint32_t runs[] = {1, 3, 200, 2, 1, 130, 7};
+    for (uint32_t k = 0; k < mesh->n_cells; k++) cells.insert(cells.end(), runs[k % 7], (k * 37) % mesh->n_cells);
+    cells.insert(cells.end(), 5, cells.front());
+    Kokkos::View<uint32_t *> d_cells("cells", cells.size());
+    Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(cells.data(), cells.size()));
+    for (const auto & run :
+         {std::pair{size_t(1), false}, std::pair{size_t(2), false}, std::pair{size_t(1), true}, std::pair{size_t(2), true}}) {
+        const size_t m = run.first;
+        const bool select_troubled = run.second;
+        const size_t n = cells.size() * m;
+        Kokkos::View<rtype *[N_DIM]> offsets("offsets", n);
+        auto h_offsets = Kokkos::create_mirror_view(offsets);
+        for (size_t p = 0; p < n; p++) {
+            for (int d = 0; d < N_DIM; d++) h_offsets(p, d) = 0.01_r * rtype((int(p) * (d + 2)) % 7 - 3);
+        }
+        Kokkos::deep_copy(offsets, h_offsets);
+        auto values = [&](const bool by_cell) {
+            Kokkos::View<rtype *[N_CONSERVATIVE]> out("out", n);
+            Kokkos::deep_copy(out, -1.0_r);
+            EXPECT_TRUE(teno->point_values(W, d_cells, offsets, out, select_troubled, by_cell));
+            return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+        };
+        const auto runs_once = values(true);
+        const auto each = values(false);
+        size_t written = 0;
+        for (size_t p = 0; p < n; p++) {
+            written += each(p, 0) > 0.0_r;
+            for (int v = 0; v < N_CONSERVATIVE; v++) {
+                EXPECT_EQ(runs_once(p, v), each(p, v))
+                    << "m " << m << ", troubled " << select_troubled << ", point " << p << ", variable " << v;
+            }
+        }
+        EXPECT_GT(written, n / 4) << "m " << m;
+        if (!select_troubled) EXPECT_LT(written, n) << "m " << m << ": no troubled cell";
+    }
+}
+
 TEST(TENO3DSetup, CentralStencilsAloneAreTheFullSetupsBitForBit) {
     // Output of states read from files sets up only what cell_gradients and point_values read, from moments
     // of the central stencils' degree alone. With share_tables, cells share basis means on the means alone,
@@ -1006,8 +1065,8 @@ TEST(TENO3DOutputPoints, TroubledCellsTakeTheFluxsChoiceAtTheirFacePoints) {
         Kokkos::deep_copy(off, h_off);
         Kokkos::deep_copy(out, h_out);
         Kokkos::deep_copy(central, h_out);
-        teno->point_values(W, cells, off, out, true);
-        smooth->point_values(W, cells, off, central, true);
+        teno->point_values(W, cells, off, out, true, false);
+        smooth->point_values(W, cells, off, central, true, false);
         auto got = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
         auto h_central = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), central);
         uint32_t n_troubled = 0, n_sectors = 0;
