@@ -2,7 +2,7 @@
 
 This walk-through takes about ten minutes: build Mallard on a CPU, run the Sod shock tube, check the result against the exact solution, and then change the case. It assumes GCC 15, Clang 22 or Apple Clang 21 or newer ([supported platforms](../installation.md#supported-platforms)), CMake 4.2 or newer, git, and Python 3.
 
-With Mallard already installed from a container, a relocatable archive or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build-3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
+With Mallard already installed from a container, the portable binaries or Spack (see [Installation](https://matthewbonanni.github.io/mallard/docs/installation/)), skip the build: run `mallard` where the commands below run `build/src/mallard` or `build-3d/src/mallard`; it runs the 2D or 3D solver a case needs (`mallard new sod runs/sod`, then `mallard check input.toml` and `mallard -i input.toml` in the case). The installed examples, mechanisms and tools are in `$MALLARD_SHARE`; the containers have the Python packages.
 
 ## 1. Build
 

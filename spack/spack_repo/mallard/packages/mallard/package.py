@@ -66,6 +66,12 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         description="Pass device buffers to MPI directly (CUDA- or ROCm-aware MPI)",
     )
     variant("nccl", default=False, when="+mpi+cuda", description="Halo exchanges with NCCL")
+    variant(
+        "kaminpar",
+        default=False,
+        when="+mpi",
+        description="The dKaMinPar graph partitioner (partitioner = \"graph\"), fetched at configure time",
+    )
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
@@ -92,6 +98,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("yaml-cpp@0.8:")
     depends_on("mpi", when="+mpi")
     depends_on("nccl", when="+nccl")
+    depends_on("tbb", when="+kaminpar")
     for _arch in CudaPackage.cuda_arch_values:
         depends_on(f"nccl cuda_arch={_arch}", when=f"+nccl cuda_arch={_arch}")
     depends_on("hdf5~mpi", when="+hdf5~mpi")
@@ -201,14 +208,19 @@ class CMakeBuilder(cmake.CMakeBuilder):
             args.append(self.define("Python_EXECUTABLE", spec["python"].command.path))
         if spec.satisfies("+mpi"):
             args.append(self.define_from_variant("Mallard_GPU_AWARE_MPI", "gpu_aware_mpi"))
+            args.append(self.define_from_variant("Mallard_ENABLE_KAMINPAR", "kaminpar"))
             if spec.satisfies("+cuda"):
                 args.append(self.define_from_variant("Mallard_ENABLE_NCCL", "nccl"))
-        if spec.satisfies("+cuda"):
+        # dKaMinPar does not compile with nvcc: the host compiler builds it, and Kokkos compiles
+        # Mallard's own code through its nvcc_wrapper
+        if spec.satisfies("+cuda") and not spec.satisfies("+kaminpar"):
             args.append(self.define("CMAKE_CXX_COMPILER", self.pkg["kokkos"].kokkos_cxx))
         elif spec.satisfies("+rocm") and not (
             spec.satisfies("%cxx=clang") or spec.satisfies("%cxx=rocmcc")
         ):
             args.append(self.define("CMAKE_CXX_COMPILER", spec["hip"].hipcc))
+        if spec.satisfies("+rocm +kaminpar"):
+            args.append(self.define("CMAKE_POSITION_INDEPENDENT_CODE", True))
         return args
 
     def cmake(self, pkg, spec, prefix):

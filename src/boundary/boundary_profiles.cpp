@@ -19,6 +19,7 @@
 
 #include "boundary_coordinates.h"
 #include "comm.h"
+#include "expression.h"
 #include "log.h"
 #include "mesh.h"
 
@@ -111,7 +112,8 @@ BoundaryProfiles::BoundaryProfiles(const Input & entry, const std::string & wher
         }
         for (size_t d = 0; d < at.size(); d++) {
             const std::string name = key + ".at[" + std::to_string(d) + "]";
-            m.at.push_back(std::make_shared<kexpr::Program>(name, at[d], base, BoundaryValue::hint, bv::FIRST_LOCAL));
+            m.at.push_back(std::make_shared<kexpr::Program>(
+                compile_expression(name, line_of(e, "at"), at[d], base, BoundaryValue::hint, bv::FIRST_LOCAL)));
             if (m.at.back()->uses(bv::T)) {
                 throw invalid(e, key + ".at", "at",
                               "reads t for column " + coordinates[d] + ", but the data are read once, at setup",
