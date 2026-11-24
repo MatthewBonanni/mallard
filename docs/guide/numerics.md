@@ -428,8 +428,9 @@ grows with resolution.
 
 Cost: TENO's smooth pass evaluates each smooth cell's polynomial gradients
 at its face points while it holds the coefficients, and keeps those of u and
-T for the stage, per face side: 5.3 KB per cell for TENO5 on hexahedra (9
-points per face), 2.7 KB on tetrahedra (7), 0.6 KB on quadrilaterals. The
+T for the stage, per face side, with their values (for the wall fits): 7.0 KB
+per cell for TENO5 on hexahedra (9 points per face), 3.7 KB on tetrahedra (7),
+0.9 KB on quadrilaterals. The
 halo sides of partition faces come from their owners with the face states.
 A step of the 3D Taylor-Green vortex on an A100 (96^3 hexahedra, 48^3 x 6
 tetrahedra) takes, against least squares:
@@ -451,10 +452,10 @@ Pitfalls:
   `reconstruction`. Viscous-dominated runs (fine near-wall cells, low Reynolds
   numbers) take up to half the time step; convection-dominated runs are
   unaffected.
-- **Troubled cells and boundaries.** Faces next to a cell where TENO selects
-  stencils, or whose polynomial is negative in density or pressure at a face
-  point, and boundary faces (walls among them), keep the least-squares
-  gradients. Near walls and shocks the flux is then second order, as before.
+- **Troubled cells.** Faces next to a cell where TENO selects stencils, or
+  whose polynomial is negative in density or pressure at a face point, keep
+  the least-squares gradients, as do the walls and boundaries listed above.
+  Near shocks the flux is then second order, as before.
 - **Not yet available** for gas mixtures (species diffusion), axisymmetric
   runs, LES, the hybrid convective flux, curved meshes and rotational
   periodicity, where Mallard reports an error. Probes of the diffusive fluxes
