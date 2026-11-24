@@ -764,7 +764,7 @@ inlet's `u` is of `x`, `y`, `z` only.
 |---|---|
 | `L` | A length of the domain (required) |
 | `sigma` | Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift, large values approach a fixed pressure or velocity) |
-| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
+| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets, whose velocity they would hold off its target ([design](design/nscbc.md#transverse-terms-at-inlets)). Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
 | `sigma_T`, `sigma_t` | Inlets only: relax the temperature and tangential velocity at these rates instead of imposing them |
 
 ```toml

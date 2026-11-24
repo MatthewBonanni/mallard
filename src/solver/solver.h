@@ -1311,6 +1311,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        bool geometry_only = false;  // within check(): set up what the case view draws, no numerics or initial state
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         std::function<bool(const gas_conversion::Summary &)> conversion_approval;  // restart convert, else accept
         std::optional<gas_conversion::Summary> conversion;  // of the initial restart, if its gas differed
