@@ -537,7 +537,8 @@ An input still being written fails on what it does not have yet: a required key 
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
 | `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
 | `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
-| `regions`, `case_view`, `case_view_images`, `view`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, its images, and with `--view` its files, blocks and boundary frames (`mallard-case-view`; [The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
+| `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
+| `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; with `--view`, the case view's files, every block's metadata and each boundary's frame (`mallard-case-view`, the [session](session.md)'s `case.view`), `null` without it ([Block metadata](#block-metadata)) |
 | `boundary_values` | With `--boundary-values`: each entry's file and the range of each column (`mallard-boundary-values`; [Boundary values](#boundary-values)), else `null` |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
@@ -734,21 +735,62 @@ draws the mesh alone, its zones and periodic pairs, so that what it stopped on
 can be seen; the JSON report's `unassigned` lists the zones without a
 condition.
 
+`--geometry-only` sets up only what the view draws: the mesh, its zones, the
+boundaries' conditions, the regions, probes, snapshot regions and periodic
+pairs. It skips the numerics (TENO's and MUSCL's stencils), the initial state
+and the checks of the run (time step, resolution, mesh quality, memory, cost),
+so a preview can follow each edit of a large case: on two CPU threads, 1.3 s
+instead of 18.6 s for `examples/explosion_3d` (262,144 cells, TENO), 2.6 s
+instead of 10.8 s for `examples/pulsed_jet` (442,368 cells, TENO). Its blocks
+and images are the whole check's, byte for byte, but for what needs the
+initial state: walls' `y_plus` and regions defined by the solution are left
+out. Keys are not checked
+for use, since the keys of the numerics and the initial state go unread: run
+the whole check before the run.
+
 ```bash
 mallard check input.toml --view view
+mallard check input.toml --view view --geometry-only   # the same view, without numerics or initial state
 mallard info mesh.msh --view view   # the mesh alone: its cells, zones and periodic pairs
 ```
 
-With `--format json`, the report's `view` (schema `mallard-case-view`, the
-result of the [session](session.md)'s `case.view`) lists the files written,
-every block with its `kind` and `condition`, and under `frames` where each
-`[[boundaries]]` entry's [local coordinates](boundary_conditions.md#local-coordinates)
+#### Block metadata
+
+Each block says which part of the input it draws, so that a script or the GUI
+can go from a block to the table that defines it without parsing its name
+(which has `/` written as `_`). The metadata is the field data of each block
+in the ParaView file, and the `view` of the JSON reports (`mallard check
+--format json`, `mallard info MESH --view DIR --format json`), schema
+`mallard-case-view`, version 1:
+
+| Member | Holds |
+|---|---|
+| `name` | The block's name in the ParaView file |
+| `kind` | `mesh` (the domain's cells), `boundary`, `cell_zone`, `region`, `probe`, `snapshot` (a `[[write_data]]` region) or `periodic` |
+| `key` | The key path of the input value it draws: `boundaries[name = "inlet"]`, `regions.heater` (a named region), `sponges[0].region`, `probes[name = "s"].region`, `probes[name = "wake"]` (a probe on points or lines of its own), `write_data[prefix = "out/near_wake"].region`; `null` for the mesh, a zone without a condition and a periodic pair |
+| `element` | The input table that holds it: `boundaries[name = "inlet"]`, `regions.heater`, `sponges[0]`, `probes[name = "s"]`, `write_data[prefix = "out/near_wake"]` |
+| `index` | The element's index in its array of tables (`[[probes]]`: 0 for the first), `null` for a table that is in none; a zone with several conditions (`where`) gives its first |
+| `zone` | Boundary and cell zones: the mesh's zone, as the mesh names it |
+| `cells` | The block's cells, over every rank: cells, faces, segments or points |
+| `condition` | Boundary zones: the type of their condition; `null` for other blocks |
+| `label` | The block's label in the images (its name if it has none) |
+
+The JSON's `view` also has `files` (the ParaView file, then the images),
+`geometry_only` and `frames`. `mallard check --view DIR --format json`'s `view`
+is the result of the [session](session.md)'s `case.view`, and its `frames` say
+where each `[[boundaries]]` entry's [local coordinates](boundary_conditions.md#local-coordinates)
 start: its `shape` (`curve` in 2D; `four-sided`, `ring` or `disk` in 3D),
 `origin` (2D: the end where u = 0; 3D: the face center nearest to u = v = 0),
 `u_direction` (the unit vector along which u grows there), `normal` (the
 inward unit normal at the origin), `length` and, in 3D, `width` (the largest u_m and v_m).
 An entry whose faces have no u (a closed curve, a zone of several pieces) has
-`shape` `null` and says why in `error`.
+`shape` `null` and says why in `error`. `mallard info`'s view has no frames. In the ParaView file, each block's field data has `kind`,
+`key`, `element` and `zone` as strings (empty for `null`), `element_index`
+(-1 for `null`) and `metadata_version`.
+
+```sh
+mallard check input.toml --view view --format json | python3 -c "import json, sys; [print(b['name'], b['kind'], b['element'], b['index']) for b in json.load(sys.stdin)['view']['blocks']]"
+```
 
 ![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-light.svg#gh-light-mode-only)
 ![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-dark.svg#gh-dark-mode-only)
