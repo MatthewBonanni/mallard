@@ -508,19 +508,22 @@ double mms_viscous_residual_error(const std::string & mesh, uint32_t n, const st
 
 } // namespace
 
-TEST(AxisymmetricScratch, DISABLED_Viscous) {
-    for (const std::string mesh : {"cartesian", "cartesian_tri"}) {
-        for (const std::string g : {"least_squares", "reconstruction"}) {
-            for (const int order : {4, 5, 6}) {
-                std::cerr << "AXI " << mesh << " " << g << " TENO" << order;
-                for (const uint32_t n : {8u, 16u, 32u, 64u}) {
-                    std::cerr << " " << mms_viscous_residual_error(mesh, n, "type = \"TENO\"\norder = " + std::to_string(order), g);
-                }
-                std::cerr << "\n";
-            }
-        }
-    }
+class AxisymmetricViscousOrder : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(AxisymmetricViscousOrder, ResidualOfReconstructionGradientsConvergesAtDesignOrder) {
+    // The hoop stress and the r-weighted face integrals from TENO5's polynomials, up to the axis; with
+    // least squares the residual converges at first order on triangles
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const std::string mesh = GetParam();
+    const std::string teno = "type = \"TENO\"\norder = 5";
+    verification::expect_order({"axisymmetric", "TENO5, reconstruction gradients", verification::cells_of(mesh),
+                                "mean viscous residual error, manufactured solution", {32, 64},
+                                {mms_viscous_residual_error(mesh, 32, teno, "reconstruction"),
+                                 mms_viscous_residual_error(mesh, 64, teno, "reconstruction")},
+                                3.0, 2.7});
 }
+
+INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricViscousOrder, ::testing::Values("cartesian", "cartesian_tri"));
 
 namespace {
 
