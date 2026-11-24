@@ -202,7 +202,9 @@ in an expression that fails to parse is pointed out in the error.
 (`p_ref = T_ref = rho_ref = 1`) work as plain numbers. Say so with
 `units = "nondimensional"` in `[physics]`: the terminal output then states it
 and labels no number with an SI unit (the progress table's units row shows
-`-`), instead of calling a time of 0.2 "0.2 s". Units in the input make no
+`-`, and the units lines of the CSV files, the units metadata of snapshot
+and probe files and the run log say `1`), instead
+of calling a time of 0.2 "0.2 s". Units in the input make no
 sense then; write them only in dimensional inputs. Gas mixtures read real
 thermochemistry and are always dimensional, so `units = "nondimensional"` is
 an error with `gas = "mixture"`.
@@ -301,7 +303,8 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
 ```
 
 When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings.
+listed under it as possible misspellings. `mallard reactor` checks its input
+the same way.
 
 ## Error messages
 
@@ -529,6 +532,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
 | `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
 | `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
+| `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; the case view with every block's metadata, `null` without `--view` ([Block metadata](#block-metadata)) |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
@@ -627,6 +631,19 @@ dissipation of a region is its own share of the field's (the statistics', or the
 initial state's); with the forcing's power, which only balances over the whole
 domain, it is the domain's.
 
+![A developing channel flow checked in two regions: cell size over the Kolmogorov length per cell, above 2 in the wall layers and below in the core; first-cell y+ along the bottom wall, above 1 near the inlet and below downstream; the checked rows of the domain and each region against their DNS targets](../images/guide/check_resolution-light.svg#gh-light-mode-only)
+![A developing channel flow checked in two regions: cell size over the Kolmogorov length per cell, above 2 in the wall layers and below in the core; first-cell y+ along the bottom wall, above 1 near the inlet and below downstream; the checked rows of the domain and each region against their DNS targets](../images/guide/check_resolution-dark.svg#gh-dark-mode-only)
+
+Air at 20 m/s entering a 50 mm × 10 mm channel of 80 × 48 cells, checked
+from the restart file of an earlier run that averaged the strain rate, with
+`regions` `entrance` (the first 12.5 mm) and `downstream`. Top: the
+`DELTA_OVER_ETA` of `--mesh-fields` (the line is the DNS target, 2). Bottom:
+`Y_PLUS` along the bottom wall, and the rows of the report with a target, as
+a ratio to it. The wall shear near the inlet makes the `entrance` region's
+first cells 3.5 wall units high, while the `downstream` region's pass (0.88);
+both regions miss the Kolmogorov target, the `entrance` the most, through
+their wall layers.
+
 The initial state of a turbulent case seldom has the dissipation the run will
 reach. An earlier run, on a coarser mesh or for a shorter time, gives a better
 one: average the strain rate in it, write a restart file, and give that file to
@@ -715,9 +732,51 @@ draws the mesh alone, its zones and periodic pairs, so that what it stopped on
 can be seen; the JSON report's `unassigned` lists the zones without a
 condition.
 
+`--geometry-only` sets up only what the view draws: the mesh, its zones, the
+boundaries' conditions, the regions, probes, snapshot regions and periodic
+pairs. It skips the numerics (TENO's and MUSCL's stencils), the initial state
+and the checks of the run (time step, resolution, mesh quality, memory, cost),
+so a preview can follow each edit of a large case: on two CPU threads, 1.3 s
+instead of 18.6 s for `examples/explosion_3d` (262,144 cells, TENO), 2.6 s
+instead of 10.8 s for `examples/pulsed_jet` (442,368 cells, TENO). Its blocks
+and images are the whole check's, byte for byte, but for what needs the
+initial state: walls' `y_plus` and regions defined by the solution are left
+out. Keys are not checked
+for use, since the keys of the numerics and the initial state go unread: run
+the whole check before the run.
+
 ```bash
 mallard check input.toml --view view
+mallard check input.toml --view view --geometry-only   # the same view, without numerics or initial state
 mallard info mesh.msh --view view   # the mesh alone: its cells, zones and periodic pairs
+```
+
+#### Block metadata
+
+Each block says which part of the input it draws, so that a script or the GUI
+can go from a block to the table that defines it without parsing its name
+(which has `/` written as `_`). The metadata is the field data of each block
+in the ParaView file, and the `view` of the JSON reports (`mallard check
+--format json`, `mallard info MESH --view DIR --format json`), schema
+`mallard-case-view`, version 1:
+
+| Member | Holds |
+|---|---|
+| `name` | The block's name in the ParaView file |
+| `kind` | `mesh` (the domain's cells), `boundary`, `cell_zone`, `region`, `probe`, `snapshot` (a `[[write_data]]` region) or `periodic` |
+| `key` | The key path of the input value it draws: `boundaries[name = "inlet"]`, `regions.heater` (a named region), `sponges[0].region`, `probes[name = "s"].region`, `probes[name = "wake"]` (a probe on points or lines of its own), `write_data[prefix = "out/near_wake"].region`; `null` for the mesh, a zone without a condition and a periodic pair |
+| `element` | The input table that holds it: `boundaries[name = "inlet"]`, `regions.heater`, `sponges[0]`, `probes[name = "s"]`, `write_data[prefix = "out/near_wake"]` |
+| `index` | The element's index in its array of tables (`[[probes]]`: 0 for the first), `null` for a table that is in none; a zone with several conditions (`where`) gives its first |
+| `zone` | Boundary and cell zones: the mesh's zone, as the mesh names it |
+| `cells` | The block's cells, over every rank: cells, faces, segments or points |
+
+The JSON's `view` also has `files` (the ParaView file, then the images) and
+`geometry_only`. In the ParaView file, each block's field data has `kind`,
+`key`, `element` and `zone` as strings (empty for `null`), `element_index`
+(-1 for `null`) and `metadata_version`.
+
+```sh
+mallard check input.toml --view view --format json | python3 -c "import json, sys; [print(b['name'], b['kind'], b['element'], b['index']) for b in json.load(sys.stdin)['view']['blocks']]"
 ```
 
 ![The case view of a 2D duct: the inlet, outlet and walls labeled with their conditions and values, a heater region, a sponge, a line, a point and a circle probe, the mesh, the domain's extent, axes and a scale bar](../images/guide/case-view-light.svg#gh-light-mode-only)

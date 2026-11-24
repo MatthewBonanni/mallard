@@ -64,10 +64,11 @@ struct MixturePointGradientsFunctor {
                 rtype n_f[N_DIM], n_vec[N_DIM];
                 FOR_I_DIM n_vec[i] = normals(f, i);
                 unit<N_DIM>(n_vec, n_f);
+                const PlanarFace nodes = values.planar_nodes(f);
                 for (uint8_t q = 0; q < n_quad; q++) {
                     rtype p[N_DIM], psi[NK], r[N_DIM], dY[N_CONSERVATIVE][N_DIM];
-                    if (!values.face_point(f, q, c, p)) continue;
-                    values.face_point_basis(f, q, c, psi);
+                    if (!values.face_point_basis(f, q, c, nodes, psi)) continue;
+                    values.face_point(f, q, c, nodes, p);
                     FOR_I_DIM r[i] = p[i] - values.cell_coords(c, i);
                     FacePointGradients::conservative_gradient<DEG>(
                         r, [&](const uint32_t l, const uint8_t d, const uint8_t i) { return a[i][l] * factor[d]; }, dY);
@@ -93,9 +94,10 @@ struct MixturePointGradientsFunctor {
             rtype n_f[N_DIM], n_vec[N_DIM];
             FOR_I_DIM n_vec[i] = normals(f, i);
             unit<N_DIM>(n_vec, n_f);
+            const PlanarFace nodes = values.planar_nodes(f);
             for (uint8_t q = 0; q < n_quad; q++) {
                 rtype p_q[N_DIM];
-                if (!values.face_point(f, q, c, p_q)) continue;
+                if (!values.face_point(f, q, c, nodes, p_q)) continue;
                 rtype v[NQ], g[NQ][N_DIM], d_rho[N_DIM];
                 point_gradients.load(f, q, side, v, g);
                 const rtype rho = point_gradients.at(f, q, side, FacePointGradients::DENSITY);

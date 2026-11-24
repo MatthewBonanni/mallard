@@ -738,8 +738,6 @@ TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason
         return k == std::string::npos ? text : text.replace(k, from.size(), to);
     };
     const std::string base = box_input("cartesian", 8, 5, "navier_stokes", "reconstruction");
-    const std::string perfect = "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = "
-                                "1.0\nmu = 0.01\nPr = 0.72\n";
     const std::string teno5 = "type = \"TENO\"\norder = 5\n";
     const std::vector<std::pair<std::string, std::string>> cases = {
         {box_input("cartesian", 8, 5, "navier_stokes", "polynomial"), "least_squares"},
