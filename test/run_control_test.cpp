@@ -236,6 +236,40 @@ TEST(RunControlTest, SettingsOutsideTheRuntimeSafeSetAreRejected) {
     EXPECT_NEAR(double(solver.get_time()), 0.01, 1e-6);
 }
 
+TEST(RunControlTest, SetFileChangesSettingsAndTheRunLogAnswersIt) {
+    const std::string dir = fresh_dir("set_file");
+    clear_requests();
+    Solver solver;
+    solver.init(parse_toml(logged(case_input(dir, "n_steps = 50\ncfl = 0.25\ncontrol_socket = false\n", 1000), dir)));
+    // Control files are off by default; control_file_interval is a setting like the others
+    ASSERT_TRUE(solver.apply_setting("control_file_interval", "1").first);
+    if (comm::is_root()) {
+        std::ofstream("SET") << "# from a GUI\nn_steps = 20\n\nwrite_data.0.interval = \"8\"  # restarts\n"
+                                "cfl = 0.5\nt_wall_stop = 2 h\n";
+    }
+    comm::barrier();
+    EXPECT_EQ(solver.run(), 0);
+    EXPECT_EQ(solver.get_step(), 20u);
+    EXPECT_EQ(run_control::pending(), 0);
+    for (uint64_t step : {8u, 16u}) EXPECT_TRUE(fs::exists(restart_file(dir, step))) << step;
+    EXPECT_FALSE(fs::exists(restart_file(dir, 12)));
+    if (!comm::is_root()) return;
+    EXPECT_FALSE(fs::exists("SET"));
+    std::vector<std::string> settings;
+    std::string refused;
+    std::ifstream in(dir + "/mallard.jsonl");
+    for (std::string line; std::getline(in, line);) {
+        const json::Value v = json::parse(line);
+        if (v["type"].string == "event" && v["kind"].string == "set") {
+            EXPECT_EQ(v["source"].string, "SET file");
+            settings.push_back(v["setting"].string);
+        }
+        if (v["type"].string == "warning" && v["code"].string == "W-SET-REFUSED") refused += v["message"].string;
+    }
+    EXPECT_EQ(settings, (std::vector<std::string>{"n_steps=20", "write_data.0.interval=8", "t_wall_stop=2h"}));
+    EXPECT_NE(refused.find("cfl: cannot be changed"), std::string::npos) << refused;
+}
+
 TEST(RunControlTest, ProbeIntervalsChangeOnlyInTheirOwnKind) {
     const std::string dir = fresh_dir("probe_set");
     clear_requests();
