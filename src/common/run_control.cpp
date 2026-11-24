@@ -447,10 +447,11 @@ std::vector<Command> take_commands() {
     return std::exchange(queue, {});
 }
 
-void submit(const std::string & text) {
+void submit(const std::string & text, const std::string & source) {
     std::lock_guard<std::mutex> lock(queue_mutex);
     Command command;
     command.text = text;
+    command.source = source;
     queue.push_back(command);
     requests.fetch_or(COMMAND);
 }

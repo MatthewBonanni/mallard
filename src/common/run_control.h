@@ -39,7 +39,7 @@ constexpr int N_REQUESTS = 4;
 
 /** @brief The commands the control socket takes, and the control files the run looks for. */
 inline constexpr std::array<const char *, 4> COMMANDS = {"status", "checkpoint", "stop", "set"};
-inline constexpr std::array<const char *, 2> FILES = {"STOP", "CHECKPOINT"};
+inline constexpr std::array<const char *, 3> FILES = {"STOP", "CHECKPOINT", "SET"};
 
 /**
  * @brief A setting `set` changes while the run goes on. The run applies it and `mallard ctl` checks it before
@@ -55,11 +55,12 @@ struct Setting {
     std::string key() const;
 };
 
-inline constexpr std::array<Setting, 10> SETTINGS = {{
+inline constexpr std::array<Setting, 11> SETTINGS = {{
     {"", "", "n_steps", "count", "steps to run in all; 0: no step limit"},
     {"", "", "t_stop", "time", "simulated time to stop at; 0 or less: no limit"},
     {"", "", "t_wall_stop", "time", "wall time to stop after, with a restart; 0 or less: no limit"},
     {"", "", "check_interval", "count", "steps between progress rows (positive)"},
+    {"", "", "control_file_interval", "count", "steps between looks for the control files; 0: never"},
     {"write_data", "prefix_or_index", "interval", "count", "steps between writes of a [[write_data]]"},
     {"write_data", "prefix_or_index", "time_interval", "time", "simulated time between writes of a [[write_data]]"},
     {"probes", "name", "interval", "count", "steps between samples of a probe"},
@@ -154,8 +155,8 @@ void record_accepted(const Command & command, uint64_t step, double t);
 /** @brief Commands received since the last call; clears the COMMAND request. */
 std::vector<Command> take_commands();
 
-/** @brief Queues a command as the socket would, without a connection (tests). */
-void submit(const std::string & text);
+/** @brief Queues a command as the socket would, without a connection to reply to. */
+void submit(const std::string & text, const std::string & source = "socket");
 
 /**
  * @brief A request line of protocol version 2 as a command: {"schema": "mallard-run-control", "version": 2,

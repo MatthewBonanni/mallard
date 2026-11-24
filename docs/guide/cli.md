@@ -95,7 +95,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -201,6 +201,15 @@ Options:
                            progress records, one JSON object per line as
                            mallard.jsonl has them, for live monitoring and
                            plotting, and the text on stderr. Default: text.
+  --set KEY=VALUE          Change a setting before the first step, as mallard
+                           ctl set does while the run goes on: the same keys
+                           (n_steps, t_stop, t_wall_stop, check_interval,
+                           control_file_interval, an output's or probe's
+                           interval or time_interval, ...) and checks; a setting
+                           it refuses is an error. Give it once per setting.
+                           Each is a set event of mallard.jsonl, and mallard
+                           pack's rerun command repeats it. Default: the input's
+                           settings.
   --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
                            per rank) or --kokkos-device-id=1 (the GPU; by
                            default each rank gets its own).
