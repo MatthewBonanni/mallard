@@ -92,7 +92,7 @@ n = [9, 9]
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
-and 2 more.
+and 3 more.
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -188,7 +188,7 @@ interaction = "stick"
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
-and 1 more.
+and 2 more.
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
@@ -486,6 +486,17 @@ CUDA graphs.
   `4 width^2 / h^2` in 2D and `6 width^2 / h^2` in 3D for cells of size `h`,
   each with a halo exchange on several ranks.
 
+![Edges of a curtain of glass beads hit by a Mach 1.66 shock: coupled two ways, the upstream edge follows the experiment and the downstream edge moves about half as fast; coupled one way, the curtain moves as a block](../images/guide/shock_curtain_edges-light.svg#gh-light-mode-only)
+![Edges of a curtain of glass beads hit by a Mach 1.66 shock: coupled two ways, the upstream edge follows the experiment and the downstream edge moves about half as fast; coupled one way, the curtain moves as a block](../images/guide/shock_curtain_edges-dark.svg#gh-dark-mode-only)
+
+*The [`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain)
+example: a Mach 1.66 shock on a curtain of glass beads at 19% volume fraction,
+against the Sandia multiphase shock tube (Wagner et al., 2012). Coupled two
+ways, the curtain reflects part of the shock and spreads, and its upstream edge
+follows the experiment; its downstream edge moves about half as fast, because
+the dilute model leaves out the volume the beads take from the gas and the
+effect of neighbors on drag. Coupled one way, the curtain moves as a block.*
+
 ## Evaporating droplets
 
 ```toml
@@ -670,6 +681,7 @@ winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
 [`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain).
 
 Each `[[particles.quantities]]` follows one value along every particle's
@@ -744,7 +756,8 @@ interval = 100
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step).
 
 A particle probe writes, every `interval` steps, the number of particles in
 its region and the mean, standard deviation, minimum and maximum of each field

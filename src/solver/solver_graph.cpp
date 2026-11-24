@@ -590,7 +590,7 @@ void Solver::device_step_body() {
                 if (averaged) {
                     probes.average_staged(staged_probes[k], sampled, &probe_clocks.data()[k].average_a);
                 } else {
-                    probes.reduce_staged(staged_probes[k], changed, out);
+                    probes.reduce_staged(staged_probes[k], changed, out, &step_loop.data()->seq);
                 }
             });
             if (reduced && averaged) device_if(changed, [&] { probes.reduce_staged(staged_probes[k], changed, out); });

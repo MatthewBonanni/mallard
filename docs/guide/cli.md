@@ -42,6 +42,7 @@ A few things hold for every command:
 | Capabilities | `mallard version --format json` | `mallard-capabilities` |
 | Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
 | Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Case view | the `view` of `mallard check INPUT --view DIR --format json` and of `mallard info MESH --view DIR --format json`; each block's field data ([The case view](input_files.md#the-case-view)) | `mallard-case-view` |
 | Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
 | Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
 | Snapshot block | every snapshot and restart file | `mallard-snapshot` |
@@ -92,7 +93,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -185,6 +186,15 @@ Options:
                            progress records, one JSON object per line as
                            mallard.jsonl has them, for live monitoring and
                            plotting, and the text on stderr. Default: text.
+  --set KEY=VALUE          Change a setting before the first step, as mallard
+                           ctl set does while the run goes on: the same keys
+                           (n_steps, t_stop, t_wall_stop, check_interval,
+                           control_file_interval, an output's or probe's
+                           interval or time_interval, ...) and checks; a setting
+                           it refuses is an error. Give it once per setting.
+                           Each is a set event of mallard.jsonl, and mallard
+                           pack's rerun command repeats it. Default: the input's
+                           settings.
   --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
                            per rank) or --kokkos-device-id=1 (the GPU; by
                            default each rank gets its own).
@@ -226,9 +236,11 @@ ETA, memory and the state of each trigger. checkpoint: write a restart file now;
 the reply names it. stop: write a restart file and end the run (exit status 3).
 set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
-t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
-.time_interval, probes.<name>.interval or .time_interval,
-forces.<zone>.interval, integrals.interval. Other keys are refused.
+t_wall_stop=2h), check_interval, control_file_interval, write_data.<prefix or
+index>.interval or .time_interval, probes.<name>.interval or .time_interval,
+forces.<zone>.interval, integrals.interval. Other keys are refused. A SET file
+in run-dir does the same from anywhere the directory is visible, with [run]
+control_file_interval: lines of key = value, the run log the reply.
 
 Options:
   -h, --help  Show this page.
@@ -509,7 +521,20 @@ Options:
                             orthographic ones) with every boundary labeled by
                             its name and condition and every region and probe by
                             its name, a legend, axes, a scale bar and the
-                            domain's extent in its units. Default: none.
+                            domain's extent in its units. Every block carries
+                            its metadata (kind, key, element, element_index,
+                            zone) as field data, and the JSON report's view
+                            lists them. Default: none.
+  --geometry-only           Set up and check only what the case view draws: the
+                            mesh, its zones, the boundaries' conditions, the
+                            regions, probes, snapshot regions and periodic
+                            pairs, without the numerics (stencils), the initial
+                            state and the checks of the run (time step,
+                            resolution, mesh quality, memory, cost); walls'
+                            y_plus and regions defined by the solution, which
+                            need the initial state, are left out, and keys are
+                            not checked for use. For previews that follow each
+                            edit of a large case. Default: the whole check.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
@@ -522,6 +547,7 @@ Examples:
   $ mpirun -n 4 mallard check input.toml --mesh-fields mesh
   $ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils
   $ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView
+  $ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time
 
 Exit status:
   0  no errors (there may be warnings)
@@ -1589,8 +1615,8 @@ made from the same table as the help pages and from the catalogs mallard list
 keys and mallard list fields print, so it knows every command, key and field of
 this build; templates come from mallard new when completing.
 
-An install (cmake --install, Spack, the containers, the archives) puts the
-scripts where the shells look: share/bash-completion/completions/mallard,
+An install (cmake --install, Spack, the containers, the portable binaries) puts
+the scripts where the shells look: share/bash-completion/completions/mallard,
 share/zsh/site-functions/_mallard and
 share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
 or a prefix the shell does not search, load it from the shell's startup file, as

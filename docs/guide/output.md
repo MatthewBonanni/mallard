@@ -50,7 +50,7 @@ fields = ["P", "T"]
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 56 more.
+and 57 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -593,7 +593,7 @@ check_interval = 100   # a progress row every 100 steps
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 61 more.
+and 62 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),
@@ -707,7 +707,7 @@ Each record has a `type`:
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals`, `forces_<zone>` and by probe `probes`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity), `check` (the [check at setup](#the-check-at-setup)); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it, and `superseded`, the files of the later steps it [set aside](#which-format): `path`, as recorded, and `to`, where the file is now) |
 | `progress` | Every progress row | as below |
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; a file over one chunk (64 MiB) `sha256_tree`, `chunk_bytes` and `chunks` instead, its [chunk-tree hash](#complete-files); no hash for a [file appended to](#complete-files)) |
-| `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
+| `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md), `set` with also `source` (`"mallard ctl"`, `"SET file"`, `"--set"`) and `setting` (`"key=value"`); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot`, `units` (of `t`, `dt`, `x`, `rho`, `speed`, `p` and `T`, as the CSV files' units lines write them; `"1"` for each in a nondimensional case) |
 | `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `code` (stable: [Warnings and errors](running.md#warnings-and-errors)), `message`, `docs` (the page and anchor that explain the code) |
 | `probe` | After the `start` record, for each filled region probe | `probe` (its name), `sampling` (its [probe sampling block](#probe-sampling), with the region's `measures`) |
@@ -960,6 +960,9 @@ error, so neither is a repair.
 Every value Mallard writes is in SI units (the mesh-quality angle
 `NON_ORTHOGONALITY` excepted, in degrees), and every output file says which,
 as metadata in the way its format's tools expect; field names never change.
+In a nondimensional case (`physics.units = "nondimensional"`,
+[Units](input_files.md#units)) every physical quantity's units are `1`, in
+every file and block below.
 Restart files are the exception: they hold the conservative variables, in SI
 units by definition, for Mallard to read back.
 
@@ -968,8 +971,8 @@ units by definition, for Mallard to read back.
 | VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres); `cell_methods` for [cell averages and point values](#cell-averages-and-point-values) |
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
-| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column) |
-| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
+| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column, and for every column of a nondimensional case) |
+| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` (`1` in a nondimensional case) |
 
 ```python
 import mallard                                     # the Python package: any file Mallard writes
@@ -1100,7 +1103,7 @@ The block's fields:
 | `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
 | `reconstruction` | Snapshots with point values: how they were evaluated, `method` (`TENO`, `linear_least_squares`), its design `order`, and `fallback`, what replaces it in order where it cannot be used ([below](#cell-averages-and-point-values)); absent otherwise |
 | `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)), and for time-averaged fields `average` ([below](#time-averaged-fields)) |
-| `units` | The units of the block's own numbers (`time`: `s`) |
+| `units` | The units of the block's own numbers (`time`: `s`; `1` in a nondimensional case) |
 
 Files written before 0.10 have no snapshot block. Readers then take step and
 time from the format's own slots, and say so: VTU, VTKHDF and the indexes had
@@ -1194,7 +1197,7 @@ of each VTP file:
 | `points` | For `point` and `points` probes, curves on `n_points` samples, resampled surfaces and grids in regions: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane, a curve on its cells or a boundary's faces |
 | `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); a curve on its cells, the share of its length outside (`length_fraction`); for a filled region partly outside the domain, the share of its volume outside (`volume_fraction`; planar 2D: `area_fraction`); `null` when nothing was dropped |
 | `measures` | For a filled region probe ([Measures](probes.md#region-probes)): the `region`'s own `volume` and `surface_area` (planar 2D: `area` and `perimeter`; axisymmetric: per radian) with their relative `tolerance` (0: closed form), `null` for a region of the mesh or an unbounded one, and the same of its part in the domain (`in_domain`; with `sampling = "point"`, its volume is that of the quadrature); `null` for other probes |
-| `units` | Units of the dimensional keys (m, s) |
+| `units` | Units of the dimensional keys, in UDUNITS syntax (`m`, `s`, `m2`; `1` in a nondimensional case) |
 
 The distance is zero for a point value and the distance to the centroid of
 the cell for a cell sample. Every sample lies in the mesh: a point on a
@@ -1466,8 +1469,9 @@ builds with zlib (`Mallard_ENABLE_ZLIB`), else plain `.tar`; `-o` names it.
   reads them at that path; give files by relative paths to pack them
   reproducibly. `pack` warns, and the manifest's `notes` say so.
 - **What a rerun cannot repeat** is noted too: a [`mallard ctl set`](running.md)
-  while the run ran, and a run record without an end record (still running,
-  or killed).
+  or `SET` file while the run ran, and a run record without an end record
+  (still running, or killed). Settings of `--set` are repeated: the rerun
+  command gives them again.
 - Series indexes (`.pvd`, `.vtkhdf.series`), which the output records do not
   list, are not packed by `--with-outputs all`; `mallard info` and
   `mallard diff` read the snapshots without them.

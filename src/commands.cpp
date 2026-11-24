@@ -45,6 +45,12 @@ constexpr Option RUN_OPTIONS[] = {
      "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
      "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
      "and the text on stderr. Default: text."},
+    {"--set", "", "KEY=VALUE",
+     "Change a setting before the first step, as mallard ctl set does while the run goes on: the same keys "
+     "(n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, an output's or probe's interval "
+     "or time_interval, ...) and checks; a setting it refuses is an error. Give it once per setting. Each "
+     "is a set event of mallard.jsonl, and mallard pack's rerun command repeats it. Default: the input's "
+     "settings."},
     KOKKOS,
 };
 
@@ -102,7 +108,15 @@ constexpr Option CHECK_OPTIONS[] = {
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
      "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
-     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
+     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
+     "lists them. Default: none."},
+    {"--geometry-only", "", "",
+     "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
+     "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
+     "and the checks of the run (time step, resolution, mesh quality, memory, cost); walls' y_plus and regions "
+     "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
+     "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
 };
 
@@ -535,6 +549,7 @@ std::string capabilities_json() {
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
                                  .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
                                  .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
@@ -574,7 +589,7 @@ constexpr Command COMMANDS[] = {
         .name = "",
         .group = "Run",
         .summary = "Run a case",
-        .synopsis = "mallard -i input.toml [--restart FILE|latest] [Kokkos options]\n"
+        .synopsis = "mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]\n"
                     "mallard <command> [options]",
         .description =
             "Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations on unstructured "
@@ -620,9 +635,10 @@ constexpr Command COMMANDS[] = {
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
-            "check_interval, write_data.<prefix or index>.interval or .time_interval, "
+            "check_interval, control_file_interval, write_data.<prefix or index>.interval or .time_interval, "
             "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
-            "are refused.",
+            "are refused. A SET file in run-dir does the same from anywhere the directory is visible, with "
+            "[run] control_file_interval: lines of key = value, the run log the reply.",
         .options = {},
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"
@@ -760,7 +776,8 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView\n"
+                    "$ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -1263,7 +1280,7 @@ constexpr Command COMMANDS[] = {
             "print, so it knows every command, key and field of this build; templates come from mallard new when "
             "completing.\n"
             "\n"
-            "An install (cmake --install, Spack, the containers, the archives) puts the scripts where the shells look: "
+            "An install (cmake --install, Spack, the containers, the portable binaries) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
             "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
             "shell does not search, load it from the shell's startup file, as the examples show.",
