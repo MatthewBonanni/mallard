@@ -584,6 +584,24 @@ std::vector<Diagnostic> unused_keys(const Input & input) {
     return out;
 }
 
+void reject_unused_keys(const Input & input) {
+    const std::vector<Diagnostic> unused = unused_keys(input);
+    if (unused.empty()) return;
+    std::string list;
+    for (const Diagnostic & key : unused) list += "\n  " + describe(key);
+    InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" + list);
+    error.code = diagnostic_code::KEY_UNUSED;
+    throw error;
+}
+
+std::string possibly_misspelled(const Input & input) {
+    std::string misspelled;
+    for (const Diagnostic & key : unused_keys(input)) {
+        if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
+    }
+    return misspelled.empty() ? misspelled : "\npossibly misspelled:" + misspelled;
+}
+
 std::string describe(const Diagnostic & key) {
     std::string text = key.line > 0 ? "line " + std::to_string(key.line) + ": " : "";
     text += key.key;
