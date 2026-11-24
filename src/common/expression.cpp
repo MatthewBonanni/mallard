@@ -12,6 +12,23 @@
 #include "expression.h"
 #include "gated.h"
 
+#include <stdexcept>
+
+#include "input.h"
+
+kexpr::Program compile_expression(const std::string & key, const std::size_t line, const std::string & text,
+                                  const std::vector<std::string> & variables, const kexpr::SymbolHint hint,
+                                  const std::size_t first_shadowable) {
+    try {
+        return kexpr::Program(key, text, variables, hint, first_shadowable);
+    } catch (const kexpr::SyntaxError & e) {
+        throw InputError(Diagnostic{.key = key,
+                                    .line = line,
+                                    .message = "\"" + text + "\": " + e.reason,
+                                    .docs = "docs/guide/expressions.md"});
+    }
+}
+
 std::vector<double> evaluate_at(const std::vector<const Expression *> & expressions,
                                 const Kokkos::View<rtype *[N_DIM]> & coords, const std::vector<uint32_t> & rows,
                                 const double t) {

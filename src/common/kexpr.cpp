@@ -299,8 +299,8 @@ class Parser {
         uint16_t n_locals() const { return max_live; }
 
         [[noreturn]] void fail(const std::string & what, const size_t pos) const {
-            throw std::invalid_argument("Failed to parse expression for " + name + " (\"" + text + "\"): " + what +
-                                        " at position " + std::to_string(pos + 1) + ".");
+            const std::string reason = what + " at position " + std::to_string(pos + 1);
+            throw SyntaxError("Failed to parse expression for " + name + " (\"" + text + "\"): " + reason + ".", reason);
         }
 
     private:
@@ -313,6 +313,8 @@ class Parser {
         size_t at = 0;
         std::vector<std::vector<std::pair<std::string, uint16_t>>> scopes{1};
         uint16_t live = 0, max_live = 0;
+        static constexpr int MAX_DEPTH = 256;
+        int depth = 0;  // of expression() and if_statement(), through which every recursion of the descent passes
         std::vector<bool> loop_breaks;  // per enclosing loop: whether a break leaves it
 
         const Token & peek() const { return tokens[at]; }
@@ -327,6 +329,30 @@ class Parser {
             if (peek().text != t) fail("expected " + what, peek().pos);
             at++;
         }
+
+        // Any of (), [] and {} group, as in exprtk, but each closes only its own opener
+        void expect_closer(const Token & open, const std::string & what) {
+            const std::string closer = open.text == "(" ? ")" : open.text == "[" ? "]" : "}";
+            if (peek().text != closer) {
+                fail("expected '" + closer + "'" + what + " to match the '" + open.text + "' at position " +
+                         std::to_string(open.pos + 1),
+                     peek().pos);
+            }
+            at++;
+        }
+
+        struct Nested {
+            explicit Nested(Parser & parser) : p(parser) {
+                if (++p.depth > MAX_DEPTH) {
+                    p.fail("the expression is nested more than " + std::to_string(MAX_DEPTH) + " levels deep",
+                           p.peek().pos);
+                }
+            }
+            ~Nested() { p.depth--; }
+            Nested(const Nested &) = delete;
+            Nested & operator=(const Nested &) = delete;
+            Parser & p;
+        };
 
         static bool is_word(const Token & t, const char * word) {
             return t.type == Tok::NAME && lower(t.text) == word;
@@ -520,6 +546,7 @@ class Parser {
         }
 
         NodePtr expression(const int precedence) {
+            const Nested nested(*this);
             NodePtr e = branch();
             for (;;) {
                 Op op = Op::CONST;
@@ -572,7 +599,7 @@ class Parser {
                     }
                 case Tok::LPAREN: {
                     NodePtr e = expression(0);
-                    expect(Tok::RPAREN, "')'");
+                    expect_closer(t, "");
                     return e;
                 }
                 case Tok::OP:
@@ -706,6 +733,7 @@ class Parser {
 
         // exprtk's forms: if (c, a, b); if (c) a; [else b;]; if (c) { ... } [else { ... }]; else if ...
         NodePtr if_statement() {
+            const Nested nested(*this);
             open_condition("if");
             NodePtr c = expression(0);
             if (peek().type == Tok::COMMA) {
@@ -823,7 +851,7 @@ class Parser {
                 fail("unknown symbol '" + t.text + "' (variables: " + known + ")" + (hint ? hint(t.text) : ""), t.pos);
             }
             if (peek().type != Tok::LPAREN) fail("expected '(' after " + t.text, peek().pos);
-            next();
+            const Token open = next();
             std::vector<NodePtr> args;
             if (peek().type != Tok::RPAREN) {
                 args.push_back(expression(0));
@@ -832,7 +860,7 @@ class Parser {
                     args.push_back(expression(0));
                 }
             }
-            expect(Tok::RPAREN, "')' after the arguments of " + t.text);
+            expect_closer(open, " after the arguments of " + t.text);
             const Function & fn = f->second;
             const int n = static_cast<int>(args.size());
             if (n < fn.min_args || (fn.max_args >= 0 && n > fn.max_args)) {
@@ -1001,8 +1029,10 @@ Program::Program(const std::string & name, const std::string & text, const std::
     m_loops = emitter.has_loops;
     const int slots = parser.n_locals() + emitter.max_depth;
     if (slots > MAX_STACK) {
-        throw std::invalid_argument("Expression for " + name + " is too deeply nested or has too many variables (needs " +
-                                    std::to_string(slots) + " stack slots, at most " + std::to_string(MAX_STACK) + ").");
+        const std::string needs = std::to_string(slots) + " stack slots, at most " + std::to_string(MAX_STACK);
+        throw SyntaxError("Expression for " + name + " is too deeply nested or has too many variables (needs " + needs +
+                              ").",
+                          "needs " + needs + ": it is too deeply nested or has too many variables");
     }
     for (const Instr & in : m_code) {
         if (in.op == Op::VAR) m_uses[in.index] = true;
