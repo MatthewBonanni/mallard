@@ -382,6 +382,10 @@ Shape shape_of(const Input & entry, const std::string & where, const Input * nam
         throw InputError(where + " is " + (N_DIM == 2 ? "an area" : "a volume") + ", and a curved zone lies on " +
                          surface + ": add filled = false for its boundary.");
     }
+    if (region::open_surface(*region)) {
+        throw InputError(where + ": a curved zone on an open surface from an STL or OBJ file is not supported yet; "
+                         "give a closed surface with filled = false, or a primitive's.");
+    }
     const auto & pieces = region->pieces();
     if (region->dimension() != N_DIM - 1 || pieces.size() != 1 || pieces[0].carriers.size() != 1 ||
         !pieces[0].inside.empty() || !pieces[0].outside.empty() ||

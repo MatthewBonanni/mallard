@@ -1,0 +1,1 @@
+- `mallard check` of an input with a region from an STL or OBJ file no longer stops with the internal error `report: a table has VALUE columns exactly when it has a UNITS column`: the table of their bounding boxes gives its units in its header.

@@ -1118,6 +1118,7 @@ TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitError
     EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
     EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
     EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    EXPECT_NE(check_text(placed, false).find("Regions from surface files"), std::string::npos);
     // Millimeters read as meters: 1000 times larger than it should be
     const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
     EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
