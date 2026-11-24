@@ -23,6 +23,8 @@
   "examples/forced_isotropic_turbulence/input.toml",
   "examples/isotropic_turbulence/input.toml",
   "examples/moving_heaters/input.toml",
+  "examples/particle_settling/input.toml",
+  "examples/particle_settling/smoke.toml",
   "examples/particle_vortex/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/rotational_sector/annulus_3d.toml",
