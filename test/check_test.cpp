@@ -23,6 +23,7 @@
 #include <string>
 
 #include "hdf5_output.h"
+#include "interfaces.h"
 #include "json.h"
 #include "mesh_block.h"
 #include "data_paths.h"
@@ -1135,6 +1136,171 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
         EXPECT_NE(svg.find(">left: inlet_state, T = 1.0 K, p = 1.0 Pa, u = [1.0, 0.0"), std::string::npos) << image;
         EXPECT_NE(svg.find(">bottom: wall_isothermal, T = 1.2 K<"), std::string::npos) << image;
         EXPECT_NE(svg.find(">right: outlet_pressure, p = 1.0 Pa<"), std::string::npos) << image;
+    }
+}
+
+namespace {
+
+/** @brief view_case with a snapshot region and a sponge, whose blocks need their elements found by prefix and index. */
+std::string view_case_with_elements() {
+    const std::string box_region = N_DIM == 2 ? "{type = \"rectangle\", center = [1.5, 0.5], size = [0.2, 0.2]}"
+                                              : "{type = \"box\", center = [1.5, 0.5, 0.125], size = [0.2, 0.2, 0.1]}";
+    return view_case() + "[[write_data]]\nprefix = \"out/near_wake\"\nformat = \"vtu\"\nfields = [\"P\"]\ninterval = 5\nregion = " +
+           box_region + "\n[[sponges]]\nstrength = 1.0\nregion = " + box_region + "\nu = " + U_ZERO +
+           "\np = 1.0\nT = 1.0\n";
+}
+
+const case_view::BlockInfo * find_block(const std::vector<case_view::BlockInfo> & blocks, const std::string & name) {
+    for (const case_view::BlockInfo & b : blocks) {
+        if (b.name == name) return &b;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST(CheckRegions, CaseViewBlocksCarryTheirKindKeyElementAndZone) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_metadata";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case_with_elements(), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    struct Expected {
+        std::string name, kind, key, element;
+        int64_t index;
+        std::string zone;
+    };
+    const int64_t bottom = N_DIM == 3 ? 4 : 2;  // left, right, (back, front,) bottom, top
+    const std::string wake = "write_data[prefix = \"out/near_wake\"]";
+    const std::vector<Expected> expected = {
+        {"domain", "mesh", "", "", -1, ""},
+        {"left", "boundary", "boundaries[name = \"left\"]", "boundaries[name = \"left\"]", 0, "left"},
+        {"bottom", "boundary", "boundaries[name = \"bottom\"]", "boundaries[name = \"bottom\"]", bottom, "bottom"},
+        {"heater", "region", "regions.heater", "regions.heater", -1, ""},
+        {"probes[name = \"s\"].region", "probe", "probes[name = \"s\"].region", "probes[name = \"s\"]", 0, ""},
+        {"probes[name = \"wake\"]", "probe", "probes[name = \"wake\"]", "probes[name = \"wake\"]", 1, ""},
+        {"probes[name = \"tap\"]", "probe", "probes[name = \"tap\"]", "probes[name = \"tap\"]", 2, ""},
+        // The block's name has no slashes; its key is the input's
+        {"write_data[prefix = \"out_near_wake\"].region", "snapshot", wake + ".region", wake, 0, ""},
+        {"sponges[0].region", "region", "sponges[0].region", "sponges[0]", 0, ""},
+    };
+    for (const Expected & e : expected) {
+        const case_view::BlockInfo * b = find_block(r.view_blocks, e.name);
+        ASSERT_NE(b, nullptr) << e.name;
+        EXPECT_EQ(case_view::kind_name(b->kind), e.kind) << e.name;
+        EXPECT_EQ(b->key, e.key) << e.name;
+        EXPECT_EQ(b->element, e.element) << e.name;
+        EXPECT_EQ(b->index, e.index) << e.name;
+        EXPECT_EQ(b->zone, e.zone) << e.name;
+        EXPECT_GT(b->cells, 0u) << e.name;
+    }
+
+    const json::Value report = json::parse(check_json(r));
+    const json::Value * view = report.find("view");
+    ASSERT_NE(view, nullptr);
+    EXPECT_EQ(view->find("schema")->string, interfaces::CASE_VIEW.name);
+    EXPECT_EQ(view->find("version")->number, interfaces::CASE_VIEW.version);
+    EXPECT_FALSE(view->find("geometry_only")->boolean);
+    EXPECT_EQ(view->find("files")->array.size(), 3u);
+    ASSERT_EQ(view->find("blocks")->array.size(), r.view_blocks.size());
+    for (const json::Value & b : view->find("blocks")->array) {
+        if (b.find("key")->string != wake + ".region") continue;
+        EXPECT_EQ(b.find("kind")->string, "snapshot");
+        EXPECT_EQ(b.find("element")->string, wake);
+        EXPECT_EQ(b.find("index")->number, 0.0);
+        EXPECT_EQ(b.find("zone")->type, json::Value::Type::NUL);
+    }
+
+    // Each block's metadata as its field data, in the ParaView file
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const std::string block = "probes[name = \"s\"].region";
+#ifdef Mallard_HAS_HDF5
+    const auto datasets = h5_all_datasets(r.view_file);
+    auto text = [&](const std::string & name) {
+        const std::vector<char> & bytes = datasets.at("VTKHDF/" + block + "/FieldData/" + name);
+        return std::string(bytes.begin(), std::find(bytes.begin(), bytes.end(), '\0'));
+    };
+    EXPECT_EQ(text("kind"), "probe");
+    EXPECT_EQ(text("key"), block);
+    EXPECT_EQ(text("element"), "probes[name = \"s\"]");
+    EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/element_index"));
+    EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/metadata_version"));
+#else
+    const std::string vtu = read_file(dir / "case_blocks" / (block + ".vtu"));
+    auto bytes = [](const std::string & s) {
+        std::string out;
+        for (const char ch : s) out += std::to_string(int(static_cast<unsigned char>(ch))) + " ";
+        return out + "0";
+    };
+    EXPECT_NE(vtu.find("Name=\"kind\" NumberOfTuples=\"1\" format=\"ascii\">\n" + bytes("probe")), std::string::npos);
+    EXPECT_NE(vtu.find("Name=\"element\" NumberOfTuples=\"1\" format=\"ascii\">\n" + bytes("probes[name = \"s\"]")),
+              std::string::npos);
+    EXPECT_NE(vtu.find("Name=\"element_index\" NumberOfTuples=\"1\" format=\"ascii\">\n0\n"), std::string::npos);
+#endif
+}
+
+TEST(CheckRegions, AGeometryOnlyViewDrawsWhatTheWholeCheckDrawsWithoutTheInitialState) {
+    const std::filesystem::path full_dir = scratch_dir() / "mallard_check_view_full";
+    const std::filesystem::path geometry_dir = scratch_dir() / "mallard_check_view_geometry";
+    if (comm::is_root()) {
+        std::filesystem::remove_all(full_dir);
+        std::filesystem::remove_all(geometry_dir);
+    }
+    comm::barrier();
+    // TENO's stencils and an initial state from a restart file that is not there yet: neither is geometry
+    std::string input = view_case_with_elements();
+    const std::string first_order = "[numerics.face_reconstruction]\ntype = \"FO\"\n";
+    input.replace(input.find(first_order), first_order.size(), "[numerics.face_reconstruction]\ntype = \"TENO\"\n");
+    std::string missing_restart = input;
+    const std::string analytical = "[initialize]\ntype = \"analytical\"\n";
+    missing_restart.replace(missing_restart.find(analytical), analytical.size(),
+                            "[initialize]\ntype = \"restart\"\nfile = \"" +
+                                (scratch_dir() / "mallard_no_such.restart").string() + "\"\n");
+    CheckOptions full;
+    full.view_dir = full_dir.string();
+    const CheckReport whole = check(input, full);
+    ASSERT_TRUE(whole.ok()) << first_error(whole);
+    EXPECT_FALSE(check(missing_restart).setup_done);
+    CheckOptions geometry;
+    geometry.view_dir = geometry_dir.string();
+    geometry.geometry_only = true;
+    const CheckReport g = check(missing_restart, geometry);
+    ASSERT_TRUE(g.ok()) << first_error(g);
+    EXPECT_TRUE(g.geometry_only);
+    EXPECT_EQ(g.dt, 0.0);
+
+    ASSERT_EQ(g.view_blocks.size(), whole.view_blocks.size());
+    for (size_t i = 0; i < g.view_blocks.size(); i++) {
+        const case_view::BlockInfo & a = whole.view_blocks[i], & b = g.view_blocks[i];
+        EXPECT_EQ(b.name, a.name);
+        EXPECT_EQ(b.kind, a.kind) << a.name;
+        EXPECT_EQ(b.key, a.key) << a.name;
+        EXPECT_EQ(b.element, a.element) << a.name;
+        EXPECT_EQ(b.index, a.index) << a.name;
+        EXPECT_EQ(b.cells, a.cells) << a.name;
+    }
+    ASSERT_EQ(g.regions.size(), whole.regions.size());
+    for (size_t i = 0; i < g.regions.size(); i++) {
+        EXPECT_EQ(g.regions[i].name, whole.regions[i].name);
+        EXPECT_EQ(g.regions[i].cells, whole.regions[i].cells) << whole.regions[i].name;
+        EXPECT_EQ(g.regions[i].measure, whole.regions[i].measure) << whole.regions[i].name;
+    }
+    EXPECT_TRUE(json::parse(check_json(g))["view"]["geometry_only"].boolean);
+    comm::barrier();
+    if (!comm::is_root()) return;
+#ifdef Mallard_HAS_HDF5
+    EXPECT_EQ(h5_all_datasets(g.view_file), h5_all_datasets(whole.view_file));
+#else
+    for (const auto & entry : std::filesystem::directory_iterator(full_dir / "case_blocks")) {
+        EXPECT_EQ(read_file(geometry_dir / "case_blocks" / entry.path().filename()), read_file(entry.path()))
+            << entry.path().filename();
+    }
+#endif
+    for (const char * image : {"case-light.svg", "case-dark.svg"}) {
+        EXPECT_EQ(read_file(geometry_dir / image), read_file(full_dir / image)) << image;
     }
 }
 
