@@ -2054,6 +2054,8 @@ template <uint8_t DEG, bool PRIM, typename TABLE = rtype>
 struct TENOFunctor {
     static constexpr uint8_t NK = teno::n_dof(DEG);
     struct SmoothPass {};
+    // SmoothPass that also writes point_gradients, a kernel of its own that leaves SmoothPass's registers alone
+    struct SmoothGradientPass {};
     struct TroubledSectorPass {};
     struct TroubledSelectPass {};
     struct TroubledProjectPass {};
@@ -2443,16 +2445,27 @@ struct TENOFunctor {
 
     KOKKOS_INLINE_FUNCTION
     void operator()(SmoothPass, const uint32_t idx) const {
+        smooth_cell<false>(idx);
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(SmoothGradientPass, const uint32_t idx) const {
+        smooth_cell<true>(idx);
+    }
+
+    template <bool GRADIENTS>
+    KOKKOS_INLINE_FUNCTION
+    void smooth_cell(const uint32_t idx) const {
         const uint32_t i_cell = cells(idx);
         const uint32_t k = block.shape_of(i_cell);
         if (k == teno::BlockStencils::NONE) {
-            smooth(i_cell, stencil_large.template row<TABLE>(i_cell));
+            smooth<GRADIENTS>(i_cell, stencil_large.template row<TABLE>(i_cell));
         } else {
-            smooth(i_cell, stencil_large.template block_row<TABLE>(i_cell, block.offsets_of(k)));
+            smooth<GRADIENTS>(i_cell, stencil_large.template block_row<TABLE>(i_cell, block.offsets_of(k)));
         }
     }
 
-    template <typename Row>
+    template <bool GRADIENTS, typename Row>
     KOKKOS_INLINE_FUNCTION
     void smooth(const uint32_t i_cell, const Row & stencil) const {
         rtype U0[N_CONSERVATIVE], W0[N_CONSERVATIVE];
@@ -2490,7 +2503,7 @@ struct TENOFunctor {
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         sigma_out(i_cell) = sigma;
         if (sigma >= sigma_threshold) {
-            if (point_gradients.on()) mark_point_gradients(i_cell);
+            if constexpr (GRADIENTS) mark_point_gradients(i_cell);
             const uint32_t j = Kokkos::atomic_fetch_add(&n_troubled(), 1u);
             troubled_cells(j) = i_cell;
             if (j < coeffs.extent(0)) {
@@ -2510,9 +2523,8 @@ struct TENOFunctor {
         const uint8_t n_quad = this->n_quad();
         const uint32_t f_begin = offsets_faces_of_cell(i_cell);
         const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
-        const bool with_gradients = point_gradients.on();
         rtype factor[DEG + 1];
-        if (with_gradients) unscaled_factors(i_cell, factor);
+        if constexpr (GRADIENTS) unscaled_factors(i_cell, factor);
         bool admissible = true;
         for (uint8_t k = 0; k < n_faces; k++) {
             const uint32_t f = faces_of_cell(f_begin + k);
@@ -2530,7 +2542,7 @@ struct TENOFunctor {
                 to_primitives(U_f, Wq);
                 admissible = admissible && (Wq[0] > 0.0_r) && (Wq[N_DIM + 1] > 0.0_r) && Kokkos::isfinite(Wq[N_DIM + 1]);
                 FOR_I_CONSERVATIVE face_solution(f, q, side, i) = Wq[i];
-                if (with_gradients) {
+                if constexpr (GRADIENTS) {
                     store_point_gradient(i_cell, f, q, side, p, Wq, [&](const uint32_t l, const uint8_t i) { return aK[l][i]; },
                                          factor);
                 }
@@ -2538,7 +2550,7 @@ struct TENOFunctor {
         }
         if (!admissible) {
             // The viscous flux would pair the polynomial's gradients with the cell mean
-            if (point_gradients.on()) mark_point_gradients(i_cell);
+            if constexpr (GRADIENTS) mark_point_gradients(i_cell);
             for (uint8_t k = 0; k < n_faces; k++) {
                 const uint32_t f = faces_of_cell(f_begin + k);
                 const uint8_t side = (cells_of_face(f, 0) == static_cast<int32_t>(i_cell)) ? 0 : 1;
@@ -2555,6 +2567,8 @@ struct TENOFunctor {
     // team scratch to the face points, which the cell's threads share out.
     // The arithmetic is SmoothPass's, operation for operation (see fmadd)
     struct SmoothTeamPass {};
+    // SmoothTeamPass that also writes point_gradients, a kernel of its own that leaves SmoothTeamPass's registers alone
+    struct SmoothTeamGradientPass {};
     static constexpr uint32_t TEAM_CELLS = 32;
     // Measured on A100s: faster than SmoothPass only when its coefficients spill
     static constexpr bool USE_TEAM = N_DIM == 3 && DEG >= 4;
@@ -2702,6 +2716,18 @@ struct TENOFunctor {
     template <typename Member>
     KOKKOS_INLINE_FUNCTION
     void operator()(SmoothTeamPass, const Member & team) const {
+        smooth_team<false>(team);
+    }
+
+    template <typename Member>
+    KOKKOS_INLINE_FUNCTION
+    void operator()(SmoothTeamGradientPass, const Member & team) const {
+        smooth_team<true>(team);
+    }
+
+    template <bool GRADIENTS, typename Member>
+    KOKKOS_INLINE_FUNCTION
+    void smooth_team(const Member & team) const {
         const uint32_t lane = static_cast<uint32_t>(team.team_rank()) % TEAM_CELLS;
         const uint8_t part = static_cast<uint8_t>(static_cast<uint32_t>(team.team_rank()) / TEAM_CELLS);
         const uint32_t idx = static_cast<uint32_t>(team.league_rank()) * TEAM_CELLS + lane;
@@ -2731,7 +2757,9 @@ struct TENOFunctor {
         team.team_barrier();
         const int slot = smooth_team[lane];
         const bool smooth = slot < 0;
-        if (active && !smooth && part == 0 && point_gradients.on()) mark_point_gradients(i_cell);
+        if constexpr (GRADIENTS) {
+            if (active && !smooth && part == 0) mark_point_gradients(i_cell);
+        }
         if (active && !smooth && slot < static_cast<int>(coeffs.extent(0))) {
             with_chunk(part, [&](auto C) {
                 constexpr uint8_t L0 = decltype(C)::value * CHUNK;
@@ -2775,7 +2803,9 @@ struct TENOFunctor {
         if (!admissible) admissible_team[lane] = 0;
         team.team_barrier();
         if (!admissible_team[lane]) {
-            if (part == 0 && point_gradients.on()) mark_point_gradients(i_cell);
+            if constexpr (GRADIENTS) {
+                if (part == 0) mark_point_gradients(i_cell);
+            }
             rtype W0[N_CONSERVATIVE];
             FOR_I_CONSERVATIVE W0[i] = W(i_cell, i);
             for (uint32_t p = part; p < n_points; p += PARTS) {
@@ -2783,7 +2813,7 @@ struct TENOFunctor {
                 const uint8_t side = side_of(f, i_cell);
                 FOR_I_CONSERVATIVE face_solution(f, p % n_quad, side, i) = W0[i];
             }
-        } else if (point_gradients.on() && n_points > 0) {
+        } else if (GRADIENTS && n_points > 0) {
             rtype factor[DEG + 1];
             unscaled_factors(i_cell, factor);
             for (uint32_t p = part; p < n_points; p += PARTS) {
@@ -3467,20 +3497,33 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
         if (rounds) functor.coeffs = {};
         const uint32_t n = cells.size();
         constexpr bool host = Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible;
-        // The face points' polynomial gradients are shared out among the team's threads too
-        constexpr bool team_possible = !host && N_DIM == 3;
-        const bool team = team_possible && (Functor::USE_TEAM || (!PRIM && point_gradients.on()));
-        if (!team) {
-            gated::parallel_for("teno_smooth",
-                                 Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic, HeavyBounds>(exec, 0, n),
-                                 functor);
-        } else if constexpr (team_possible) {
+        auto launch_team = [&](auto tag) {
             if (n == 0) return;
-            using Policy = Kokkos::TeamPolicy<Space, typename Functor::SmoothTeamPass,
-                                              Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
+            using Policy = Kokkos::TeamPolicy<Space, decltype(tag), Kokkos::LaunchBounds<Functor::TEAM_SIZE, 2>>;
             const Policy policy = Policy(exec, static_cast<int>((n + Functor::TEAM_CELLS - 1) / Functor::TEAM_CELLS), Functor::TEAM_SIZE)
                                       .set_scratch_size(0, Kokkos::PerTeam(Functor::SMOOTH_SCRATCH));
             gated::parallel_for("teno_smooth", policy, functor);
+        };
+        if constexpr (!PRIM) {
+            if (point_gradients.on()) {
+                // In 3D the team's threads share out the face points' gradients, whatever DEG
+                if constexpr (!host && N_DIM == 3) {
+                    launch_team(typename Functor::SmoothTeamGradientPass{});
+                } else {
+                    gated::parallel_for(
+                        "teno_smooth",
+                        Kokkos::RangePolicy<Space, typename Functor::SmoothGradientPass, Dynamic, HeavyBounds>(exec, 0, n),
+                        functor);
+                }
+                return;
+            }
+        }
+        if constexpr (!Functor::USE_TEAM || host) {
+            gated::parallel_for("teno_smooth",
+                                 Kokkos::RangePolicy<Space, typename Functor::SmoothPass, Dynamic, HeavyBounds>(exec, 0, n),
+                                 functor);
+        } else {
+            launch_team(typename Functor::SmoothTeamPass{});
         }
         return;
     }
