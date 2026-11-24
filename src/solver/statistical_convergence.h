@@ -88,7 +88,10 @@ double autocorrelation_time(const double * x, uint64_t n, double c = 5.0);
  *        t_stationary the latest of the latest accepted ones) and, from then on, confidence intervals on the mean
  *        and the variance (batch means; the variance as the mean of
  *        (x - mean)^2) of the samples after the transient and, once the
- *        [statistics] averages run, inside their averaging window. Its
+ *        [statistics] averages run, inside their averaging window. A
+ *        sample that is not finite (or whose prefix sums would overflow) means
+ *        the run diverged: it is counted, warned of and left out of the sums,
+ *        and its signal can no longer converge. Its
  *        values are a monitor named "convergence", read by [[triggers]];
  *        restart files carry the histories.
  */
@@ -113,7 +116,7 @@ class Convergence {
 
         /** @brief The latest values (named by columns(); empty name before any). */
         const MonitorValues & last() const { return values; }
-        /** @brief The value columns: STATIONARY, T_STATIONARY, [CONVERGED], <signal>_{MEAN,CI,...}. */
+        /** @brief The value columns: STATIONARY, T_STATIONARY, [CONVERGED], <signal>_{MEAN,CI,...,NONFINITE}. */
         std::vector<Monitored> columns() const;
 
         RestartAttributes attributes() const;
@@ -131,6 +134,7 @@ class Convergence {
             uint64_t n_tau = 0;       // window samples at the last autocorrelation time
             double window_tau = 0.0;  // its window's start
             double tau = 0.0;
+            uint64_t nonfinite = 0;    // samples not finite (or whose prefix sums would not be): never converged
         };
         /** @brief A signal on the device: its state and the samples of its history. */
         struct DeviceSignal {
@@ -172,7 +176,8 @@ class Convergence {
             std::vector<double> s1 = {0.0}, s2 = {0.0};  // prefix sums of x - x[0] and of its square
             uint64_t n_staged = 0;    // samples resume_staged copied
 
-            void push(double time, double value);
+            /** @brief Appends the sample, or counts it non-finite if the prefix sums would not stay finite. */
+            bool push(double time, double value);
         };
 
         void update(double window_start);

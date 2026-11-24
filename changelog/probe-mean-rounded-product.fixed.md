@@ -1,0 +1,1 @@
+- Time-averaged probes of moving regions: the host's means per cell round each update's product on its own, as the device's do, so a trigger reading their extrema or sums fires at the same step with any `step_queue` on compilers that fuse multiply-adds within an expression (Clang).

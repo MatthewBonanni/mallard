@@ -34,6 +34,7 @@
 #include "example_inputs.h"
 #include "json.h"
 #include "particles.h"
+#include "run_log.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -356,6 +357,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         o.rejected = solver.get_rejected_steps();
         o.queued = solver.get_queued_steps();
     }
+    // Rank 0 keeps a distributed run's log open, and NFS shows other nodes an open file's old contents
+    run_log::close();
     comm::barrier();
     if (comm::is_root()) fs::remove("STOP");
     // Messages name the run's files
@@ -1744,6 +1747,43 @@ TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
     Case at_step = c;
     at_step.extra = probes + triggers("step == 8", "step == " + std::to_string(back + 2));
     EXPECT_EQ(run_case("moving_reductions", c, 3).queued, run_case("moving_reductions_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, TriggersOfTimeAveragesOfAMovingRegionAcrossTwoCellsAreReducedOnTheDevice) {
+    // A small disk going back and forth across the face of two cells: its time averages per cell are the host's and
+    // the device's means of f V and f V q, decaying in the cell it left, and sums of two terms of like size keep
+    // their last bits, so a trigger that equals the written means fires on the device only if each mean is updated
+    // with the same roundings on both
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 0.03 * sin(3000 * t)", "0.55", "0.2") + ", radius = 0.015}";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"dot\"\nregion = " + disk + "\nfields = [\"P\"]\ninterval = 3\naverage = true\n"
+        "reductions = [\"integral\", \"mean\", \"min\", \"max\"]\nreductions_file = \"{dir}/dot_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("two_cells_reference", c, 0);
+    // At every write: each trigger checkpoints after its write's values, on the host and on the device alike
+    std::string triggers;
+    for (uint64_t step = 3; step < 30; step += 3) {
+        const std::string when =
+            written_at(reference, "dot", {"integral_MEAN_P", "mean_MEAN_P", "min_MEAN_P", "max_MEAN_P"}, "pt", "P", step) + " and step == " +
+            std::to_string(step + 2);
+        triggers += "[[triggers]]\nname = \"at_" + std::to_string(step) + "\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    }
+    c.extra = probes + triggers;
+    const Outcome o = expect_queue_invariant("two_cells", c);
+    if (comm::is_root()) {
+        for (uint64_t step = 5; step < 30; step += 3) {
+            std::ostringstream file;
+            file << "restart_" << std::setw(6) << std::setfill('0') << step << ".restart";
+            EXPECT_TRUE(o.files.count(file.str())) << file.str();
+        }
+    }
 }
 
 TEST(StepQueueTest, TriggersOfMovingRegionsStagedWhileTheyCoverNoCellAreReducedOnTheDevice) {

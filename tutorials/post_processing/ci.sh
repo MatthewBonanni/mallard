@@ -3,7 +3,6 @@
 # post-processing step and figure; mallard post convergence exits with 1
 # when a quantity of these unconverged runs diverges, still a report
 post_processing() {
-    export MALLARD_EXECUTABLE="$mallard"
     for mesh in coarse medium; do
         mkdir -p $mesh
         refine=$([ $mesh = coarse ] && echo 0.5 || echo 0.7071)

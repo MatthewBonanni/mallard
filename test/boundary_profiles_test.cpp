@@ -209,6 +209,13 @@ TEST(BoundaryProfilesTest, MisplacedDataAreInputErrors) {
     EXPECT_NE(error_of(inlet("\"bl_T\"", "at = [\"n_m + t\"]\n")).find("reads t for column d, but the data are read once"), std::string::npos);
     EXPECT_NE(error_of(inlet("\"bl_T\"", "")).find("the table's coordinate column d is not named like a boundary coordinate"),
               std::string::npos);
+    try {
+        Solver solver;
+        solver.init(parse_toml(inlet("\"bl_T\"", "at = [\"(n_m\"]\n")));
+        ADD_FAILURE() << "an at expression that does not compile was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find(".data[0].at[0]: \"(n_m\": expected ')'"), std::string::npos) << e.what();
+    }
     // Column names are the table's: a coordinate column and a value column named like coordinates
     std::ostringstream named;
     named << "n_m, u\n";
