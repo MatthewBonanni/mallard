@@ -1,8 +1,9 @@
 # Single-GPU performance and parallel scaling
 
 Status: in progress. Baseline measured on `main` at v0.5.0-92 (before any change here); each change below
-lists its measured effect. Results stay bitwise identical to `main` (checked on the cases under
-*Verification*), and bitwise independent of the rank count, thread count and restarts.
+lists its measured effect. Results stay bitwise independent of the rank count, thread count and restarts,
+and, unless a change says otherwise with a measured reason, bitwise identical to `main` (checked on the cases
+under *Verification*; the contract and what it costs: section 16).
 
 ## Hardware and method
 
@@ -195,6 +196,74 @@ every other cell's tables bitwise; `TENO::cells_within_reach()` gives the cells 
 set of changed cells. Rebuilding those after moving nodes reproduces a full setup bitwise (tests on
 prisms, mixed cells and tetrahedra in 3D and triangles in 2D).
 
+**2D** (#889, #999). The 2D setup runs one thread per cell (`CellSetup2D`), each with its own scratch in
+global memory, so the threads in flight are the batch's cells. The kernel takes 134 registers per thread,
+and Kokkos launches it in blocks of 128, three per SM: 41,472 resident threads on an A100. On CUDA a
+batch is that one wave (`resident_threads()` repeats Kokkos's block-size choice from the kernel's
+attributes), within a quarter of the free memory. Batches of 13,824 to 55,296 cells at orders 5 and 6
+took 6.25 / 5.04 / 5.17 / **4.17** / 4.69 / 4.48 s and 19.7 / 19.3 / 15.6 / **12.2** / 14.5 / 14.7 s
+(13,824 cells, the earlier byte budget's batch, then 27,648, 41,472, 51,840 and 55,296 cells): past one wave, a partial
+second wave lengthens every batch.
+
+At orders 5 and 6 a per-thread `clock64` profile of that kernel put 73-82% of the thread time in the
+smoothness-indicator matrix, which added every term to the cell's interleaved scratch in global memory (a
+load and a store per term, for each of up to 231 entries, quadrature point and derivative), and 16-22% in
+the fits. Each thread now sums the matrix one row at a time in registers (`smoothness_rows<R>`, the terms
+whose derivative vanishes left out), and on the device the Householder sums, the back-substitution and
+the Lebesgue constant's coefficients likewise column by column; every entry adds the same terms in the
+same order, so the tables are bitwise the same (in builds whose CUDA compiler is `nvcc_wrapper`, which
+compiles the TENO sources without contracting FMAs; not yet with the host compiler as
+`CMAKE_CXX_COMPILER`, #1184). The kernel then takes 255 registers and 2.3 KB of local memory per thread,
+two blocks per SM; bounded to four blocks of 128 per SM (128 registers, 2.8 KB) it holds 55,296 threads
+and is faster at every order. The fits are now about 70% of the thread time (#1185). The host backends
+run the same row sums; their pseudo-inverse keeps updating whole rows, which vectorize.
+
+"TENO setup" tables phase, one A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`); the host setup is
+the same code on the 16 host threads; restart files are bitwise identical:
+
+| tables (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 6.48 | 12.8 | 23.5 | 57.8 |
+| double Mach, device, batches from a byte budget (at most 27,648 cells) | 1.03 | 1.66 | 5.12 | 19.3 |
+| double Mach, device, batches of one wave (41,472) | **0.89** | **1.47** | **4.18** | **12.2** |
+| box, 1024 x 1024 quadrilaterals, device, byte budget | 0.86 | 1.35 | 3.38 | 17.4 |
+| box, device, one wave | **0.69** | **1.11** | **3.25** | **10.7** |
+| double Mach, device, one wave, again (same session as the next row) | 0.92 | 1.45 | 4.43 | 13.5 |
+| double Mach, device, sums in registers, four blocks per SM (55,296) | **0.78** | **1.07** | **2.15** | **4.83** |
+| box, device, one wave, again | 0.69 | 1.11 | 3.23 | 11.4 |
+| box, device, sums in registers, four blocks per SM | **0.51** | **0.75** | **1.32** | **3.42** |
+
+On the 28 threads of the Threads backend the 2D tables take 2-43% less (box 1.63 / 3.30 / 9.34 / 25.6 s
+before, 1.59 / 2.66 / 5.47 / 14.6 s after; double Mach 2.56 / 4.19 / 10.8 / 26.8 s before, 2.51 / 3.56 /
+7.75 / 16.0 s after) and the 3D tables the same (Taylor-Green 96^3 at orders 3, 5 and 6: 5.74 / 11.2 /
+25.0 s). The tables' SHA-256 (the cache file after its header) is the same before and after, on the A100
+and on the host, for every case above.
+
+The workspace still does not grow with the mesh (meshes of at least 16,384 cells share the batch); one
+wave of 41,472 cells takes 1.5 GB at order 3 and 3.6 GB at order 6, one of 55,296 a third more. On the host, the packing of the shared tables
+took 7-37 s on these meshes, more than the tables; it now runs on the device (#1031, below).
+
+**Shared tables** (#1031). With shared tables (#994, #972), the packing copied every batch's tables to
+the host, where each cell's pseudo-inverse was ranked, hashed and compared with its shape's, and the
+rows of basis means and moments were then downloaded and matched the same way. Now the device ranks the
+slots (an insertion sort per cell, stable like the host's), hashes each table and row, and compares the
+cells with their shapes' tables; the host only looks up the hashes in cell order and receives the
+tables that its shapes keep. One A100 (CUDA 13.5, 16 OpenMP threads, `n_steps = 2`), the same machine for
+both; restart files at step 2 are bitwise identical:
+
+| packing / numerics setup (s) | order 3 | order 4 | order 5 | order 6 |
+|---|---|---|---|---|
+| double Mach, 2048 x 512 x 2 triangles (2.1M), host | 25.7 / 29.4 | 36.7 / 49.6 | 70.2 / 87 | 108 / 168 |
+| double Mach, device | **0.87 / 2.64** | **0.91 / 3.25** | **1.10 / 6.54** | **1.22 / 21.7** |
+| box, 1024 x 1024 quadrilaterals (1M), host | 16.6 / 20.5 | 23.1 / 30.9 | 33.8 / 44.6 | 62.7 / 93 |
+| box, device | **0.45 / 3.05** | **0.53 / 3.53** | **0.54 / 6.23** | **0.65 / 20.6** |
+
+The numerics setup is now the tables phase plus 1-3 s; on the host it was the tables phase plus 25-150
+s. Per family (central and sector stencils) and per 2.1M cells, the device ranking takes 10-70 ms, the
+comparisons 25-100 ms and the host's matching 0.1-0.25 s; the rest of the packing is the cells' stencils,
+as without sharing. Packing times vary by up to 3 s from run to run with the host's load (one box run at
+order 5 took 3.2 s; the table gives the repeat).
+
 ### 5. Reacting mixtures (#257)
 
 The reacting Volvo LES cost about 24 times air per cell and step. The performance set's `flame_3d`
@@ -281,8 +350,8 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds half the cells (`troubled_capacity`); more troubled cells are done in further
-  rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
+- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+  further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
 - The setup takes its team scratch from a pool with one slot per team that can be resident (0.3 GB instead of
@@ -450,8 +519,29 @@ which the reduction's minimum gives every rank for the triggers that read `wall`
 a step the host must act on (or a divergence, or the last allowed rejection), the device clears the flag and
 the launches already enqueued do nothing; the host then acts on that step's state with the code of the
 one-step path. Progress rows' reductions sit under a second IF node. Builds without conditional nodes (CUDA
-before 12.4, or a failed capture of NCCL operations under one, tried on every rank before the first step)
-launch one step at a time with the IF bodies always run.
+before 12.4, and HIP and SYCL, whose graphs have none) take their steps kernel by kernel, one at a time, the host
+reading each IF node's flag.
+
+Where NCCL communicates over a network, it adds host nodes to the operations it captures, which a conditional
+node's body cannot hold; a capture of NCCL operations under one is tried on every rank before the first step.
+If it fails, the step graph gates every IF body instead. Gating only the bodies with NCCL operations and keeping
+IF nodes for the others does not capture: an IF node inside a gated body ends the capture of the graph around it
+and starts another one of it, and NCCL (2.32) fails the next operation captured there ("dependency created on
+uncaptured work in another stream"). A gated body runs in every
+launch: a kernel copies its flag, and the gate of the code around it, into a gate of its own, which every kernel
+of the body tests, so the body's kernels follow the flag as it was when the body began even where the body clears
+it. Every top-level kernel launches through `src/common/gated.h` (a CMake check rejects Kokkos's own launches),
+which tests the innermost gate; a reduction that does nothing leaves its destination as it was, by copying it
+into the result in the reduction's final step. Copies and fills there are kernels too (the tests'
+`StepGraphGuard` reports others). On CUDA a thread of a parallel_for that does nothing exits rather than
+returns: a return would leave the rest of the kernel in a divergent region, which costs TENO's kernels about
+0.4% of a step also where nothing is gated. The NCCL operations always run, on the same buffers on every rank,
+since the flags come from values reduced over the ranks. Nothing outside a gated body may therefore read a buffer
+that an NCCL collective reduces in place: while the body is gated, a `SUM` buffer that its kernels no longer refill
+grows by the rank count at each launch. A gated body costs its kernel launches (and its NCCL
+latency) whether or not it is due: in every step for an output due only every few steps (a probe's reductions,
+say), and in each launch after a stop, `step_queue` - 1 times per stop, instead of nothing. Off CUDA, the tests'
+launches of the code a capture records gate every body.
 
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
@@ -468,9 +558,41 @@ it stops at, a restart, averages started afresh), the device's means are copied 
 Probes of `[statistics]` outputs read the device's averages, which the graph samples before the probes and
 the triggers; at a step the device stops at after sampling them (a trigger that fires, an output still being
 written), the record says so, and the host takes the step without sampling them again (writing the spectra's
-staged sample instead). Probes reading cell data or `[statistics]` confidence intervals are left to the host:
+staged sample instead). Confidence intervals `CI_<average>` are computed at each sample's cell from the
+device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`batch_means::half_width`), the
+Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
+half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
+Probes of moving and `where` regions reduce the cells covered at the write, the first `count()` of the
+selection, weighed by their `f V`; the fixed point's unit depends on the number of terms summed over the ranks,
+which only the device knows, so `ExactSums::sum(terms, count)` sums that count over the ranks and takes the unit
+from it in a kernel, as `exact_sums_unit` (integer arithmetic, the same on the host) gives it. Their time
+averages are kept per owned cell, as the host's per global cell (`accumulate_cells`): each cell held or covered
+takes `mean += a (x - mean)` of `f V` and of `f V q`, `x` zero where the sample does not cover it, and the
+reduction compacts the cells held and divides as `Probe::mean_fields` does. The sums do not depend on the order
+of the terms, so the per-cell layout gives the host's values on any number of ranks. Isosurfaces (the weights of
+those sampled per cell come from the host's extraction, and their averages sum each cell's points in the host's
+order) and probes reading cell data are left to the host:
 the device stops at their writes, the host writes them and evaluates the triggers, and on resuming copies the
 values into the device's trigger variables (rank 0's, sent to every rank with one host `allgatherv`).
+
+`[statistics.convergence]` values that a trigger reads are updated on the device too, at the rows of their signals,
+between the probes and the triggers. The integrals' and forces' values are the trigger variables the monitors set;
+probe signals are reduced into theirs like the probes a trigger reads. Each signal's history (times, values and the
+prefix sums of its values less the first, and of their squares) lives in device memory, and one kernel, under an IF
+node on whether any signal has a sample (and itself checking that flag, since graphs without conditional nodes run
+every IF body), does `Convergence::add` and `update`: the MSER-5 checks, the start of the stationary window, the
+integrated autocorrelation time and the batch means of the mean and the variance, in the host's order of operations
+and compiled without contracted multiply-adds, so its values are the host's bit for bit. Its team sums each of
+MSER's batch means and each lag's autocorrelation on one thread, as the host does, and Sokal's window closes over
+chunks of 256 lags. The host updates its own estimate as it takes each record, which writes the file and the
+restart histories; the device keeps the window's start, the `[statistics]` averages' start after the step's
+samples, in the record, since the host's copy of the statistics' clock may be steps ahead. On resuming, the host
+copies its state to the device, and its histories' samples since the last copy if it added any. The histories are
+whole, with no wraparound: their device memory holds at least 4096 samples, twice the longest history when staged,
+at 32 bytes per sample and signal (128 KiB per signal at least, about 1 GiB per signal at 10^7 samples, besides
+MSER's batch means and the lags' chunk). A history fills it only by running that long without a stop; the device
+then stops at that row (`CONVERGENCE`) and resumes with twice the room, in a new graph; while it restages, the old
+and the new memory are held at once, about three times the old.
 
 Snapshots and restarts are staged in the graph. The writers' clocks (`OutputClock`, the arithmetic
 `DataWriter` uses too) live in device memory; after the triggers, a kernel decides which writers are due at a
@@ -491,7 +613,9 @@ node on its writer's own flag at the device's `t` (after the cell states, for a 
 copied into pinned memory; the host computes them the same way, at its `t`, when it writes the output itself.
 With fused chemistry the staging flushes the pending half step first, as for the monitors (below), and also
 copies the kept, unflushed state, which the host swaps into the mirrors while it writes restart files. Outputs
-of builds without conditional nodes stop the device at their steps.
+of builds without conditional nodes stop the device at their steps. What the host copies from the device for an
+output it writes itself also goes through pinned mirrors: the same ones for snapshots and restarts, and their
+own for probe values, a moving region probe's cells and the spectra.
 
 A progress row's values are those of the step it reports, at any depth. The row's local reductions (with
 the mixture's and the chemistry's columns) go into a struct in the record. The run health's per-rank values
@@ -520,14 +644,49 @@ false`) are copied into a pinned array per record slot on rank 0, with a bit in 
 the file from it as it takes the record.
 
 Probes written every few steps or by time, and the samples of time-averaged probes, are evaluated in the graph
-as well, except those of regions that move or follow the solution and those reading `[statistics]` confidence
-intervals (`CI_`), whose Student's t quantile the host computes. A kernel sets one flag per probe and one for any; under the latter the
+as well, except those of surfaces or curves of the solution that are clipped, made of more than one
+piece or cut from two conditions, or lie on a mesh with curved cells (below). A kernel sets one flag per probe and one for any; under the latter the
 derived fields the due probes read are updated (the cell states, transport and gradients, as the host's
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
 from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
-takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
+takes the record. A probe whose writes need its reductions alone (no samples written, no time averages, spectra,
+motion or isosurface) is reduced in the graph instead, as the probes triggers read are, and only its measure and
+reduced values go to the record slot: copying a cut plane's 1.5M samples into pinned memory at each write made
+the perf set's `probes_3d` two to five times slower than `teno5_3d` on an A100 (#1402). Point values come from
+`FaceReconstruction::point_values` with `by_cell`: the probes' points come by cell, and TENO fits each run of
+one cell once, a team of threads sharing out its coefficients, each summed in the per-point fit's order, so the
+values are those of a fit per point bit for bit. The intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
+
+A moving region's fractions, and a `where` region's (from the levels of its conditions on the cell states, which
+an IF node on a flag for any due probe of the solution updates first, after the pending chemistry flush), are
+updated at the device's `t`, and a scan selects the owned cells it covers, with their count, on the device. That happens before the outputs and the statistics' samples are staged, at the steps the probe is due: if on
+some rank the count is above the capacity of the probe's staging, the device stops at that step (reason
+`PROBES`, reduced over the ranks), the host writes it as it writes unstaged probes, and the step graph is built
+anew with each moving probe's staging at twice the cells it covers then (at least 64, at most the owned cells).
+An isosurface (or another surface or curve of the solution) sampled as cell averages without normals has one
+sample per cell it crosses, whose values are the cell's: the same scan selects, at the device's `t`, the owned
+cells the host would read levels in (`region::CrossedLevels`), and their values are evaluated there and copied
+with the cells' levels into the record slot (with the same capacity and `PROBES` stop). The host extracts the
+elements from those levels as it takes the record, with the code it runs on the levels it selects itself, so the
+samples, their order and weights are its own bit for bit, and each sample takes its cell's staged values.
+Probes of fluxes through it, of point values or of gradients need values at each quadrature point. When the
+surface is cut from one condition alone (`region::single_level`: one piece, unclipped, on straight cells), the
+device cuts each crossed cell's level on its simplices as the host does (`region::cut::level_cut`, the host's
+double arithmetic in its order, without contraction, and an exact angular order instead of `atan2`; the host's
+`order_about` uses the same), counts the points per cell, scans their offsets and fills them into arrays of twice
+the points at the stage, and at least the surface's points per crossed cell over the ranks times the cells staged
+(at least 256; more stop the device with `PROBES` as above), samples them as
+`Samples::in_cells` would, and stages their values with the levels. The host cuts the staged levels again at
+the record and takes the staged values point by point, after checking that it found as many points. Other
+surfaces of the solution stay with the host.
+Otherwise the samples are evaluated over arrays the size of the owned cells, each thread past the count
+returning at once, and
+the covered cells, their `f V` and the count are copied into the record slot with the samples. The host orders
+them by global cell, as it does for the samples it selects itself, as it takes the record. On one A100
+(`air_3d.toml`, a sphere of radius 0.03 written every 10 steps) the sampling of the cells its surface crosses
+is nearly all of the region's work; the selection, evaluation and copies take under 0.1 ms per write.
 
 With fused chemistry (`[chemistry] fuse_half_steps`), each step ends with a half step still pending, which the
 host applies to a copy (`Solver::flush_chemistry`) for whatever reads the state. In the graph, before the first
@@ -657,22 +816,23 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   agreed over the ranks, through a per-cell index. Bytes per cell of the tables and cells per A100-80GB
   (`mallard check`; the GPU's packing in blocks of 32 tables measured with the CPU build packing slices of 32):
 
-  | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
-  |---|---|---|---|---|
-  | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
-  | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
-  | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
-  | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
-  | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
-  | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
-  | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
-  | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
+    | case | compact entries | shared, per cell | shared, blocks of 32 | cells per A100-80GB |
+    |---|---|---|---|---|
+    | TENO3, hexahedra | 9.77 kB | 721 B | 774 B | 5.85M / 17.9M |
+    | TENO4, hexahedra | 17.4 kB | 1.15 kB | 1.26 kB | 3.69M / 15.6M |
+    | TENO5, hexahedra | 31.3 kB | 1.77 kB | 1.97 kB | 2.12M / 10.3M |
+    | TENO6, hexahedra | 64.2 kB | 2.76 kB | 3.21 kB | 1.12M / 8.70M |
+    | TENO3, tetrahedra | 8.10 kB | 638 B | 656 B | 6.69M / 18.3M |
+    | TENO4, tetrahedra | 13.9 kB | 1.02 kB | 1.06 kB | 4.43M / 16.1M |
+    | TENO5, tetrahedra | 43.1 kB | 1.90 kB | 2.06 kB | 1.66M / 12.5M |
+    | TENO6, tetrahedra | 71.1 kB | 2.79 kB | 3.07 kB | 1.04M / 10.4M |
 
-  What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
-  states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
-  per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
-  mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
-  count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+    What a TENO5 hexahedron keeps is mostly its entries' cells (0.85 kB) and its moments (0.7 kB); the face
+    states and gradients (4 kB) now dominate the memory per cell. Results change once at round-off against
+    per-cell tables: restart files after 5 steps of a blast on hexahedra, tetrahedra and
+    mixed cells with walls differ by at most 9e-16 (absolute, fields of order 1), and do not depend on the rank
+    count, slice width or thread count. Unstructured meshes have a shape per cell and keep their packing.
+
 - **Shared basis means and moments (#972).** Next to its entries' cells, a shared-table cell kept its basis
   means and its central moments (2D: smoothness-indicator matrix), the same for every cell of a shape up to
   round-off. They are now one row per cell shape, found the same way as the shared tables (on a grid of 2^-30 of
@@ -681,21 +841,21 @@ periodic boxes of $16^3$ hexahedra and $10^3 \times 6$ Kuhn tetrahedra), and the
   cells per A100-80GB (`mallard check --memory a100-80` on the A100, $16^3$ hexahedra and $10^3 \times 6$
   tetrahedra, periodic):
 
-  | case | tables, before | tables | cells per A100-80GB, before / after |
-  |---|---|---|---|
-  | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
-  | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
-  | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
-  | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
-  | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
-  | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
-  | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
-  | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
+    | case | tables, before | tables | cells per A100-80GB, before / after |
+    |---|---|---|---|
+    | TENO3, hexahedra | 774 B | 626 B | 18.2M / 18.8M |
+    | TENO4, hexahedra | 1.26 kB | 834 B | 15.7M / 17.1M |
+    | TENO5, hexahedra | 1.97 kB | 1.04 kB | 10.2M / 11.6M |
+    | TENO6, hexahedra | 3.21 kB | 1.46 kB | 8.39M / 10.3M |
+    | TENO3, tetrahedra | 656 B | 508 B | 18.6M / 19.2M |
+    | TENO4, tetrahedra | 1.06 kB | 633 B | 16.3M / 17.8M |
+    | TENO5, tetrahedra | 2.06 kB | 1.12 kB | 12.4M / 14.5M |
+    | TENO6, tetrahedra | 3.07 kB | 1.32 kB | 10.1M / 13.0M |
 
-  The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
-  8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
-  against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
-  most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
+    The smooth pass reads fewer distinct rows: the $96^3$ Taylor-Green vortex of `teno5_3d` on one A100 runs at
+    8.20M cells/s against 8.08M at order 5, and 3.83M against 3.60M at order 6. Results change once at round-off
+    against per-cell rows: restart files after 5 steps of a blast on $16^3$ hexahedra and tetrahedra differ by at
+    most 2e-15 (absolute, fields of order 1). Unstructured meshes have a shape per cell and keep a row per cell.
 
 ### 15. Working set beyond the TENO tables (#552)
 
@@ -734,6 +894,318 @@ and of MUSCL, double-flux and `outlet_extrapolation` variants).
 Together: 3.0% more cells on hexahedra and 2.0% on tetrahedra for a perfect gas, 5.2% and 3.8% for the
 6-species flame, 16.1% with GRI-Mech. What remains beyond the tables, and why it stays for now: #978.
 
+#### Stage scratch of gas mixtures (#552)
+
+A gas mixture's right-hand side runs in this order: the reconstruction (the TENO troubled passes' coefficients, or
+MUSCL's gradients and limiters, and the scalar reconstruction's work memory) writes `face_thermo`; the convective
+fluxes read it and write `face_mdot`; the species slots read `face_mdot`; only then does `update_transport` fill
+`cell_diffusion`, `transport_values` and `transport_gradients` for the viscous fluxes. Every other reader of those
+three (the time step's transport, the eddy viscosity of LES, TFLES and PaSR, output, probes, forces, derived fields)
+runs after a call that fills them. Gas mixtures never start a reconstruction before the time step
+(`exchanges_partition_faces`), so the two groups are never live together. They share one allocation,
+`stage_scratch`, as large as the larger group: buffers placed one after another, 256-byte aligned. The memory
+tracker counts it once under that label, so `mallard check --memory` stays exact; view sizes are checked as
+for any allocation. The reconstructions are told not to allocate their own scratch, so the setup never holds both.
+
+Not shared: `production` (live with the transport buffers in the TFLES reaction sensor and output), a perfect
+gas's `viscous_gradients` (its reconstruction may start before the time step's gradients are read), and the
+chemistry's work memory (on the thread's stack).
+
+| bytes per cell, cells per A100-80GB | `main` | stage scratch | cells |
+|---|---|---|---|
+| propane flame, TENO5, hexahedra | 9,590 / 8,090,532 | 9,220 / 8,413,483 | +4.0% |
+| propane flame, TENO5, tetrahedra | 8,760 / 8,854,176 | 8,390 / 9,242,432 | +4.4% |
+| propane flame, MUSCL, hexahedra | 4,190 / 18,514,190 | 3,840 / 20,183,512 | +9.0% |
+| GRI-Mech, TENO5, hexahedra | 14,500 / 5,342,876 | 12,300 / 6,321,797 | +18.3% |
+| GRI-Mech, MUSCL, hexahedra | 12,100 / 6,435,177 | 10,600 / 7,333,000 | +14.0% |
+| 2D propane flame, MUSCL | 2,100 / 37,226,797 | 1,870 / 41,879,047 | +12.5% |
+
+With GRI-Mech at TENO5, the 2,882 bytes of `stage_scratch` replace 1,760 (TENO), 891 (`face_thermo`), 223
+(`face_mdot`) and 2,248 (transport). Perfect gases and runs limited by the setup or by view sizes (2D TENO5) are
+unchanged. Restart files after 4 steps are bitwise identical to `main` for 31 runs: TENO and MUSCL, 2D, 3D and
+axisymmetric, GRI-Mech, Soret, PaSR, dynamic LES, double flux, MPI on 3 ranks and restarts. On one A100 (medians
+of alternating runs) the time per step does not change: `flame_3d` 39.1 / 39.3 ms, with TENO5 217 / 217 ms,
+with GRI-Mech at TENO5 1,567 / 1,558 ms, `teno5_3d` 105 / 104 ms; the device's peak falls by 82 MiB, 86 MiB and
+482 MiB on the three flames (221,184 cells).
+
+#### Planar face points from the face nodes (#978)
+
+3D TENO stored every face's quadrature points (face, q, dim), read by the face evaluation of every pass. On meshes
+without curved faces the kernels now place them from the faces' nodes, and the stored points are freed after the
+setup. A table holds each face's four node indices (a triangle's third repeated, which marks it), next to a copy of
+the node coordinates in `LayoutRight`, so a face's nodes take one 16-byte load and four coordinate rows; both replace
+the mesh's node lists and coordinates, which TENO kept in 2D anyway. `planar_face_point` evaluates
+$v_0 + a (v_1 - v_0) + b (v_2 - v_0)$ on triangles and $\sum_k N_k v_k$ on quadrilaterals with every product
+rounded on its own (`rounded_product`), as the setup did on the host, so the points and the results are bitwise
+those of the stored points; the rule's padding rows repeat the last point, as the stored padding did. A thread loads
+a face's nodes once for the points it evaluates on that face: `SmoothTeamPass` gives each of a cell's threads a run
+of consecutive points rather than every fifth one, and the troubled passes load them per face. The image points of
+transmissive faces are placed on the host for those faces alone.
+
+`mallard check --memory a100-80 --steps 1` (CUDA 13.5 build on an A100) of the 3D TENO5 Taylor-Green vortex on
+$32^3$ hexahedra and $16^3 \times 6$ tetrahedra, `main` at a7a5432e:
+
+| | hexahedra: `main` | change | tetrahedra: `main` | change |
+|---|---|---|---|---|
+| bytes per cell (setup's peak) | 6.47 kB | 5.87 kB (-600 B) | 6.51 kB | 6.20 kB (-310 B) |
+| most cells per A100-80GB | 12,103,636 | 13,324,340 (+10.1%) | 12,018,308 | 12,616,797 (+5.0%) |
+
+On one A100 (CUDA 13.5, TENO5, 300 steps, median wall time per step of the progress rows from step 100, five runs
+each alternated with `main`'s on the same GPU; spread = (max - min) / median):
+
+| case | `main` | change |
+|---|---|---|
+| Taylor-Green, $96^3$ hexahedra | 101.49 ms (spread 0.1%) | 100.69 ms (-0.8%, spread 0.1%) |
+| explosion, $96^3$ hexahedra | 233.75 ms (1.3%) | 183.94 ms (-21.3%, 2.6%) |
+| Taylor-Green, $48^3 \times 6$ tetrahedra | 87.38 ms (0.4%) | 86.81 ms (-0.7%, 0.1%) |
+
+Restart files after 100 steps are bitwise those of `main` (`mallard diff`) in the three cases and in the hexahedral
+Taylor-Green vortex at $48^3$ with `viscous_gradients = "reconstruction"`, whose viscous flux places the points as
+the TENO kernels do. An earlier measurement (100 steps, three runs) gave the same picture.
+
+Nsight Systems over the 100 steps: `SmoothTeamPass` 8.33 s / 8.23 s (Taylor-Green, hexahedra), 7.08 s / 7.00 s
+(tetrahedra), and `TroubledSelectTeamPass` 6.40 s / 3.53 s in the explosion, whose threads (one per face and
+variable) each read the stored points of their face again for every point. A first version that read the nodes
+through the mesh's offsets per point was 4-10% slower than `main`.
+
+### 16. Cost of bitwise reproducibility (#429)
+
+Three places where the bitwise contract constrains the arithmetic were relaxed one at a time on a branch that is
+not merged, and measured on one A100 (CUDA 13.5, best of two runs; setup times are the TENO setup's `tables`
+line of the run summary):
+
+- **TENO setup with FMA contraction and tree sums.** `teno_setup.cpp` and `teno.cpp` compiled with contraction
+  (no `--fmad=false`, `-ffp-contract=off`), then also the setup's dot products (`strided_dot`, every sum of the
+  Householder QR and the back substitution) with four partial sums added pairwise instead of one sequential sum.
+- **Plain sums instead of `ExactSums`.** One `Kokkos::Sum<double>` per column, without the max reduction and the
+  rounding to fixed point.
+- **Atomic scatter of the face fluxes.** `face_flux_sum` replaced by a kernel over the faces that adds each flux
+  to its two cells with `atomic_add` (the reduction order then depends on scheduling).
+
+Unconstrained chunking in the team TENO kernel (section 1) was not measured on its own: `teno.cpp` no longer
+contracts, so runtime chunk bounds would give the same bits as compile-time ones, and the compile-time bounds
+stay because they keep each thread's coefficients in registers. Its cost in bits is covered by the contraction
+row below.
+
+| case | change | TENO tables | throughput (cells/s) | result vs `main` after N steps |
+|---|---|---|---|---|
+| `teno5_3d` ($96^3$ hexahedra) | none | 6.35 s | 8.22M | - |
+| | FMA contraction | 6.10 s (-3.9%) | 8.26M (+0.4%) | all cells differ, max 4.5e-13 of each field's max (N = 100) |
+| | FMA + tree sums | 6.07 s (-4.4%) | 8.24M (+0.2%) | max 4.9e-13 |
+| | atomic scatter | | 8.20M (-0.3%) | max 4.7e-13 |
+| 3D explosion, $55^3 \times 6$ tetrahedra | none | 24.4 s | 5.90M | - |
+| | FMA contraction | 23.5 s (-3.9%) | 5.91M (+0.2%) | 52% of cells differ, max 1.8e-15 (N = 20) |
+| | FMA + tree sums | 23.6 s (-3.6%) | 5.85M (-0.8%) | max 1.8e-15 |
+| `sphere_3d` mesh with TENO5 (176,243 tetrahedra, 4,000 prisms) | none | 33.4 s | 3.24M | - |
+| | FMA contraction | 32.0 s (-4.2%) | 3.22M (noise) | 67% of cells differ, max 6.0e-14 (N = 20) |
+| | FMA + tree sums | 32.2 s (-3.5%) | 3.21M (noise) | max 5.9e-14 |
+| `teno5_2d` | none | 3.35 s | 76.2M | - |
+| | FMA contraction | 3.35 s | 76.4M (+0.3%) | 30% of cells differ, max 2.0e-14 (N = 300) |
+| | atomic scatter | | 75.6M (-0.8%) | max 1.8e-14 |
+| `air_3d` | atomic scatter | | 45.9M vs 46.0M (noise) | max 8.4e-14 (N = 100) |
+| `air_3d` with `les.dynamic` | plain sums | | 35.31M vs 35.27M (+0.1%) | 71% of cells differ, max 2.5e-14 (N = 100) |
+| `flame_3d` with `efficiency = "dynamic"` | plain sums | | 7.80M vs 7.79M (+0.2%) | every cell differs, momentum by up to 2%, chemistry sub-steps by 60% (N = 100) |
+
+- **Setup.** Contraction saves 4% of the fits on every cell type; the tree sums add nothing beyond it. On these
+  meshes the setup is dominated by the host's packing of shared tables (#1031), so the whole setup changes by
+  less than 1%. The price would be the portable cache: with contraction the device's tables no longer equal the
+  host's (cells redone on the host, CPU builds, a cache written by the other), and 13-31% of the cache's bytes
+  change.
+- **Per step.** `teno.cpp` already writes its FMAs explicitly where they count, so contracting the rest gains
+  0.2-0.4%. The atomic scatter is slower than the gather on every case: it writes each cell's sum through
+  atomics in global memory twice per face, where the gather sums in registers and writes once
+  (`face_flux_sum` is 99 us per stage on `teno5_2d`, 2.1% of the stage).
+- **Exact sums.** `ExactSums` takes 59 us per call for the dynamic constant (2 columns, 221k cells) and 107 us
+  for the dynamic TFLES efficiency (4 columns), against 26 and 49 us for plain sums (Nsight Systems): the
+  difference is 0.5% and 0.2% of a step. On CPUs (48 threads as 1, 2, 4 or 8 ranks, `air_3d` with
+  `les.dynamic`) it stays inside the run-to-run spread (5%). Distributed, exact sums add one all-reduce of the
+  column maxima per call to the one of the sums. Over NCCL on A100s (main 9da4ab1e7, 221k cells, median ms per
+  step of two runs, exact / plain):
+
+    | GPUs | `air_3d` with `les.dynamic` | `flame_3d` with `efficiency = "dynamic"` |
+    |---|---|---|
+    | 1 | 5.27 / 5.23 (+0.7%) | 27.16 / 27.12 (+0.1%) |
+    | 2 | 3.25 / 3.23 (+0.8%) | 20.57 / 20.56 (+0.1%) |
+    | 4 | 2.36 / 2.30 (+2.3%) | 17.12 / 17.11 (+0.1%) |
+    | 8 | 1.65 / 1.60 (+3.2%) | 15.32 / 15.24 (+0.5%) |
+    | 7 + 7, two nodes | 1.81 / 1.71 (+6.0%) | 15.75 / 15.61 (+0.9%) |
+
+    On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
+    us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+    The flame shows what the plain sums would cost: last
+    bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
+    or a restart on another partition, could no longer be checked against the original.
+
+**Contract.** Within one build and version, results stay bitwise independent of the rank count, partition,
+thread count, step queue depth, CUDA graphs and restarts: it costs at most 0.5% per step here, and it is what
+makes restarts, partitions and GPU against CPU checkable by `mallard diff` with no tolerance. Against the previous
+`main`, a change may move the last bits when it brings a measured speedup, with tolerance checks and an unchanged
+verification manual instead of bitwise identity ([CONTRIBUTING.md](../../CONTRIBUTING.md#reproducibility));
+none of the three relaxations above qualifies, so none was kept, and the TENO setup keeps its host and device
+tables equal.
+
+### 17. Convective flux without contraction (#1253)
+
+The Riemann solvers are inline functions, and where nvcc and Clang contract their multiplies and adds into
+FMAs depends on the kernel they are inlined in: the same flux rounded differently in `convective_flux` and in a
+reconstruction kernel computing it on its own (#965), by about 1e-15. The sources that call them
+(`solver_convective_flux.cpp` and three tests) are compiled without contraction, as `teno.cpp` is, and the
+solvers, the flux functors and the low-Mach and hybrid blends write their FMAs explicitly (`fmadd`, `fma_dot`):
+every product added to something, as the compiler would have fused it. Configuring fails if another source
+names `riemann::` without the same flags. Measured on one A100 (CUDA 13.5, Release, three runs each;
+`convective_flux` is the mean over 60 (`teno5_3d`, 20 steps) or 300 (`sphere_3d`, 100 steps) launches, Nsight
+Systems):
+
+| case | `main` | no contraction, no explicit FMAs | this change |
+|---|---|---|---|
+| `teno5_3d`, `convective_flux` | 3.46 ms | 3.71 ms (+7.2%) | **3.18 ms (-8.0%)** |
+| `teno5_3d`, step | 105 ms (8.41-8.44M cells/s) | 106 ms (8.36-8.37M) | **104 ms (8.48-8.51M)** |
+| `sphere_3d` (MUSCL, 500 steps), `convective_flux` | 94.7 us | 98.2 us (+3.7%) | **88.0 us (-7.0%)** |
+| `sphere_3d`, step | 7.33-7.36 ms | 7.30-7.40 ms | 7.32-7.35 ms |
+
+Without contraction and without explicit FMAs the flux is 4-7% slower; with them it is 7-8% faster than `main`,
+whose contraction does not fuse every product (for example `0.5 W[0] |u|^2` into the energy, or the HLLC star
+state). Results change in the last bits once: after 20 steps of `teno5_3d` the cells differ from `main` by at most
+3.5e-15 of each field's maximum (`mallard diff`), 1.5e-12 for the momentum along z, which starts at zero. The block-face flux of #965 (design 1, computed in the TENO smooth
+pass) is now bitwise equal to `convective_flux`: on CPUs (`teno5_3d` at $32^3$, 6 steps) and on the A100
+(`teno5_3d`, 20 steps).
+
+### 18. Mesh build memory (#964)
+
+Peak heap in use (glibc `mallinfo2`, bytes per local cell, the highest rank) while building 1M-cell meshes, and
+build times of rank 0 (s, best and worst of two runs), on `main` and with the change; Linux x86_64, GCC, Release,
+double, 2 threads, MPI on 1 or 3 ranks (`DistributedMesh`, as `mallard` builds a mesh for a run). Generated
+meshes, and a Gmsh file of the same box; "built" is the finished mesh.
+
+| peak / built, B per cell; time, s | serial | | distributed, 1 rank | | distributed, 3 ranks | |
+|---|---|---|---|---|---|---|
+| hexahedra $100^3$ | 513 / 504 → 407 / 398 | 3.74-3.86 → 3.38-3.46 | 532 → 426 | 5.45-5.60 → 4.88-4.92 | 604 → 465 | 2.21-2.38 → 1.89-2.08 |
+| periodic hexahedra | 546 / 537 → 413 / 404 | 4.84-4.96 → 4.35-4.37 | 561 → 428 | 7.47-7.58 → 6.27-6.29 | 571 → 446 | 2.94-3.03 → 2.52-2.59 |
+| Kuhn tetrahedra $56^3 \times 6$ | 537 / 531 → 262 / 256 | 3.10-3.13 → 1.94-2.18 | 550 → 331 | 3.92-4.19 → 2.87-2.89 | 547 → 276 | 1.62-1.86 → 1.25-1.37 |
+| Gmsh hexahedra $100^3$ | 521 / 508 → 415 / 402 | 3.76-4.26 → 3.31-3.35 | 536 → 430 | 5.86-6.00 → 4.95-4.99 | 560 → 435 | 2.48-2.56 → 2.09-2.19 |
+| quadrilaterals $1000^2$ | 255 / 254 → 219 / 218 | 1.33-1.35 → 1.14-1.16 | 276 → 252 | 2.08 → 1.78 | 324 → 294 | 0.86-0.94 → 0.78-0.84 |
+| periodic quadrilaterals | 270 / 269 → 226 / 225 | 1.98-2.12 → 1.83-1.85 | 290 → 246 | 3.41-3.44 → 2.69-2.72 | 323 → 295 | 1.23-1.27 → 1.02-1.06 |
+| triangles $700^2 \times 2$ | 222 / 222 → 170 / 170 | 0.93-0.94 → 0.70 | 239 → 223 | 1.57 → 1.28 | 253 → 228 | 0.65-0.71 → 0.58-0.64 |
+| Gmsh quadrilaterals $1000^2$ | 263 / 258 → 227 / 222 | 1.59-1.64 → 1.41-1.44 | 281 → 281 | 2.38-2.57 → 2.01-2.13 | 303 → 283 | 1.14-1.15 → 0.85-0.90 |
+
+- **Vertex neighbors on first use.** `cells_of_cell` and its offsets and shift rows (106 B per hexahedron, 275 B
+  per Kuhn tetrahedron, 36 B per quadrilateral) are built by `Mesh::vertex_neighbors()` when first read, not
+  with the mesh, and freed with the setup's data: only the kernels that read them in the step keep them (the
+  vertex gradient of viscous fluxes, the hybrid sensor and MUSCL, the LES filters through it, moving regions).
+  Building them takes 0.49 s per million hexahedra and 1.1 s per million tetrahedra, as before, at the first
+  reader. Their periodic shift rows are still numbered with the mesh, so the `shifts` table and the checks of
+  periodic directions are unchanged.
+- **Face matching and node directory in rounds.** `DistributedMesh` sends the faces in four rounds of a hash
+  bucket, and the node directory's records in four rounds of node ranges: on 3 ranks of hexahedra the
+  construction peaked at 604 B per cell and now at 320, the distribution at 540 and now at 465. The records of a round are
+  sorted as records, stably: `std::sort` of an index took twice as long on some meshes' rounds.
+
+Distributed builds now peak in the distribution (465 B per hexahedron on 3 ranks against 419 built, 331 per
+tetrahedron on 1 rank against 266): the cells sent to their owners next to the block. A whole run (Kokkos host
+allocations, CPU, 10 steps) holds less after setup when no step kernel reads the vertex neighbors: 134 B per cell
+less on the $64^3$ Taylor-Green vortex with TENO5 (6,660 → 6,526 B per cell; 5,440 → 5,309 on 3 ranks), 44 B on
+$512^2$ quadrilaterals (2,476 → 2,432). With GPUs that is device memory, and the host copies of the lists go too.
+The runs' peaks are set later, in the numerics setup, and do not change; nor do viscous runs, which keep the lists.
+Setup and step times are within the run-to-run spread (Taylor-Green, 10 steps: 17.86 → 17.73 s). Meshes are
+bitwise those of `main` on every rank (a hash of every array), and `mallard diff` finds the states of 10-step runs
+(inviscid and viscous, 2D and 3D, hexahedra and tetrahedra, dynamic Smagorinsky LES) the same bit for bit on 1 and
+3 ranks.
+
+### 19. Troubled scratch for a quarter of the cells (#978)
+
+The troubled passes' scratch (central coefficients and the sector coefficients of every face) had room for half
+the cells; it now has room for a quarter (`troubled_capacity = 0.25`), and cells beyond it are done in further
+rounds. Every round below a capacity of 1 recomputes its cells' central coefficients, so results do not depend
+on the capacity (`TENO3DTroubled` and `RotationalPeriodicSetup` test 0.001 and 0.02 against 1 and 0.5).
+
+The cases of section 15 (perfect gas on $32^3$ hexahedra and $16^3 \times 6$ tetrahedra, LES, the propane
+flame on $48 \times 24^2$ / $24 \times 12^2 \times 6$, GRI-Mech 3.0 on $32 \times 16^2$), 3D TENO5 unless
+stated, `mallard check --memory a100-80` on a CPU (2 Threads, one step): bytes per cell and the cells that fit
+on an A100-80GB.
+
+| bytes per cell, cells per A100-80GB | perfect gas, hexahedra | tetrahedra | LES, hexahedra | tetrahedra | flame, hexahedra | tetrahedra | GRI-Mech, hexahedra |
+|---|---|---|---|---|---|---|---|
+| capacity 0.5 | 7,558 / 10,402,669 | 7,414 / 10,603,752 | 7,598 / 10,347,899 | 7,454 / 10,546,850 | 9,212 / 8,419,977 | 8,383 / 9,252,886 | 12,046 / 6,432,167 |
+| capacity 0.25 | 6,678 / 11,773,594 | 6,534 / 12,031,826 | 6,718 / 11,703,485 | 6,574 / 11,958,618 | 8,332 / 9,309,270 | 7,503 / 10,338,158 | 11,413 / 6,789,351 |
+
+| perfect gas, bytes per cell, cells per A100-80GB | TENO3, hexahedra | tetrahedra | TENO4, hexahedra | tetrahedra | TENO6, hexahedra | tetrahedra |
+|---|---|---|---|---|---|---|
+| capacity 0.5 | 4,973 / 15,808,529 | 5,740 / 13,696,969 | 5,371 / 14,636,220 | 6,183 / 12,715,675 | 8,382 / 9,379,146 | 8,774 / 8,960,039 |
+| capacity 0.25 | 4,343 / 18,101,651 | 5,110 / 15,385,696 | 4,641 / 16,938,167 | 5,453 / 14,418,008 | 7,292 / 10,781,086 | 7,684 / 10,230,998 |
+
+880 bytes less per cell at TENO5 (630 at TENO3, 730 at TENO4, 1,090 at TENO6): 13% more cells per A100-80GB
+for a perfect gas at TENO5, 11-12% for the 6-species flame, 6% with GRI-Mech (whose setup peak binds).
+Results are bitwise unchanged (`mallard diff` of the restart files after 4 steps, on a CPU). On one A100-80GB
+(CUDA 13.5), restart files after 100 steps are bitwise identical with capacities 0.25 and 0.125 on the $96^3$
+Taylor-Green vortex, the $96^3$ explosion and the $48^3 \times 6$ tetrahedral Taylor-Green vortex, and on the
+2D Riemann problem with 0.25 and 0.125 against 1.
+
+The smaller scratch adds two rounds of the five troubled kernels per stage, which find no work in smooth flows:
+under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), and a capacity of 0.125 is within
+1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
+recomputes the central coefficients, so 2D keeps 1.
+
+### 20. TENO setup: one fit per stencil shape (#986)
+
+With shared tables, every backend keys each cell's stencil geometry on the device before the fit and fits one
+cell per key (`teno_shapes.h`); the other cells take its tables, and whole batches go through the shared-table
+packing of #1031. The $64^3$ Taylor-Green vortex at TENO5 (hexahedra, periodic, HLLC, SSPRK3), Threads with 2 threads on an
+Apple M-series machine shared with other jobs, base = #1031, one step and `mallard post derive` of its step-0
+restart file (`--fields Q_CRITERION`):
+
+| $64^3$ TENO5, Threads | numerics setup | of it: tables / packing / keys | run, wall / CPU | run, peak RSS | post derive, wall / CPU | post derive, peak RSS |
+|---|---|---|---|---|---|---|
+| base | 56.9 s | 33.5 / 12.1 / - s | 63.1 / 104.4 s | 2.43 GB | 59.6 / 95.1 s | 1.82 GB |
+| keyed | 34.1 s | 0.01 / 18.5 / 4.4 s | 42.4 / 62.2 s | 2.46 GB | 47.6 / 59.8 s | 1.85 GB |
+
+27 cells are fitted of 262,144: the interior and the 26 combinations of periodic faces. Results are bitwise
+those of the base except where cells of one key used to fall on either side of the table comparison's grid:
+of 3D cases on $24^3$ / $12^3$ / $8^3$ meshes (periodic and symmetry boxes, mixed, tetrahedra, prisms; orders
+3-6) only the periodic order-3 box differs (restart files after 3 steps, at most 6.7e-16 in density), and of
+2D double Mach ($160 \times 40 \times 2$, orders 3-6) and $96^2$ boxes only the order-3 box (4.4e-16). 2 and 3
+ranks give the 1-rank result bit for bit.
+
+On one A100 (base = #1069, device packing), restart files after 3 steps are bitwise those of the base, and a
+GPU run that reads the tables cache an OpenMP run wrote gives its own result bit for bit; the two caches differ
+only in the producer's name. Seconds of the numerics setup:
+
+| A100 | base: tables / packing | keyed: tables / packing / shapes | fitted |
+|---|---|---|---|
+| double Mach $2048 \times 512 \times 2$, TENO3 | 0.87 / 0.96 | 0.17 / 1.17 / 0.40 | 323 of 2,097,152 |
+| TENO4 | 1.43 / 0.96 | 0.20 / 1.24 / 0.40 | 323 |
+| TENO5 | 4.52 / 1.16 | 0.32 / 1.47 / 0.46 | 323 |
+| TENO6 | 19.35 / 1.31 | 0.66 / 1.54 / 0.56 | 323 |
+| $96^3$ symmetry box, TENO5 | 5.29 / 1.14 | 0.07 / 2.03 / 1.16 | 873 of 884,736 |
+| 750,000 jittered tetrahedra, TENO3 | 3.02 / 6.18 | 3.02 / 6.41 / 0.23 | 750,000 |
+| TENO5 | 90.10 / 30.83 | 90.05 / 31.19 / 0.18 | 750,000 |
+
+The peak device memory is unchanged except for double Mach at order 6 (6,995 to 7,515 MiB) and the
+tetrahedra, where every cell has a shape of its own: against main's 11,279 / 40,611 MiB at orders 3 / 5, the
+base peaks at 11,955 / 44,013 MiB and the keyed path at 11,279 / 42,701 MiB.
+
+**Ranking a key's table once** (#1079). The packing ranked, hashed and compared every cell's table although the
+cells of a key carry it bit for bit. Each batch now does that once per key, at its first cell there, with the
+lowest global id of its cells, so the store sees the same tables in the same order and gives the same shapes.
+The $64^3$ Taylor-Green vortex at TENO5 as above, under a load average of about 140, two alternating runs, base =
+the keyed setup above (#986); the packing includes the decode of the records:
+
+| $64^3$ TENO5, Threads | setup, wall | of it: geometry / tables / packing / keys | run, wall | run, peak RSS |
+|---|---|---|---|---|
+| base | 77.2 / 92.5 s | 21.9 / 0.07 / 28.0 / 9.2 s, 23.9 / 0.03 / 41.2 / 10.6 s | 86.1 / 100.2 s | 2.43 / 2.35 GB |
+| once per key | 70.0 / 60.1 s | 25.8 / 0.07 / 11.7 / 14.6 s, 18.3 / 0.04 / 11.6 / 12.8 s | 77.1 / 68.0 s | 2.32 / 2.43 GB |
+
+On one A100 (16 host threads, two alternating runs each) the packing, which ranks on the device, gains less:
+
+| one A100, packing | base | once per key |
+|---|---|---|
+| $96^3$ symmetry box, TENO3 / TENO5 | 1.49-1.53 / 1.93-2.05 s | 1.30-1.37 / 1.63-1.70 s |
+| 1,053,696 tetrahedra, TENO3 / TENO5 | 2.89-2.90 / 4.34-6.94 s | 2.61-2.66 / 3.57-3.65 s |
+
+The $96^3$ box at TENO3 on 8 OpenMP threads packs in 4.8 s instead of 11.4 s. Restart files are bitwise those of
+the base on the A100, on OpenMP (orders 3, 5 and 6; hexahedra, tetrahedra and prisms) and on 1, 2 and 3 ranks, and
+the tables in the caches the A100 and OpenMP write are the same bytes. What remains: the decode's search of
+every layer (#1178), the per-cell geometry (#1166) and the keys (#1167).
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step
@@ -764,7 +1236,12 @@ Notes:
   GPUs; the comparison with the domain grown instead is in progress.
 - At small sizes per GPU (MUSCL, 262k cells on 4 GPUs: 65k per GPU) the step is latency-bound (about 30
   launches and four exchanges per step); the CUDA graph and NCCL exchange of #217 take it from 667 to 523 us.
-- Multi-node runs (16-32 GPUs over InfiniBand) are pending free GPUs.
+- 3D TENO5 Taylor-Green, $64^3$ hexahedra per A100 (Nx = 64 N, multi-jagged, NCCL, CUDA graphs; main
+  9da4ab1e7, median of the progress intervals from step 60 to 160, two runs): 1 GPU 30.58 ms, 2 GPUs 30.77 ms
+  (99.4%), 4 GPUs 31.10 ms (98.3%), 8 GPUs 31.04 ms (98.5%); over two nodes (HDR InfiniBand) 1 + 1 31.09 ms,
+  4 + 4 31.05 ms and 7 + 7 31.06 ms (98.5%). With the step queue (#787) the step graph runs across nodes too,
+  so crossing nodes costs nothing measurable; before it, two-node runs fell back to one step per launch and
+  paid a flat 0.5 ms per step.
 
 ## Partitions
 

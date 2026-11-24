@@ -49,7 +49,7 @@ const std::vector<BoundarySubtype> & boundary_subtypes() {
 const std::vector<std::string> & boundary_option_keys(const std::string & option) {
     static const std::unordered_map<std::string, std::vector<std::string>> keys = {
         {"nscbc", {"nscbc"}},           {"average", {"average"}}, {"turbulence", {"turbulence"}},
-        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance"}}, {"u-field", {}},
+        {"wall_model", {"wall_model"}}, {"composition", {"X", "Y", "balance", "Z", "C"}}, {"u-field", {}},
     };
     return keys.at(option);
 }
@@ -136,9 +136,8 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
         return sigma / L;
     };
     bc.relax[Relax::ACOUSTIC] = contains_optional(table, "sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
-    // A turbulent inlet's incoming wave follows the target's own, which carries the target's
-    // transverse terms: by default it leaves out the face's, which would count them twice
-    bc.relax[Relax::BETA] = (inlet && InletProfile::turbulent(entry)) ? 0.0_r : -1.0_r;
+    // Transverse terms in an inlet's incoming wave hold its velocity off the target by beta T- / (K rho c)
+    bc.relax[Relax::BETA] = inlet ? 0.0_r : -1.0_r;
     if (contains_optional(table, "beta")) {
         bc.relax[Relax::BETA] = find_real(table, "beta", dim::none);
         if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {
@@ -249,10 +248,10 @@ BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler
     fields.apply(bc, Point{}, 0.0, double(physics.R), Point{}, true);
     if (bc.has(AVERAGE)) {
         const BoundaryValue * p = fields.slot(BoundaryFields::SLOT_P);
-        for (uint16_t x = 0; x < 3 && p->compiled(); x++) {
-            if (p->compiled()->uses(x)) {
+        for (uint16_t x = 0; x < boundary_variable::COUNT && p->compiled(); x++) {
+            if (x != boundary_variable::T && p->compiled()->uses(x)) {
                 fail(input, where, "p", "with average = true is one area-averaged pressure: it may depend on t, not "
-                                        "on x, y or z",
+                                        "on x, y, z or the local coordinates",
                      "Remove average to impose p face by face", "average-area-averaged-pressure");
             }
         }
@@ -574,9 +573,10 @@ ImageNeighbors image_neighbors(const Mesh & mesh, const std::vector<int32_t> & h
             }
             if (read.empty()) break;
             std::vector<uint32_t> next;
+            const VertexNeighbors & neighbors = mesh.vertex_neighbors();
             for (uint32_t x : front) {
-                for (uint32_t k = mesh.h_offsets_cells_of_cell(x); k < mesh.h_offsets_cells_of_cell(x + 1); k++) {
-                    const uint32_t y = mesh.h_cells_of_cell(k);
+                for (uint32_t k = neighbors.h_offsets(x); k < neighbors.h_offsets(x + 1); k++) {
+                    const uint32_t y = neighbors.h_cells(k);
                     if (seen[y] != c + 1) {
                         seen[y] = c + 1;
                         next.push_back(y);
@@ -668,7 +668,8 @@ BoundaryData make_boundary_data(const Mesh & mesh,
             h_face_state_index(f) = n_dirichlet++;
         }
         if (h_face_bc_vec[f] < 0 || !h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_transmissive()) continue;
-        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic()) {
+        if (h_bcs_vec[static_cast<size_t>(h_face_bc_vec[f])].is_characteristic() &&
+            static_cast<uint32_t>(mesh.h_cells_of_face(f, 0)) < mesh.n_reconstructed()) {
             h_face_char(f) = static_cast<int32_t>(char_faces.size());
             char_faces.push_back(f);
             const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
@@ -702,14 +703,14 @@ BoundaryData make_boundary_data(const Mesh & mesh,
         // their frame (images do not cross rotations: the exterior state would
         // need turning)
         uint32_t image_shift = 0;
-        for (uint32_t k = mesh.h_offsets_cells_of_cell(c);
-             image == c && k < mesh.h_offsets_cells_of_cell(c + 1); k++) {
-            const uint32_t s = mesh.h_cells_of_cell_shift(k);
+        const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+        for (uint32_t k = neighbors.h_offsets(c); image == c && k < neighbors.h_offsets(c + 1); k++) {
+            const uint32_t s = neighbors.h_shift(k);
             if (s == 0 || mesh.h_rotated_row(s)) continue;
             rtype q[N_DIM];
             FOR_I_DIM q[i] = p[i] - mesh.h_shifts(s, i);
-            if (point_in_cell(mesh, mesh.h_cells_of_cell(k), q)) {
-                image = mesh.h_cells_of_cell(k);
+            if (point_in_cell(mesh, neighbors.h_cells(k), q)) {
+                image = neighbors.h_cells(k);
                 image_shift = s;
             }
         }

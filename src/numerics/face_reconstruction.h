@@ -20,15 +20,78 @@
 
 #include "input.h"
 
+#include "common_math.h"
 #include "common_typedef.h"
 #include "index_set.h"
 #include "mesh.h"
+#include "face_weights.h"
 #include "quadrature.h"
 #include "boundary.h"
 #include "gradient.h"
 #include "log.h"
 #include "report.h"
 #include "teno.h"
+
+/**
+ * @brief Point (a, b) of a planar 3D face's quadrature rule from its nodes v:
+ *        v0 + a (v1 - v0) + b (v2 - v0) on a triangle, the bilinear map at
+ *        (s, t) = (a, b) on a quadrilateral. Every product is rounded on its
+ *        own, so host and device place the points alike.
+ */
+template <typename V>
+KOKKOS_INLINE_FUNCTION void planar_face_point(const bool triangle, const double a, const double b, const V & v,
+                                              double * p) {
+    if (triangle) {
+        for (uint8_t i = 0; i < 3; i++) {
+            p[i] = v[0][i] + rounded_product(a, v[1][i] - v[0][i]) + rounded_product(b, v[2][i] - v[0][i]);
+        }
+        return;
+    }
+    const double N[4] = {0.25 * (1 - a) * (1 - b), 0.25 * (1 + a) * (1 - b), 0.25 * (1 + a) * (1 + b),
+                         0.25 * (1 - a) * (1 + b)};
+    for (uint8_t i = 0; i < 3; i++) {
+        p[i] = 0.0;
+        for (uint8_t k = 0; k < 4; k++) p[i] += rounded_product(N[k], v[k][i]);
+    }
+}
+
+// The faces' nodes (face, k), a triangle's last node repeated, and the nodes' coordinates
+using FaceNodes = Kokkos::View<uint32_t *[2 * (N_DIM - 1)], Kokkos::LayoutRight>;
+using NodeCoords = Kokkos::View<rtype *[N_DIM], Kokkos::LayoutRight>;
+
+/** @brief Nodes of a planar 3D face, from which planar_face_point places its quadrature points. */
+struct PlanarFace {
+    rtype v[4][3] = {};
+    bool triangle = false;
+};
+
+/** @brief The nodes of face f (3D), from a FaceNodes-like table. */
+template <typename Nodes, typename Coords>
+KOKKOS_INLINE_FUNCTION PlanarFace planar_face(const Nodes & face_nodes, const Coords & node_coords, const uint32_t f) {
+    PlanarFace face;
+    uint32_t n[4];
+    for (uint32_t k = 0; k < 4; k++) n[k] = face_nodes(f, k);
+    face.triangle = n[3] == n[2];
+    for (uint32_t k = 0; k < 4; k++) {
+        FOR_I_DIM face.v[k][i] = node_coords(n[k], i);
+    }
+    return face;
+}
+
+/**
+ * @brief Point q of a planar 3D face (FaceReconstruction::face_rule), as
+ *        FaceReconstruction::init_face_quadrature_3d places it.
+ */
+template <typename Rule>
+KOKKOS_INLINE_FUNCTION void planar_face_point(const PlanarFace & face, const Rule & rule, const uint32_t q, rtype * x) {
+    double v[4][3];
+    for (uint8_t k = 0; k < 4; k++) {
+        for (uint8_t i = 0; i < 3; i++) v[k][i] = double(face.v[k][i]);
+    }
+    double p[3];
+    planar_face_point(face.triangle, double(rule(q, face.triangle ? 2 : 0)), double(rule(q, face.triangle ? 3 : 1)), v, p);
+    for (uint8_t i = 0; i < 3; i++) x[i] = static_cast<rtype>(p[i]);
+}
 
 enum class FaceReconstructionType {
     FIRST_ORDER,
@@ -124,6 +187,9 @@ class FaceReconstruction {
          */
         virtual bool exchanges_partition_faces() const { return false; }
 
+        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
+        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
+
         /**
          * @brief Reconstruct the listed cells' sides of their faces, on the
          *        given execution space instance, as far as each cell can on its
@@ -152,6 +218,19 @@ class FaceReconstruction {
         virtual void discard_cell_face_values() {}
 
         /**
+         * @brief Bytes of the work memory needed only while face values are reconstructed (calc_face_values,
+         *        or from calc_cell_face_values to finish_cell_face_values); 0 if none.
+         */
+        virtual size_t scratch_bytes() const { return 0; }
+
+        /**
+         * @brief Keep that work memory in storage that other work uses at other times (memory::ScratchArena),
+         *        instead of the reconstruction's own allocation.
+         * @param storage scratch_bytes() bytes, aligned for rtype, that outlive the reconstruction's use.
+         */
+        virtual void place_scratch(void * /*storage*/) {}
+
+        /**
          * @brief Turn the velocity of the cell 1 sides of faces across
          *        rotational periodic boundaries, which the schemes reconstruct
          *        in cell 1's frame, into the face's (its cell 0's) frame, so
@@ -173,6 +252,13 @@ class FaceReconstruction {
                                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution);
 
         /**
+         * @brief Halo cells whose polynomials image_point_values() reads: the
+         *        image cells of owned cells' transmissive faces without an image
+         *        face (sorted, distinct).
+         */
+        std::vector<uint32_t> halo_image_cells() const;
+
+        /**
          * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
          *        cells from the reconstruction polynomials, if the scheme has
          *        higher-order ones than least squares on face neighbors.
@@ -190,13 +276,14 @@ class FaceReconstruction {
          *        offset offsets(i) from its centroid, with m =
          *        offsets.extent(0) / cells.extent(0) points per cell, for cells
          *        the scheme deems smooth and where the value is admissible;
-         *        out(i) of other points is left as it is.
+         *        out(i) of other points is left as it is. by_cell: equal
+         *        cells come in runs, whose polynomials may then be fitted once.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
         virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                   Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, bool /*by_cell*/) {
             return false;
         }
 
@@ -230,12 +317,27 @@ class FaceReconstruction {
          */
         void init_face_quadrature_2d_curved();
 
+        /**
+         * @brief 3D, and 2D curved meshes: the faces' quadrature points (face,
+         *        q, dim) on the host, the stored ones or, on planar faces whose
+         *        points were released, placed from the nodes as the kernels do.
+         */
+        Kokkos::View<rtype ***>::host_mirror_type host_face_points() const;
+        /** @brief Node k of face f as in a FaceNodes table, on the host. */
+        uint32_t host_face_node(uint32_t f, uint32_t k) const;
+        /** @brief 3D: the nodes of face f, as planar_face reads them, on the host. */
+        PlanarFace host_planar_face(uint32_t f) const;
+
         Quadrature quadrature_face;
         // 3D, and 2D curved meshes: (face, q, dim) and (face, q). Weights sum to 2 per face
         // (twice the area over face_area on curved faces) and are zero on padding points
         Kokkos::View<rtype ***> face_quad_points;
-        Kokkos::View<rtype **> face_quad_weights;
+        FaceWeights<> face_quad_weights;
         Kokkos::View<rtype ***> face_quad_normals;  // curved meshes: (face, q, dim) unit normals out of cell 0
+        // 3D: reference coordinates of point q on planar faces, (s, t) on quadrilaterals and (a, b) on triangles,
+        // from which planar_face_point places it
+        Kokkos::View<rtype *[4]> face_rule;
+        bool share_weights = true;  // false keeps a row of face_quad_weights per face (tests)
     protected:
         FaceReconstructionType type;
         std::shared_ptr<Mesh> mesh;
@@ -306,6 +408,59 @@ static const std::unordered_map<LimiterType, std::string> LIMITER_NAMES = {
 };
 
 /**
+ * @brief The geometry of MUSCL's face-neighbor stencils, for the reconstructed
+ *        cells that take the face-neighbor fit (not tetrahedra, no face of a
+ *        characteristic boundary), have no rotational periodic face and have
+ *        all their faces (not the outermost halo layer): per face slot (in
+ *        faces_of_cell order), the gradient weights (LSQGradientFunctor::weights)
+ *        and the offset from the cell centroid to the face centroid. The
+ *        cells whose rows are equal on teno::TableStore's grid share the row
+ *        of the lowest global id, agreed over the ranks, so that a cell's
+ *        row does not depend on the partition. Boundary faces' states still
+ *        come from LSQGradientFunctor::neighbor. The cells of structured
+ *        blocks whose faces all have a neighbor take their neighbors as the
+ *        cell plus their block shape's offsets (one per face slot).
+ */
+struct MUSCLTables {
+    static constexpr uint32_t NONE = ~0u;
+    Kokkos::View<uint32_t *[2]> row;  // (cell): its weights row and offsets row, or NONE; empty if no cell has one
+    Kokkos::View<rtype *> weights;    // ((row stride + slot) N_DIM + d)
+    Kokkos::View<rtype *> offsets;    // ((row stride + slot) N_DIM + d)
+    uint32_t stride = 0;
+    teno::BlockStencils block;
+    Kokkos::View<uint32_t *> offsets_faces_of_cell;
+    Kokkos::View<uint32_t *> faces_of_cell;
+    Kokkos::View<int32_t *[2]> cells_of_face;
+
+    KOKKOS_INLINE_FUNCTION
+    bool has(const uint32_t c) const { return row.extent(0) && row(c, 0) != NONE; }
+
+    /** @brief Cell c's block offsets, or null if it reads its faces. */
+    KOKKOS_INLINE_FUNCTION
+    const int32_t * block_offsets(const uint32_t c) const {
+        const uint32_t k = block.shape_of(c);
+        return k == teno::BlockStencils::NONE ? nullptr : block.offsets_of(k);
+    }
+
+    /** @brief The neighbor of cell c across its face slot k, by offsets o or by its face; -1 across a boundary. */
+    KOKKOS_INLINE_FUNCTION
+    int32_t neighbor(const uint32_t c, const uint32_t k, const int32_t * o) const {
+        if (o) return int32_t(c) + o[k];
+        const uint32_t f = faces_of_cell(offsets_faces_of_cell(c) + k);
+        const int32_t c0 = cells_of_face(f, 0);
+        return c0 == int32_t(c) ? cells_of_face(f, 1) : c0;
+    }
+
+    /** @brief Cell c's weights, (slot N_DIM + d). */
+    KOKKOS_INLINE_FUNCTION
+    const rtype * weights_of(const uint32_t c) const { return weights.data() + size_t(row(c, 0)) * stride * N_DIM; }
+
+    /** @brief Cell c's face-centroid offsets, (slot N_DIM + d). */
+    KOKKOS_INLINE_FUNCTION
+    const rtype * offsets_of(const uint32_t c) const { return offsets.data() + size_t(row(c, 1)) * stride * N_DIM; }
+};
+
+/**
  * @brief Second-order MUSCL reconstruction of W = [rho, u_x, u_y, p] using
  *        least-squares gradients and a slope limiter.
  */
@@ -331,6 +486,21 @@ class MUSCL : public FaceReconstruction {
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients;
         Kokkos::View<rtype *[N_CONSERVATIVE]> limiters;
         LSQVertexGradientFunctor gradient;  // Its linear vertex fit serves tetrahedra
+        // The cells of structured blocks read their neighbors by offsets (MUSCLTables::block);
+        // false (tests only) reads every cell's faces
+        bool block_path = true;
+        MUSCLTables tables;
+        // Cells that could have a row per distinct row, over the ranks, below which no cell gets one: the rows
+        // would cost more memory than the per-step fit
+        static constexpr uint64_t MIN_CELLS_PER_ROW = 8;
+        uint64_t n_table_cells = 0;           // cells with a row (this rank)
+        uint64_t n_candidates_global = 0;     // owned cells that could have a row, over the ranks
+        uint64_t n_rows_global = 0;           // distinct rows over the ranks (weights or offsets, the more)
+        /** @brief The tables of the cells that have one (MUSCLTables), and the block shapes (collective). */
+        void find_tables();
+        // Measured on A100s: one fused kernel per cell is faster from about 2^17 cells, separate kernels (more
+        // parallel, shorter chains) below. Tests lower it to run the fused kernel on small meshes
+        static inline uint32_t fused_cells = 1u << 17;
 };
 
 /**
@@ -361,13 +531,16 @@ class TENO : public FaceReconstruction {
                                      Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_solution) override;
         bool exchanges_partition_faces() const override { return true; }
         void discard_cell_face_values() override;
+        size_t scratch_bytes() const override;
+        void place_scratch(void * storage) override;
         bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                          bool by_cell) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -394,26 +567,53 @@ class TENO : public FaceReconstruction {
         // cells of a cell shape one row of basis_mean and si_matrix or moments
         // (teno::TableStore); false (tests only) keeps a table and a row per cell
         bool share_tables = true;
+        // This rank's cells whose tables the last full setup fitted; with shared tables the
+        // others take those of their stencil shape's cell with the lowest global id
+        uint32_t n_cells_fitted = 0;
+        // false: the central stencils alone, which cell_gradients and point_values read, and no
+        // face values (output of states read from files); such tables are never written to the cache
+        bool sector_stencils = true;
+        // false, set before init() by a caller that places the troubled passes' work memory (place_scratch):
+        // init() leaves it without memory
+        bool own_scratch = true;
+        // Set before init() when distributed runs get the halo side of partition faces from their owners
+        // (Solver::exchanges_partition_faces): the tables then cover only the owned cells and the halo cells
+        // of halo_image_cells(), which are all whose reconstruction is evaluated
+        bool partition_faces_exchanged = false;
+        // Rows of the per-cell tables: cells [0, n_direct_rows) in order, then extra_cells (halo cells, sorted)
+        uint32_t n_direct_rows = 0;
+        std::vector<uint32_t> extra_cells;
+        Kokkos::View<uint32_t *> extra_cells_device;
+        /** @brief Rows of the per-cell tables. */
+        uint32_t n_rows() const { return n_direct_rows + static_cast<uint32_t>(extra_cells.size()); }
+        /** @brief The local cell of table row r. */
+        uint32_t cell_of_row(const uint32_t r) const { return r < n_direct_rows ? r : extra_cells[r - n_direct_rows]; }
+        /** @brief The table row of local cell c, or -1 if it has none. */
+        int64_t row_of_cell(uint32_t c) const;
         // The cells of structured blocks with a block shape read their central stencils by offsets
         // (teno::BlockStencils); false (tests only) reads every cell's slots
         bool block_path = true;
         teno::BlockStencils block_stencils;
-        uint64_t n_block_cells = 0;   // reconstructed cells on the block path (this rank)
-        uint32_t n_block_shapes = 0;  // their block shapes (this rank)
         /**
          * @brief Block shapes of the cells of the structured blocks, from their packed central stencils
          *        (after the tables are set up or rebuilt; a no-op unless block_path).
          */
         void find_block_stencils();
-        /** @brief Each local cell's global id, or null if the mesh is not distributed (its own index then). */
+        /** @brief Each table row's global id, or null if the mesh is not distributed (its row then). */
         const uint64_t * global_cell_ids() const {
-            return mesh->h_global_cell_id.empty() ? nullptr : mesh->h_global_cell_id.data();
+            if (mesh->h_global_cell_id.empty()) return nullptr;
+            return extra_cells.empty() ? mesh->h_global_cell_id.data() : row_global_ids.data();
         }
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
+        // When allocated (cell / 2, l, cell % 2, var), the reconstruction also writes there the central
+        // coefficients of the conservative variables of the cells it finds smooth, in the unscaled frame
+        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones and for those
+        // whose face values fall back to the cell mean (inadmissible at a face point)
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
 
-        // Per-cell precomputed data, for the reconstructed cells [0, n_reconstructed)
+        // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)
         // Rotational periodicity: (turns + teno::TURN_BIAS, i, j) the rotation
         // by turns times the periodic angle, and the boundary faces in
@@ -437,19 +637,25 @@ class TENO : public FaceReconstruction {
         // Queued cells per round of the troubled passes, as a fraction of the
         // reconstructed cells (scratch slots); later rounds recompute the
         // central coefficients the smooth pass could not keep
-        rtype troubled_capacity = N_DIM == 3 ? 0.5 : 1.0;
+        rtype troubled_capacity = N_DIM == 3 ? 0.25 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
-        // Vertex-neighbor layers each reconstructed cell's stencil search visited
-        // (host); a distributed run needs this many complete layers around the cell
+        // Vertex-neighbor layers each table row's stencil search visited (host);
+        // a distributed run needs this many complete layers around the row's cell
         std::vector<uint8_t> gather_depth;
-        // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source
+        // Axisymmetric runs: rule on the reference triangle (q, [xi, eta, w]) of the geometric source,
+        // and the curved cells' own rules (q, [x, y, w]), cell c's from curved_rule_start(c)
         Kokkos::View<rtype *[3]> cell_rule;
-        // 2D: the faces' nodes, from which the kernels place the face points of
-        // straight faces, and (axisymmetric runs) the cells' nodes; the mesh's
-        // own views are released after setup
-        Kokkos::View<uint32_t *> offsets_nodes_of_face, nodes_of_face, offsets_nodes_of_cell, nodes_of_cell;
-        Kokkos::View<rtype *[N_DIM]> node_coords;
+        Kokkos::View<uint32_t *> curved_rule_start;
+        Kokkos::View<rtype *[3]> curved_rule;
+        void init_curved_source_rules();
+        // The faces' nodes, from which the kernels place the face points of
+        // straight (2D) and planar (3D, meshes without curved faces) faces, and
+        // (axisymmetric runs) the cells' nodes; the mesh's own views are
+        // released after setup
+        FaceNodes face_nodes;
+        Kokkos::View<uint32_t *> offsets_nodes_of_cell, nodes_of_cell;
+        NodeCoords node_coords;
         // Device memory of the packed stencils when they were streamed to the device (CUDA)
         std::vector<std::shared_ptr<GrowingBuffer>> table_memory;
 
@@ -473,12 +679,12 @@ class TENO : public FaceReconstruction {
         };
 
         /**
-         * @brief Calls visit(c, stencils of c) for every reconstructed cell c in
-         *        increasing order, copying the tables to the host chunk by chunk.
+         * @brief Calls visit(c, stencils of c) for every cell c with tables, in
+         *        the order of their rows, copying the tables to the host chunk by chunk.
          */
         void for_each_stencil(const std::function<void(uint32_t, const CellStencils &)> & visit, bool pinv) const;
 
-        /** @brief Local cells that some stencil (central or sector) of the reconstructed cells flagged in cells reads. */
+        /** @brief Local cells that some stencil (central or sector) of the cells with tables flagged in cells reads. */
         std::vector<uint8_t> stencil_cells(const std::vector<uint8_t> & cells) const;
 
         /**
@@ -503,7 +709,7 @@ class TENO : public FaceReconstruction {
         void save_cache(uint8_t halo_layers = 0);
 
         /**
-         * @brief Recompute the tables of the given reconstructed cells and keep
+         * @brief Recompute the tables of the given cells with tables and keep
          *        every other cell's, after the mesh geometry changed (node
          *        coordinates moved, geometry recomputed and on the device).
          *        Each cell's tables are a function of the mesh alone, so with
@@ -513,15 +719,17 @@ class TENO : public FaceReconstruction {
         void rebuild_cells(const std::vector<uint32_t> & cells);
 
         /**
-         * @brief Reconstructed cells whose stencil searches reach any of the
+         * @brief Cells with tables whose stencil searches reach any of the
          *        given cells (within their gather_depth vertex-neighbor layers),
          *        i.e. whose tables depend on those cells' geometry.
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
 
-        // Setup: on the host only (tests), and the cells per device batch (0: from the device memory)
+        // Setup: on the host only (tests), the cells per device batch (0: from the device memory), and
+        // cells refitted after taking their stencil shape's tables (tests)
         bool setup_on_host = false;
         uint32_t setup_batch_cells = 0;
+        std::vector<uint32_t> setup_refit_cells;
 
         // Gas mixtures: the flow block is reconstructed in primitive variables
         // W with characteristic projections on the primitive system, whose
@@ -544,7 +752,8 @@ class TENO : public FaceReconstruction {
                            Kokkos::View<rtype *> source, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out);
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                           bool by_cell);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
@@ -559,12 +768,17 @@ class TENO : public FaceReconstruction {
 
         void read_options(const Input & input);
         void compute_stencils_and_matrices(const std::vector<uint32_t> * subset = nullptr);
+        /** @brief 3D meshes without curved faces: frees the face points, which only the setup reads. */
+        void release_planar_face_points();
         void allocate_scratch();
         uint64_t options_key() const;
         uint64_t cache_key() const;
         bool load_cache();
         void round_to_single();
 
+        void choose_rows();
+
+        std::vector<uint64_t> row_global_ids;  // with extra_cells: global_cell_ids()
         std::string cache_file;  // this rank's
         bool cache_single = false;  // pseudo-inverses and smoothness-indicator matrices (3D: moments) cached in single precision
         bool cache_loaded = false;

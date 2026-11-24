@@ -7,7 +7,10 @@
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",
   "examples/explosion_3d/input.toml",
+  "examples/forced_isotropic_turbulence/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_centrifuge/input.toml",
+  "examples/particle_vortex/input.toml",
   "examples/riemann_2d/input.toml",
   "examples/riemann_2d_quads/coarse.toml",
   "examples/riemann_2d_quads/input.toml",
@@ -18,6 +21,8 @@
   "examples/shock_bubble_2d/input.toml",
   "examples/shu_osher/input.toml",
   "examples/sod/input.toml",
-  "examples/viscous_shock_tube/input.toml"
+  "examples/tracer_vortex/input.toml",
+  "examples/viscous_shock_tube/input.toml",
+  "tools/dev/catalog_inputs/2d/check.toml"
  ]
 }

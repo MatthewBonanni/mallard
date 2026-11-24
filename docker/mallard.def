@@ -1,0 +1,31 @@
+# Mallard as an Apptainer (Singularity) image, from the release's container image:
+#
+#   apptainer build mallard.sif docker/mallard.def                                  # the latest release
+#   apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard:0.11.0 mallard.sif docker/mallard.def
+#   apptainer build --build-arg image=ghcr.io/matthewbonanni/mallard@sha256:<digest> mallard.sif docker/mallard.def
+#   apptainer build --build-arg bootstrap=docker-daemon --build-arg image=mallard:test mallard.sif docker/mallard.def
+#
+# then `apptainer run mallard.sif -i input.toml` (add --nv for the CUDA image), or `apptainer exec mallard.sif
+# mallard ...`. The image's MPI is Open MPI: multi-node runs need the site's Open MPI of a compatible version
+# (the hybrid model, mpirun outside the container); the portable binaries suit sites with any MPICH- or Open MPI-based MPI.
+Bootstrap: {{ bootstrap }}
+From: {{ image }}
+
+%arguments
+    bootstrap=docker
+    image=ghcr.io/matthewbonanni/mallard:latest
+
+%labels
+    org.opencontainers.image.title Mallard
+    org.opencontainers.image.source https://github.com/MatthewBonanni/mallard
+
+%runscript
+    exec mallard "$@"
+
+%test
+    set -e
+    mallard --version
+    for dim in 2 3; do
+        "mallard${dim}d" --version > /dev/null
+    done
+    ls "$MALLARD_SHARE/examples/sod/input.toml" > /dev/null

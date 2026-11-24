@@ -10,11 +10,11 @@
  */
 
 #include "synthetic_inflow.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <fstream>
 #include <numeric>
 #include <sstream>
 
@@ -24,7 +24,6 @@
 #include "input.h"
 #include "log.h"
 #include "mesh.h"
-#include "provenance.h"
 
 namespace {
 
@@ -130,19 +129,6 @@ rtype unit_random(uint64_t seed, uint64_t stream, uint64_t component, int64_t i0
 KOKKOS_INLINE_FUNCTION
 int64_t positive_mod(int64_t a, int64_t n) { return ((a % n) + n) % n; }
 
-/** @brief Axis named by name ("x", "Y", ...), or -1. */
-int axis_of(const std::string & name) {
-    if (name.size() != 1) return -1;
-    const int a = std::tolower(static_cast<unsigned char>(name[0])) - 'x';
-    return (a >= 0 && a < N_DIM) ? a : -1;
-}
-
-std::string trim(const std::string & s) {
-    const size_t a = s.find_first_not_of(" \t\r\n");
-    const size_t b = s.find_last_not_of(" \t\r\n");
-    return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
-}
-
 std::string stress_names() {
     const char * XYZ = "xyz";
     std::string names;
@@ -156,30 +142,20 @@ std::string stress_names() {
 
 } // namespace
 
-double InletProfile::Field::at(const Point & x) const {
-    if (!expression) return value;
-    return (*expression)(x[0], x[1], N_DIM > 2 ? x[N_DIM - 1] : 0.0, 0.0);
-}
-
 InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     const Input * turbulence = turbulent(boundary) ? &boundary.at("turbulence") : nullptr;
     if (turbulence && !turbulence->is_table()) throw InputError(where + ".turbulence must be a table.");
+    const std::vector<std::string> variables = BoundaryValue::variables(boundary);
     auto field = [&](const Input & v, const std::string & name, const Dimension & dimension, bool & varies) {
-        Field f;
-        if (v.is_string() && !has_unit(v.as_string())) {
-            f.expression = std::make_shared<Expression>(name, v.as_string());
-            varies = true;
-        } else {
-            f.value = as_double(v, name, dimension);
-        }
-        return f;
+        varies = varies || BoundaryValue::is_expression(v);
+        return BoundaryValue(v, name, dimension, variables);
     };
     if (turbulence && contains_optional(*turbulence, "profile")) {
         if (boundary.contains("u") && TimedInletTargets::depends_on_time(boundary, where)) {
             throw InputError(where + ".u depends on t, but " + where + ".turbulence.profile gives the mean velocity "
                              "too: remove the profile and give reynolds_stress, or remove u to take the profile's mean.");
         }
-        read_table(*turbulence, where);
+        read_profile(boundary, where, variables);
         return;
     }
     if (!boundary.contains("u")) throw InputError(where + ": missing u.");
@@ -204,119 +180,101 @@ InletProfile::InletProfile(const Input & boundary, const std::string & where) {
     for (uint8_t k = 0; k < N_STRESS; k++) {
         const std::string key = where + ".turbulence.reynolds_stress[" + std::to_string(k) + "]";
         stress.push_back(field(r_in.as_array()[k], key, dim::velocity_squared, varies));
-        if (stress.back().expression && stress.back().expression->depends_on_time()) {
+        if (stress.back().depends_on_time()) {
             throw InputError(key + " depends on t, but the Reynolds stress is fixed at setup: write it in x, y, z "
-                             "only (the mean velocity u may depend on t).");
+                             "and the local coordinates only (the mean velocity u may depend on t).");
         }
     }
 }
 
-void InletProfile::read_table(const Input & turbulence, const std::string & where) {
+std::vector<std::string> InletProfile::profile_columns(const std::vector<std::string> & header) {
+    if (header.empty()) return {};
+    const auto has = [&](const std::string & c) { return std::find(header.begin(), header.end(), c) != header.end(); };
+    const char * XYZ = "XYZ";
+    std::vector<std::string> columns;
+    FOR_I_DIM columns.push_back(std::string("MEAN_U_") + XYZ[i]);
+    for (uint8_t k = 0; k < N_STRESS; k++) {
+        uint8_t r, c;
+        stress_entry(k, r, c);
+        const std::string name = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
+        const std::string swapped = std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r];
+        if (r == c || has(name)) {
+            columns.push_back(name);
+        } else if (has(swapped)) {
+            columns.push_back(swapped);
+        }
+    }
+    return columns;
+}
+
+void InletProfile::read_profile(const Input & boundary, const std::string & where,
+                                const std::vector<std::string> & variables) {
+    const Input & turbulence = boundary.at("turbulence");
     const std::string key = where + ".turbulence.profile";
     if (turbulence.contains("reynolds_stress")) {
         throw InputError(where + ".turbulence: give reynolds_stress or profile, not both.");
     }
     uniform_ = false;
-    const std::string file = find_value<std::string>(turbulence, "profile");
-    std::ifstream in(file);
-    if (!in.good()) throw InputError(key + ": cannot open " + file + ".");
-    provenance::read_file("inflow_profile", file);
-    std::string line;
-    std::getline(in, line);
-    std::vector<std::string> header;
-    {
-        std::stringstream s(line);
-        std::string item;
-        while (std::getline(s, item, ',')) header.push_back(trim(item));
-    }
-    if (header.empty() || (axis = axis_of(header[0])) < 0) {
-        throw InputError(key + ": the first column of " + file + " must be a coordinate (x, y" +
-                         std::string(N_DIM == 3 ? ", z" : "") + ").");
-    }
-    auto column_of = [&](const std::string & name) {
-        for (size_t c = 0; c < header.size(); c++) {
-            if (header[c] == name) return static_cast<int>(c);
-        }
-        return -1;
+    const std::string given = find_value<std::string>(turbulence, "profile");
+    const std::string name = BoundaryValue::profile_data(boundary);
+    const auto has = [&](const std::string & c) {
+        return std::find(variables.begin(), variables.end(), name + "_" + c) != variables.end();
+    };
+    const auto value = [&](const std::string & c, const Dimension & dimension) {
+        return BoundaryValue(Input(name + "_" + c), key, dimension, variables);
+    };
+    const auto missing = [&](const std::string & c) {
+        return InputError({.key = key,
+                           .line = line_of(turbulence, "profile"),
+                           .message = "the data of \"" + given + "\" have no column " + c,
+                           .fix = "Give the precursor's mean velocity MEAN_U_* and Reynolds stresses COV_U_*_U_*, as "
+                                  "mallard post average --statistics writes them",
+                           .docs = "docs/guide/boundary_conditions.md#synthetic-turbulence-turbulence"});
     };
     const char * XYZ = "XYZ";
-    std::vector<int> use;  // N_DIM mean columns, then N_STRESS stress columns (-1: zero)
     FOR_I_DIM {
-        const std::string name = std::string("MEAN_U_") + XYZ[i];
-        use.push_back(column_of(name));
-        if (use.back() < 0) throw InputError(key + ": " + file + " has no column " + name + ".");
+        const std::string c = std::string("MEAN_U_") + XYZ[i];
+        if (!has(c)) throw missing(c);
+        u.push_back(value(c, dim::velocity));
     }
     for (uint8_t k = 0; k < N_STRESS; k++) {
         uint8_t r, c;
         stress_entry(k, r, c);
-        const std::string name = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
-        int col = column_of(name);
-        if (col < 0) col = column_of(std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r]);
-        if (col < 0 && r == c) throw InputError(key + ": " + file + " has no column " + name + ".");
-        use.push_back(col);
+        const std::string column = std::string("COV_U_") + XYZ[r] + "_U_" + XYZ[c];
+        const std::string swapped = std::string("COV_U_") + XYZ[c] + "_U_" + XYZ[r];
+        if (has(column)) {
+            stress.push_back(value(column, dim::velocity_squared));
+        } else if (has(swapped)) {
+            stress.push_back(value(swapped, dim::velocity_squared));
+        } else if (r == c) {
+            throw missing(column);
+        } else {
+            stress.push_back(BoundaryValue(Input(std::string("0")), key, dim::velocity_squared, variables));
+        }
     }
-    columns.assign(use.size(), {});
-    while (std::getline(in, line)) {
-        if (trim(line).empty()) continue;
-        std::vector<double> row;
-        std::stringstream s(line);
-        std::string item;
-        while (std::getline(s, item, ',')) {
-            try {
-                row.push_back(std::stod(item));
-            } catch (const std::exception &) {
-                throw InputError(key + ": " + file + ": not a number: \"" + item + "\".");
-            }
-        }
-        if (row.size() != header.size()) {
-            throw InputError(key + ": " + file + ": a row has " + logging::count(row.size(), "value") + " for " +
-                             logging::count(header.size(), "column") + ".");
-        }
-        if (!coordinate.empty() && !(row[0] > coordinate.back())) {
-            throw InputError(key + ": " + file + ": the coordinate must increase from row to row.");
-        }
-        coordinate.push_back(row[0]);
-        for (size_t c = 0; c < use.size(); c++) columns[c].push_back(use[c] < 0 ? 0.0 : row[static_cast<size_t>(use[c])]);
-    }
-    if (coordinate.size() < 2) throw InputError(key + ": " + file + " needs at least two rows.");
 }
 
-double InletProfile::table(size_t column, double s) const {
-    const auto it = std::upper_bound(coordinate.begin(), coordinate.end(), s);
-    if (it == coordinate.begin()) return columns[column].front();
-    if (it == coordinate.end()) return columns[column].back();
-    const size_t i = static_cast<size_t>(it - coordinate.begin());
-    const double f = (s - coordinate[i - 1]) / (coordinate[i] - coordinate[i - 1]);
-    return (1.0 - f) * columns[column][i - 1] + f * columns[column][i];
-}
-
-std::array<double, N_DIM> InletProfile::velocity(const Point & x, const Point & n_in) const {
+std::array<double, N_DIM> InletProfile::velocity(const FacePoint & x, const Point & n_in) const {
     std::array<double, N_DIM> v{};
-    if (axis < 0 && speed) {
-        const double s = u[0].at(x);
+    if (speed) {
+        const double s = u[0].at(x, 0.0);
         const Point d = directed ? direction.at(x, 0.0) : n_in;
         FOR_I_DIM v[i] = s * d[i];
         return v;
     }
-    FOR_I_DIM v[i] = (axis >= 0) ? table(i, x[static_cast<size_t>(axis)]) : u[i].at(x);
+    FOR_I_DIM v[i] = u[i].at(x, 0.0);
     return v;
 }
 
-std::array<double, N_STRESS> InletProfile::stress_at(const Point & x) const {
+std::array<double, N_STRESS> InletProfile::stress_at(const FacePoint & x) const {
     std::array<double, N_STRESS> s{};
-    for (uint8_t k = 0; k < N_STRESS; k++) {
-        if (axis >= 0) {
-            s[k] = table(N_DIM + k, x[static_cast<size_t>(axis)]);
-        } else if (!stress.empty()) {
-            s[k] = stress[k].at(x);
-        }
-    }
+    for (uint8_t k = 0; k < N_STRESS && !stress.empty(); k++) s[k] = stress[k].at(x, 0.0);
     return s;
 }
 
 SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & where, uint64_t stream_,
                                  const Mesh & mesh, const std::vector<uint32_t> & faces,
-                                 const std::vector<int32_t> & char_index) {
+                                 const std::vector<FacePoint> & points, const std::vector<int32_t> & char_index) {
     const std::string tw = where + ".turbulence";
     const InletProfile profile(boundary, where);
     const Input & turbulence = boundary.at("turbulence");
@@ -411,14 +369,16 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
 
     // The inlet's faces of owned cells on all ranks, in the order of their global keys
     std::vector<uint64_t> keys;
-    std::vector<double> geometry;  // x, area
-    for (uint32_t f : faces) {
+    constexpr size_t W = boundary_variable::COUNT + 1;
+    std::vector<double> geometry;  // point, area
+    for (size_t k = 0; k < faces.size(); k++) {
+        const uint32_t f = faces[k];
         const uint32_t c = static_cast<uint32_t>(mesh.h_cells_of_face(f, 0));
         if (c >= mesh.n_owned()) continue;
         uint32_t slot = 0;
         while (mesh.h_face_of_cell(c, slot) != f) slot++;
         keys.push_back(mesh.h_global_cell(c) * 8 + slot);  // No cell has 8 faces
-        FOR_I_DIM geometry.push_back(double(mesh.h_face_coords(f, i)));
+        geometry.insert(geometry.end(), points[k].v.begin(), points[k].v.end());
         geometry.push_back(double(mesh.h_face_area(f)));
     }
     if (distributed) {
@@ -429,16 +389,16 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     std::iota(order.begin(), order.end(), size_t(0));
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return keys[a] < keys[b]; });
     const size_t n_global = keys.size();
-    std::vector<Point> x_global(n_global);
+    std::vector<FacePoint> x_global(n_global);
     std::vector<double> area_global(n_global);
     for (size_t i = 0; i < n_global; i++) {
         const size_t g = order[i];
-        for (size_t d = 0; d < N_DIM; d++) x_global[i][d] = geometry[g * (N_DIM + 1) + d];
-        area_global[i] = geometry[g * (N_DIM + 1) + N_DIM];
+        for (size_t d = 0; d < boundary_variable::COUNT; d++) x_global[i][d] = geometry[g * W + d];
+        area_global[i] = geometry[g * W + boundary_variable::COUNT];
     }
 
     // Every rank checks the stresses of every face, so that all throw on one that is not semidefinite
-    for (const Point & x : x_global) cholesky(profile.stress_at(x), x, tw);
+    for (const FacePoint & x : x_global) cholesky(profile.stress_at(x), x.point(), tw);
 
     // Mean flow and convection velocity
     area = 0.0;
@@ -463,7 +423,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     for (int d = 0; d < N_T; d++) {
         lo[d] = std::numeric_limits<double>::infinity();
         hi[d] = -lo[d];
-        for (const Point & x : x_global) {
+        for (const FacePoint & x : x_global) {
             lo[d] = std::min(lo[d], x[axes[d]]);
             hi[d] = std::max(hi[d], x[axes[d]]);
         }
@@ -529,7 +489,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     Kokkos::deep_copy(kernels, h_kernels);
 
     // Interpolation from the grid to a point: corners and fractions per transverse direction
-    auto locate = [&](const Point & x, int32_t corner[N_T][2], double fraction[N_T]) {
+    auto locate = [&](const FacePoint & x, int32_t corner[N_T][2], double fraction[N_T]) {
         for (int d = 0; d < N_T; d++) {
             const double s = (x[axes[d]] - origin[d]) / spacing[d];
             const double i = std::floor(s);
@@ -569,7 +529,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
             int32_t corner[N_T][2];
             double fraction[N_T];
             locate(x_global[i], corner, fraction);
-            const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x_global[i]), x_global[i], tw);
+            const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x_global[i]), x_global[i].point(), tw);
             for (uint8_t j = 0; j <= normal_axis; j++) {
                 const double a = area_global[i] * chol[lower(normal_axis, j)] * scale(fraction, j);
                 for (uint32_t bits = 0; bits < (1u << N_T); bits++) {
@@ -601,8 +561,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     auto h_cholesky = Kokkos::create_mirror_view(face_cholesky);
     for (uint32_t i = 0; i < n_faces; i++) {
         const uint32_t f = faces[i];
-        Point x;
-        for (size_t d = 0; d < N_DIM; d++) x[d] = double(mesh.h_face_coords(f, d));
+        const FacePoint & x = points[i];
         int32_t corner[N_T][2];
         double fraction[N_T];
         locate(x, corner, fraction);
@@ -615,7 +574,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
         Point n_in;
         for (size_t d = 0; d < N_DIM; d++) n_in[d] = -double(mesh.h_face_normals(f, d)) / double(mesh.h_face_area(f));
         const std::array<double, N_DIM> mean = profile.velocity(x, n_in);
-        const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x), x, tw);
+        const std::array<double, N_STRESS> chol = cholesky(profile.stress_at(x), x.point(), tw);
         for (uint8_t j = 0; j < N_DIM; j++) {
             h_scale(i, j) = static_cast<rtype>(scale(fraction, j));
             h_mean(i, j) = static_cast<rtype>(mean[j]);
@@ -665,7 +624,7 @@ void SyntheticInflow::plan(const Kokkos::View<rtype> & time) {
     const double dt_p = dt_plane;
     const int64_t n_slots = n_filtered, nt = n_time, none = NO_PLANE;
     constexpr int64_t n_cache = N_CACHE;
-    Kokkos::parallel_for("inflow_plan", 1, KOKKOS_LAMBDA(const int) {
+    gated::parallel_for("inflow_plan", 1, KOKKOS_LAMBDA(const int) {
         const double s = static_cast<double>(time()) / dt_p;
         const int64_t m = static_cast<int64_t>(Kokkos::floor(s));
         a() = s - double(m);
@@ -723,7 +682,7 @@ void SyntheticInflow::random_planes() {
     // Unit-variance noise on the padded grid, keyed by the global grid indices, filtered along each
     // transverse direction; slots without a pending plane do nothing
     if constexpr (N_T == 1) {
-        Kokkos::parallel_for("inflow_filter_0",
+        gated::parallel_for("inflow_filter_0",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n[0]}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int i0) {
             const int64_t m = job(slot);
@@ -739,7 +698,7 @@ void SyntheticInflow::random_planes() {
         });
     } else {
         const int n_first = n[0] * np[N_T - 1];
-        Kokkos::parallel_for("inflow_filter_0",
+        gated::parallel_for("inflow_filter_0",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n_first}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int q) {
             const int64_t m = job(slot);
@@ -755,7 +714,7 @@ void SyntheticInflow::random_planes() {
             work(slot, j, q) = sum;
         });
         const int n_out = n[0] * n[N_T - 1];
-        Kokkos::parallel_for("inflow_filter_1",
+        gated::parallel_for("inflow_filter_1",
                              Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {n_slots, int(N_DIM), n_out}),
                              KOKKOS_LAMBDA(const int slot, const int j, const int p) {
             if (job(slot) == none) return;
@@ -778,7 +737,7 @@ void SyntheticInflow::time_filter() {
     const int64_t n_slots = n_filtered, none = NO_PLANE;
     Kokkos::Array<int32_t, N_DIM> N;
     for (uint32_t j = 0; j < N_DIM; j++) N[j] = half_width[j][N_T];
-    Kokkos::parallel_for("inflow_filter_time",
+    gated::parallel_for("inflow_filter_time",
                          Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {2, int(N_DIM), n_points}),
                          KOKKOS_LAMBDA(const int c, const int j, const int p) {
         const int64_t m = job(n_slots + c);
@@ -799,7 +758,7 @@ void SyntheticInflow::net_flux() {
     const int32_t n = n_points;
     const int n_chunks = static_cast<int>(sums.extent(1));
     constexpr int32_t chunk = CHUNK;
-    Kokkos::parallel_for("inflow_flux_chunks",
+    gated::parallel_for("inflow_flux_chunks",
                          Kokkos::MDRangePolicy<Kokkos::Rank<3>>({0, 0, 0}, {2, n_chunks, int(N_DIM)}),
                          KOKKOS_LAMBDA(const int b, const int c, const int j) {
         if (job(n_slots + b) == none) return;
@@ -809,7 +768,7 @@ void SyntheticInflow::net_flux() {
         for (int32_t p = c * chunk; p < end; p++) sum += weight(j, p) * values(slot, j, p);
         sums(b, c, j) = sum;
     });
-    Kokkos::parallel_for("inflow_flux_total", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {2, int(N_DIM)}),
+    gated::parallel_for("inflow_flux_total", Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0}, {2, int(N_DIM)}),
                          KOKKOS_LAMBDA(const int b, const int j) {
         if (job(n_slots + b) == none) return;
         rtype sum = 0.0_r;
@@ -849,7 +808,7 @@ void SyntheticInflow::fill(const Kokkos::View<rtype> & time, const Kokkos::View<
     const Kokkos::View<rtype *[N_T]> fraction = face_fraction;
     const Kokkos::View<rtype *[N_DIM]> scale = face_scale, mean = face_mean;
     const Kokkos::View<rtype *[N_STRESS]> chol = face_cholesky;
-    Kokkos::parallel_for("inflow_fill", n_faces, KOKKOS_LAMBDA(const uint32_t i) {
+    gated::parallel_for("inflow_fill", n_faces, KOKKOS_LAMBDA(const uint32_t i) {
         const int64_t s0 = job(n_slots + 2), s1 = job(n_slots + 3);
         const double a = a_t();
         const rtype a_r = static_cast<rtype>(a);

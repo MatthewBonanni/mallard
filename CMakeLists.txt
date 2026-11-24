@@ -16,6 +16,7 @@ if(index GREATER_EQUAL 0)
 endif()
 
 find_package(Git QUIET)
+include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release")
@@ -27,16 +28,12 @@ function(mallard_target_warnings target)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
         return()
     endif()
-    # Kokkos builds for CUDA with nvcc_wrapper, which CMake identifies as GNU
-    if(Kokkos_ENABLE_CUDA AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set(nvcc TRUE)
-    endif()
     set(warnings
         -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor -Wcast-align -Wunused
         -Woverloaded-virtual -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough
         -Wconversion -Wsign-conversion)
     # nvcc rewrites functional casts such as T(x) into C-style casts before the host compiler sees them
-    if(NOT nvcc)
+    if(NOT mallard_nvcc)
         list(APPEND warnings -Wold-style-cast)
     endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -47,7 +44,7 @@ function(mallard_target_warnings target)
     endif()
     if(${PROJECT_NAME}_WARNINGS_AS_ERRORS)
         list(APPEND warnings -Werror)
-        if(nvcc)
+        if(mallard_nvcc)
             list(APPEND warnings "SHELL:-Werror all-warnings")
         endif()
     endif()
@@ -59,10 +56,10 @@ endfunction()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
     add_compile_options(-fp-model=precise)
 endif()
-# GCC fuses multiplies and adds across statements where the CPU has FMA (arm64, or x86-64
-# with -march), so equal expressions round differently by where they are inlined, and
-# results differ from other CPUs'; Clang fuses only within an expression
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT Kokkos_ENABLE_CUDA)
+# Where the CPU has FMA (arm64, or x86-64 with -march), GCC fuses multiplies and adds across
+# statements and Clang within an expression, so equal expressions round differently by how
+# they are written or inlined, and results differ from other CPUs'
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT Kokkos_ENABLE_CUDA AND NOT Kokkos_ENABLE_HIP)
     add_compile_options(-ffp-contract=off)
 endif()
 
@@ -99,13 +96,21 @@ endif()
 message(STATUS "Mallard: Dimension: ${${PROJECT_NAME}_DIM}")
 add_compile_definitions(${PROJECT_NAME}_DIM=${${PROJECT_NAME}_DIM})
 
-# libmallard2d/3d: the output reader as a C library for the Python package (tools/mallard), so
-# every library it links is compiled position independent
-option(${PROJECT_NAME}_ENABLE_PYTHON "Build libmallard${${PROJECT_NAME}_DIM}d, the reader the Python package loads" ON)
+# libmallard2d/3d: the C++ library API (include/mallard, the CMake package Mallard) and the output
+# reader as a C library for the Python package (tools/mallard), so every library it links is
+# compiled position independent
+option(${PROJECT_NAME}_ENABLE_LIBRARY "Build and install libmallard${${PROJECT_NAME}_DIM}d: the C++ library API and the reader the Python package loads" ON)
+option(${PROJECT_NAME}_ENABLE_PYTHON "Check and install the Python package, which loads libmallard${${PROJECT_NAME}_DIM}d" ON)
 set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
     "A site-packages directory to install the Python package into, besides share/mallard/tools")
-if(${PROJECT_NAME}_ENABLE_PYTHON)
+if(${PROJECT_NAME}_ENABLE_PYTHON AND NOT ${PROJECT_NAME}_ENABLE_LIBRARY)
+    message(FATAL_ERROR "Mallard_ENABLE_PYTHON needs Mallard_ENABLE_LIBRARY, the library the Python package loads: "
+                        "turn both off, or Mallard_ENABLE_LIBRARY on.")
+endif()
+if(${PROJECT_NAME}_ENABLE_LIBRARY)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+if(${PROJECT_NAME}_ENABLE_PYTHON)
     file(STRINGS ${CMAKE_SOURCE_DIR}/tools/mallard/_version.py python_version REGEX "^__version__ = ")
     if(NOT python_version STREQUAL "__version__ = \"${PROJECT_VERSION}\"")
         message(FATAL_ERROR "tools/mallard/_version.py has ${python_version}, not Mallard's version "
@@ -233,6 +238,85 @@ if(USE_SYSTEM_KOKKOS)
 else()
     add_subdirectory(src/external/kokkos ${CMAKE_BINARY_DIR}/external/kokkos SYSTEM)
 endif()
+# Kokkos compiles device code with nvcc either through nvcc_wrapper as the compiler or
+# through its launcher around the host compiler (-DCMAKE_CXX_COMPILER=g++), which CMake
+# identifies as the host compiler either way; Kokkos' own compiler id tells nvcc apart
+if(USE_SYSTEM_KOKKOS)
+    set(mallard_kokkos_compiler_id "${Kokkos_CXX_COMPILER_ID}")
+else()
+    get_directory_property(mallard_kokkos_compiler_id DIRECTORY src/external/kokkos
+                           DEFINITION KOKKOS_CXX_COMPILER_ID)
+endif()
+if(Kokkos_ENABLE_CUDA AND mallard_kokkos_compiler_id STREQUAL "NVIDIA")
+    set(mallard_nvcc TRUE)
+else()
+    set(mallard_nvcc FALSE)
+endif()
+
+# Sources whose floating-point operations must round alike on every backend, host and
+# device: no multiply-add contraction (--fmad=false for nvcc; -ffp-contract=off reaches
+# nvcc's host compiler, and Clang's CUDA, HIP and SYCL device compilations alike)
+function(mallard_no_contraction)
+    if(mallard_nvcc)
+        set(options --fmad=false -ffp-contract=off)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+        # -ffp-contract=off overrides the -fp-model=precise of every file, as intended
+        set(options -ffp-contract=off -Wno-overriding-option)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        set(options -ffp-contract=off)
+    endif()
+    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS "${options}")
+    list(TRANSFORM ARGN PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+    set_property(DIRECTORY APPEND PROPERTY mallard_no_contraction ${ARGN})
+    set_property(GLOBAL APPEND PROPERTY mallard_no_contraction_dirs "${CMAKE_CURRENT_SOURCE_DIR}")
+endfunction()
+
+# Checks every mallard_no_contraction source against how its compile command actually
+# runs, independently of mallard_nvcc: through nvcc when the compiler is nvcc_wrapper or
+# Kokkos' launcher redirects to it
+function(mallard_check_no_contraction)
+    set(required)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|IntelLLVM")
+        list(APPEND required -ffp-contract=off)
+    endif()
+    if(Kokkos_ENABLE_CUDA)
+        execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE version ERROR_QUIET)
+        get_property(launcher GLOBAL PROPERTY RULE_LAUNCH_COMPILE)
+        if(version MATCHES "nvcc" OR launcher MATCHES "nvcc_wrapper")
+            list(APPEND required --fmad=false)
+        endif()
+    endif()
+    get_property(dirs GLOBAL PROPERTY mallard_no_contraction_dirs)
+    list(REMOVE_DUPLICATES dirs)
+    set(all_sources)
+    foreach(dir IN LISTS dirs)
+        get_property(sources DIRECTORY ${dir} PROPERTY mallard_no_contraction)
+        list(APPEND all_sources ${sources})
+        foreach(source IN LISTS sources)
+            get_source_file_property(options ${source} DIRECTORY ${dir} COMPILE_OPTIONS)
+            foreach(option IN LISTS required)
+                if(NOT option IN_LIST options)
+                    message(FATAL_ERROR "${source} must not contract multiplies and adds, but compiles "
+                                        "without ${option} (its options: ${options})")
+                endif()
+            endforeach()
+        endforeach()
+    endforeach()
+    # The Riemann solvers round alike in every kernel only if every source naming them is listed
+    set(globs ${PROJECT_SOURCE_DIR}/src/*.cpp)
+    if(${PROJECT_NAME}_ENABLE_TESTS)
+        list(APPEND globs ${PROJECT_SOURCE_DIR}/test/*.cpp)
+    endif()
+    file(GLOB_RECURSE candidates ${globs})
+    list(FILTER candidates EXCLUDE REGEX "/src/external/")
+    foreach(source IN LISTS candidates)
+        file(STRINGS ${source} uses REGEX "riemann::")
+        if(uses AND NOT source IN_LIST all_sources)
+            message(FATAL_ERROR "${source} inlines the Riemann solvers: list it in mallard_no_contraction "
+                                "with the others (src/CMakeLists.txt)")
+        endif()
+    endforeach()
+endfunction()
 
 # Cantera YAML mechanism files
 option(USE_SYSTEM_YAML_CPP "Use system-installed yaml-cpp" OFF)
@@ -275,6 +359,7 @@ endif()
 if(${PROJECT_NAME}_ENABLE_FUZZING)
     add_subdirectory(test/fuzz)
 endif()
+mallard_check_no_contraction()
 
 # Documentation setup
 option(BUILD_DOCS "Build documentation" OFF)
@@ -293,11 +378,24 @@ if(BUILD_DOCS)
     endif()
 endif()
 
-include(GNUInstallDirs)
 # OPTIONAL: an install after building only some targets (e.g. --target mallard)
 install(TARGETS mallard RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+if(${PROJECT_NAME}_ENABLE_LIBRARY)
+    # The CMake package: find_package(Mallard [COMPONENTS 2d 3d]) in a prefix of either dimension or both
+    include(CMakePackageConfigHelpers)
+    set(package_dir ${CMAKE_INSTALL_LIBDIR}/cmake/Mallard)
+    install(TARGETS MallardLibrary EXPORT MallardTargets${Mallard_DIM}d
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    install(EXPORT MallardTargets${Mallard_DIM}d NAMESPACE Mallard:: DESTINATION ${package_dir})
+    install(DIRECTORY include/mallard DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    configure_package_config_file(cmake/MallardConfig.cmake.in ${CMAKE_BINARY_DIR}/MallardConfig.cmake
+                                  INSTALL_DESTINATION ${package_dir})
+    write_basic_package_version_file(${CMAKE_BINARY_DIR}/MallardConfigVersion.cmake
+                                     COMPATIBILITY SameMinorVersion)
+    install(FILES ${CMAKE_BINARY_DIR}/MallardConfig.cmake ${CMAKE_BINARY_DIR}/MallardConfigVersion.cmake
+            DESTINATION ${package_dir})
+endif()
 if(${PROJECT_NAME}_ENABLE_PYTHON)
-    install(TARGETS MallardReader LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} OPTIONAL)
     if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
         install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
     endif()

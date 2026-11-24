@@ -1,0 +1,18 @@
+{
+ "default": "false",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/autoignition_2d/input.toml",
+  "examples/flame_2d/input.toml",
+  "examples/flame_2d/unity/input.toml",
+  "examples/flame_outflow/input.toml",
+  "examples/flame_turbulence/input.toml",
+  "examples/flame_vortex/input.toml",
+  "examples/premixed_flame/input.toml",
+  "examples/triple_flame/tfles/input.toml"
+ ],
+ "type": "bool"
+}

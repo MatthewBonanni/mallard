@@ -44,8 +44,10 @@ struct CheckOptions {
     std::vector<uint64_t> stencil_cells;  // or of these cells, by global id (--cells)
     std::string stencil_region;           // or of the cells of this region: a name or an inline table (--region)
     bool stencil_weights = false;         // with the pseudo-inverse rows (--weights)
+    std::string initial;        // prefix of the initial state's snapshot (--initial), or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
+    bool geometry_only = false;  // set up and check only what the case view draws (--geometry-only)
     std::string input_file;     // named before input errors, as a run names it, or empty
     uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
     std::string memory_name;    // what it is ("A100-80GB", "40GB")
@@ -73,6 +75,28 @@ struct CheckBoundary {
     std::string turbulence;  // its synthetic inflow turbulence, or empty
 };
 
+/**
+ * @brief A periodic pair as the mesh joined it: its map, the faces joined (one per face of each zone) and their
+ *        area, and how far a node lies from its partner's image (round-off for a periodic mesh).
+ */
+struct CheckPeriodic {
+    std::string zone_a, zone_b;  // empty for a generated mesh's sides joined without names
+    bool rotation = false;
+    std::array<double, 3> translation{};  // m
+    double angle = 0.0;                   // degrees, about axis through center
+    std::array<double, 3> center{}, axis{0.0, 0.0, 1.0};
+    uint64_t faces = 0;
+    double area = 0.0;             // of the joined faces of one zone (2D: length)
+    double node_offset_max = 0.0;  // m
+    double node_offset_relative = 0.0;  // over the mean face size, area / faces (3D: its square root)
+};
+
+/** @brief Faces of a boundary zone with no condition (each also in the boundaries error). */
+struct CheckUnassigned {
+    std::string zone;
+    uint64_t faces = 0;
+};
+
 /** @brief A region on the mesh: one of the mesh's own (the domain, its zones) or one the case uses. */
 struct CheckRegion {
     std::string name;
@@ -90,6 +114,8 @@ struct CheckRegion {
     double own_surface = std::numeric_limits<double>::quiet_NaN();
     double own_tolerance = 0.0;  // relative; 0 in closed form
     bool solution = false;       // defined by the solution: measured and counted on the initial solution
+    bool from_file = false;      // holds a surface read from a file (STL, OBJ): box is its bounding box
+    std::array<std::array<double, 3>, 2> box{};
 };
 
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */
@@ -103,6 +129,23 @@ struct CheckEstimate {
     std::string basis;     // what it is estimated from
     bool located = false;  // x: where the value is
     std::array<double, N_DIM> x{};
+    std::string region;    // the region it is of (check.regions, or a cell zone of the mesh); empty: the domain
+};
+
+/** @brief The viscous scales of each owned cell that the values per region read (check_viscous_scales). */
+struct CheckCellScales {
+    std::vector<double> rho, nu;  // the state's
+    std::vector<double> epsilon;  // dissipation per unit mass: the statistics', or the state's; empty: domain only
+    std::vector<double> y_plus;   // first-cell y+ of walls without a wall model, 0 elsewhere
+    std::string epsilon_basis;
+};
+
+/** @brief [check] of the input: the regions the resolution report gives values for, and an earlier run's
+ *         dissipation. */
+struct CheckInputs {
+    std::vector<std::pair<std::string, std::vector<double>>> regions;  // name, fractions of the owned cells
+    std::vector<double> strain;  // per owned cell, check.statistics' <|S|^2> = 2 <S_ij S_ij> (or <omega^2>)
+    std::string statistics;      // what strain is, from which file; empty without check.statistics
 };
 
 /** @brief What a run would run on: the build, where each rank runs, MPI and NCCL (check_environment). */
@@ -128,9 +171,15 @@ struct CheckReport {
     CheckEnvironment environment;
 
     std::vector<CheckBoundary> boundaries;
+    std::vector<CheckUnassigned> unassigned;
+    std::vector<CheckPeriodic> periodic;
     std::vector<CheckRegion> regions;
+    std::vector<double> face_y_plus;  // per local face: first-cell y+ of wall faces, NaN elsewhere (the view's walls)
+    std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
+    std::vector<case_view::BlockInfo> view_blocks;  // and its blocks
+    bool geometry_only = false;  // the check of geometry alone (CheckOptions::geometry_only)
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 
@@ -142,7 +191,7 @@ struct CheckReport {
     double dt = 0.0;
     double dt_cfl1 = 0.0;    // the time step at CFL 1
     double cfl = 0.0;        // that dt's CFL number
-    double cfl_limit = 0.0;  // the time integrator's for smooth flow, infinity if it has none
+    double cfl_limit = 0.0;  // the time integrator's for smooth flow
     std::string integrator;
     std::string dt_limit;  // what sets dt: "CFL", "sponge" or "fixed"
     uint64_t limiting_cell = 0;
@@ -163,8 +212,11 @@ struct CheckReport {
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
     memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
     memory::Bytes steady_bytes{};  // after setup, or at the peak of the timed steps
+    memory::Bytes released_on_devices{};  // of steady_bytes, what device builds free after setup (host builds)
     std::vector<memory::Bytes> setup_phases;  // at the peak of each phase of the setup
     uint64_t outside_kokkos = 0;   // device memory beyond Kokkos' allocations (CUDA context, libraries), measured
+    double view_entries_per_cell = 0.0;  // the most of any View proportional to the cells, largest rank
+    uint64_t view_max_local_cells = 0;   // owned and halo cells per rank its view_entries::MAX allows, 0: no limit
 
     // Sizing for options.memory (or the device): the largest rank's peak against the memory per rank
     std::string sizing_name;       // empty: no sizing
@@ -176,6 +228,7 @@ struct CheckReport {
     uint64_t fixed_bytes = 0;      // the rest (memory::scales_with_cells)
     bool sizing_setup = false;     // the setup's peak limits the cells per rank, else the steady state
     uint64_t max_local_cells = 0;  // owned and halo cells per rank that fit
+    bool sizing_view_entries = false;  // view_max_local_cells limits them, else the memory
     int min_ranks = 0;             // fewest ranks the mesh fits on, 0 if not found
     uint64_t min_owned = 0, min_halo = 0, min_peak = 0;  // largest part there and its predicted peak
     bool min_partitioned = false;  // the part comes from the partitioner (serial checks), else from this halo ratio

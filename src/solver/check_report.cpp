@@ -16,9 +16,11 @@
 
 #include "check.h"
 #include "comm.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "report.h"
+#include "view_entries.h"
 
 using report::Row;
 using report::Status;
@@ -130,11 +132,13 @@ void input_section(report::Text & text, const CheckReport & r) {
     rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, diagnostic_code::INPUT)
                                                                                         ? diagnostic_code::INPUT
                                                                                         : diagnostic_code::SETUP)
-                                             : "completed: mesh, partition, boundaries, numerics, initial state"}});
+                                             : r.geometry_only ? "completed, geometry only: mesh, partition, boundaries, regions, probes"
+                                                               : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
                      n_unused ? count(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
-                              : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
+                     : r.geometry_only ? "not checked: a geometry-only setup reads only the keys of what it draws"
+                     : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
                      n_deprecated ? count(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
@@ -217,6 +221,20 @@ void regions_section(report::Text & text, const CheckReport & r) {
                     "tolerance", "outside"},
                    measures);
     }
+    std::vector<Row> boxes;
+    for (const CheckRegion & g : r.regions) {
+        if (!g.from_file) continue;
+        std::string lo, hi;
+        for (size_t i = 0; i < N_DIM; i++) {
+            lo += (i ? ", " : "(") + logging::real(g.box[0][i]);
+            hi += (i ? ", " : "(") + logging::real(g.box[1][i]);
+        }
+        boxes.push_back({Status::OK, {g.name, lo + ")", hi + ")"}});
+    }
+    if (!boxes.empty()) {
+        text.note("Regions from surface files (STL, OBJ): their bounding box, placed and in meters.");
+        text.table({"region", "from (m)", "to (m)"}, boxes);
+    }
     if (!r.view_file.empty()) text.line("Case view (every region and zone, for ParaView): " + r.view_file);
     if (!r.view_images.empty()) {
         std::string images;
@@ -266,13 +284,12 @@ void time_step_section(report::Text & text, const CheckReport & r) {
     const std::string basis = r.dt_limit == "CFL"      ? "run.cfl times the time step at CFL 1"
                               : r.dt_limit == "sponge" ? "the sponges' stable step, below run.cfl's"
                                                        : "run.dt";
-    const bool limited = std::isfinite(r.cfl_limit);
-    const Status cfl = !limited ? Status::NONE : r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
+    const Status cfl = r.cfl > r.cfl_limit ? Status::WARNING : Status::OK;
     std::vector<Row> rows = {
         {Status::NONE, {"time step dt", g4(r.dt), "s", "", basis}},
         {cfl,
-         {"CFL number", format("%.3g", r.cfl), "dimensionless", limited ? "<= " + g4(r.cfl_limit) : "",
-          limited ? r.integrator + "'s stability limit for smooth flow" : "no limit known for " + r.integrator}},
+         {"CFL number", format("%.3g", r.cfl), "dimensionless", "<= " + g4(r.cfl_limit),
+          r.integrator + "'s stability limit for smooth flow"}},
         {Status::NONE, {"time step at CFL 1", g4(r.dt_cfl1), "s", "", "the smallest over the cells"}},
         {Status::NONE, {"CFL-limiting cell", count(r.limiting_cell), "global id", "", "at " + point(r.limiting_x)}},
         {Status::NONE,
@@ -312,6 +329,7 @@ void memory_section(report::Text & text, const CheckReport & r) {
         device = format("%.0f%% of %s", 100.0 * double(r.target_bytes_peak) / double(r.device_capacity),
                         bytes(double(r.device_capacity)).c_str());
     }
+    if (n_of(r, diagnostic_code::VIEW_ENTRIES)) s = Status::ERROR;
     std::vector<Row> rows = {{target ? Status::NONE : s,
                               {"this check", std::to_string(r.ranks), count(r.local_owned),
                                count(r.local_cells - r.local_owned), bytes(double(r.bytes)), bytes(double(r.bytes_peak)),
@@ -376,6 +394,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
         memory_row("outside Kokkos per GPU", double(r.sizing_overhead),
                          r.overhead_measured ? "measured on this GPU"
                                              : "typical: CUDA's context and kernels' local memory on an A100");
+        uint64_t released = 0;
+        for (const uint64_t b : r.released_on_devices) released += b;
+        if (!r.device_memory && released > 0) {
+            memory_row("freed after setup on GPUs", double(released),
+                       "the mesh's node lists, which this CPU build keeps: left out of the steady state");
+        }
     }
     if (r.max_local_cells == 0) {
         rows.push_back(
@@ -383,9 +407,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     } else {
         rows.push_back({fixed,
                         {"most cells per " + unit, count(r.max_local_cells), "owned and halo cells", "",
-                         bytes(r.bytes_per_cell) + " per cell" +
-                             (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
-                             (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});
+                         r.sizing_view_entries
+                             ? format("%.0f", r.view_entries_per_cell) + " entries per cell in a View of rank 2 or "
+                                   "more, which addresses " + count(view_entries::MAX)
+                             : bytes(r.bytes_per_cell) + " per cell" +
+                                   (r.fixed_bytes > 0 ? " + " + bytes(double(r.fixed_bytes)) : "") +
+                                   (r.sizing_setup ? ", at the setup's peak" : ", in the steady state")}});
         if (r.min_ranks == 0) {
             rows.push_back({Status::WARNING,
                             {"fewest " + units, "-", units, "", "see " + std::string(diagnostic_code::SIZING_PARTS)}});
@@ -630,11 +657,13 @@ std::string quality_json(const CheckReport & r) {
         const QualitySummary & s = r.quality[m];
         q.raw(MeshQuality::FIELDS[m], json::Object()
                                           .add("name", std::string(MeshQuality::NAMES[m]))
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("units", std::string(MeshQuality::UNITS[m]))
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", array_json(s.worst, [](const QualityCell & c) {
                                                    return json::Object()
                                                        .add("value", c.value)
@@ -658,6 +687,7 @@ std::string resolution_json(const CheckReport & r) {
                                  .add("status", std::string(report::status_name(e.status)))
                                  .add("basis", e.basis)
                                  .raw("x", e.located ? point_json(e.x) : "null")
+                                 .raw("region", e.region.empty() ? "null" : json::quote(e.region))
                                  .str());
     }
     return resolution.str();
@@ -677,7 +707,7 @@ std::string check_text(const CheckReport & r, const bool color) {
         resolution_section(text, r);
         if (r.bytes > 0) memory_section(text, r);
         sizing_section(text, r);
-        if (r.setup_done) cost_section(text, r);
+        if (r.setup_done && !r.geometry_only) cost_section(text, r);
     }
     if (r.environment.checked) environment_section(text, r);
     diagnostics_section(text, r);
@@ -688,7 +718,7 @@ std::string check_text(const CheckReport & r, const bool color) {
 
 std::string check_json(const CheckReport & r) {
     json::Object o;
-    o.add("version", 1);
+    o.add("schema", interfaces::CHECK_REPORT.name).add("version", interfaces::CHECK_REPORT.version);
     o.add("status", std::string(report::status_name(r.status())));
     o.add("errors", uint64_t(r.errors().size())).add("warnings", uint64_t(r.warnings().size()));
     o.raw("input_file", r.input_file.empty() ? "null" : json::quote(r.input_file))
@@ -712,6 +742,30 @@ std::string check_json(const CheckReport & r) {
                   .add("turbulence", b.turbulence)
                   .str();
           }));
+    o.raw("unassigned", array_json(r.unassigned, [](const CheckUnassigned & u) {
+              return json::Object().add("zone", u.zone).add("faces", u.faces).str();
+          }));
+    o.raw("periodic", array_json(r.periodic, [](const CheckPeriodic & p) {
+              auto vec = [](const std::array<double, 3> & v) {
+                  std::string out = "[";
+                  for (size_t i = 0; i < N_DIM; i++) out += (i ? ", " : "") + json::number(v[i]);
+                  return out + "]";
+              };
+              return json::Object()
+                  .raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
+                  .add("map", std::string(p.rotation ? "rotation" : "translation"))
+                  .raw("translation", p.rotation ? "null" : vec(p.translation))
+                  .raw("angle", p.rotation ? json::number(p.angle) : "null")
+                  .raw("center", p.rotation ? vec(p.center) : "null")
+                  .raw("axis", p.rotation && N_DIM == 3 ? "[" + json::number(p.axis[0]) + ", " + json::number(p.axis[1]) +
+                                                              ", " + json::number(p.axis[2]) + "]"
+                                                        : "null")
+                  .add("faces", p.faces)
+                  .add("area", p.area)
+                  .add("node_offset_max", p.node_offset_max)
+                  .add("node_offset_relative", p.node_offset_relative)
+                  .str();
+          }));
     o.raw("regions", array_json(r.regions, [](const CheckRegion & g) {
               return json::Object()
                   .add("name", g.name)
@@ -724,6 +778,10 @@ std::string check_json(const CheckReport & r) {
                   .raw("resolution", g.exact ? "null" : std::to_string(g.resolution))
                   .add("solution", g.solution)
                   .add("surface", g.surface)
+                  .raw("box", !g.from_file ? "null"
+                                           : "[[" + json::number(g.box[0][0]) + ", " + json::number(g.box[0][1]) +
+                                                 ", " + json::number(g.box[0][2]) + "], [" + json::number(g.box[1][0]) +
+                                                 ", " + json::number(g.box[1][1]) + ", " + json::number(g.box[1][2]) + "]]")
                   .raw("own", std::isfinite(g.own_measure) ? json::Object()
                                                                  .add("measure", g.own_measure)
                                                                  .add("surface", g.own_surface)
@@ -734,6 +792,11 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.add("geometry_only", r.geometry_only);
+    std::vector<std::string> view_files = r.view_images;
+    if (!r.view_file.empty()) view_files.insert(view_files.begin(), r.view_file);
+    o.raw("view", r.view_file.empty() ? "null" : case_view::json(view_files, r.view_blocks, r.geometry_only));
+    o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));
@@ -775,9 +838,12 @@ std::string check_json(const CheckReport & r) {
                             .add("target_bytes_peak", r.target_bytes_peak)
                             .add("device_capacity", r.device_capacity)
                             .add("outside_kokkos", r.outside_kokkos)
+                            .add("view_entries_per_cell", r.view_entries_per_cell)
+                            .add("view_max_local_cells", r.view_max_local_cells)
                             .add("steps_timed", r.steps_timed)
                             .raw("at_setup_peak", bytes_json(r.setup_bytes))
                             .raw("steady", bytes_json(r.steady_bytes))
+                            .raw("released_on_devices", bytes_json(r.released_on_devices))
                             .str());
     } else {
         o.raw("memory", "null");
@@ -794,6 +860,7 @@ std::string check_json(const CheckReport & r) {
                             .add("fixed_bytes", r.fixed_bytes)
                             .add("at_setup_peak", r.sizing_setup)
                             .add("max_local_cells", r.max_local_cells)
+                            .add("limit", r.sizing_view_entries ? "view_entries" : "memory")
                             .add("min_ranks", r.min_ranks)
                             .add("min_owned", r.min_owned)
                             .add("min_halo", r.min_halo)

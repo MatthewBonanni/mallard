@@ -11,15 +11,20 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "cli.h"
 #include "comm.h"
+#include "commands.h"
 #include "data_paths.h"
 #include "field_units.h"
+#include "json.h"
 #include "output_reader.h"
 #include "provenance.h"
 #include "scratch.h"
@@ -218,6 +223,47 @@ std::string channel(const std::string & dir) {
     }
 #endif
     return s.str();
+}
+
+
+/** @brief A channel with forces, probes with reductions, spectra and a restart file, in the given units. */
+std::string units_case(const std::string & dir, const std::string & system) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 2\ncfl = 0.25\n"
+      << "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
+      << (N_DIM == 3 ? "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
+      << "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\n"
+      << "[[boundaries]]\nname = \"top\"\ntype = \"wall_adiabatic\"\n"
+      << "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.1 * x\"\np = \"1.0\"\nu = "
+      << (N_DIM == 3 ? "[\"0.5\", \"0.0\", \"0.0\"]" : "[\"0.5\", \"0.0\"]") << "\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\n[numerics.face_reconstruction]\ntype = \"FO\"\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nunits = \"" << system
+      << "\"\n[output]\nrun_log = \"\"\n"
+      << "[statistics]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*P\"]\n"
+      << "[statistics.spectra]\nfields = [\"U_X\", \"P\"]\nproducts = [\"U_X*P\"]\nfile = \"" << dir << "/spectra.csv\"\n"
+      << "[[forces]]\nzone = \"bottom\"\nfile = \"" << dir << "/forces.csv\"\n"
+      << "[[probes]]\nname = \"point\"\nfile = \"" << dir << "/point.csv\"\npoint = " << SIDE_POINT
+      << "\nfields = [\"RHO\", \"U\", \"P\"]\n"
+      << "[[probes]]\nname = \"line\"\nfile = \"" << dir << "/line.csv\"\nstart = "
+      << (N_DIM == 3 ? "[0.1, 0.5, 0.5]" : "[0.1, 0.5]") << "\nend = " << (N_DIM == 3 ? "[0.9, 0.5, 0.5]" : "[0.9, 0.5]")
+      << "\nn_points = 4\nfields = [\"RHO\", \"P\"]\nreductions = [\"integral\", \"mean\"]\n"
+      << "reductions_file = \"" << dir << "/line_reductions.csv\"\n"
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 2\n";
+    return s.str();
+}
+
+/** @brief Runs mallard post extract on words, quietly. */
+int post_extract_quietly(const std::vector<std::string> & words) {
+    cli::Args args;
+    std::string error;
+    EXPECT_TRUE(cli::parse(*cli::command("post extract"), words, args, error)) << error;
+    std::ostringstream report;
+    std::streambuf * out = std::cout.rdbuf(report.rdbuf());
+    const int status = post_extract(args);
+    std::cout.rdbuf(out);
+    comm::barrier();
+    return status;
 }
 
 } // namespace
@@ -632,7 +678,7 @@ TEST(FieldUnitsTest, FieldsFromTheInputAloneAreThoseOfTheSetup) {
         "mechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n";
     const std::string les = std::string("[les]\nmodel = \"") + (N_DIM == 3 ? "sigma" : "wale") + "\"\n";
     const std::vector<std::string> cases = {
-        gas + "[numerics]\npreset = \"robust\"\n",
+        gas + "[numerics]\npreset = \"second_order\"\n",
         gas + "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n[[sources]]\nrhoE = \"1.0 + x\"\n"
               "[statistics]\nfields = [\"P\"]\nproducts = [\"U_X*RHO\"]\nbatch = 1.0e-3\n"
               "[statistics.phase]\nfields = [\"U_Y\"]\nbins = 3\nperiod = 0.01\n",
@@ -678,4 +724,165 @@ TEST(FieldUnitsTest, CatalogGroupsHoldEveryNamedField) {
     std::vector<size_t> ranks;
     for (const CatalogField & f : field_units::catalog()) ranks.push_back(field_units::group_rank(f.group));
     EXPECT_TRUE(std::is_sorted(ranks.begin(), ranks.end()));
+}
+
+TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsLines) {
+    // The run log gives "1" for every physical quantity of a nondimensional case; so must every CSV file
+    for (const std::string system : {"nondimensional", "SI"}) {
+        const std::string dir = (scratch_dir() / ("mallard_units_" + system)).string();
+        const std::string extracted = dir + "/extract";
+        if (comm::is_root()) std::filesystem::remove_all(dir);
+        comm::barrier();
+        {
+            Solver solver;
+            solver.init(parse_toml(units_case(dir, system)));
+            solver.run();
+        }
+        comm::barrier();
+        ASSERT_EQ(post_extract_quietly({dir + "/restart_000002.restart", "-o", extracted}), 0) << system;
+        if (!comm::is_root()) continue;
+        std::map<std::string, std::map<std::string, std::string>> files;
+        for (const char * name : {"/forces.csv", "/point.csv", "/line.csv", "/line_reductions.csv"}) {
+            files[name] = csv_units(dir + name);
+        }
+        for (const char * name : {"/point.csv", "/line.csv", "/line_reductions.csv"}) {
+            files[std::string("/extract") + name] = csv_units(extracted + name);
+        }
+        std::map<std::string, std::string> spectra;
+        {
+            std::ifstream in(dir + "/spectra.csv");
+            bool header = true;
+            for (std::string row; std::getline(in, row);) {
+                if (row.empty() || row[0] == '#') continue;
+                if (!std::exchange(header, false)) {
+                    const auto cells = split(row, ',');
+                    spectra[cells[0] + " " + cells[1]] = cells.back();
+                }
+            }
+        }
+        if (system == "nondimensional") {
+            for (const auto & [file, units] : files) {
+                ASSERT_FALSE(units.empty()) << file;
+                for (const auto & [column, unit] : units) EXPECT_EQ(unit, "1") << file << ": " << column;
+            }
+            for (const auto & [row, unit] : spectra) EXPECT_EQ(unit, "1") << "spectra.csv: " << row;
+        } else {
+            for (const char * file : {"/point.csv", "/extract/point.csv"}) {
+                EXPECT_EQ(files[file]["step"], "1") << file;
+                EXPECT_EQ(files[file]["t"], "s") << file;
+                EXPECT_EQ(files[file]["x"], "m") << file;
+                EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
+            }
+            for (const char * file : {"/line.csv", "/extract/line.csv"}) {
+                EXPECT_EQ(files[file]["x"], "m") << file;
+                EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
+            }
+            EXPECT_EQ(files["/line_reductions.csv"]["length"], "m");
+            EXPECT_EQ(files["/extract/line_reductions.csv"], files["/line_reductions.csv"]);
+            EXPECT_EQ(files["/forces.csv"]["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
+            EXPECT_EQ(spectra["mean P"], "kg m-1 s-2");
+        }
+    }
+}
+
+TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsMetadata) {
+    // The units stored in snapshot and probe files follow the case's units as the CSV units lines do
+    const std::string line = N_DIM == 3 ? "start = [0.1, 0.5, 0.5]\nend = [0.9, 0.5, 0.5]\n" : "start = [0.1, 0.5]\nend = [0.9, 0.5]\n";
+    bool hdf5 = false;
+#ifdef Mallard_HAS_HDF5
+    hdf5 = comm::size() == 1 || have_parallel_hdf5();
+#endif
+    for (const std::string system : {"nondimensional", "SI"}) {
+        const std::string dir = (scratch_dir() / ("mallard_units_metadata_" + system)).string();
+        if (comm::is_root()) std::filesystem::remove_all(dir);
+        comm::barrier();
+        std::ostringstream s;
+        s << units_case(dir, system)
+          << "[[write_data]]\nprefix = \"" << dir << "/f\"\nformat = \"vtu\"\ninterval = 2\n"
+          << "fields = [\"RHO\", \"U\", \"P\", \"MEAN_*\", \"COV_*\"]\n"
+          << "[[probes]]\nname = \"lv\"\nformat = \"vtp\"\nfile = \"" << dir << "/lv.pvd\"\n" << line
+          << "n_points = 4\nfields = [\"RHO\", \"P\"]\n"
+          << "[[probes]]\nname = \"blob\"\nregion = "
+          << (N_DIM == 3 ? "{type = \"sphere\", center = [0.5, 0.5, 0.5], radius = 0.2}"
+                         : "{type = \"disk\", center = [0.5, 0.5], radius = 0.2}")
+          << "\nfields = [\"RHO\"]\nreductions = [\"integral\"]\nreductions_file = \"" << dir << "/blob.csv\"\n";
+        if (hdf5) {
+            s << "[[write_data]]\nprefix = \"" << dir << "/h\"\nformat = \"xdmf\"\ninterval = 2\nfields = [\"RHO\", \"P\"]\n"
+              << "[[write_data]]\nprefix = \"" << dir << "/k\"\nformat = \"vtkhdf\"\nseries = false\ninterval = 2\n"
+              << "fields = [\"RHO\", \"P\"]\n"
+              << "[[probes]]\nname = \"h5\"\nformat = \"hdf5\"\nfile = \"" << dir << "/probe.h5\"\n" << line
+              << "n_points = 4\nfields = [\"RHO\", \"P\"]\n"
+              << "[[probes]]\nname = \"vk\"\nformat = \"vtkhdf\"\nfile = \"" << dir << "/probe.vtkhdf\"\n" << line
+              << "n_points = 4\nfields = [\"RHO\", \"P\"]\n";
+        }
+        {
+            Solver solver;
+            solver.init(parse_toml(s.str()));
+            solver.run();
+        }
+        comm::barrier();
+        if (!comm::is_root()) continue;
+
+        // Every units entry a file stores, by where it is: fields as the C++ reader finds them, the snapshot and
+        // probe sampling blocks' own units, and the CF attributes of the coordinates and times
+        std::map<std::string, std::string> stored;
+        auto block_units = [&](const std::string & where, const std::string & block) {
+            if (block.empty()) return;
+            const json::Value b = json::parse(block);
+            ASSERT_TRUE(b.has("units")) << where;
+            for (const std::string & key : b["units"].keys()) stored[where + " units." + key] = b["units"][key].string;
+        };
+        const std::string vtu = comm::size() > 1 ? "/f_000002_p0000.vtu" : "/f_000002.vtu";
+        std::vector<std::string> files = {vtu, "/lv_000002.vtp", "/blob.csv"};
+        if (hdf5) files.insert(files.end(), {"/h_000002.xmf", "/h_000002.h5", "/k_000002.vtkhdf", "/probe.h5", "/probe.vtkhdf"});
+        for (const std::string & file : files) {
+            const output::Contents c = output::open(dir + file);
+            for (const output::Field & f : c.fields) stored[file + " " + f.name] = f.units;
+            block_units(file + " sampling", c.sampling);
+        }
+        for (const std::string & file : {vtu, std::string("/lv_000002.vtp")}) {
+            block_units(file + " block", provenance::parse_comment(read_file(dir + file), snapshot_block::NAME));
+        }
+#ifdef Mallard_HAS_HDF5
+        if (hdf5) {
+            for (const auto & [file, dataset] : std::vector<std::pair<std::string, std::string>>{
+                     {"/h_mesh.h5", "nodes/coordinates"}, {"/k_000002.vtkhdf", "VTKHDF/Points"},
+                     {"/k_000002.vtkhdf", "VTKHDF/FieldData/TIME"}, {"/probe.h5", "time"},
+                     {"/probe.h5", "coordinates"}, {"/probe.vtkhdf", "VTKHDF/Points"}}) {
+                h5::Handle h(H5Fopen((dir + file).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, file);
+                h5::Handle d(H5Dopen2(h, dataset.c_str(), H5P_DEFAULT), H5Dclose, dataset);
+                stored[file + " " + dataset] = h5::read_string_attribute(d, "units");
+            }
+        }
+#endif
+        const std::string area = N_DIM == 3 ? "volume" : "area";
+        for (const auto & key : {vtu + " RHO", vtu + " MEAN_P", vtu + " block units.time",
+                                 vtu + " block units.statistics.average_start", vtu + " block units.fields.average.start",
+                                 std::string("/lv_000002.vtp P"), std::string("/lv_000002.vtp block units.time"),
+                                 std::string("/lv_000002.vtp sampling units.points.requested"),
+                                 "/blob.csv sampling units.measures.region." + area}) {
+            EXPECT_TRUE(stored.count(key)) << system << ": " << key;
+        }
+        if (system == "nondimensional") {
+            for (const auto & [where, unit] : stored) EXPECT_EQ(unit, "1") << where;
+        } else {
+            EXPECT_EQ(stored[vtu + " RHO"], "kg m-3");
+            EXPECT_EQ(stored[vtu + " MEAN_P"], "kg m-1 s-2");
+            EXPECT_EQ(stored[vtu + " block units.time"], "s");
+            EXPECT_EQ(stored[vtu + " block units.statistics.average_start"], "s");
+            EXPECT_EQ(stored["/lv_000002.vtp P"], "kg m-1 s-2");
+            EXPECT_EQ(stored["/lv_000002.vtp sampling units.points.requested"], "m");
+            EXPECT_EQ(stored["/blob.csv sampling units.measures.region." + area], N_DIM == 3 ? "m3" : "m2");
+            EXPECT_EQ(stored["/blob.csv sampling units.measures.in_domain." + std::string(N_DIM == 3 ? "surface_area" : "perimeter")],
+                      N_DIM == 3 ? "m2" : "m");
+            if (hdf5) {
+                for (const char * file : {"/h_000002.xmf", "/h_000002.h5", "/k_000002.vtkhdf", "/probe.h5", "/probe.vtkhdf"}) {
+                    EXPECT_EQ(stored[std::string(file) + " RHO"], "kg m-3") << file;
+                }
+                EXPECT_EQ(stored["/k_000002.vtkhdf VTKHDF/FieldData/TIME"], "s");
+                EXPECT_EQ(stored["/probe.h5 coordinates"], "m");
+            }
+        }
+        if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
+    }
 }

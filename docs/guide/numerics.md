@@ -137,52 +137,56 @@ times over:
 ![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL and TENO-E 3 to 6](../images/guide/high_order_cost-dark.svg#gh-dark-mode-only)
 
 *The isentropic vortex of [Shu (1998)](../references.md#shu-1998), strength
-5, convected 2 units across a periodic 10 × 10 box of irregular triangles
+5, cut off smoothly at radius 5 so that it is smooth across the box's
+periodic sides ([the vortex](../design/work_precision.md#method)),
+convected 2 units across a periodic 10 × 10 box of irregular triangles
 (nodes jittered by up to a quarter cell), with HLLC, SSPRK3 and `cfl = 1.0`
 for every scheme (MUSCL unlimited). Error: the L2 norm of the density cell
 averages at t = 2 against the exact solution. Cost: the CPU time of the
-whole run, setup and output included, on 2 threads of an Apple Silicon
-laptop shared with other jobs (hence CPU rather than wall time, also
-recorded). Script and data: `tools/docs/high_order_cost.py`.*
+whole run, setup and output included, on 2 pinned threads of an AMD EPYC
+7763, the fastest of three runs (the wall time is also recorded). Script and
+data: `tools/docs/high_order_cost.py`.*
 
 Read off the curves (interpolated between the measured meshes):
 
 | Error | FO | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
 |---|---|---|---|---|---|---|
-| 10<sup>-3</sup> | not reached (1.7 × 10<sup>-3</sup> on 524,288 cells, 395 s) | 5,800 cells, 0.57 s | 2,700 cells, 0.52 s | 960 cells, 0.25 s | 1,100 cells, 0.62 s | 750 cells, 0.76 s |
-| 10<sup>-4</sup> | not reached | 64,500 cells, 20.8 s | 13,000 cells, 3.7 s | 3,300 cells, 1.1 s | 3,600 cells, 2.8 s | 1,900 cells, 2.4 s |
-| 10<sup>-5</sup> | not reached | not reached | 61,000 cells, 35 s | 10,000 cells, 4.6 s | 9,700 cells, 10.4 s | 4,400 cells, 6.9 s |
-| Measured order (two finest meshes) | 0.97 | 1.89 (1.23 from 131,072 to 524,288 cells) | 3.00 | 3.90 | 4.87 | 5.54 |
+| 10<sup>-3</sup> | not reached (1.8 × 10<sup>-3</sup> on 524,288 cells, 1,080 s) | 6,300 cells, 1.96 s | 3,200 cells, 1.73 s | 1,100 cells, 0.69 s | 1,300 cells, 1.29 s | 850 cells, 1.17 s |
+| 10<sup>-4</sup> | not reached | 70,000 cells, 81 s | 15,500 cells, 14.9 s | 3,700 cells, 3.6 s | 4,100 cells, 6.3 s | 2,200 cells, 4.3 s |
+| 10<sup>-5</sup> | not reached | not reached | 73,000 cells, 151 s | 11,300 cells, 17.2 s | 11,100 cells, 25.0 s | 4,900 cells, 12.9 s |
+| Measured order (two finest meshes) | 0.96 | 1.90 (1.42 from 131,072 to 524,288 cells) | 3.00 | 3.92 | 4.89 | 6.02 |
 
-- **At an error of 10<sup>-4</sup>** TENO-E 5 needs 18 times fewer cells than
-  MUSCL and 7.4 times less CPU time; FO would need, at its measured first
-  order, about 300 times the cells of its finest run (some 150 million).
-- **FO's finest run** (524,288 cells, 395 s) has an error of 1.7 × 10<sup>-3</sup>;
-  TENO-E 5 has 3.8 × 10<sup>-4</sup> on 2,048 cells in 1.3 s.
-- **The crossover with second order:** above an error of about 9 × 10<sup>-4</sup>
-  (here, meshes under about 5,000 cells, some 7 cells per core radius of the
-  vortex) MUSCL is as cheap as TENO-E 5 or cheaper: at 10<sup>-3</sup> it
-  costs 0.92 times TENO-E 5's time. Below it the gap widens with every
-  refinement, since each halving of h divides TENO-E 5's error by about 29
+- **At an error of 10<sup>-4</sup>** TENO-E 5 needs 17 times fewer cells than
+  MUSCL and 12.9 times less CPU time; FO would need, at its measured first
+  order, about 430 times the cells of its finest run (some 230 million).
+- **FO's finest run** (524,288 cells, 1,080 s) has an error of 1.8 × 10<sup>-3</sup>;
+  TENO-E 5 has 5.0 × 10<sup>-4</sup> on 2,048 cells in 2.3 s.
+- **The crossover with second order:** above an error of about 1.8 × 10<sup>-3</sup>
+  (here, meshes under about 3,500 cells, some 4 cells per core radius of the
+  vortex) MUSCL is as cheap as TENO-E 5 or cheaper; at 10<sup>-3</sup> it
+  already costs 1.5 times TENO-E 5's time. Below it the gap widens with every
+  refinement, since each halving of h divides TENO-E 5's error by about 30
   and MUSCL's by about 4.
-- **Which order is cheapest:** TENO-E 4, over the whole range from
-  10<sup>-3</sup> to 10<sup>-5</sup>. It needs about as many cells as TENO-E 5
-  for a given error, at a smaller stencil, and so reaches it in about 0.4
-  times TENO-E 5's CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error
-  of about 2.5 × 10<sup>-3</sup> (0.66 times its time at 10<sup>-5</sup>) and,
-  at the highest order, closes in on TENO-E 4 as the error falls. TENO-E 3 is
-  cheaper than TENO-E 5 only above about 1.8 × 10<sup>-4</sup>.
+- **Which order is cheapest:** TENO-E 4 from 10<sup>-3</sup> to
+  10<sup>-4</sup>, and TENO-E 6 at 10<sup>-5</sup> (12.9 s, against 17.2 s
+  for TENO-E 4). TENO-E 4 needs about as many cells as TENO-E 5 for a given
+  error, at a smaller stencil, and so reaches it in 0.55 to 0.7 times TENO-E 5's
+  CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error of about
+  3 × 10<sup>-3</sup> (0.52 times its time at 10<sup>-5</sup>) and, at the
+  highest order, overtakes TENO-E 4 as the error falls. TENO-E 3 is cheaper
+  than TENO-E 5 only above about 3.5 × 10<sup>-3</sup>.
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
-  - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
-    (Mach 1 in a Mach 0.2 flow);
-  - it keeps an odd-even wall-pressure mode at the NACA 0012 trailing edge;
-  - it undershoots ahead of shocks on quads about 10 times as much as order 5.
+    - it amplifies an outgoing acoustic wave on the cylinder's stretched O-grid
+      (Mach 1 in a Mach 0.2 flow);
+    - it undershoots where shocks start from a corner on quads (the density by a
+      third in the first steps of the 2D Riemann problem);
+    - it grows acoustic modes on graded hexahedra (from 5% cell-to-cell grading).
 
-  Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
-  For smooth flow, setting `order = 4` under
-  `[numerics.face_reconstruction]` is the cheaper choice.
+    Order 5 passes all of these ([robustness study](../design/teno4_robustness.md)).
+    For smooth flow, setting `order = 4` under
+    `[numerics.face_reconstruction]` is the cheaper choice.
 
 The same comparison on squares, in 3D, with a shock and on a GPU is in
 [Performance: choosing a scheme for an accuracy target](performance.md#accuracy-target).
@@ -193,7 +197,7 @@ a flow dominated by discontinuities the gain shrinks to the smooth regions
 between them; for the strongest shocks and blasts, `second_order` (no stencil
 setup, fewer ways to fail) or, as a last resort, `first_order` is the right
 tool. TENO-E also has a one-time stencil setup, included in the times above:
-for TENO-E 5 it is 27% of the run on 2,048 cells and 11% on 32,768 (it grows
+for TENO-E 5 it is 14% of the run on 2,048 cells and 5% on 32,768 (it grows
 with the cells, the time stepping with cells times steps; seconds per
 million cells on a GPU, minutes on CPUs), and it holds more memory per cell.
 
@@ -211,7 +215,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 58 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -264,7 +268,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 58 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -329,7 +333,7 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
-| `troubled_capacity` | 0.5 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
+| `troubled_capacity` | 0.25 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 
 Pitfalls:
@@ -345,6 +349,89 @@ Pitfalls:
 - The **troubled-cell share** is in every progress row; output `TENO_SIGMA` to
   see where stencils are being selected.
 
+### Viscous gradients
+
+```toml
+[numerics]
+viscous_gradients = "reconstruction"   # default "least_squares"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+```
+
+By default the viscous stress and heat flux take second-order least-squares
+gradients, whatever the reconstruction, so viscous-dominated flows (boundary
+layers, diffusion, decaying turbulence at low Reynolds numbers) stay second
+order under TENO. With `viscous_gradients = "reconstruction"`, each face
+between two cells TENO finds smooth takes the gradients of the two cells'
+TENO polynomials at its quadrature points instead. That is order `order - 1`
+for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
+
+Two convergence studies on periodic boxes of every cell type
+(`tools/docs/viscous_gradients.py`) compare the two paths against their design
+orders. The momentum error of a decaying shear wave, an exact Navier-Stokes
+solution, converges with `reconstruction` at least at the face gradients'
+order, `order - 1`, and in practice at about `order` (4 for TENO4 and TENO5, 6
+for TENO6); least squares gives second order, and stalls on hexahedra:
+
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-light.svg#gh-light-mode-only)
+![Momentum error of a decaying shear wave against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-shear-wave-dark.svg#gh-dark-mode-only)
+
+The viscous residual of a manufactured solution (velocity, temperature and
+density all varying) at its exact cell averages divides the face gradients'
+error by h: design order `order - 2` with `reconstruction` (higher on
+symmetric meshes), 1 with least squares, which does not converge on
+tetrahedra:
+
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-light.svg#gh-light-mode-only)
+![Viscous residual error of a manufactured solution against mesh size h on quadrilaterals, triangles, hexahedra, prisms and tetrahedra, least squares and reconstruction gradients with TENO4 to 6, with observed and design orders](../images/guide/viscous-gradients-residual-dark.svg#gh-dark-mode-only)
+
+Finest-pair orders (design in parentheses), least squares with TENO5:
+
+| Cells | Shear wave, `least_squares` | Shear wave, `reconstruction` TENO4 / 5 / 6 | Residual, `least_squares` | Residual, `reconstruction` TENO4 / 5 / 6 |
+|---|---|---|---|---|
+| quadrilaterals | 2.6 (2) | 4.0 / 3.9 / 5.9 (3 / 4 / 5) | 2.0 (1) | 4.0 / 3.9 / 5.9 (2 / 3 / 4) |
+| triangles | 2.0 (2) | 4.1 / 3.9 / 6.1 | 1.0 (1) | 3.0 / 3.0 / 5.0 |
+| hexahedra | -0.1 (2) | 3.9 / 3.9 / 5.9 | 1.9 (1) | 3.7 / 3.6 / 5.3 |
+| prisms | 2.0 (2) | 4.1 / 3.9 / 5.9 | 1.0 (1) | 2.9 / 3.0 / 4.8 |
+| tetrahedra | 2.0 (2) | 4.1 / 4.0 / 5.9 | 0.0 (1) | 2.0 / 3.0 / 4.1 |
+
+On 32 × 32 × 2 triangles, TENO5's shear-wave error is 24 times smaller with
+`reconstruction` than with least squares (1.9e-8 against 4.4e-7), and the gap
+grows with resolution.
+
+Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
+per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to
+partition faces receive theirs from their owners. Evaluating the gradients at
+the face points makes a TENO5 step of the 3D Taylor-Green vortex 1.9 times as
+long on hexahedra and 1.6 times on tetrahedra on CPU (16 threads), and 2.2 and
+1.6 times on an A100.
+
+Pitfalls:
+
+- **TENO4 or higher.** TENO3's quadratic polynomials give second-order face
+  gradients, with a larger error than least squares, so Mallard rejects it.
+- **Smaller viscous time steps.** The polynomial gradients make the viscous
+  operator stiffer: in 1D its largest eigenvalue is up to 8.2/h² (5.5/h² for
+  least-squares central stencils) against 4/h² for least squares, so the
+  viscous part of the time-step limit is 2.05 times as strict with
+  `reconstruction`. Viscous-dominated runs (fine near-wall cells, low Reynolds
+  numbers) take up to half the time step; convection-dominated runs are
+  unaffected.
+- **Troubled cells and boundaries.** Faces next to a cell where TENO selects
+  stencils, or whose polynomial is negative in density or pressure at a face
+  point, and boundary faces (walls among them), keep the least-squares
+  gradients. Near walls and shocks the flux is then second order, as before.
+- **Not yet available** for gas mixtures (species diffusion), axisymmetric
+  runs, LES, the hybrid convective flux, curved meshes and rotational
+  periodicity, where Mallard reports an error. Probes of the diffusive fluxes
+  on faces (`[[probes]]` surfaces) still report the least-squares fluxes.
+
 ## Riemann solvers
 
 ```toml
@@ -358,7 +445,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 58 more.
 
 | `riemann_solver` | Use |
 |---|---|

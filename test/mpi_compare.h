@@ -42,6 +42,32 @@ inline std::string with_halo_exchange(const std::string & input, const std::stri
 }
 
 /**
+ * @brief Every halo cell's centroid, volume and (axisymmetric) measure and covariance equal its owner's bit for bit.
+ */
+inline void expect_halo_geometry_matches_owners(const Solver & solver) {
+    const Mesh & mesh = *solver.get_mesh();
+    const uint32_t width = N_DIM + 1 + (mesh.axisymmetric ? 4 : 0);
+    const auto geometry = [&](const uint32_t c, double * v) {
+        FOR_I_DIM v[i] = double(mesh.h_cell_coords(c, i));
+        v[N_DIM] = double(mesh.h_cell_volume(c));
+        if (!mesh.axisymmetric) return;
+        v[N_DIM + 1] = double(mesh.h_cell_measure(c));
+        for (uint32_t k = 0; k < 3; k++) v[N_DIM + 2 + k] = double(mesh.h_cell_covariance(c, k));
+    };
+    const uint64_t n_global = comm::allreduce(uint64_t(mesh.n_owned()), comm::Op::SUM);
+    std::vector<double> owned(n_global * width, 0.0);
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) geometry(c, owned.data() + mesh.h_global_cell(c) * width);
+    comm::allreduce(std::span<double>(owned), comm::Op::SUM);
+    uint64_t n_differ = 0;
+    std::vector<double> v(width);
+    for (uint32_t c = mesh.n_owned(); c < mesh.n_cells; c++) {
+        geometry(c, v.data());
+        n_differ += !std::equal(v.begin(), v.end(), owned.begin() + std::ptrdiff_t(mesh.h_global_cell(c) * width));
+    }
+    EXPECT_EQ(n_differ, 0u) << "halo cells whose geometry differs from the owner's, on rank " << comm::rank();
+}
+
+/**
  * @brief Run the input distributed and serially, the serial run in the
  *        global numbering; every rank compares the gathered distributed
  *        solution with its serial one. NCCL builds exchange halos with NCCL
@@ -126,6 +152,7 @@ inline void expect_matches_serial(const std::string & input,
 inline void expect_matches_serial_with_and_without_step_graphs(
     const std::string & input, const std::function<void(const Solver &)> & check_distributed = {}) {
     for (const bool graphs : {true, false}) {
+        if (graphs && Solver::are_cuda_graphs_off()) continue;
         std::string text = input;
         text.insert(text.find("[run]\n") + 6, std::string("cuda_graphs = ") + (graphs ? "true" : "false") + "\n");
         SCOPED_TRACE(text);
@@ -140,7 +167,7 @@ inline void expect_matches_serial_with_and_without_step_graphs(
 #ifdef KOKKOS_ENABLE_CUDA
                 EXPECT_EQ(s.get_graph_steps() > 0, graphs && why.empty()) << why;
 #if CUDART_VERSION >= 12040
-                // On one node NCCL's collectives fit under the step's conditional node: steps queue ahead
+                // Steps with NCCL queue ahead: under conditional nodes, or gated where those cannot hold NCCL
                 if (graphs && why.empty() && s.is_distributed()) {
                     EXPECT_GT(s.get_queue_depth(), 1u) << "NCCL steps launched one at a time";
                 }

@@ -14,7 +14,7 @@ surfaces: "sphere", "inflow" (x = x-min), "outflow" (x = x-max), "lateral"
 With --order 2 or 3 the elements are quadratic or cubic, their extra nodes on
 the CAD surfaces: Mallard keeps the corners and curves the sphere from its
 high-order faces.
-Needs the gmsh Python module (pip install gmsh).
+Needs the gmsh Python module (uv pip install gmsh).
 """
 import argparse
 

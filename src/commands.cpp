@@ -15,7 +15,12 @@
 #include "commands.h"
 #include "front_end.h"
 #include "input_upgrade.h"
+#include "interfaces.h"
+#include "json.h"
+#include "provenance.h"
 #include "run_control.h"
+#include "run_log.h"
+#include "snapshot_block.h"
 #include "diagnostic_code.h"
 #include "log.h"
 
@@ -61,8 +66,9 @@ constexpr Option CHECK_OPTIONS[] = {
      "steps' peak. Default: no cost."},
     {"--memory", "", "SIZE|GPU",
      "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
-     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank, the fewest ranks the mesh fits "
-     "on and up to how many the halo stays below 10%. Default: the GPU's memory in GPU builds, else none."},
+     "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank (within the memory and the "
+     "entries a multi-dimensional View addresses), the fewest ranks the mesh fits on and up to how many the halo "
+     "stays below 10%. Default: the GPU's memory in GPU builds, else none."},
     {"--mesh-fields", "", "PREFIX",
      "Write the mesh and stencil fields of every cell to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds "
      "without HDF5), the default snapshot format: the mesh quality (NON_ORTHOGONALITY, SKEWNESS, ASPECT_RATIO, "
@@ -86,13 +92,25 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
+    {"--initial", "", "PREFIX",
+     "Write the initial state, as the run would start from it (initialize, its regions and data, or a restart), "
+     "to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), the default snapshot format: RHO, U, P, "
+     "T and, for mixtures, Y_*. Default: none."},
     {"--view", "", "DIR",
      "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
-     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone (walls with their first cells' y+ as the field y_plus once it is estimated), region the case uses (filled regions as "
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
-     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
-     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
+     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
+     "lists them. Default: none."},
+    {"--geometry-only", "", "",
+     "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
+     "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
+     "and the checks of the run (time step, resolution, mesh quality, memory, cost); walls' y_plus and regions "
+     "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
+     "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
 };
 
@@ -109,6 +127,17 @@ constexpr Option NEW_OPTIONS[] = {
      "A coarse, short version that runs in seconds to a minute: for trying the steps, not for the "
      "physical result."},
     {"--force", "", "", "Write into a directory that is not empty."},
+};
+
+constexpr Option VERIFY_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: one row per check with its status, time and why; json: the verdict as one JSON object (schema "
+     "mallard-install-verify), for scripts and the GUI. Default: text."},
+    {"--launcher", "", "COMMAND",
+     "Run the checks under this command, split at spaces: the job's launcher (\"srun -n 2\", \"mpirun -n 2\"), "
+     "or a container runtime. Default: none, one process."},
+    {"--keep", "", "DIR", "Make the checks' cases in DIR and keep them, with their logs. Default: a temporary directory, removed."},
+    KOKKOS,
 };
 
 constexpr Option UPGRADE_OPTIONS[] = {
@@ -139,7 +168,8 @@ constexpr Option INFO_OPTIONS[] = {
      "its size; reads every file once. Default: sizes only."},
     {"--html", "", "",
      "Run directories: write RUN_DIR/report.html, the run report, from RUN_DIR/mallard.jsonl, the page the run "
-     "writes itself: for a run still going, killed, or of a Mallard before 0.10. Default: off."},
+     "writes itself: for a run still going, killed, or of a Mallard before 0.10; with --format json, prints "
+     "its path as {\"directory\", \"report\"}. Default: off."},
     KOKKOS,
 };
 
@@ -236,7 +266,7 @@ constexpr Option DERIVE_OPTIONS[] = {
      "Write the fields on a region only: a name of the input's [regions] or of the mesh, or an inline TOML "
      "table, as [[write_data]] region takes it. Default: the whole mesh."},
     {"--snapshot", "", "vtkhdf|vtu",
-     "The format of the snapshots: OUTPUT/NAME.vtkhdf, every snapshot in one file, or .vtu files with a "
+     "The format of the snapshots: OUTPUT/NAME.vtkhdf, the series of a file per snapshot, or .vtu files with a "
      ".pvd index. Default: vtkhdf, or vtu in builds without HDF5."},
     {"--name", "", "NAME", "The name of the snapshots: NAME.vtkhdf. Default: derived."},
     {"--steps", "", "LIST",
@@ -317,6 +347,43 @@ constexpr Option AVERAGE_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option FLAME_OPTIONS[] = {
+    {"--direction", "", "x|y|z",
+     "The direction the flame propagates along: the profile is along it, each row the mean over the other "
+     "directions, weighted by cell volume. Default: x."},
+    {"--species", "", "NAME",
+     "The species whose consumption gives the consumption speed: the deficient reactant (H2 of a lean H2/air "
+     "flame, O2 of a rich one). Default: from the equivalence ratio of the fresh gas in the first snapshot, the "
+     "fuel when it is at most 1.01, else the oxidizer; of several, the one the flame depletes most, relative to "
+     "its fresh mass fraction."},
+    {"--burnt-temperature", "", "T",
+     "The burnt gas temperature T_b, in K, of x_f and delta_T: e.g. the adiabatic equilibrium temperature, "
+     "where the burnt gas of a short domain has not reached it. Default: the peak temperature of each snapshot."},
+    {"--reference-speed", "", "S_L",
+     "A laminar flame speed to compare with, in m/s (Cantera's): the report gives the errors of the "
+     "consumption and displacement speeds. Default: none."},
+    {"--rtol", "", "R",
+     "Cells share a row of the profile where their centers agree to R times the mesh's extent along "
+     "--direction. Default: 1e-6."},
+    {"-i", "", "FILE",
+     "The input file of the case: its mesh, physics and chemistry. Default: the input in the run block of FILE "
+     "(Mallard 0.10 and later record it resolved), whose mesh file, mechanism and TENO cache_file resolve from "
+     "the run's directory."},
+    {"--name", "", "NAME", "The name of the table: NAME.csv. Default: flame."},
+    {"--steps", "", "LIST",
+     "The snapshots of these steps, separated by commas (--steps 100,200). Default: every snapshot."},
+    {"--times", "", "T|T1:T2",
+     "The snapshot nearest to simulated time T, or every one with T1 <= t <= T2, in seconds. Default: every "
+     "snapshot."},
+    {"--every", "", "N", "Every Nth of the snapshots selected, starting with the first. Default: 1."},
+    {"--latest", "", "", "Only the last snapshot selected."},
+    {"--output", "-o", "DIR", "The directory the table goes to. Default: flame."},
+    {"--format", "", "text|json",
+     "text: sections and tables, with the units of every quantity; json: the same as one JSON object, for "
+     "scripts. Default: text."},
+    KOKKOS,
+};
+
 constexpr Option CONVERGENCE_OPTIONS[] = {
     {"--quantity", "", "NAMES",
      "The quantities to study, separated by commas: TABLE:COLUMN (integrals:rho2, forces_wall:F_x), a column "
@@ -350,6 +417,10 @@ constexpr Option CONVERGENCE_OPTIONS[] = {
 };
 
 constexpr Option PACK_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: sections and tables; json: the same as one JSON object, for scripts: the archive, the rerun "
+     "command and each file with its role, size and SHA-256 (--verify: each problem, and the result). Default: "
+     "text."},
     {"--output", "-o", "FILE",
      "The archive: .tar.gz (gzip-compressed, in builds with zlib) or .tar. Default: the run directory's name "
      "with .tar.gz (.tar in builds without zlib), in the current directory."},
@@ -403,6 +474,13 @@ constexpr std::string_view INPUT_ARGUMENT[] = {"INPUT"};
 constexpr std::string_view KEYS_ARGUMENTS[] = {"[SECTION]", "[INPUT]"};
 constexpr std::string_view COMPLETION_ARGUMENTS[] = {"bash|zsh|fish"};
 
+constexpr Option VERSION_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: the version alone, as mallard --version prints it; json: the version, commit, build and "
+     "dependencies, the dimensions of the solvers installed with it, and the schema and version of every "
+     "machine-readable interface, for programs that drive Mallard. Default: text."},
+};
+
 int new_main(const Args & args) {
     if (args.has("--list")) {
         logging::warning(diagnostic_code::OPTION_DEPRECATED, "mallard new --list is deprecated: use mallard list templates");
@@ -444,8 +522,59 @@ int completion_main(const Args & args) {
     return 0;
 }
 
-int version_main(const Args &) {
-    std::cout << "Mallard " << mallard_version() << std::endl;
+std::string strings_json(std::span<const char * const> items) {
+    std::string out = "[";
+    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
+    return out + "]";
+}
+
+std::string schema_json(const char * schema, int version) {
+    return json::Object().add("schema", schema).add("version", version).str();
+}
+
+std::string capabilities_json() {
+    std::string dimensions = "[";
+    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
+    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
+    control.pop_back();
+    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
+    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
+    const std::string list = json::Object()
+                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
+                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
+                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
+                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
+                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
+                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
+                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
+                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
+                                 .raw("run_control", control)
+                                 .raw("convergence", entry(interfaces::CONVERGENCE))
+                                 .raw("pack", entry(interfaces::PACK))
+                                 .str();
+    return json::Object()
+        .add("schema", interfaces::CAPABILITIES.name)
+        .add("version", interfaces::CAPABILITIES.version)
+        .raw("mallard", provenance::code())
+        .raw("build", provenance::build())
+        .raw("dependencies", provenance::dependencies())
+        .raw("dimensions", dimensions + "]")
+        .raw("interfaces", list)
+        .str();
+}
+
+int version_main(const Args & args) {
+    const std::string format = args.value_or("--format", "text");
+    if (format != "text" && format != "json") {
+        return usage_error(*command("version"), "--format takes text or json, not " + format);
+    }
+    if (format == "json") {
+        std::cout << capabilities_json() << std::endl;
+    } else {
+        std::cout << "Mallard " << mallard_version() << std::endl;
+    }
     return 0;
 }
 
@@ -495,7 +624,8 @@ constexpr Command COMMANDS[] = {
             "Sends a request to the run started in run-dir, through its control socket mallard.sock, and "
             "prints the reply. It must run on the node of the run's rank 0.\n"
             "\n"
-            "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA and memory. "
+            "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA, memory "
+            "and the state of each trigger. "
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
@@ -639,7 +769,8 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView\n"
+                    "$ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -828,8 +959,8 @@ constexpr Command COMMANDS[] = {
             "Writes a mesh as a Mallard HDF5 mesh file, which large runs read in parallel. INPUT is a mesh file "
             "(Gmsh or Fluent .msh, Fluent .cas, CGNS .cgns, OpenFOAM polyMesh directory), or an input file "
             "(.toml) whose [mesh] table describes the mesh (with its [mesh.transform]). Under MPI, the ranks "
-            "write in parallel (needs parallel HDF5); each reads the whole mesh file but generates only its "
-            "block. Needs a build with HDF5.",
+            "write in parallel (needs parallel HDF5), and read a mesh file together or generate the input's "
+            "mesh, each only its block. Needs a build with HDF5.",
         .options = {},
         .arguments = CONVERT_ARGUMENTS,
         .examples = "$ mallard mesh convert wing.msh wing.h5\n"
@@ -960,6 +1091,46 @@ constexpr Command COMMANDS[] = {
         .run = average_main,
     },
     {
+        .name = "post flame",
+        .group = "Post",
+        .summary = "Position, thermal thickness, consumption and displacement speed of a premixed flame in saved "
+                   "snapshots",
+        .synopsis = "mallard post flame FILE... [--direction x|y|z] [--species NAME] [--burnt-temperature T] "
+                    "[--reference-speed S_L] [-o DIR]",
+        .description =
+            "Sets up the case of a series of restart files or snapshots of a premixed flame, planar on average, and "
+            "measures the flame in each: its profile along --direction (each row the mean over the other "
+            "directions, weighted by cell volume), with the fresh gas at its colder end and the burnt gas at the "
+            "other, gives its position x_f, where T is midway between the fresh temperature T_u and the burnt "
+            "T_b (the peak, or --burnt-temperature); its thermal thickness delta_T = (T_b - T_u) / max |dT/dx|, "
+            "and max |dT/dx| itself; its consumption speed S_c = -int omega_k "
+            "dx / (rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which in a steady flame is the flame speed, "
+            "in any frame; and its displacement speed S_d, the speed of x_f relative to the fresh gas.\n"
+            "\n"
+            "The production rates are the run's own: the OMEGA_* fields of snapshots that hold them with T, RHO, "
+            "the velocity and Y_* (read on the mesh alone), else computed from each stored state by the case's "
+            "chemistry (restart files, snapshots of the state). The report gives the consumption speed and the "
+            "thickness averaged over the last third of the series and the displacement speed from x_f fitted over its last half, which settle once the flame is "
+            "steady, against --reference-speed if given; OUTPUT/NAME.csv has a row per snapshot.\n"
+            "\n"
+            "FILE, the case and the choice of snapshots are as for mallard post extract: the case comes from -i, "
+            "else from FILE's run block, and its mesh must be the file's; the snapshots' steps and times are those "
+            "the files record, in increasing time. The states are read one at a time. Under mpirun -n N the cells "
+            "are split over N ranks.",
+        .options = FLAME_OPTIONS,
+        .arguments = FILES_ARGUMENTS,
+        .examples = "$ mallard post flame solut/flame.vtkhdf\n"
+                    "$ mallard post flame solut/flame.vtkhdf --reference-speed 2.33237\n"
+                    "$ mallard post flame solut/restart_*.restart --species O2 --times 2e-4:6e-4\n"
+                    "$ mallard post flame solut/flame.vtkhdf --format json | jq .summary",
+        .exit_status = "0  the flame was measured in every snapshot\n"
+                       "1  a file cannot be read, the case cannot be set up or has no chemistry, a snapshot holds no "
+                       "flame, or the file is not of its mesh\n"
+                       "2  usage error",
+        .dim = Case::output_case,
+        .run = flame_main,
+    },
+    {
         .name = "post convergence",
         .group = "Post",
         .summary = "Order of accuracy, extrapolated value and grid convergence index (GCI) of runs at several "
@@ -1004,8 +1175,8 @@ constexpr Command COMMANDS[] = {
         .name = "pack",
         .group = "Share",
         .summary = "One archive that reproduces a run, with a manifest of hashes",
-        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none]\n"
-                    "mallard pack --verify FILE",
+        .synopsis = "mallard pack RUN_DIR [-o FILE] [--with-outputs small|all|none] [--format text|json]\n"
+                    "mallard pack --verify FILE [--format text|json]",
         .description =
             "Packs the last run of a run directory into one tar archive, for a paper's supplement or a bug "
             "report: what it needs to run again and what it wrote. What goes in comes from its run record "
@@ -1042,6 +1213,33 @@ constexpr Command COMMANDS[] = {
         .run = pack_main,
     },
     {
+        .name = "install verify",
+        .group = "Maintain",
+        .summary = "Check that this install works here: its environment, and a quick run of every solver",
+        .synopsis = "mallard install verify [--format text|json] [--launcher COMMAND] [--keep DIR] [Kokkos options]",
+        .description =
+            "Checks an install where it is, for each solver it has (mallard2d, mallard3d): the environment, as "
+            "mallard check without an input reports it (the build, devices, MPI), with no error; and a quick run, "
+            "the Sod shock tube of mallard new sod --quick (a slab one cell thick in 3D) to t = 0.2, which must "
+            "finish and match the exact solution: the undisturbed state ahead of the shock (rho 0.125, p 0.1, within "
+            "2%) and the largest Mach number (0.929, within 0.05), from the run log's monitors.\n"
+            "\n"
+            "Run it where the install will run, as a short job on the partition the runs use: under --launcher, "
+            "each check runs on the job's ranks. The JSON verdict holds every check with its time and why it "
+            "failed, the version and the prefix; an installer records it with the install. A few seconds per "
+            "solver on a CPU.",
+        .options = VERIFY_OPTIONS,
+        .arguments = {},
+        .examples = "$ mallard install verify\n"
+                    "$ srun -n 1 -c 4 mallard install verify --format json --kokkos-num-threads=4\n"
+                    "$ mallard install verify --launcher \"mpirun -n 2\" --keep verify",
+        .exit_status = "0  every check passed\n"
+                       "1  a check failed, or no solver is installed\n"
+                       "2  usage error",
+        .dim = Case::front_end,
+        .run = install_verify_main,
+    },
+    {
         .name = "test",
         .group = "Maintain",
         .summary = "Run the unit and regression tests",
@@ -1075,7 +1273,7 @@ constexpr Command COMMANDS[] = {
             "print, so it knows every command, key and field of this build; templates come from mallard new when "
             "completing.\n"
             "\n"
-            "An install (cmake --install, Spack, the containers) puts the scripts where the shells look: "
+            "An install (cmake --install, Spack, the containers, the portable binaries) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
             "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
             "shell does not search, load it from the shell's startup file, as the examples show.",
@@ -1091,26 +1289,42 @@ constexpr Command COMMANDS[] = {
         .run = completion_main,
     },
     {
-        .name = "--version",
+        .name = "version",
+        .alias = "--version",
         .group = "Maintain",
-        .summary = "Print the version",
-        .synopsis = "mallard --version",
+        .summary = "Print the version, or what this build supports",
+        .synopsis = "mallard version [--format text|json]\n"
+                    "mallard --version",
         .description =
             "Prints the version of this build: the git description of the commit it was built from, else the "
-            "release.",
-        .options = {},
+            "release.\n"
+            "\n"
+            "With --format json, one JSON object for programs that drive Mallard, such as a GUI or a workflow "
+            "tool, to learn what this mallard supports before using it: the version and commit (mallard), the "
+            "build (dimension, precision, Kokkos backends, MPI, GPU-aware MPI, NCCL, HDF5, CGNS, zlib), the "
+            "versions of the libraries it uses (dependencies), the dimensions of the solvers installed with it "
+            "(mallard --dim 3 version --format json describes the 3D one's build), and under interfaces the "
+            "schema name and version of every machine-readable output: the key catalog, the check report, the "
+            "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run control (with "
+            "its commands and control files), the grid convergence report and the pack manifest. Each of these "
+            "carries the same schema and version fields; an addition keeps the version, a change that breaks "
+            "a reader increments it.",
+        .options = VERSION_OPTIONS,
         .arguments = {},
-        .examples = "$ mallard --version",
-        .exit_status = "0  always",
+        .examples = "$ mallard --version\n"
+                    "$ mallard version --format json",
+        .exit_status = "0  printed\n"
+                       "2  usage error",
         .run = version_main,
     },
 };
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
+    {"install", "Commands on this install of Mallard."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
-    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, and the grid convergence of several runs."},
+    {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
 };
 
 constexpr std::string_view GROUPS[] = {"Run", "Set up", "Inspect", "Mesh", "Post", "Share", "Maintain"};

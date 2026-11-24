@@ -5,22 +5,21 @@ MUSCL and TENO-E orders 3 to 6, each on several meshes.
     python tools/docs/high_order_cost.py --mallard build/src/mallard [--threads 2]
 
 The box is 10 x 10 and the vortex (strength 5, free stream rho = p = 1,
-u = 1) is convected to t = 2, where the exact solution is the initial one
-shifted by 2. The meshes (triangles()) are n x n squares, interior nodes
+u = 1, cut off smoothly at radius 5: exact()) is convected to t = 2, where
+the exact solution is the initial one shifted by 2. The meshes (triangles()) are n x n squares, interior nodes
 moved by up to 0.25 h, each square split along its shorter diagonal. Every
 scheme runs with HLLC, SSPRK3 and cfl = 1.0 (MUSCL unlimited: the flow is
 smooth). The error is the L2 norm of the density error over the box, against
 exact cell averages (a degree-5 rule on 16 subtriangles per cell). The cost
 of a run is its CPU time (user + system, setup, TENO-E stencils and output
-included) on --threads threads, which a busy machine disturbs less than its
-wall time (also recorded); runs under 30 s are the best of three. The cell
+included) on --threads threads, the fastest of three runs (all three are recorded,
+with the wall time). The cell
 count is the cost that does not depend on the machine. The measurements go
 to high_order_cost.json, which make_figures.py draws without running anything.
 """
 import argparse
 import json
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -83,20 +82,30 @@ def triangles(path, n, jitter=0.25, seed=7):
 
 
 def exact(x, y, t=0.0):
-    """Density, velocity and pressure of the vortex, centered in the box at t = 0, convected at u = 1."""
+    """Density, velocity and pressure of the vortex, centered in the box at t = 0, convected at u = 1. It is
+    Shu's vortex with r^2 in its exponent replaced by r^2 / (1 - r^2 / R^2), R = LENGTH / 2: still an exact steady
+    isentropic vortex (u_theta = beta / (2 pi) r f / (1 - r^2 / R^2), T = 1 - (gamma - 1) beta^2 / (8 gamma pi^2)
+    f^2), and zero with all its derivatives from r = R on, so the field is smooth across the periodic box."""
     dx = (x - LENGTH / 2 - t + LENGTH / 2) % LENGTH - LENGTH / 2
     dy = y - LENGTH / 2
-    f = np.exp(0.5 * (1.0 - dx * dx - dy * dy))
+    r2 = dx * dx + dy * dy
+    s = 1.0 - r2 / (LENGTH / 2) ** 2
+    inside = s > 0.0
+    sp = np.where(inside, s, 1.0)
+    f = np.where(inside, np.exp(0.5 * (1.0 - r2 / sp)), 0.0)
+    g = f / sp
     rho = (1.0 - (GAMMA - 1.0) * BETA**2 / (8.0 * GAMMA * np.pi**2) * f * f) ** (1.0 / (GAMMA - 1.0))
-    return rho, 1.0 - BETA / (2 * np.pi) * f * dy, BETA / (2 * np.pi) * f * dx, rho**GAMMA
+    return rho, 1.0 - BETA / (2 * np.pi) * g * dy, BETA / (2 * np.pi) * g * dx, rho**GAMMA
 
 
 def kexpr():
-    f = f"exp(0.5 * (1.0 - (x - {LENGTH / 2}) * (x - {LENGTH / 2}) - (y - {LENGTH / 2}) * (y - {LENGTH / 2})))"
-    rho = f"pow(1.0 - {(GAMMA - 1.0) * BETA**2 / (8.0 * GAMMA * np.pi**2):.17g} * {f} * {f}, {1.0 / (GAMMA - 1.0):.17g})"
+    c = LENGTH / 2
+    v = (f"var dx := x - {c}; var dy := y - {c}; var r2 := dx * dx + dy * dy; var s := 1.0 - r2 / {c * c}; "
+         f"var f := s > 0.0 ? exp(0.5 * (1.0 - r2 / s)) : 0.0; var g := s > 0.0 ? f / s : 0.0; ")
+    T = f"(1.0 - {(GAMMA - 1.0) * BETA**2 / (8.0 * GAMMA * np.pi**2):.17g} * f * f)"
     a = BETA / (2 * np.pi)
-    return dict(rho=rho, u=f"1.0 - {a:.17g} * {f} * (y - {LENGTH / 2})", v=f"{a:.17g} * {f} * (x - {LENGTH / 2})",
-                p=f"pow({rho}, {GAMMA})")
+    return dict(rho=v + f"pow({T}, {1.0 / (GAMMA - 1.0):.17g})", u=v + f"1.0 - {a:.17g} * g * dy",
+                v=v + f"{a:.17g} * g * dx", p=v + f"pow({T}, {GAMMA / (GAMMA - 1.0):.17g})")
 
 
 def case_toml(mesh, recon):
@@ -135,7 +144,7 @@ check_interval = 1000000
 prefix = "w"
 format = "vtu"
 interval = 1000000
-variables = ["RHO"]
+fields = ["RHO"]
 """
 
 
@@ -183,7 +192,9 @@ def run_case(binary, mesh, recon, threads, work):
 
 def measure(binary, threads, schemes, results):
     """Runs the schemes named, replacing their earlier measurements in results."""
-    results = dict(results, machine=f"{platform.machine()} {platform.system()}, {threads} threads")
+    sys.path[:0] = [str(ROOT / "tools" / "perf")]
+    from work_precision import hardware
+    results = dict(results, machine=f"{threads} threads, {re.sub(r' \d+-Core Processor', '', hardware())}")
     results["runs"] = {k: v for k, v in results.get("runs", {}).items() if k not in schemes}
     with tempfile.TemporaryDirectory() as work:
         for n in sorted({n for k in schemes for n in SCHEMES[k]["meshes"]}):
@@ -193,10 +204,10 @@ def measure(binary, threads, schemes, results):
                 if name not in schemes or n not in s["meshes"]:
                     continue
                 tries = []
-                while not tries or (sum(t["wall"] for t in tries) < 30.0 and len(tries) < 3):  # short: best of 3
+                while len(tries) < 3:
                     with tempfile.TemporaryDirectory() as case:
                         tries.append(run_case(binary, mesh, s["recon"], threads, case))
-                r = min(tries, key=lambda t: t["cpu"])
+                r = dict(min(tries, key=lambda t: t["cpu"]), tries=[t["cpu"] for t in tries])
                 r["cells"] = 2 * n * n
                 results["runs"].setdefault(name, []).append(r)
                 print(f"{name:6s} {2 * n * n:7d} cells  error {r['error']:.3e}  cpu {r['cpu']:8.2f} s  "

@@ -4,6 +4,7 @@
         [--cfl 1.0] [--transport mixture_averaged] [--soret] [--flame-times 3] [--t-stop T]
         [--outputs 30] [--dim 2] [--upstream 6] [--downstream 9] [--ref-delta D]
         [--inlet-factor 1] [--ny NY --perturb A --modes 8 --seed 1] [--radiation cantera|tnf]
+        [--explicit-step]
 
 FULL.csv is a flame's full solution from tools/setup/flame_reference.py (x, u, T,
 rho, Y). The run is a strip of Nx cells (with an aspect ratio of 10, so that
@@ -17,9 +18,11 @@ thickness instead of the flame's own (to give flames of different transport
 models the same mesh). With --ny the run is a 2D channel of NY square cells
 across, periodic in y, whose flame is displaced along x by a sum of
 random-phase modes 1..--modes of the width, scaled to a largest displacement
-of --perturb reference thicknesses. Writes RUN_DIR/input.toml and
+of --perturb reference thicknesses. --explicit-step sets [chemistry]
+explicit_step = true, as the flame examples do (docs/design/chemistry.md,
+issue #1090). Writes RUN_DIR/input.toml and
 RUN_DIR/flame.restart (float64, double builds); the output series
-RUN_DIR/solut/flame is what tools/post/flame_speed.py reads.
+RUN_DIR/solut/flame is what mallard post flame reads.
 """
 import argparse
 import os
@@ -54,6 +57,7 @@ def main():
     ap.add_argument("--radiation", choices=["cantera", "tnf"],
                     help="optically thin radiation: as Cantera's (H2O, CO2, T_ambient = 0) or the TNF model's "
                          "(H2O, CO2, CO, CH4, T_ambient = 300 K)")
+    ap.add_argument("--explicit-step", action="store_true", help="[chemistry] explicit_step = true")
     args = ap.parse_args()
     if args.ny > 1 and args.dim != 2:
         ap.error("--ny is for 2D runs")
@@ -200,7 +204,7 @@ transport = "{args.transport}"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
-{radiation}
+{"explicit_step = true" + chr(10) if args.explicit_step else ""}{radiation}
 [output]
 check_interval = 2000
 

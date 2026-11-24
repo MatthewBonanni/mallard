@@ -1,0 +1,13 @@
+{
+ "default": "\"temperature\"",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "examples/triple_flame/tfles/input.toml",
+  "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
+  "tools/dev/catalog_inputs/3d/flamelet_tfles.toml"
+ ],
+ "type": "string"
+}

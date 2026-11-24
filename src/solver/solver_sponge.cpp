@@ -10,6 +10,7 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <limits>
 
@@ -24,7 +25,7 @@ namespace {
 
 /** @brief An expression in x, y, z from a number, a quantity with a unit or an expression. */
 Expression number_or_expression(const Input & value, const std::string & name, const Dimension & dimension) {
-    return Expression(name, quantity_or_expression(value, name, dimension));
+    return Expression(name, line_of(value), quantity_or_expression(value, name, dimension));
 }
 
 } // namespace
@@ -174,7 +175,7 @@ void Solver::apply_sponges(const State & solution, const State & rhs, const rtyp
     const StateView U = solution.flow, dU = rhs.flow;
     const SpeciesView rhoY = solution.species, d_rhoY = rhs.species;
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
-    Kokkos::parallel_for("sponges", cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
+    gated::parallel_for("sponges", cells.extent(0), KOKKOS_LAMBDA(const uint32_t k) {
         const uint32_t c = cells(k);
         const rtype s = strength(k);
         FOR_I_CONSERVATIVE dU(c, i) += target(k, i) - s * U(c, i);
@@ -193,7 +194,7 @@ void Solver::apply_moving_sponges(const State & solution, const State & rhs, con
         const Kokkos::View<double *> f = m.fractions->fractions();
         const Kokkos::View<rtype *> strength = m.strength;
         const Kokkos::View<rtype **, Kokkos::LayoutRight> target = m.target;
-        Kokkos::parallel_for("moving_sponges", strength.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
+        gated::parallel_for("moving_sponges", strength.extent(0), KOKKOS_LAMBDA(const uint32_t c) {
             const rtype w = static_cast<rtype>(f(c)), s = strength(c);
             if (w == 0.0_r || s == 0.0_r) return;
             FOR_I_CONSERVATIVE dU(c, i) += w * (target(c, i) - s * U(c, i));
@@ -208,7 +209,7 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
     if (characteristic_transverse) {
         const CharacteristicTransverseFunctor transverse{boundary_data,      mesh->face_coords,   mesh->face_normals,
                                                          mesh->face_area,    mesh->cells_of_face, W_cells};
-        Kokkos::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
+        gated::parallel_for("characteristic_transverse", boundary_data.char_faces.extent(0), transverse);
     }
     // Inlet targets at the end of the step, whose change enters the incoming wave
     if (!inflows.empty() || !timed_inlets.empty()) {
@@ -217,10 +218,10 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
         if (recording_step) {
             const rtype * s = step_dt_device();
             const rtype * t_step = step_time_device();
-            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = *t_step + *s; });
+            gated::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = *t_step + *s; });
         } else {
             const rtype t_end = t + dt;
-            Kokkos::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = t_end; });
+            gated::parallel_for("characteristic_time", 1, KOKKOS_LAMBDA(const int) { t_next() = t_end; });
         }
         timed_inlets.fill(t_next, boundary_data.char_target_next);
         for (auto & inflow : inflows) inflow->fill(t_next, boundary_data.char_target_next);
@@ -238,7 +239,7 @@ void Solver::update_characteristic_boundaries(const rtype t_stage) {
                                            step_controller.enabled()
                                                ? step_controller.slots().data() + StepController::ACCEPTED
                                                : nullptr};
-    Kokkos::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
+    gated::parallel_for("characteristic_state", boundary_data.char_faces.extent(0), state);
     t_characteristic = t_stage;
     characteristic_state_set = true;
 }

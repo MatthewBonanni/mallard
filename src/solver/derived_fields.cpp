@@ -6,6 +6,7 @@
  */
 
 #include "derived_fields.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
@@ -38,10 +39,10 @@ double bilger_coefficient(const chemistry::Species & s) {
     return (2.0 * atoms(s, "C") + 0.5 * atoms(s, "H") - atoms(s, "O")) / s.molecular_weight;
 }
 
-/** @brief The mass fractions of a stream of [output.mixture]: a composition table, or a [[boundaries]] name. */
-std::vector<double> stream(const Input & input, const Input & table, const std::string & key,
-                           const MixtureModel & mixture) {
-    const std::string path = "output.mixture." + key;
+/** @brief The mass fractions of the stream `key` of a table at `where`: a composition table, or a [[boundaries]] name. */
+std::vector<double> stream(const Input & input, const Input & table, const std::string & where, const std::string & key,
+                           const MixtureModel & mixture, const char * docs) {
+    const std::string path = where + "." + key;
     const Input & value = table.at(key);
     if (!value.is_string()) {
         if (!value.is_table() || (!value.contains("X") && !value.contains("Y"))) {
@@ -50,7 +51,7 @@ std::vector<double> stream(const Input & input, const Input & table, const std::
                                         .message = "is a composition {X = {...}} or {Y = {...}}, or the name of a "
                                                    "[[boundaries]] entry whose composition it takes",
                                         .fix = "e.g. " + key + (key == "fuel" ? " = {X = {CH4 = 1}}" : " = {X = {O2 = 1, N2 = 3.76}}"),
-                                        .docs = DOCS});
+                                        .docs = docs});
         }
         if (MixtureModel::composition_varies(value)) throw InputError(path + " must be uniform: give numbers.");
         return mixture.mass_fractions(value, path);
@@ -85,7 +86,7 @@ std::vector<double> stream(const Input & input, const Input & table, const std::
                                 .message = "no [[boundaries]] entry is named \"" + name + "\"",
                                 .valid = names,
                                 .suggestion = suggest_value(name, names),
-                                .docs = DOCS});
+                                .docs = docs});
 }
 
 /** @brief The species of a stream that counts most by mass among those that qualify(species), or -1. */
@@ -117,10 +118,51 @@ struct CellY {
 
 } // namespace
 
+MixtureFraction mixture_fraction(const Input & input, const Input & table, const std::string & where,
+                                 const MixtureModel & mixture, const char * docs) {
+    const bool fuel = table.contains("fuel"), oxidizer = table.contains("oxidizer");
+    if (!fuel || !oxidizer) {
+        throw missing_key(table, where + "." + (fuel ? "oxidizer" : "fuel"),
+                          "The mixture fraction needs both streams, fuel and oxidizer");
+    }
+    const chemistry::Mechanism & mech = mixture.mechanism();
+    const uint32_t n = mech.n_species();
+    const std::vector<double> Y_F = stream(input, table, where, "fuel", mixture, docs);
+    const std::vector<double> Y_O = stream(input, table, where, "oxidizer", mixture, docs);
+    double beta_F = 0.0, beta_O = 0.0, scale = 0.0;
+    std::vector<double> b(n);
+    for (uint32_t k = 0; k < n; k++) {
+        b[k] = bilger_coefficient(mech.species[k]);
+        beta_F += b[k] * Y_F[k];
+        beta_O += b[k] * Y_O[k];
+        scale = std::max(scale, std::abs(b[k]));
+    }
+    if (!(std::abs(beta_F - beta_O) > 1e-6 * scale)) {
+        throw InputError(Diagnostic{.key = where,
+                                    .line = line_of(table),
+                                    .message = "the fuel and oxidizer streams have the same Bilger coupling "
+                                               "function (2 C + H/2 - O per unit mass), so no mixture fraction "
+                                               "separates them",
+                                    .fix = "Give the fuel stream (C and H) and the oxidizer stream (O)",
+                                    .docs = docs});
+    }
+    MixtureFraction z;
+    z.weights.resize(n);
+    for (uint32_t k = 0; k < n; k++) z.weights[k] = b[k] / (beta_F - beta_O);
+    z.offset = -beta_O / (beta_F - beta_O);
+    const auto burns = [](const chemistry::Species & sp) { return atoms(sp, "C") + atoms(sp, "H") > 0.0; };
+    z.fuel_species = most_abundant(mech, Y_F, burns);
+    z.oxidizer_species = most_abundant(mech, Y_O, [&](const chemistry::Species & sp) {
+        return atoms(sp, "O") > 0.0 && !burns(sp);
+    });
+    return z;
+}
+
 Settings Settings::from_input(const Input & input, const Euler & physics, const MixtureModel * mixture,
                               const bool viscous) {
     Settings s;
     s.mixture = mixture != nullptr;
+    s.tabulated = mixture && mixture->tabulated();
     s.viscous = viscous;
     if (!mixture) {
         s.cp = physics.cp;
@@ -145,45 +187,28 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
                                     .fix = "Remove [output.mixture], or set physics.gas = \"mixture\"",
                                     .docs = DOCS});
     }
+    if (s.tabulated) {
+        throw InputError(Diagnostic{.key = "output.mixture",
+                                    .line = line_of(*output, "mixture"),
+                                    .message = "describes the streams and species of a gas mixture, and a flamelet "
+                                               "gas transports Z and C, which the output holds as Y_Z and Y_C",
+                                    .fix = "Remove [output.mixture]",
+                                    .docs = DOCS});
+    }
     const chemistry::Mechanism & mech = mixture->mechanism();
     const uint32_t n = mech.n_species();
     s.scalar_weights = Kokkos::View<rtype **, Kokkos::LayoutRight>("derived_scalar_weights", N_SCALARS, n);
     auto weights = Kokkos::create_mirror_view(s.scalar_weights);
 
     const bool fuel = table.contains("fuel"), oxidizer = table.contains("oxidizer");
-    if (fuel != oxidizer) {
-        throw missing_key(table, std::string("output.mixture.") + (fuel ? "oxidizer" : "fuel"),
-                          "The mixture fraction needs both streams, fuel and oxidizer");
-    }
     int32_t fuel_default = -1, oxidizer_default = -1;
-    if (fuel) {
-        const std::vector<double> Y_F = stream(input, table, "fuel", *mixture);
-        const std::vector<double> Y_O = stream(input, table, "oxidizer", *mixture);
-        double beta_F = 0.0, beta_O = 0.0, scale = 0.0;
-        std::vector<double> b(n);
-        for (uint32_t k = 0; k < n; k++) {
-            b[k] = bilger_coefficient(mech.species[k]);
-            beta_F += b[k] * Y_F[k];
-            beta_O += b[k] * Y_O[k];
-            scale = std::max(scale, std::abs(b[k]));
-        }
-        if (!(std::abs(beta_F - beta_O) > 1e-6 * scale)) {
-            throw InputError(Diagnostic{.key = "output.mixture",
-                                        .line = line_of(output->at("mixture")),
-                                        .message = "the fuel and oxidizer streams have the same Bilger coupling "
-                                                   "function (2 C + H/2 - O per unit mass), so no mixture fraction "
-                                                   "separates them",
-                                        .fix = "Give the fuel stream (C and H) and the oxidizer stream (O)",
-                                        .docs = DOCS});
-        }
+    if (fuel || oxidizer) {
+        const MixtureFraction z = mixture_fraction(input, table, "output.mixture", *mixture, DOCS);
         s.streams = true;
-        for (uint32_t k = 0; k < n; k++) weights(Z, k) = static_cast<rtype>(b[k] / (beta_F - beta_O));
-        s.z_offset = static_cast<rtype>(-beta_O / (beta_F - beta_O));
-        const auto burns = [](const chemistry::Species & sp) { return atoms(sp, "C") + atoms(sp, "H") > 0.0; };
-        fuel_default = most_abundant(mech, Y_F, burns);
-        oxidizer_default = most_abundant(mech, Y_O, [&](const chemistry::Species & sp) {
-            return atoms(sp, "O") > 0.0 && !burns(sp);
-        });
+        for (uint32_t k = 0; k < n; k++) weights(Z, k) = static_cast<rtype>(z.weights[k]);
+        s.z_offset = static_cast<rtype>(z.offset);
+        fuel_default = z.fuel_species;
+        oxidizer_default = z.oxidizer_species;
     }
     s.fuel_species = species_of(table, "fuel_species", *mixture, fuel_default);
     s.oxidizer_species = species_of(table, "oxidizer_species", *mixture, oxidizer_default);
@@ -234,7 +259,9 @@ Settings Settings::from_input(const Input & input, const Euler & physics, const 
 bool Settings::available(const Field f) const {
     const uint16_t n = FIELDS[f].needs;
     const auto needs = [&](uint16_t bit) { return (n & bit) != 0; };
-    return !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
+    if (tabulated && (f == MIXTURE_FRACTION || f == C_NORM)) return true;
+    if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) return false;
+    return !needs(need::FLAMELET) && !(needs(need::THREE_D) && N_DIM != 3) && !(needs(need::MIXTURE) && !mixture) &&
            !(needs(need::VISCOUS) && !viscous) && !(needs(need::REFERENCE) && !reference) &&
            !(needs(need::STREAMS) && !streams) && !(needs(need::PROGRESS) && progress == Progress::NONE) &&
            !(needs(need::SPECIES_PAIR) && (fuel_species < 0 || oxidizer_species < 0));
@@ -252,7 +279,14 @@ void Settings::require(const Field f, const Input & input) const {
             if (v.is_string() && v.as_string() == name && d.line == 0) d.line = line_of(entry, "fields");
         }
     }
-    if (needs(need::THREE_D) && N_DIM != 3) {
+    if (needs(need::FLAMELET)) {
+        d.message = name + " is a field of the flamelet table, and this case has no flamelet gas";
+        d.fix = "Remove " + name + ", or set physics.gas = \"flamelet\"";
+    } else if (tabulated && (needs(need::MIXTURE) || f == ENTROPY)) {
+        d.message = name + " needs the species of a gas mixture, and a flamelet gas has a table in their place";
+        d.fix = f == PROGRESS_VARIABLE ? "Write C_NORM, the table's normalized progress variable, in its place"
+                                       : "Remove " + name;
+    } else if (needs(need::THREE_D) && N_DIM != 3) {
         d.message = name + " is zero in 2D, where the vorticity is normal to the velocity";
         d.fix = "Run the case with mallard3d, or remove " + name;
     } else if (needs(need::MIXTURE) && !mixture) {
@@ -290,7 +324,7 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
     const Kokkos::View<rtype **, Kokkos::LayoutRight> values = workspace.values;
     const Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients = workspace.gradients;
     const uint32_t n_species = static_cast<uint32_t>(weights.extent(1));
-    Kokkos::parallel_for("derived_scalars", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_scalars", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         for (uint32_t v = 0; v < N_SCALARS; v++) {
             rtype sum = 0.0;
             for (uint32_t k = 0; k < n_species; k++) sum += weights(v, k) * Y(c, k);
@@ -298,7 +332,7 @@ void scalar_gradients(const Settings & settings, const Kokkos::View<rtype **, Ko
         }
     });
     const LSQVertexGradientFunctor s = stencil;
-    Kokkos::parallel_for("derived_scalar_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_scalar_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const LSQGradientFunctor & f = s.faces;
         rtype g[N_SCALARS][N_DIM] = {};
         for (uint32_t k = s.offsets_cells_of_cell(c); k < s.offsets_cells_of_cell(c + 1); k++) {
@@ -351,12 +385,14 @@ void compute(const Selection & selection, const Settings & settings, const Input
     const Kokkos::View<rtype **, Kokkos::LayoutRight> weights = settings.scalar_weights;
     const Kokkos::View<rtype *> progress_weights = settings.progress_weights;
     const bool mixture = settings.mixture;
+    const flamelet::Gas<> flamelet = inputs.flamelet;
+    const bool tabulated = settings.tabulated;
     const bool progress_T = settings.progress == Settings::Progress::TEMPERATURE;
     const rtype cp = settings.cp, R = settings.R, T_ref = settings.T_ref, p_ref = settings.p_ref;
     const rtype p_inf = settings.p_inf, q_inf = settings.q_inf, z_offset = settings.z_offset;
     const rtype T_unburnt = settings.T_unburnt, T_burnt = settings.T_burnt;
     const uint32_t n_species = mixture ? thermo.n_species : 0;
-    Kokkos::parallel_for("derived_fields", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("derived_fields", n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         const auto put = [&](Field f, rtype value) {
             if (sel.column[f] >= 0) out(c, static_cast<uint32_t>(sel.column[f])) = value;
         };
@@ -415,7 +451,14 @@ void compute(const Selection & selection, const Settings & settings, const Input
             FOR_I_DIM g2 += g(c, 0, i) * g(c, 0, i);
             put(SCHLIEREN, Kokkos::sqrt(g2));
         }
-        if (wants(MIXTURE_FRACTION)) {
+        if (tabulated) {
+            put(MIXTURE_FRACTION, Y(c, flamelet::Gas<>::Z));
+            if (wants(C_NORM)) {
+                put(C_NORM, static_cast<rtype>(flamelet.lambda(static_cast<double>(Y(c, flamelet::Gas<>::Z)),
+                                                               flamelet.cell_variance(c),
+                                                               static_cast<double>(Y(c, flamelet::Gas<>::C)))));
+            }
+        } else if (wants(MIXTURE_FRACTION)) {
             rtype z = z_offset;
             for (uint32_t k = 0; k < n_species; k++) z += weights(Z, k) * Y(c, k);
             put(MIXTURE_FRACTION, z);

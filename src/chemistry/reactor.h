@@ -2,7 +2,7 @@
  * @file reactor.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Adiabatic constant-volume reactor: the chemistry of one cell over a
- *        splitting step, integrated with RODAS.
+ *        splitting step, integrated with RODAS or BDF.
  * @version 0.3
  * @date 2026-10-03
  *
@@ -16,7 +16,9 @@
 #include <Kokkos_Core.hpp>
 
 #include <cstdint>
+#include <type_traits>
 
+#include "bdf.h"
 #include "kinetics.h"
 #include "rosenbrock.h"
 #include "sparse_lu.h"
@@ -24,8 +26,12 @@
 
 namespace chemistry {
 
+/** @brief The reactor's integrator: RODAS (integrate) or BDF (integrate_bdf). */
+enum class Integrator : uint8_t { RODAS, BDF };
+
 struct ReactorOptions {
-    RosenbrockOptions integrator;
+    RosenbrockOptions integrator;  // tolerance, first and most sub-steps, of either integrator
+    Integrator method = Integrator::RODAS;
     double atol_Y = 1e-10;
     int sparse = -1;  // linear solver: 0 dense LU, 1 sparse LU, -1 automatic (use_sparse_lu)
     double C_reg = KineticsTable<Kokkos::HostSpace>::C_REG;  // regularization of fractional orders (KineticsTable)
@@ -268,22 +274,25 @@ struct ConstantVolumeReactor {
  */
 template <typename MemorySpace>
 KOKKOS_INLINE_FUNCTION uint32_t reactor_fast_size(const KineticsTable<MemorySpace> & kinetics,
-                                                  const SparseLUPattern<MemorySpace> * sparse = nullptr) {
+                                                  const std::type_identity_t<SparseLUPattern<MemorySpace>> * sparse = nullptr,
+                                                  const Integrator method = Integrator::RODAS) {
     const uint32_t n = kinetics.n_species + 1;
     const uint32_t solver = sparse ? sparse->work_size() + 1 : n * n;
-    return n + solver + rosenbrock_vectors_size(n);
+    return n + solver + (method == Integrator::BDF ? bdf_vectors_size(n) : rosenbrock_vectors_size(n));
 }
 
 /**
  * @brief Doubles of work memory advance_reactor() needs, the linear solver's
- *        included: dense, or sparse with a SparseLUPattern.
+ *        included: dense, or sparse with a SparseLUPattern, for the
+ *        integrator of options.method.
  */
 template <typename MemorySpace>
 KOKKOS_INLINE_FUNCTION uint32_t reactor_work_size(const KineticsTable<MemorySpace> & kinetics,
-                                                  const SparseLUPattern<MemorySpace> * sparse = nullptr) {
+                                                  const std::type_identity_t<SparseLUPattern<MemorySpace>> * sparse = nullptr,
+                                                  const Integrator method = Integrator::RODAS) {
     const uint32_t n = kinetics.n_species + 1;
     return (sparse ? sparse->jacobian_size() : n * n) + ConstantVolumeReactor<MemorySpace>::scratch_size(kinetics) +
-           reactor_fast_size(kinetics, sparse);
+           reactor_fast_size(kinetics, sparse, method);
 }
 
 /** @brief A repair callback that ignores the clipping (see advance_reactor). */
@@ -298,11 +307,11 @@ struct NoRepair {
  *        initial mass fractions are clipped the same way before integrating.
  * @param Y Mass fractions (n_species), T temperature: updated in place.
  * @param h Sub-step size: first guess in, proposal for the next call out.
- * @param work reactor_work_size(kinetics, sparse) doubles (with fast, only the
- *        Jacobian and the reactor's scratch are used).
+ * @param work reactor_work_size(kinetics, sparse, options.method) doubles (with
+ *        fast, only the Jacobian and the reactor's scratch are used).
  * @param pivot n_species + 1 integers (dense LU).
  * @param sparse The pattern of the sparse LU (Sparse = true; else unused).
- * @param fast Null, or reactor_fast_size(kinetics, sparse) doubles of faster
+ * @param fast Null, or reactor_fast_size(kinetics, sparse, options.method) doubles of faster
  *        memory for the rest of the work memory.
  * @param forcing Null, or the constant sources g_1 .. g_Ns, g_e per unit
  *        initial density (see ConstantVolumeReactor): Y then holds the
@@ -357,14 +366,20 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
         const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,    options.atol_Y, scratch,
                                                          u,       sparse,   forcing, dt};
         const SparseLU<MemorySpace> solver{*sparse, values, z, u, x, x + n};
-        result = integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
-                           static_cast<Observer &&>(observer));
+        result = options.method == Integrator::BDF
+                     ? integrate_bdf(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
+                                     static_cast<Observer &&>(observer))
+                     : integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
+                                 static_cast<Observer &&>(observer));
     } else {
         const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,     options.atol_Y, scratch,
                                                          nullptr, nullptr,  forcing, dt};
         const DenseLU solver{n, solver_work, pivot};
-        result = integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
-                           static_cast<Observer &&>(observer));
+        result = options.method == Integrator::BDF
+                     ? integrate_bdf(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
+                                     static_cast<Observer &&>(observer))
+                     : integrate(lanes, reactor, solver, 0.0, dt, y, h, options.integrator, J, vectors,
+                                 static_cast<Observer &&>(observer));
     }
     const double negative_end = lanes.sum(ns, [&](const uint32_t k) { return y[k] < 0.0 ? 1.0 : 0.0; });
     const double total = lanes.sum(ns, [&](const uint32_t k) { return Kokkos::fmax(y[k], 0.0); });
@@ -379,6 +394,55 @@ KOKKOS_INLINE_FUNCTION RosenbrockResult advance_reactor(const Lanes & lanes, con
     }
     T = thermo.T_from_e(e, MassFractions{Y}, y[ns]);
     return result;
+}
+
+/** @brief Doubles of work memory explicit_reactor_step() needs. */
+template <typename MemorySpace>
+KOKKOS_INLINE_FUNCTION uint32_t explicit_reactor_work_size(const KineticsTable<MemorySpace> & kinetics) {
+    return ConstantVolumeReactor<MemorySpace>::scratch_size(kinetics) + 7 * (kinetics.n_species + 1);
+}
+
+/**
+ * @brief Advance one reactor over dt as advance_reactor() would, but by one
+ *        explicit_step() (no Jacobian, no factorization), if it is accepted
+ *        and leaves no negative mass fraction; else Y and T stay as they
+ *        are and it returns false. Also false for negative initial mass
+ *        fractions, which advance_reactor() clips.
+ * @param work explicit_reactor_work_size(kinetics) doubles.
+ */
+template <typename Lanes, typename MemorySpace>
+KOKKOS_INLINE_FUNCTION bool explicit_reactor_step(const Lanes & lanes, const ThermoTable<MemorySpace> & thermo,
+                                                  const KineticsTable<MemorySpace> & kinetics, const double rho,
+                                                  const double dt, double * Y, double & T,
+                                                  const ReactorOptions & options, double * work,
+                                                  const double * forcing = nullptr) {
+    const uint32_t ns = thermo.n_species, n = ns + 1;
+    double * scratch = work;
+    double * y = scratch + ConstantVolumeReactor<MemorySpace>::scratch_size(kinetics);
+    double * y_new = y + n;
+    double * y_tmp = y_new + n;
+    double * k[4] = {y_tmp + n, y_tmp + 2 * n, y_tmp + 3 * n, y_tmp + 4 * n};
+    if (lanes.sum(ns, [&](const uint32_t i) { return Y[i] < 0.0 ? 1.0 : 0.0; }) > 0.0) return false;
+    double e, cv;
+    thermo.e_cv(T, MassFractions{Y}, e, cv);
+    lanes.for_each(ns, [&](const uint32_t i) { y[i] = Y[i]; });
+    lanes.single([&]() { y[ns] = T; });
+    lanes.sync();
+    const ConstantVolumeReactor<MemorySpace> reactor{thermo,  kinetics, rho,     options.atol_Y, scratch,
+                                                     nullptr, nullptr,  forcing, dt};
+    reactor.rhs(lanes, y, k[0]);
+    if (!explicit_step(lanes, reactor, n, dt, options.integrator.rtol, y, k, y_new, y_tmp)) return false;
+    if (lanes.sum(ns, [&](const uint32_t i) { return y_new[i] < 0.0 ? 1.0 : 0.0; }) > 0.0) return false;
+    const double total = lanes.sum(ns, [&](const uint32_t i) { return y_new[i]; });
+    lanes.for_each(ns, [&](const uint32_t i) { Y[i] = y_new[i] / total; });
+    lanes.sync();
+    if (forcing) {
+        const double growth = 1.0 + dt * lanes.sum(ns, [&](const uint32_t i) { return forcing[i]; });
+        T = thermo.T_from_e((e + dt * forcing[ns]) / growth, MassFractions{Y}, y_new[ns]);
+    } else {
+        T = thermo.T_from_e(e, MassFractions{Y}, y_new[ns]);
+    }
+    return true;
 }
 
 /** @brief advance_reactor() by one thread. */

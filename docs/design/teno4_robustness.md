@@ -2,15 +2,18 @@
 
 Status: `high_order` is TENO-E order 5. Order 4 reaches order 5's error on
 smooth flow at 0.3 to 0.5 times the CPU time, with 0.4 to 0.6 times the
-memory, but it fails three robustness checks that order 5 passes. Each failure
-has its own issue, and the preset can move to order 4 once all three are
-fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)).
+memory, but it fails two robustness checks that order 5 passes. Each failure
+has its own issue, and the preset can move to order 4 once both are
+fixed ([#711](https://github.com/MatthewBonanni/mallard/issues/711)). A third,
+undershoots ahead of plane shocks on quads about 10 times order 5's
+([#977](https://github.com/MatthewBonanni/mallard/issues/977)), is fixed, but
+an undershoot where shocks start from a corner remains:
+[shocks](#shocks-undershoots).
 
 | Failure at order 4 | Issue |
 |---|---|
 | An outgoing acoustic wave amplified on a stretched O-grid (cylinder) | [#975](https://github.com/MatthewBonanni/mallard/issues/975) |
-| Odd-even wall pressure at the closed trailing edge of the NACA 0012 mesh | [#976](https://github.com/MatthewBonanni/mallard/issues/976) |
-| Undershoots ahead of shocks on quads, about 10 times order 5's | [#977](https://github.com/MatthewBonanni/mallard/issues/977) |
+| Growing acoustic modes on graded hexahedra (from 5% cell-to-cell grading; also order 6) | [#1232](https://github.com/MatthewBonanni/mallard/issues/1232) |
 
 ## Setup
 
@@ -163,7 +166,10 @@ pressure.
 | largest for 0.1 < x < 0.9 | 0.0014 | 0.0002 |
 
 The odd-even wall-pressure mode that the [mirror-image rules and the metric](../numerics/teno_e.md#candidates)
-remove elsewhere remains at order 4 at the trailing edge.
+remove elsewhere remained at order 4 at the trailing edge. Its cause was
+mirror images that land past the far side of the thin trailing edge, among the
+flow there; without them the largest value near the trailing edge is
+0.0002 of the dynamic pressure up to t = 10, against 0.064 before (steady from t = 15 to 30) and 0.001 for order 5 (#976).
 
 **Taylor–Green vortex at Mach 0.1.** The kinetic energy agrees to 0.1%,
 but order 4 leaves more compressible noise:
@@ -184,22 +190,40 @@ The lowest density and pressure over every step (`check_interval = 1`):
 
 | Case | Order 3 | Order 4 | Order 5 | Order 6 |
 |---|---|---|---|---|
-| Sod, quads: min ρ (exact 0.125) | 0.1246 | **0.1236** | 0.1249 | 0.1249 |
-| Sod, triangles: min ρ | 0.1234 | 0.1211 | 0.1216 | 0.1206 |
-| Shu–Osher, 400 × 4 quads: min p ahead of the shock (exact 1) | | **0.977** | 0.9997 | |
+| Sod, quads: min ρ (exact 0.125) | 0.1246 | 0.1249 | 0.1249 | 0.1249 |
+| Sod, triangles: min ρ | 0.1235 | 0.1226 | 0.1216 | 0.1206 |
+| Shu–Osher, 200 × 4 quads: min p ahead of the shock (exact 1) | 0.9819 | 0.9976 | 0.9988 | 0.9985 |
+| Shu–Osher, triangles: min p ahead of the shock | 0.969 | 0.972 | 0.970 | 0.963 |
 
-On quads, order 4's undershoot is about 10 times order 5's and comes and goes
-as the shock crosses cells ([#977](https://github.com/MatthewBonanni/mallard/issues/977)).
-On triangles every order undershoots by 2.6 to 3.5%. The 3D explosion shows
-the same trend: the lowest pressure (ambient 0.1) is 0.0845 against 0.0884 on
-tetrahedra and 0.0822 against 0.0857 on pyramids.
+Order 4 once gave 0.1236 and 0.1212 on Sod and 0.953 and 0.929 on Shu–Osher:
+on quads about 10 times order 5's undershoot, coming and going as the shock
+crossed cells ([#977](https://github.com/MatthewBonanni/mallard/issues/977)).
+The cell the shock was crossing took its central cubic at its downstream
+face, where the cubic undershoots the state ahead; order 4 no longer takes it
+there ([TENO-E: troubled cells](../numerics/teno_e.md#troubled-cells)). The
+errors of the [first table](#accuracy-and-cost-on-shocks-and-flows) predate
+that rule. With it order 4's are 0.7 to 3% lower on Sod, between 1.3% lower
+and 5.2% higher on Shu–Osher (100 to 800 cells), within 1.2% on the 3D
+explosion, and 9% higher on the 2D Riemann problem on 100² triangles, where
+the difference lies in the roll-up of the slip lines.
+On triangles every order undershoots by 1.2 to 3.7%. In the 3D explosion the
+lowest pressure (ambient 0.1) at order 4 against order 5 is 0.0957 against
+0.0955 on 32³ hexahedra, 0.0846 against 0.0867 on tetrahedra and 0.0707
+against 0.0764 on pyramids.
+
+One undershoot remains at order 4 on quads. Where the four shocks of the 2D
+Riemann problem start from one corner (`examples/riemann_2d`, on 100² quads),
+the density falls to 0.086 in the first 14 steps (0.138 around the corner;
+order 5: 0.134). Rejecting the central cubic whenever any sector is cut
+removes it (0.132), but costs 6 to 7% of the Shu–Osher error on 400 and 800
+cells, so it is not done.
 
 ## What would change the default
 
-When [#975](https://github.com/MatthewBonanni/mallard/issues/975),
-[#976](https://github.com/MatthewBonanni/mallard/issues/976) and
-[#977](https://github.com/MatthewBonanni/mallard/issues/977) are fixed and
-this page's cases pass at order 4, `high_order` can move to order 4. The
+When [#975](https://github.com/MatthewBonanni/mallard/issues/975) and
+[#1232](https://github.com/MatthewBonanni/mallard/issues/1232) are fixed and
+this page's cases pass at order 4, the [corner undershoot](#shocks-undershoots)
+included, `high_order` can move to order 4. The
 cylinder is the deciding check. Until then, order 4 is an explicit choice for
 smooth flow:
 `[numerics.face_reconstruction] order = 4` under `high_order`.

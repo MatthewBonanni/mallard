@@ -21,9 +21,50 @@
 #include "face_reconstruction.h"
 #include "mesh.h"
 #include "teno.h"
+#include "mixture.h"
+#include "thermo.h"
 
 /** @brief Cell scalars of a mixture: (cell, j) = Y_1 .. Y_Ns, gamma, e0. */
 using ScalarView = Kokkos::View<rtype **, Kokkos::LayoutRight>;
+
+/**
+ * @brief Largest spread of a mass fraction over a cell's reconstruction
+ *        stencil that is reconstructed as constant: such a species is
+ *        round-off (e.g. 1e-34 next to 0), so it neither limits the other
+ *        scalars nor moves away from its cell value, and stays non-negative.
+ *        The slopes so dropped are not given to another species, so the face
+ *        mass fractions sum to one within n_species * SPECIES_NOISE: about
+ *        4e-15 per species in double precision, 2e-6 in single.
+ */
+constexpr rtype SPECIES_NOISE = 16.0_r * Kokkos::Experimental::epsilon_v<rtype>;
+
+/**
+ * @brief Changes of a mass fraction at a face (absolute, not relative to the
+ *        species' value) between which its cut to stay in [0, 1] moves from
+ *        its own slope to the shared limiter of all scalars: a cut of one
+ *        species alone acts as numerical diffusion of that species only,
+ *        harmless when it is small but a differential diffusion of order
+ *        u dx when it is large. Cuts up to OWN_CUT_LO stay on the species'
+ *        own slope, cuts from OWN_CUT_HI go to the shared limiter, and those
+ *        in between are split by shared_cut_weight, so that the limiter is
+ *        continuous in the data.
+ */
+constexpr rtype OWN_CUT_LO = 3.0e-5_r;
+constexpr rtype OWN_CUT_HI = 3.0e-4_r;
+
+/**
+ * @brief Share of a species' bound cut that goes to the shared limiter: 0 up
+ *        to OWN_CUT_LO, 1 from OWN_CUT_HI, and a smoothstep in log(cut) in
+ *        between (C1, as smooth per decade at both ends).
+ * @param cut Largest change of the mass fraction at a face that the cut makes.
+ */
+KOKKOS_INLINE_FUNCTION
+rtype shared_cut_weight(const rtype cut) {
+    if (cut <= OWN_CUT_LO) return 0.0_r;
+    if (cut >= OWN_CUT_HI) return 1.0_r;
+    const rtype t = Kokkos::log(cut / OWN_CUT_LO) / Kokkos::log(OWN_CUT_HI / OWN_CUT_LO);
+    return t * t * (3.0_r - 2.0_r * t);
+}
 
 /** @brief Per-face storage of scalar values at a face's quadrature points. */
 using FacePointValues = rtype[teno::MAX_FACE_QUAD];
@@ -31,10 +72,11 @@ using FacePointValues = rtype[teno::MAX_FACE_QUAD];
 /**
  * @brief Face values of the cell scalars: the cell value (first order) or the
  *        linear reconstruction S_c + phi_c grad S_c . r with one limiter value
- *        phi_c per cell shared by all scalars (MUSCL); one point per face.
+ *        phi_c per cell shared by all scalars (MUSCL; the gradients of the
+ *        mass fractions already scaled to their bounds); one point per face.
  *        Least-squares reconstruction reproduces constants, so mass fractions
  *        summing to one in every cell sum to one at every face point to
- *        round-off.
+ *        round-off and SPECIES_NOISE.
  *
  * A plain aggregate of Views, captured by value in kernels. Face-value
  * evaluators (also TENOScalarValues) provide cell_values(c, j, out), the
@@ -94,22 +136,31 @@ struct ScalarFaceValues {
  *        that the flow block uses:
  *        - first order;
  *        - MUSCL: least-squares gradients and one limiter value per cell, the
- *          minimum over all scalars of the flow block's limiter type, further
- *          reduced so that every mass fraction stays in [0, 1] and gamma above
- *          1 at every face;
+ *          minimum over all scalars of the flow block's limiter type. A mass
+ *          fraction that would leave [0, 1] at a face by at most OWN_CUT_LO
+ *          then scales its own slope to stay in, the cell's most abundant
+ *          species taking what the others give up (the slopes still sum to
+ *          zero); the slopes of gamma and e0, and the face density, change
+ *          with that composition at the cell's p and T, so the face state
+ *          stays that of its composition. A cut from OWN_CUT_HI reduces the
+ *          limiter value of all scalars instead (one in between is split
+ *          between the two, see shared_cut_weight), as does keeping the most
+ *          abundant species in [0, 1] and gamma above 1;
  *        - TENO: the flow block's linear weights (TENOScalarValues) with one
  *          bound-preserving factor theta per cell (Zhang & Shu 2010), the
  *          largest in [0, 1] keeping every Y_k in [0, 1] and gamma above 1 at
  *          every face point, and in troubled cells every scalar within the
  *          range of the cell and its face neighbors.
+ *        A mass fraction within SPECIES_NOISE of its cell value over the whole
+ *        stencil is constant in the cell and takes no part in the limiter.
  */
 class ScalarReconstruction {
     public:
         /**
-         * @param n_species Number of species (the scalars are n_species + 2).
+         * @param gas The gas (the scalars are its n_species + 2; a flamelet gas's are bounded independently).
          * @param flow Face reconstruction of the flow block, whose stencils TENO shares.
          */
-        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, uint32_t n_species,
+        void init(std::shared_ptr<Mesh> mesh, const BoundaryData & boundaries, const Mixture & gas,
                   const FaceReconstruction & flow);
 
         /**
@@ -117,10 +168,12 @@ class ScalarReconstruction {
          *        beyond it (MUSCL gradients and limiters, TENO factors theta),
          *        and the face values of [gamma, e0] on both sides of every
          *        face, written to face_thermo(face, q, side, 0/1).
-         * @param W Cell states W = [rho, u, p], for the limiter thresholds.
+         * @param W Cell states W = [rho, u, p], for the limiter thresholds and the cell temperatures.
+         * @param face_W Face states of the flow block: MUSCL moves the face density with the
+         *        composition where a mass fraction's slope was bounded.
          */
         void calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
-                  Kokkos::View<rtype **[2][2]> face_thermo);
+                  Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W, Kokkos::View<rtype **[2][2]> face_thermo);
 
         /**
          * @brief Species fluxes per face side (SpeciesSlotFunctor) of every
@@ -129,17 +182,31 @@ class ScalarReconstruction {
          * @param face_weights 3D: (face, q) weights of the face points.
          */
         void species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                           Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                           FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
 
         /** @brief Device evaluator of first-order and MUSCL face values, valid after calc(). */
         ScalarFaceValues face_values(ScalarView scalars) const;
 
         void set_boundaries(const BoundaryData & b) { boundaries = b; }
 
+        /** @brief Bytes of the work memory needed only from calc() to species_slots(). */
+        size_t scratch_bytes() const;
+
+        /**
+         * @brief Keep that work memory in storage that other work uses at other times (memory::ScratchArena),
+         *        instead of its own allocation.
+         * @param storage scratch_bytes() bytes, aligned for rtype, that outlive its use.
+         */
+        void place_scratch(void * storage);
+
+        // false, set before init() by a caller that places the work memory (place_scratch): init() leaves it
+        // without memory
+        bool own_scratch = true;
+
         // Public because nvcc rejects device lambdas in non-public member functions
         template <typename Eval>
         void launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
-                          Kokkos::View<rtype **> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
+                          FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
         template <uint8_t DEG>
         void calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo);
 
@@ -147,11 +214,14 @@ class ScalarReconstruction {
         std::shared_ptr<Mesh> mesh;
         BoundaryData boundaries;
         const TENO * teno = nullptr;
+        chemistry::ThermoTable<> thermo;
         uint32_t n_species = 0;
+        bool independent = false;
         bool linear = false;
         LimiterType limiter_type = LimiterType::NONE;
         rtype venkat_K = 5.0;
         Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;
+        Kokkos::View<rtype *[N_DIM]> density_slope;  // change of the face density with the bounded composition
         Kokkos::View<rtype *> limiter;
         Kokkos::View<rtype *> theta;  // TENO
 };

@@ -10,12 +10,16 @@
  */
 
 #include "scalar_reconstruction.h"
+#include "gated.h"
 
 #include "launch_bounds.h"
 #include "mixture_flux.h"
+#include "scratch_arena.h"
 #include "teno_scalars.h"
 
+#include <cstddef>
 #include <stdexcept>
+#include <type_traits>
 
 namespace {
 
@@ -40,10 +44,13 @@ struct ScalarLimiterFunctor {
     ScalarView scalars;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W;
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;
+    Kokkos::View<rtype *[N_DIM]> density_slope;
     Kokkos::View<rtype *> limiter;
     LimiterType limiter_type;
     rtype venkat_K;
     uint32_t n_species;
+    chemistry::ThermoTable<> thermo;
+    bool independent;  // flamelet scalars: each bounded by its own slope, no composition to keep summing to one
 
     /**
      * @brief Offset to the neighbor across face f: the neighbor cell
@@ -108,6 +115,20 @@ struct ScalarLimiterFunctor {
                (d_plus * d_plus + 2.0_r * d_minus * d_minus + d_minus * d_plus + eps2);
     }
 
+    /**
+     * @brief Derivatives with respect to Y_k at the cell's p and T (powers p,
+     *        gas constant R, cv and gamma): of gamma, of e0 and of log rho.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void composition_derivatives(const uint32_t k, const chemistry::ThermoTable<>::Powers & p, const double R,
+                                 const double cv, const double gamma, double * d) const {
+        const double R_k = chemistry::GAS_CONSTANT * thermo.inv_W(k);
+        const double cp_R = thermo.cp_R(k, p);
+        d[0] = R_k * (cp_R - gamma * (cp_R - 1.0)) / cv;
+        d[1] = R_k * p.T * (thermo.h_RT(k, p) - cp_R);
+        d[2] = -R_k / R;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         const uint32_t k_begin = offsets_faces_of_cell(c);
@@ -154,6 +175,10 @@ struct ScalarLimiterFunctor {
                 S_min = Kokkos::fmin(S_min, S_n);
                 S_max = Kokkos::fmax(S_max, S_n);
             }
+            if (j < n_species && S_max - S_c <= SPECIES_NOISE && S_c - S_min <= SPECIES_NOISE) {
+                FOR_I_DIM gradients(c, j, i) = 0.0_r;
+                continue;
+            }
             rtype g[N_DIM];
             gemv<N_DIM>(M_inv, b, g);
             FOR_I_DIM gradients(c, j, i) = g[i];
@@ -169,10 +194,89 @@ struct ScalarLimiterFunctor {
             }
         }
 
-        // Physical bounds at every face: 0 <= Y_k <= 1 and gamma above 1
+        // Physical bounds at every face, 0 <= Y_k <= 1: a mass fraction whose cut is small scales its
+        // own slope, and the most abundant species takes what they give up, so that the slopes still
+        // sum to zero; a larger cut limits all scalars (see shared_cut_weight). gamma, e0 and the face density
+        // follow the change of composition at the cell's p and T, so that the face state stays the
+        // state of the face composition
+        uint32_t major = 0;
+        for (uint32_t k = 1; k < n_species; k++) {
+            if (scalars(c, k) > scalars(c, major)) major = k;
+        }
+        double moved[N_DIM] = {}, given_d[3][N_DIM] = {};
+        bool any_cut = false;
+        rtype shared_cut = 1.0_r;
+        chemistry::ThermoTable<>::Powers powers{};
+        double R = 0.0, cv = 0.0;
+        const double gamma_d = static_cast<double>(gamma_c);
+        for (uint32_t k = 0; k < n_species; k++) {
+            if ((k == major && !independent) || phi <= 0.0_r) continue;
+            const rtype S_c = scalars(c, k);
+            rtype g[N_DIM];
+            FOR_I_DIM g[i] = gradients(c, k, i);
+            rtype phi_k = phi, d_max = 0.0_r;
+            for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
+                if (m >= n_faces) continue;
+                const rtype d = dot<N_DIM>(g, r[m]);
+                if (d > 0.0_r) phi_k = Kokkos::fmin(phi_k, (1.0_r - S_c) / d);
+                if (d < 0.0_r) phi_k = Kokkos::fmin(phi_k, S_c / -d);
+                d_max = Kokkos::fmax(d_max, Kokkos::fabs(d));
+            }
+            if (phi_k >= phi) continue;
+            const rtype s_k = Kokkos::fmax(phi_k, 0.0_r) / phi;
+            if (independent) {
+                FOR_I_DIM gradients(c, k, i) = s_k * g[i];
+                continue;
+            }
+            const rtype w_k = shared_cut_weight((1.0_r - s_k) * phi * d_max);
+            if (w_k >= 1.0_r) {
+                shared_cut = Kokkos::fmin(shared_cut, s_k);
+                continue;
+            }
+            // The shared value scales by sigma_k and the species' own slope by the rest, s_k / sigma_k
+            const rtype sigma_k = 1.0_r - (1.0_r - s_k) * w_k;
+            shared_cut = Kokkos::fmin(shared_cut, sigma_k);
+            const rtype own_k = s_k / sigma_k;
+            if (!any_cut) {
+                any_cut = true;
+                double sum = 0.0;
+                for (uint32_t j = 0; j < n_species; j++) sum += static_cast<double>(scalars(c, j)) * thermo.inv_W(j);
+                R = chemistry::GAS_CONSTANT * sum;
+                powers = chemistry::ThermoTable<>::powers(static_cast<double>(W(c, N_DIM + 1)) /
+                                                          (static_cast<double>(W(c, 0)) * R));
+                cv = R / (gamma_d - 1.0);
+            }
+            double d_k[3];
+            composition_derivatives(k, powers, R, cv, gamma_d, d_k);
+            FOR_I_DIM {
+                const double given = static_cast<double>((1.0_r - own_k) * g[i]);
+                moved[i] += given;
+                given_d[0][i] -= d_k[0] * given;
+                given_d[1][i] -= d_k[1] * given;
+                given_d[2][i] -= d_k[2] * given;
+                gradients(c, k, i) = own_k * g[i];
+            }
+        }
+        FOR_I_DIM density_slope(c, i) = 0.0_r;
+        if (any_cut) {
+            double d_major[3];
+            composition_derivatives(major, powers, R, cv, gamma_d, d_major);
+            FOR_I_DIM {
+                gradients(c, major, i) += static_cast<rtype>(moved[i]);
+                for (uint32_t t = 0; t < 2; t++) {
+                    gradients(c, n_species + t, i) += static_cast<rtype>(d_major[t] * moved[i] + given_d[t][i]);
+                }
+                density_slope(c, i) = static_cast<rtype>(static_cast<double>(W(c, 0)) *
+                                                         (d_major[2] * moved[i] + given_d[2][i]));
+            }
+        }
+        phi *= shared_cut;
+        // The most abundant species and gamma - 1 (above half its cell value) limit them all
+        const uint32_t shared[2] = {major, n_species};
         for (uint8_t m = 0; m < teno::MAX_FACES; m++) {
             if (m >= n_faces) continue;
-            for (uint32_t j = 0; j <= n_species; j++) {
+            for (const uint32_t j : shared) {
+                if (independent && j < n_species) continue;
                 rtype d = 0.0_r;
                 FOR_I_DIM d += gradients(c, j, i) * r[m][i];
                 const rtype S_c = scalars(c, j);
@@ -188,9 +292,11 @@ struct ScalarLimiterFunctor {
     }
 };
 
-/** @brief Face values of [gamma, e0] on both sides of each face. */
+/** @brief Face values of [gamma, e0] on both sides of each face, and MUSCL's change of the face density. */
 struct FaceThermoFunctor {
     ScalarFaceValues values;
+    Kokkos::View<rtype *[N_DIM]> density_slope;  // MUSCL
+    Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W;
     Kokkos::View<rtype **[2][2]> face_thermo;
     uint32_t n_species;
 
@@ -204,6 +310,11 @@ struct FaceThermoFunctor {
             values.offset(c, f, side, r);
             face_thermo(f, 0, side, 0) = values.value(c, n_species, r);
             face_thermo(f, 0, side, 1) = values.value(c, n_species + 1, r);
+            if (density_slope.extent(0) > 0) {
+                rtype d = 0.0_r;
+                FOR_I_DIM d += density_slope(c, i) * r[i];
+                face_W(f, 0, side, 0) += values.limiter(c) * d;
+            }
         }
     }
 };
@@ -280,10 +391,12 @@ struct ScalarThetaFunctor {
 } // namespace
 
 void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryData & boundaries_in,
-                                const uint32_t n_species_in, const FaceReconstruction & flow) {
+                                const Mixture & gas, const FaceReconstruction & flow) {
     mesh = mesh_in;
     boundaries = boundaries_in;
-    n_species = n_species_in;
+    thermo = gas.thermo;
+    n_species = gas.n_species;
+    independent = gas.tabulated();
     switch (flow.get_type()) {
         case FaceReconstructionType::FIRST_ORDER:
             linear = false;
@@ -297,14 +410,42 @@ void ScalarReconstruction::init(std::shared_ptr<Mesh> mesh_in, const BoundaryDat
         }
         case FaceReconstructionType::TENO:
             teno = &dynamic_cast<const TENO &>(flow);
-            theta = Kokkos::View<rtype *>("scalar_theta", mesh->n_cells);
+            theta = memory::scratch_view<Kokkos::View<rtype *>>(own_scratch, "scalar_theta", mesh->n_cells);
             break;
     }
     if (linear) {
-        gradients = Kokkos::View<rtype ***, Kokkos::LayoutRight>("scalar_gradients", mesh->n_cells, n_species + 2,
-                                                                 N_DIM);
-        limiter = Kokkos::View<rtype *>("scalar_limiter", mesh->n_cells);
+        gradients = memory::scratch_view<Kokkos::View<rtype ***, Kokkos::LayoutRight>>(
+            own_scratch, "scalar_gradients", mesh->n_cells, n_species + 2, uint32_t(N_DIM));
+        density_slope = memory::scratch_view<Kokkos::View<rtype *[N_DIM]>>(own_scratch, "scalar_density_slope",
+                                                                          mesh->n_cells);
+        limiter = memory::scratch_view<Kokkos::View<rtype *>>(own_scratch, "scalar_limiter", mesh->n_cells);
     }
+}
+
+namespace {
+
+size_t aligned_bytes(const size_t n) { return memory::ScratchArena::aligned(n * sizeof(rtype)); }
+
+} // namespace
+
+size_t ScalarReconstruction::scratch_bytes() const {
+    return aligned_bytes(gradients.span()) + aligned_bytes(density_slope.span()) + aligned_bytes(limiter.span()) +
+           aligned_bytes(theta.span());
+}
+
+void ScalarReconstruction::place_scratch(void * storage) {
+    std::byte * p = static_cast<std::byte *>(storage);
+    const auto place = [&](auto & v) {
+        using V = std::remove_reference_t<decltype(v)>;
+        if (v.span() == 0) return;
+        const size_t bytes = aligned_bytes(v.span());
+        v = V(reinterpret_cast<rtype *>(p), v.layout());
+        p += bytes;
+    };
+    place(gradients);
+    place(density_slope);
+    place(limiter);
+    place(theta);
 }
 
 ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
@@ -315,12 +456,13 @@ ScalarFaceValues ScalarReconstruction::face_values(ScalarView scalars) const {
 template <uint8_t DEG>
 void ScalarReconstruction::calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo) {
     const auto values = make_teno_scalar_values<DEG>(*teno, *mesh, boundaries, scalars, Kokkos::View<rtype *>(), n_species);
-    Kokkos::parallel_for("scalar_theta", HeavyRange<>(0, mesh->n_reconstructed()),
+    gated::parallel_for("scalar_theta", HeavyRange<>(0, mesh->n_reconstructed()),
                          ScalarThetaFunctor<TENOScalarValues<DEG>>{values, theta, face_thermo, teno->troubled,
                                                                    teno->sigma_threshold, n_species});
 }
 
 void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
+                                Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W,
                                 Kokkos::View<rtype **[2][2]> face_thermo) {
     if (teno) {
         switch (teno->degree) {
@@ -337,25 +479,27 @@ void ScalarReconstruction::calc(ScalarView scalars, Kokkos::View<rtype *[N_CONSE
             ScalarLimiterFunctor<decltype(rotations)::value> functor{
                 mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face, mesh->cell_coords,
                 mesh->face_coords, mesh->face_normals, mesh->periodic_maps(), mesh->face_shift, mesh->cell_volume,
-                boundaries, scalars, W, gradients, limiter, limiter_type, venkat_K, n_species};
-            Kokkos::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
+                boundaries, scalars, W, gradients, density_slope, limiter, limiter_type, venkat_K, n_species, thermo,
+                independent};
+            gated::parallel_for("scalar_limiter", HeavyRange<>(0, mesh->n_cells), functor);
         });
     }
-    Kokkos::parallel_for("face_thermo", mesh->n_faces, FaceThermoFunctor{face_values(scalars), face_thermo, n_species});
+    gated::parallel_for("face_thermo", mesh->n_state_faces(),
+                         FaceThermoFunctor{face_values(scalars), density_slope, face_W, face_thermo, n_species});
 }
 
 template <typename Eval>
 void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot,
-                                        Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                        Kokkos::View<rtype *> quad_weights, FaceWeights<> face_weights,
                                         Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
     SpeciesSlotFunctor<Eval> functor{mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
                                      mesh->face_area, quad_weights, face_weights, face_mdot, values, boundaries,
                                      slots, n_species};
-    Kokkos::parallel_for("species_slots", HeavyRange<>(0, mesh->n_reconstructed()), functor);
+    gated::parallel_for("species_slots", HeavyRange<>(0, mesh->n_reconstructed()), functor);
 }
 
 void ScalarReconstruction::species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot,
-                                         Kokkos::View<rtype *> quad_weights, Kokkos::View<rtype **> face_weights,
+                                         Kokkos::View<rtype *> quad_weights, FaceWeights<> face_weights,
                                          Kokkos::View<rtype ***, Kokkos::LayoutRight> slots) {
     if (!teno) {
         launch_slots(face_values(scalars), face_mdot, quad_weights, face_weights, slots);

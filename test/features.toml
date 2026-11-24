@@ -19,6 +19,8 @@
 ]
 "AxisymmetricTest.PoiseuilleResidualConvergesAtSecondOrderUpToTheAxis" = ["axisymmetric", "navier_stokes", "muscl", "hllc", "ssprk3", "periodic"]
 "AxisymmetricOrder.ManufacturedResidualConvergesAtDesignOrder" = [["axisymmetric", "euler", "teno3"], ["axisymmetric", "euler", "teno4"], ["axisymmetric", "euler", "teno5"]]
+"AxisymmetricCurvedUniform.UniformFlowAndGasAtRestStayExactlyUniform" = ["axisymmetric", "curved", "euler", "fo", "muscl", "teno3", "teno5", "hllc", "ssprk3"]
+"AxisymmetricCurvedOrder.ResidualBetweenCurvedSpheresConvergesAtDesignOrder" = [["axisymmetric", "curved", "euler", "teno3"], ["axisymmetric", "curved", "euler", "teno4"]]
 
 [chemistry_reactor_test]
 "ChemistryReactorTest.RodasIsFourthOrderWithThirdOrderEmbeddedSolution" = ["chemistry"]
@@ -88,6 +90,7 @@
 "MixtureTest.BudgetWithDoubleFluxLeavesTheSolutionUnchanged" = ["mixture", "navier_stokes", "double_flux", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.DoubleFluxKeepsPressureAndVelocityUniformAtContacts" = ["mixture", "euler", "double_flux", "muscl", "teno5", "hllc", "roe", "rhll", "ssprk3"]
 "MixtureTest.DoubleFluxShockTubeStaysAccurateAndReportsItsEnergyError" = ["mixture", "euler", "double_flux", "muscl", "hllc", "ssprk3"]
+"MixtureTest.InertContactKeepsTemperatureAndPressureUniformWhereMassFractionsAreBounded" = ["mixture", "euler", "muscl", "hllc", "ssprk3", "periodic"]
 "MixtureTest.RotatedHybridRiemannSolverIsCarbuncleFree" = [
     ["mixture", "euler", "fo", "roe", "ssprk3"],
     ["mixture", "euler", "fo", "rhll", "ssprk3"],
@@ -99,9 +102,19 @@
 ]
 "ReactingTest.SimplerSplittingIsSecondOrderInTime" = ["mixture", "euler", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"]
 
+[mixture_transport_test]
+"MixtureTransportTest.SharedStageScratchMatchesSeparateBuffersBitwise" = [
+    ["les", "navier_stokes", "mixture", "chemistry", "teno3", "hllc", "hybrid", "ssprk3"],
+    ["les", "navier_stokes", "mixture", "chemistry", "muscl", "hllc", "hybrid", "ssprk3"],
+]
+
 [mpi_test]
 "MPITest.FirstOrderMatchesSerial" = ["mpi", "euler", "fo", "hllc", "ssprk3"]
 "MPITest.MUSCLMatchesSerial" = ["mpi", "euler", "muscl", "hllc", "ssprk3"]
+"MPITest.FusedMUSCLMatchesSerial" = [
+    ["mpi", "euler", "muscl", "hllc", "ssprk3"],
+    ["mpi", "mixture", "euler", "muscl", "hllc", "ssprk3"],
+]
 "MPITest.TENOOnQuadsMatchesSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3"]
 "MPITest.TENOOnTrianglesMatchesSerial" = ["mpi", "euler", "teno4", "hllc", "ssprk3"]
 "MPITest.LowStorageIntegratorsAndErrorControlMatchSerial" = [
@@ -140,6 +153,7 @@
     ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"],
     ["mpi", "mixture", "navier_stokes", "chemistry", "simpler", "les", "muscl", "hllc", "ssprk3"],
 ]
+"MPITest.ReactionSensorMatchesSerialWithAndWithoutStepGraphs" = ["mpi", "mixture", "navier_stokes", "chemistry", "les", "muscl", "hllc", "ssprk3"]
 "MPITest.HybridConvectiveFluxMatchesSerial" = [
     ["mpi", "euler", "hybrid", "fo", "hllc", "ssprk3"],
     ["mpi", "mixture", "euler", "hybrid", "muscl", "hllc", "ssprk3"],
@@ -159,6 +173,10 @@
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "curved"],
 ]
 "MPITest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno5", "hllc", "ssprk3", "curved"]
+"MPITest.AxisymmetricCurvedWallsMatchSerial" = [
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "teno4", "hllc", "ssprk3"],
+    ["mpi", "axisymmetric", "curved", "navier_stokes", "muscl", "hllc", "ssprk3"],
+]
 "MPITest.RemapDoesNotDependOnTheRankCount" = [
     ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"],
     ["mpi", "mixture", "euler", "chemistry", "muscl", "hllc", "ssprk3", "remap", "restart"],
@@ -180,6 +198,17 @@
 "MPI3DTest.PeriodicZonePairsOfAGmshMeshMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3", "periodic"]
 "MPI3DTest.CurvedWallsMatchSerial" = ["mpi", "euler", "teno3", "hllc", "ssprk3", "curved"]
 "MPI3DTest.RemapDoesNotDependOnTheRankCount" = ["mpi", "euler", "muscl", "hllc", "ssprk3", "remap", "restart"]
+
+[particles_test]
+# Only the features each study verifies: in the studies in time the gas is uniform and exact
+"ParticleTimeOrder.TracerPathlinesInATurningFlow" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleTimeOrder.DragRelaxationInATurningFlow" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleTimeOrder.DragRelaxationNearTheStiffLimit" = [["particles", "fe"], ["particles", "ssprk3"], ["particles", "rk4"], ["particles", "ssprk54"], ["particles", "ck45"], ["particles", "rdpk3sp35"]]
+"ParticleOrder.StokesSettlingFromRest" = ["particles", "ssprk3"]
+"ParticleOrder.SchillerNaumannResponseToAStepInGasVelocity" = ["particles", "rk4"]
+"ParticleOrder.ExponentialIntegrationOfRelaxationsStifferThanTheStep" = ["particles", "rk4"]
+"ParticleSpaceOrder.GasVelocityAtTheParticles" = [["particles", "fo"], ["particles", "muscl"], ["particles", "teno3"], ["particles", "teno4"], ["particles", "teno5"]]
+"ParticleSpaceOrder.TracerPathlinesInACompactVortex" = [["particles", "euler", "fo"], ["particles", "euler", "muscl"], ["particles", "euler", "teno3"], ["particles", "euler", "teno4"], ["particles", "euler", "teno5"]]
 
 [periodic_test]
 "PeriodicBox2D.PreservesUniformFlowAndConservesMassMomentumAndEnergy" = ["euler", "fo", "muscl", "teno5", "hllc", "ssprk3", "periodic"]
@@ -211,6 +240,10 @@
     ["navier_stokes", "muscl", "hllc", "ssprk3", "periodic"],
 ]
 "PeriodicFile3D.ZonePairsJoinAJitteredGmshMeshOfHexahedraAndPrisms" = ["euler", "teno3", "hllc", "ssprk3", "periodic"]
+
+[post_flame_test]
+"PostFlameTest.ConsumptionSpeedBurnsTheFuelTheStripLoses" =["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3", "restart"]
+"PostFlameTest.AMirroredFlameAlongAnotherDirectionMeasuresTheSame" = ["mixture", "navier_stokes", "chemistry", "muscl", "hllc", "ssprk3", "restart"]
 
 [preset_validation_test]
 "PresetValidation.SecondOrderKeepsTheNohImplosionPositive" = ["axisymmetric", "euler", "muscl", "rhll", "ssprk3"]
@@ -286,6 +319,8 @@
     ["les", "navier_stokes", "mixture", "chemistry", "simpler", "fo", "hllc", "ssprk3", "periodic"],
 ]
 "ThickenedFlame.EddyViscosityVelocitySetsTheEfficiency" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
+"ThickenedFlame.ReactionSensorThickensTheLocalPremixedFlameWithinTheFlammableRangeOnly" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
+"ThickenedFlame.EfficiencyCapHolds" = ["les", "navier_stokes", "mixture", "chemistry", "fo", "hllc", "ssprk3", "periodic"]
 
 [time_integrator_test]
 "TimeIntegratorTest.ForwardEulerIsFirstOrder" = ["fe"]
