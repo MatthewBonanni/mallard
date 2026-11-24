@@ -1,0 +1,1 @@
+- `mallard post` commands no longer set up the run's report, which they never write, nor the mesh-quality and resolution check that only the report shows: `mallard post derive` of the 64³ Taylor-Green benchmark sets up about 0.2 s faster; output is unchanged (#935).
