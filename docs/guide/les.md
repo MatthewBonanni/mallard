@@ -258,6 +258,13 @@ python tools/setup/flame_table.py mechanisms/h2o2.yaml ohmech h2n2_air.csv \
     --fuel H2:0.5,N2:0.5 --oxidizer O2:1,N2:3.76 --T 300 --dz 0.01
 ```
 
+The table of `examples/triple_flame/tfles` (gray: outside its range, where
+nothing is thickened), and the largest thickening `F = max(1, n_res Delta /
+delta_L)` it gives on that example's cells of 0.128 mm with `n_res = 5`:
+
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-light.svg#gh-light-mode-only)
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-dark.svg#gh-dark-mode-only)
+
 | Key | Default | Meaning |
 |---|---|---|
 | `sensor` | `temperature` | `temperature` (the progress variable of `T_unburnt`, `T_burnt`) or `reaction` |

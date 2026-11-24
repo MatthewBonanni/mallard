@@ -44,6 +44,7 @@ import runs
 import schematics
 import structured_blocks
 import teno
+import thickened_flames
 import theory
 import time_integrators
 import triple_flame_sensor
@@ -76,6 +77,7 @@ def main():
     schematics.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()
+    thickened_flames.figures()
     theory.figures()
     time_integrators.figures()
     triple_flame_sensor.figures()
