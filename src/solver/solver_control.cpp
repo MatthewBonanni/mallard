@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <sstream>
@@ -63,8 +64,43 @@ bool parse_time(const std::string & text, double & seconds) {
     }
 }
 
+std::string trim(const std::string & text) {
+    const size_t begin = text.find_first_not_of(" \t\r");
+    if (begin == std::string::npos) return "";
+    return text.substr(begin, text.find_last_not_of(" \t\r") - begin + 1);
+}
+
+std::string without_spaces(std::string text) {
+    std::erase_if(text, [](char c) { return c == ' ' || c == '\t'; });
+    return text;
+}
+
+/**
+ * @brief The lines "key = value" of a SET file as the words "key=value ..." of mallard ctl set: comments (#) and
+ *        blank lines dropped, quotes around a value and spaces in it ("2 h") removed, as every settable value is a
+ *        number or a time. A line without "=" stays a word of its own, for the reply to name.
+ */
+std::string set_file_assignments(const std::string & text) {
+    std::string words;
+    for (std::string line : split(text, '\n')) {
+        line = trim(line.substr(0, line.find('#')));
+        if (line.empty()) continue;
+        const size_t eq = line.find('=');
+        std::string word = without_spaces(line);
+        if (eq != std::string::npos) {
+            std::string value = trim(line.substr(eq + 1));
+            if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front()) {
+                value = value.substr(1, value.size() - 2);
+            }
+            word = without_spaces(trim(line.substr(0, eq))) + "=" + without_spaces(value);
+        }
+        words += (words.empty() ? "" : " ") + word;
+    }
+    return words;
+}
+
 const char * SETTABLE =
-    "n_steps, t_stop, t_wall_stop, check_interval, write_data.<prefix or index>.interval, "
+    "n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, write_data.<prefix or index>.interval, "
     "write_data.<prefix or index>.time_interval, probes.<name>.interval, probes.<name>.time_interval, forces.<zone>.interval, integrals.interval";
 
 } // namespace
@@ -258,31 +294,48 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            std::string reply, settings = "[";
-            bool ok = true;
-            for (const std::string & assignment : split(line.substr(4), ' ')) {
-                const size_t eq = assignment.find('=');
-                const auto [accepted, what] = eq == std::string::npos
-                                                  ? std::make_pair(false, "expected key=value, got '" + assignment + "'")
-                                                  : apply_setting(assignment.substr(0, eq), assignment.substr(eq + 1));
-                ok = ok && accepted;
-                reply += (accepted ? "" : "error: ") + what + "\n";
-                if (accepted) logging::event(step, double(t), "set", what);
-                settings += std::string(settings.size() > 1 ? "," : "") +
-                            json::Object()
-                                .add("key", assignment.substr(0, eq))
-                                .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
-                                .add("applied", accepted)
-                                .add("message", what)
-                                .str();
+            // The run log's set events name the route as the user knows it
+            const std::string source = command.source == "file" ? "SET file" : "mallard ctl";
+            std::string settings;
+            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), source, &settings);
+            // Without a connection to reply to (the SET file), the run log is the reply
+            if (!ok && command.fd < 0 && comm::is_root()) {
+                logging::warning(diagnostic_code::SET_REFUSED, source + ": not all settings were applied\n" + reply);
             }
             run_control::finish(command, {.ok = ok,
                                           .message = ok ? reply : "error: not all settings were applied\n" + reply,
                                           .step = step,
                                           .t = double(t),
-                                          .result = json::Object().raw("settings", settings + "]").str()});
+                                          .result = json::Object().raw("settings", settings).str()});
         }
     }
+}
+
+std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::string> & assignments,
+                                                    const std::string & source, std::string * results) {
+    std::string reply, settings = "[";
+    bool ok = true;
+    for (const std::string & assignment : assignments) {
+        const size_t eq = assignment.find('=');
+        const auto [accepted, what] = eq == std::string::npos
+                                          ? std::make_pair(false, "expected key=value, got '" + assignment + "'")
+                                          : apply_setting(assignment.substr(0, eq), assignment.substr(eq + 1));
+        ok = ok && accepted;
+        reply += (accepted ? "" : "error: ") + what + "\n";
+        if (accepted) {
+            logging::event(step, double(t), "set", what,
+                           {{"source", json::quote(source)}, {"setting", json::quote(assignment)}});
+        }
+        settings += std::string(settings.size() > 1 ? "," : "") +
+                    json::Object()
+                        .add("key", assignment.substr(0, eq))
+                        .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
+                        .add("applied", accepted)
+                        .add("message", what)
+                        .str();
+    }
+    if (results) *results = settings + "]";
+    return {ok, reply};
 }
 
 std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value, const bool apply) {
@@ -313,6 +366,15 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         }
         // Checked at the time it applies, as another setting may have added a limit by then
         if (none && apply) return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
+        return {true, key + " = " + value + " (was " + old + ")"};
+    }
+    if (key == "control_file_interval") {
+        if (!is_uint) return rejected("expected a non-negative integer (0: never)");
+        const std::string old = std::to_string(control_file_interval);
+        if (apply) {
+            control_file_interval = n;
+            if (n > 0) control_files_polled = step / n;
+        }
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     if (key == "check_interval") {
@@ -410,6 +472,15 @@ void Solver::poll_control_files() {
     if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
     control_files_polled = step / control_file_interval;
     std::error_code error;
+    if (std::filesystem::is_regular_file("SET", error)) {
+        std::ifstream in("SET");
+        std::ostringstream text;
+        text << in.rdbuf();
+        in.close();
+        std::filesystem::remove("SET", error);
+        const std::string assignments = set_file_assignments(text.str());
+        if (!assignments.empty()) run_control::submit("set " + assignments, "file");
+    }
     if (std::filesystem::remove("CHECKPOINT", error)) {
         checkpoint_file_seen = true;
         run_control::request(run_control::CHECKPOINT);

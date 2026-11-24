@@ -111,8 +111,8 @@ void record_accepted(const Command & command, uint64_t step, double t);
 /** @brief Commands received since the last call; clears the COMMAND request. */
 std::vector<Command> take_commands();
 
-/** @brief Queues a command as the socket would, without a connection (tests). */
-void submit(const std::string & text);
+/** @brief Queues a command as the socket would, without a connection to reply to. */
+void submit(const std::string & text, const std::string & source = "socket");
 
 /**
  * @brief A request line of protocol version 2 as a command: {"schema": "mallard-run-control", "version": 2,
