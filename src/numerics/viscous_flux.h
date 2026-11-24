@@ -16,6 +16,7 @@
 
 #include "common.h"
 #include "boundary.h"
+#include "face_reconstruction.h"
 #include "physics.h"
 #include "flux_functor.h"
 #include "view_entries.h"
@@ -172,10 +173,11 @@ struct CellPolynomials {
  */
 struct FacePoints {
     Kokkos::View<rtype **> gauss;                // 2D: (q, 0) on [-1, 1]
-    Kokkos::View<uint32_t *> offsets_nodes_of_face, nodes_of_face;
-    Kokkos::View<rtype *[N_DIM]> node_coords;
+    FaceNodes face_nodes;
+    NodeCoords node_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     Kokkos::View<rtype ***> face_quad_points;    // (face, q, dim), or empty
+    Kokkos::View<rtype *[4]> face_rule;          // 3D: planar faces' points (planar_face_point)
 
     /** @brief Point q of face f, in its cell 0's frame. */
     KOKKOS_INLINE_FUNCTION
@@ -184,9 +186,13 @@ struct FacePoints {
             FOR_I_DIM x[i] = face_quad_points(f, q, i);
             return;
         }
-        const uint32_t a = nodes_of_face(offsets_nodes_of_face(f)), b = nodes_of_face(offsets_nodes_of_face(f) + 1);
-        const rtype s = 0.5_r * gauss(q, 0);
-        FOR_I_DIM x[i] = face_coords(f, i) + s * (node_coords(b, i) - node_coords(a, i));
+        if constexpr (N_DIM == 3) {
+            planar_face_point(planar_face(face_nodes, node_coords, f), face_rule, q, x);
+        } else {
+            const uint32_t a = face_nodes(f, 0), b = face_nodes(f, 1);
+            const rtype s = 0.5_r * gauss(q, 0);
+            FOR_I_DIM x[i] = face_coords(f, i) + s * (node_coords(b, i) - node_coords(a, i));
+        }
     }
 };
 

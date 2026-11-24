@@ -1,5 +1,5 @@
 # Distribution of a release: the container images (CPU for amd64 and arm64, CUDA), the
-# relocatable archives (CPU, x86_64 and aarch64) and the Spack package, each smoke-tested by running examples and comparing them with
+# portable binaries (CPU, x86_64 and aarch64, MPICH and Open MPI) and the Spack package, each smoke-tested by running examples and comparing them with
 # reference solutions (docker/smoke/run.sh). A release is dispatched on main once the
 # release PR has landed, and creates the tag v<version> only after every image and the
 # Spack package pass, so a broken build leaves no tag behind:
@@ -7,7 +7,7 @@
 # It pushes the images to ghcr.io/matthewbonanni/mallard:
 #   <version>, latest            CPU (OpenMP + MPI), amd64 and arm64
 #   <version>-cuda, cuda         NVIDIA GPUs (CUDA + OpenMP + MPI), sm_80, 86, 89 and 90
-# and a draft GitHub release v<version> holding the archives, their .sha256 files and
+# and a draft GitHub release v<version> holding the portable binaries, their .sha256 files and
 # release-manifest.json (tools/dev/release_manifest.py), which the maintainer publishes.
 # To test a branch, run it without a version; it pushes nothing unless asked:
 #   gh workflow run release.yml --ref <branch>
@@ -136,19 +136,23 @@ jobs:
           docker tag mallard:cuda "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
 
-  # Relocatable archives (docker/archive.sh) built on glibc 2.28 (manylinux_2_28), then
-  # unpacked and smoke-tested on a newer system with nothing but Python, and run on two
-  # ranks with that system's MPICH in place of the archive's (the MPICH ABI)
+  # Portable binaries (docker/archive.sh) for each MPI family, built on glibc 2.28
+  # (manylinux_2_28), then unpacked and smoke-tested on a newer system with nothing but
+  # Python, and run on two ranks with that system's MPI of the family in place of the archive's
   archive:
     needs: meta
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64]
+        mpi: [mpich, openmpi]
         include:
           - { arch: x86_64, runner: ubuntu-26.04 }
           - { arch: aarch64, runner: ubuntu-26.04-arm }
+          - { mpi: mpich, devel: mpich-devel, system: mpich, soname: libmpi.so.12, launch: mpiexec }
+          - { mpi: openmpi, devel: openmpi-devel, system: openmpi-bin, soname: libmpi.so.40, launch: mpirun --allow-run-as-root --oversubscribe }
     runs-on: ${{ matrix.runner }}
-    name: archive (cpu, ${{ matrix.arch }})
+    name: archive (cpu, ${{ matrix.arch }}, ${{ matrix.mpi }})
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 src/external/kokkos src/external/toml11 src/external/hdf5
@@ -159,10 +163,10 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" quay.io/pypa/manylinux_2_28_${{ matrix.arch }} bash -c '
             set -e
-            dnf install -y -q gcc-toolset-16-gcc-c++ mpich-devel zlib-devel
+            dnf install -y -q gcc-toolset-16-gcc-c++ ${{ matrix.devel }} zlib-devel
             source /opt/rh/gcc-toolset-16/enable
             git config --global --add safe.directory /src
-            JOBS=$(nproc) /src/docker/archive.sh /src /src/out cpu'
+            JOBS=$(nproc) /src/docker/archive.sh /src /src/out cpu ${{ matrix.mpi }}'
           sudo chown -R "$(id -u)" out
       - name: Smoke test
         run: |
@@ -171,14 +175,14 @@ jobs:
             apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-numpy python3-scipy python3-matplotlib python3-h5py > /dev/null
             mkdir /t && tar -C /t -xzf /src/out/mallard-*.tar.gz && prefix=$(echo /t/mallard-*)
             /src/docker/smoke/run.sh "$prefix"
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mpich > /dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${{ matrix.system }} > /dev/null
             export LD_LIBRARY_PATH=/usr/lib/$(uname -m)-linux-gnu
-            ldd "$prefix/bin/mallard2d" | grep "libmpi.so.12 => /usr/lib"
+            ldd "$prefix/bin/mallard2d" | grep "${{ matrix.soname }} => /usr/lib"
             cp -R "$prefix/share/mallard/examples/sod" /tmp/sod && cd /tmp/sod
-            OMP_NUM_THREADS=1 mpiexec -n 2 "$prefix/bin/mallard" -i input.toml'
+            OMP_NUM_THREADS=1 ${{ matrix.launch }} -n 2 "$prefix/bin/mallard" -i input.toml'
       - uses: actions/upload-artifact@v4
         with:
-          name: archive-${{ matrix.arch }}
+          name: archive-${{ matrix.arch }}-${{ matrix.mpi }}
           path: |
             out/*.tar.gz
             out/*.tar.gz.sha256
@@ -257,6 +261,7 @@ jobs:
           spack -e "$RUNNER_TEMP/env" spec mallard +rocm amdgpu_target=gfx90a
           spack -e "$RUNNER_TEMP/env" spec mallard +cuda cuda_arch=90 +nccl
           spack -e "$RUNNER_TEMP/env" spec mallard ~mpi dims=3 precision=single
+          spack -e "$RUNNER_TEMP/env" spec mallard +kaminpar
       - name: Test
         run: |
           spack -e "$RUNNER_TEMP/env" test run mallard
@@ -297,7 +302,7 @@ jobs:
           path: assets
           merge-multiple: true
       # TODO(#1314): --interfaces with `mallard version --format json` once it exists
-      - name: Draft the GitHub release with the archives and release-manifest.json
+      - name: Draft the GitHub release with the portable binaries and release-manifest.json
         if: env.RELEASE == 'true'
         env:
           V: ${{ needs.meta.outputs.version }}
