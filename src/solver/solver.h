@@ -466,6 +466,8 @@ class Solver {
         std::vector<double> monitored_values() const;
         /** @brief The step each was last written at (Probes::NO_VALUE before), on every rank. */
         std::vector<uint64_t> monitored_steps() const;
+        /** @brief Adds the internal probes of the region reductions triggers read (Triggers::region_reductions). */
+        void add_trigger_probes(region::Regions & regions);
         void init_triggers();
         /** @brief The values triggers read, in the order of init_triggers' names. */
         std::vector<double> trigger_values() const;

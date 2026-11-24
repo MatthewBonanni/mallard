@@ -1672,6 +1672,52 @@ TEST(StepQueueTest, TriggersOfProbeReductionsAreReducedOnTheDevice) {
     EXPECT_EQ(run_case("probe_reductions", c, 3).queued, run_case("probe_reductions_at_step", at_step, 3).queued);
 }
 
+TEST(StepQueueTest, RegionReductionsInConditionsAreReducedOnTheDeviceEveryStep) {
+    // max(P, "domain") in a condition: the run's own probe of the region, written nowhere, reduced every step on the
+    // device, so the queue stops only where the condition first holds, the step a [[probes]] of the region says
+    Case c;
+    c.run = "n_steps = 40\ncfl = 0.5\n";
+    c.distributed = comm::size() > 1;
+    c.extra = "check_interval = 1000\n" + RESTARTS +
+              "[[probes]]\nname = \"whole\"\nregion = \"domain\"\nfields = [\"P\"]\ninterval = 1\n"
+              "reductions = [\"max\"]\nreductions_file = \"{dir}/whole.csv\"\n";
+    const Outcome reference = run_case("region_triggers_reference", c, 0);
+    std::vector<double> p;
+    if (comm::is_root()) {
+        std::istringstream in(reference.files.at("whole.csv"));
+        for (std::string line; std::getline(in, line);) {
+            if (line.empty() || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+            p.push_back(std::stod(line.substr(line.rfind(',') + 1)));
+        }
+    }
+    p = comm::allgatherv(p);
+    // The pulse decays: the first step after the fifth below every earlier one
+    size_t k = 5;
+    while (k < p.size() && !(p[k] < *std::min_element(p.begin(), p.begin() + static_cast<std::ptrdiff_t>(k)))) k++;
+    ASSERT_LT(k, p.size() - 1);
+    const double threshold = 0.5 * (p[k] + *std::min_element(p.begin(), p.begin() + static_cast<std::ptrdiff_t>(k)));
+    std::ostringstream trigger;
+    trigger << std::setprecision(17) << "[[triggers]]\nname = \"decayed\"\nwhen = 'max(P, \"domain\") < " << threshold
+            << "'\ndo = [\"stop\", \"log peak {max(P, 'domain')}\"]\n";
+    c.extra = "check_interval = 1000\n" + RESTARTS + trigger.str();
+    const Outcome o = expect_queue_invariant("region_triggers", c);
+    // The first row is the start's, at step 0
+    EXPECT_EQ(o.step, k);
+    for (const auto & [file, contents] : o.files) EXPECT_EQ(file.find("trigger_region"), std::string::npos) << file;
+    if (comm::is_root()) {
+        bool read = false, logged = false;
+        for (const auto & line : o.log) {
+            read = read || line.find("values:{max(P, \"domain\"):") != std::string::npos;
+            logged = logged || line.find("text:\"peak ") != std::string::npos;
+        }
+        EXPECT_TRUE(read && logged);
+    }
+    Case at_step = c;
+    at_step.extra = "check_interval = 1000\n" + RESTARTS + "[[triggers]]\nname = \"decayed\"\nwhen = \"step == " +
+                    std::to_string(k) + "\"\ndo = \"stop\"\n";
+    EXPECT_EQ(run_case("region_triggers", c, 3).queued, run_case("region_triggers_at_step", at_step, 3).queued);
+}
+
 TEST(StepQueueTest, TriggersOfAveragedAndStatisticsProbesAreReducedOnTheDevice) {
     // A line's time averages, a point of a [statistics] mean and a line of its confidence interval, written every 3
     // steps and sampled every 2: the device keeps the means and samples the statistics before the triggers, so the

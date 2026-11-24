@@ -10,8 +10,9 @@
    monitor: `[integrals]`, `[[forces]]`, the reductions of `[[probes]]` and
    the values of one-point probes, named `<monitor>_<column>`. kexpr has no
    strings, so a monitor's name is part of the variable name rather than an
-   argument (`combustor_max_T`, not `max(T, "combustor")`). Nothing new is
-   computed on the device: a trigger reads what the monitors wrote.
+   argument (`combustor_max_T`). A condition reads what the monitors wrote;
+   `max(T, "combustor")` is written as a call but is a monitor too, an
+   internal probe (decision 8).
 2. **Evaluated on the host after every step, once that step's probes are
    written.** Probes are now written before the scheduled snapshots and
    restarts of the step (their files are independent), so a trigger reads
@@ -68,6 +69,19 @@
    of `t` alone: constant between the compared times, they are evaluated at
    each and between each two up to `t_stop` (`W-TRIGGER-NEVER`).
 
+8. **Region reductions in conditions.** `max(T, "domain")` names a reduction
+   over a region in the condition itself. Before kexpr compiles it, each
+   such call (a reduction's name, a field and a quoted region) becomes a
+   variable: the value of an internal probe of that region, one per region
+   with the union of the fields and reductions its calls read, written every
+   step. The internal probe is an ordinary region probe in every other way,
+   so the step graph stages and reduces it on the device (a trigger reads
+   it) and the values are those a `[[probes]]` entry of the region gives,
+   bit for bit; it writes no file and is not listed, recorded or set by
+   `mallard ctl set`. A call no probe of the region can give (a vector, an
+   unknown field or region) is an input error of the condition. Inputs
+   without such calls add no probe.
+
 ## Measurements
 
 A 2D case (38,400 triangles, MUSCL, 400 steps, a 50-point and a 400-point
@@ -81,9 +95,9 @@ spread of 4.15-5.06 s.
 
 - `[run] t_stop`, `n_steps` and `t_wall_stop` as built-in triggers (one code
   path, shown as triggers in the resolved input); they already share the
-  landing of steps on times with the triggers.
-- Reductions over regions inside a condition (`max(T, "domain")`), particle
-  counts, run-health values and a steady-state test (`change(q, over = ...)`);
-  today a `[[probes]]` region reduction gives the first. These evaluate on
-  the device through the probes' staged reductions, which #1210 is
-  extending to moving regions.
+  landing of steps on times with the triggers. Open: showing them in the
+  resolved input changes `mallard input resolve` for every existing input,
+  and evaluating them as triggers adds the trigger kernels (and, on a
+  distributed mesh, the host's broadcast) to every run; both need a decision.
+- Particle counts, run-health values and a steady-state test
+  (`change(q, over = ...)`) in conditions (#1550).

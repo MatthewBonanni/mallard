@@ -2082,6 +2082,7 @@ void Solver::init_output(region::Regions & regions) {
     probes.init(input, *mesh, regions, species_names,
                 find_value_or<std::string>(input, "initialize", "type", "") == "restart", is_viscous(), data,
                 statistics);
+    add_trigger_probes(regions);
     // An undistributed solver runs on every rank (tests): no run log or report unless asked for
     const std::string run_log_file =
         find_value_or<std::string>(input, "output", "run_log", distribute ? "mallard.jsonl" : "");

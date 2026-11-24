@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 
@@ -78,6 +79,62 @@ std::string unknown_placeholder(const std::string & message, const std::vector<s
     return "";
 }
 
+const std::vector<std::string> REGION_REDUCTIONS = {"integral", "mean", "favre", "min", "max", "rms"};
+
+/** @brief A reduction over a region as a condition writes it: `max(T, "domain")`, at [begin, end) of its text. */
+struct RegionCall {
+    size_t begin = 0, end = 0;
+    std::string reduction, field, region;
+};
+
+std::vector<RegionCall> region_calls(const std::string & text) {
+    static const std::regex pattern(R"re(\b([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*)\s*,\s*(?:"([^"]*)"|'([^']*)')\s*\))re");
+    std::vector<RegionCall> calls;
+    for (auto it = std::sregex_iterator(text.begin(), text.end(), pattern); it != std::sregex_iterator(); ++it) {
+        const std::smatch & m = *it;
+        const size_t begin = static_cast<size_t>(m.position(0));
+        calls.push_back({begin, begin + static_cast<size_t>(m.length(0)), m[1].str(), m[2].str(),
+                         m[3].matched ? m[3].str() : m[4].str()});
+    }
+    return calls;
+}
+
+std::string call_text(const std::string & reduction, const std::string & field, const std::string & region) {
+    return reduction + "(" + field + ", \"" + region + "\")";
+}
+
+/** @brief The {...} of a log message, as [begin, end) of their contents. */
+std::vector<std::pair<size_t, size_t>> placeholders(const std::string & message) {
+    std::vector<std::pair<size_t, size_t>> all;
+    for (size_t open = message.find('{'); open != std::string::npos; open = message.find('{', open + 1)) {
+        const size_t close = message.find('}', open);
+        if (close == std::string::npos) break;
+        all.emplace_back(open + 1, close);
+    }
+    return all;
+}
+
+/** @brief The texts of a trigger that may read region reductions, with their key: its condition and log placeholders. */
+std::vector<std::pair<std::string, std::string>> region_texts(const Input & entry) {
+    std::vector<std::pair<std::string, std::string>> texts;
+    if (entry.contains("when") && entry.at("when").is_string()) texts.emplace_back("when", entry.at("when").as_string());
+    if (!entry.contains("do")) return texts;
+    std::vector<std::string> actions;
+    if (entry.at("do").is_string()) actions.push_back(entry.at("do").as_string());
+    if (entry.at("do").is_array()) {
+        for (const auto & a : entry.at("do").as_array()) {
+            if (a.is_string()) actions.push_back(a.as_string());
+        }
+    }
+    for (const auto & action : actions) {
+        if (trimmed(action).rfind("log ", 0) != 0) continue;
+        for (const auto & [begin, end] : placeholders(action)) texts.emplace_back("do", action.substr(begin, end - begin));
+    }
+    return texts;
+}
+
+constexpr const char * REGION_PROBE = "__trigger_region_";
+
 } // namespace
 
 std::string trigger_variable(const std::string & name) {
@@ -86,6 +143,38 @@ std::string trigger_variable(const std::string & name) {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') c = '_';
     }
     return out;
+}
+
+std::vector<Triggers::RegionReduction> Triggers::region_reductions(const Input & input) {
+    std::vector<RegionReduction> all;
+    if (!contains_optional(input, "triggers") || !input.at("triggers").is_array()) return all;
+    const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
+    for (size_t i = 0; i < entries.size(); i++) {
+        if (!entries[i].is_table()) continue;
+        for (const auto & [key, text] : region_texts(entries[i])) {
+            for (const RegionCall & c : region_calls(text)) {
+                const std::string call = call_text(c.reduction, c.field, c.region);
+                if (std::find(REGION_REDUCTIONS.begin(), REGION_REDUCTIONS.end(), c.reduction) == REGION_REDUCTIONS.end()) {
+                    throw InputError({.key = "triggers[" + std::to_string(i) + "]." + key,
+                                      .line = line_of(entries[i], key),
+                                      .message = "\"" + call + "\": " + c.reduction + " is not a reduction over a region",
+                                      .valid = REGION_REDUCTIONS,
+                                      .suggestion = suggest_value(c.reduction, REGION_REDUCTIONS),
+                                      .docs = "docs/guide/running.md#triggers"});
+                }
+                auto it = std::find_if(all.begin(), all.end(), [&](const RegionReduction & r) { return r.region == c.region; });
+                if (it == all.end()) {
+                    all.push_back({.region = c.region, .fields = {}, .reductions = {}, .trigger = i, .key = key, .call = call});
+                    it = all.end() - 1;
+                }
+                if (std::find(it->fields.begin(), it->fields.end(), c.field) == it->fields.end()) it->fields.push_back(c.field);
+                if (std::find(it->reductions.begin(), it->reductions.end(), c.reduction) == it->reductions.end()) {
+                    it->reductions.push_back(c.reduction);
+                }
+            }
+        }
+    }
+    return all;
 }
 
 const std::vector<std::string> & Triggers::built_in() {
@@ -98,7 +187,55 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
     triggers.clear();
     names = built_in();
     for (const auto & name : monitored) names.push_back(trigger_variable(name));
+    shown_names = names;
+    visible.clear();
+    for (const auto & name : names) {
+        if (name.rfind(REGION_PROBE, 0) != 0) visible.push_back(name);
+    }
     if (!contains_optional(input, "triggers")) return;
+    const std::vector<RegionReduction> regional = region_reductions(input);
+    const auto hidden = [&](size_t k, const std::string & reduction, const std::string & field) {
+        return region_probe(k) + "_" + reduction + "_" + field;
+    };
+    for (size_t k = 0; k < regional.size(); k++) {
+        for (const auto & reduction : regional[k].reductions) {
+            for (size_t v = 0; v < names.size(); v++) {
+                const std::string prefix = hidden(k, reduction, "");
+                if (names[v].rfind(prefix, 0) == 0) {
+                    shown_names[v] = call_text(reduction, names[v].substr(prefix.size()), regional[k].region);
+                }
+            }
+        }
+    }
+    // A region reduction's text becomes the name of its internal probe's value
+    const auto resolve = [&](const std::string & text, const Input & entry, const std::string & key) {
+        std::string out;
+        size_t at = 0;
+        for (const RegionCall & c : region_calls(text)) {
+            const auto r = std::find_if(regional.begin(), regional.end(),
+                                        [&](const RegionReduction & rr) { return rr.region == c.region; });
+            const std::string name = hidden(static_cast<size_t>(r - regional.begin()), c.reduction, c.field);
+            if (std::find(names.begin(), names.end(), name) == names.end()) {
+                std::vector<std::string> calls;
+                for (size_t v = 0; v < names.size(); v++) {
+                    if (names[v].rfind(hidden(static_cast<size_t>(r - regional.begin()), c.reduction, ""), 0) == 0) {
+                        calls.push_back(shown_names[v]);
+                    }
+                }
+                throw InputError({.key = key,
+                                  .line = line_of(entry, key.substr(key.rfind('.') + 1)),
+                                  .message = "\"" + call_text(c.reduction, c.field, c.region) + "\": " + c.field +
+                                             " is not a field of one value",
+                                  .valid = calls,
+                                  .fix = "Reduce one component of a vector, e.g. " + c.reduction + "(" + c.field +
+                                         "_X, \"" + c.region + "\")",
+                                  .docs = "docs/guide/running.md#triggers"});
+            }
+            out += text.substr(at, c.begin - at) + name;
+            at = c.end;
+        }
+        return out + text.substr(at);
+    };
     const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
     for (size_t i = 0; i < entries.size(); i++) {
         const Input & entry = entries[i];
@@ -126,7 +263,7 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
         const std::string when = find_value<std::string>(entry, "when");
         std::optional<kexpr::Program> condition;
         try {
-            condition.emplace(where + ".when", when, names);
+            condition.emplace(where + ".when", resolve(when, entry, where + ".when"), names);
         } catch (const std::invalid_argument & e) {
             Diagnostic d{.key = where + ".when",
                          .line = line_of(entry, "when"),
@@ -139,8 +276,8 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
             if (at != std::string::npos) {
                 const size_t begin = at + 16, end = what.find('\'', begin);
                 d.message = "unknown name '" + what.substr(begin, end - begin) + "' in \"" + when + "\"";
-                d.valid = names;
-                d.suggestion = suggest_value(what.substr(begin, end - begin), names);
+                d.valid = visible;
+                d.suggestion = suggest_value(what.substr(begin, end - begin), visible);
             }
             throw InputError(d);
         }
@@ -181,13 +318,21 @@ void Triggers::init(const Input & input, const std::vector<std::string> & monito
             } else if (text.rfind("log ", 0) == 0) {
                 act.action = Action::LOG;
                 act.message = trimmed(text.substr(4));
-                const std::string unknown = unknown_placeholder(act.message, names);
+                std::string resolved;
+                size_t at = 0;
+                for (const auto & [begin, end] : placeholders(act.message)) {
+                    resolved += act.message.substr(at, begin - at) +
+                                resolve(act.message.substr(begin, end - begin), entry, where + ".do");
+                    at = end;
+                }
+                act.resolved = resolved + act.message.substr(at);
+                const std::string unknown = unknown_placeholder(act.resolved, names);
                 if (!unknown.empty()) {
                     throw InputError({.key = where + ".do",
                                       .line = line_of(entry, "do"),
                                       .message = "\"" + text + "\": {" + unknown + "} is not a name conditions read",
-                                      .valid = names,
-                                      .suggestion = suggest_value(unknown, names),
+                                      .valid = visible,
+                                      .suggestion = suggest_value(unknown, visible),
                                       .fix = "Write {<name>} with a name of t, step, dt, wall or a monitored value",
                                       .docs = "docs/guide/running.md#triggers"});
                 }
@@ -312,13 +457,14 @@ std::vector<double> Triggers::landing_times() const {
 std::string Triggers::message(const Act & act, const std::vector<double> & values) const {
     std::string text;
     size_t at = 0;
-    for (size_t open = act.message.find('{'); open != std::string::npos; open = act.message.find('{', at)) {
-        const size_t close = act.message.find('}', open);
-        const auto v = std::find(names.begin(), names.end(), act.message.substr(open + 1, close - open - 1));
-        text += act.message.substr(at, open - at) + logging::real(values[static_cast<size_t>(v - names.begin())]);
+    const std::string & m = act.resolved;
+    for (size_t open = m.find('{'); open != std::string::npos; open = m.find('{', at)) {
+        const size_t close = m.find('}', open);
+        const auto v = std::find(names.begin(), names.end(), m.substr(open + 1, close - open - 1));
+        text += m.substr(at, open - at) + logging::real(values[static_cast<size_t>(v - names.begin())]);
         at = close + 1;
     }
-    return text + act.message.substr(at);
+    return text + m.substr(at);
 }
 
 bool Triggers::never_true(const size_t i, const double t0, const double t_end) const {
