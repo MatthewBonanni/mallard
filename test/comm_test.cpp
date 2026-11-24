@@ -20,6 +20,10 @@
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include "comm.h"
 #include "device_comm.h"
 #include "exact_sums.h"
@@ -244,4 +248,31 @@ TEST(CommTest, SharedDirectoriesAreRemovedOrFailAlikeOnEveryRank) {
     EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(300, 'x')));
     EXPECT_NE(failure, "");
     EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
+}
+
+TEST(CommTest, SharedDirectoryWithAFileStillOpenIsKeptOnEveryRank) {
+    // Shared storage cannot remove a file a process has open, so no file system does
+    const std::filesystem::path dir = scratch_dir() / "open";
+    if (comm::is_root()) std::filesystem::create_directories(dir);
+    comm::barrier();
+    const std::string name = "held" + std::to_string(comm::rank());
+    auto kept = [&](const std::string & failure) {
+        EXPECT_NE(failure.find(name), std::string::npos) << failure;
+        EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
+        EXPECT_TRUE(std::filesystem::exists(dir / name));
+    };
+    {
+        std::ofstream out(dir / name);
+        out << "x" << std::flush;
+        kept(remove_shared_directory(dir));
+    }
+    // A mapping outlives its descriptor
+    const int fd = ::open((dir / name).c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+    void * mapped = mmap(nullptr, 1, PROT_READ, MAP_PRIVATE, fd, 0);
+    ::close(fd);
+    ASSERT_NE(mapped, MAP_FAILED);
+    kept(remove_shared_directory(dir));
+    munmap(mapped, 1);
+    EXPECT_EQ(remove_shared_directory(dir), "");
 }
