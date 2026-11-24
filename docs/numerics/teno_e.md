@@ -699,6 +699,12 @@ sound speed over the box size, with the bound of 10 and of 4:
 | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 | 8e-8 / 0.022 |
 | mixed tilings (4³), walls, order 4 / 6 | 0.19 / 0.08 | 8e-4 / 1e-7 |
 
+The same growth rates on a log scale, with those of the pyramid lattice's odd
+degrees (below) against the central stencil size:
+
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-light.svg#gh-light-mode-only)
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-dark.svg#gh-dark-mode-only)
+
 Making only the near-degenerate cells first order removes these modes, and
 in the walled boxes the energy is produced at their wall faces. Bounds of 5
 to 7 do not remove them. Order 6 on tetrahedra and pyramids reaches only
