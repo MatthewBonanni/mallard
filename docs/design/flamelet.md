@@ -152,6 +152,28 @@ What Mallard needs from the generator, for `fpv` tables:
   coefficients and power-law transport for CharLES^X. The generator writes
   them in this format, together with the provenance.
 
+`tools/docs/flamelet.py` follows these steps to draw the documentation's
+figures, and writes no table. Its sample is Cantera flamelets of H2/N2 (1:1 by
+mole) against air at 300 K and 1 atm, `mechanisms/h2o2.yaml`, unity Lewis
+number, `C = Y_H2O`. The control temperatures march down. Where that stalls
+(near `T_max` = 1025 K), they march up, and every solution whose `C_st` falls
+is kept. The stable branch runs from `chi_st` = 0.32 1/s to extinction at
+2777 1/s and `T_max` = 1246 K. The unstable branch runs back to 0.52 1/s and
+levels off at `T_max` = 986 K and `C_st` = 0.059 (`Lambda` = 0.34 at `Z_st`).
+Below that, the table interpolates linearly to the mixing solution.
+
+![S-curve of the sample table's counterflow flamelets: peak temperature and source of C against the stoichiometric scalar dissipation rate, with the stable, unstable and extinguished branches, and the temperature of flamelets of each branch against the mixture fraction](../images/guide/flamelet_s_curve-light.svg#gh-light-mode-only)
+![S-curve of the sample table's counterflow flamelets: peak temperature and source of C against the stoichiometric scalar dissipation rate, with the stable, unstable and extinguished branches, and the temperature of flamelets of each branch against the mixture fraction](../images/guide/flamelet_s_curve-dark.svg#gh-dark-mode-only)
+
+![Temperature, source of C and OH mass fraction of the sample table at the stoichiometric mixture fraction against Lambda, with the nodes from the stable and the unstable branch and the interpolated range below them](../images/guide/flamelet_progress-light.svg#gh-light-mode-only)
+![Temperature, source of C and OH mass fraction of the sample table at the stoichiometric mixture fraction against Lambda, with the nodes from the stable and the unstable branch and the interpolated range below them](../images/guide/flamelet_progress-dark.svg#gh-dark-mode-only)
+
+The beta integration of the same flamelets, at the most burning `Lambda` and
+at the `Lambda` of the largest source:
+
+![Temperature at Lambda = 1 and source of C at Lambda = 0.7 of the sample table against the mean mixture fraction, at 5 normalized variances](../images/guide/flamelet_variance-light.svg#gh-light-mode-only)
+![Temperature at Lambda = 1 and source of C at Lambda = 0.7 of the sample table against the mean mixture fraction, at 5 normalized variances](../images/guide/flamelet_variance-dark.svg#gh-dark-mode-only)
+
 Later models (FGM/FPI from free premixed flames, heat-loss axes, several
 streams, other thermodynamics) are added to the generator first, and to the
 format as new tags ([table_format.md](table_format.md#8-versioning-and-new-models)).
@@ -270,6 +292,11 @@ from it the generator checks monotonicity after integration and follows the
 running maximum where it fails, reporting how many nodes did. In the first
 draft's H2/N2 table none did (the only non-monotonic nodes were those where `C`
 does not vary at all).
+
+The bounds of `C` of the sample table, and a lookup's cell:
+
+![Bounds of C against Z at 3 normalized variances, with a transported state mapped to Lambda = 0.6, and the 8 corners of a table cell around a query point](../images/guide/flamelet_lookup-light.svg#gh-light-mode-only)
+![Bounds of C against Z at 3 normalized variances, with a transported state mapped to Lambda = 0.6, and the 8 corners of a table cell around a query point](../images/guide/flamelet_lookup-dark.svg#gh-dark-mode-only)
 
 ## 5. Transported scalars and coupling with the flow (stage 2)
 
@@ -531,6 +558,12 @@ meshes that do not resolve the laminar flame (Kuenne et al. 2011). Decisions:
   is also accepted in LES without thickening. Tables keep their `Sz` axis
   (the format needs every axis to have two nodes); only its first slice is read.
 - **PaSR** stays an input error: it scales finite-rate rates.
+
+With the sample table, the sensor covers the source of `C` at every `Z`
+(`C_SENSOR = 0.05` in `src/physics/tfles.h`):
+
+![The thickened flame's sensor against Lambda, with the source of C of the sample table at 3 mixture fractions, each normalized by its peak](../images/guide/flamelet_tfles_sensor-light.svg#gh-light-mode-only)
+![The thickened flame's sensor against Lambda, with the source of C of the sample table at 3 mixture fractions, each normalized by its peak](../images/guide/flamelet_tfles_sensor-dark.svg#gh-dark-mode-only)
 
 Tests (`test/flamelet_les_test.cpp`): lookups with `variance = "none"` and with
 a thickened flame are those of the `Sz = 0` slice of the variance table; in

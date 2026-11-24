@@ -1,0 +1,1 @@
+- `mallard reactor` rejects the keys it does not read, as a run does (`E-KEY-UNUSED`, with the line and the closest key), and lists the misspelled-looking ones when the input stops it; it now reads `[physics] gas` (only `mixture`), which every reactor input of the repository sets, and its `[benchmark]` mode reads `[reactor] type` (#1480).

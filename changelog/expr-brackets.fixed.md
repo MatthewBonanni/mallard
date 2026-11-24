@@ -1,0 +1,1 @@
+- Expressions with mismatched brackets, such as `(x + 1]` or `sin[x}`, are errors that name the opening bracket, as in exprtk, instead of compiling; an expression nested more than 256 levels deep is an error instead of overflowing the stack (#1112).

@@ -243,7 +243,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   and a test that reruns the test binary passes its own `--gtest_filter` (CI sets
   `GTEST_FILTER`) and unsets `GTEST_TOTAL_SHARDS` and `GTEST_SHARD_INDEX`.
   Documentation-only changes skip the build jobs (the run takes about a minute).
-- **`main` runs everything every 3 hours** when it has changed: every supported compiler
+- **`main` runs everything nightly** when it has changed: every supported compiler
   on x86-64 and arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and
   case templates, and the fuzzers, so a full run never holds the runners PRs need. Each
   merge runs the gate on `main` too, unless it lands a tree that already passed the gate in
@@ -261,7 +261,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
   shared headers or anything the whole suite exercises needs the full run.
 - **Only the tests a change can affect**: `-f gtest_filter=<pattern>` runs only those tests
   in the backend jobs (`-*` for none), which still build and run their other checks in full.
-  Each push to `main` maps every test to the files it depends on (`coverage.yml`,
+  Each night `main` maps every test to the files it depends on (`coverage.yml`,
   `tools/dev/test_coverage.py`), and each backend job uploads its results as JUnit XML
   (`junit-<job>`), so the tooling that dispatches CI can pick the filter.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
@@ -313,7 +313,7 @@ A maintainer releases version X.Y.Z in three steps:
    (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
    `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
 2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
-   container images, the relocatable archives and the Spack package from `main`, pushes
+   container images, the portable binaries and the Spack package from `main`, pushes
    the images, and only then creates the tag `vX.Y.Z` and a draft release holding the
    archives and `release-manifest.json`. A failed build leaves no tag: fix it on `main`
    and dispatch again.
