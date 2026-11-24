@@ -244,7 +244,7 @@ void Solver::setup_from_input() {
         init_boundaries();
     });
     timed_phase("numerics", [&] { init_numerics(); });
-    while (halo_too_shallow()) {
+    while (!geometry_only && halo_too_shallow()) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
@@ -263,10 +263,12 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) {
             init_particles(*used_regions);
-            allocate_time_stepping();
+            if (!geometry_only) allocate_time_stepping();
         }
-        init_les();
-        init_rhs_split();
+        if (!geometry_only) {
+            init_les();
+            init_rhs_split();
+        }
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -279,8 +281,10 @@ void Solver::setup_from_input() {
         init_output(*used_regions);
         init_check_inputs();
     });
-    timed_phase("initial solution", [&] { init_solution(); });
-    init_health();
+    if (!geometry_only) {
+        timed_phase("initial solution", [&] { init_solution(); });
+        init_health();
+    }
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
@@ -575,13 +579,6 @@ void Solver::init_mesh() {
     }
     axisymmetric = find_value_or<bool>(input, "physics", "axisymmetric", false);
     if (axisymmetric) {
-        if (mesh->curved_geometry) {
-            throw InputError({.key = "physics.axisymmetric",
-                              .line = line_of(input.at("physics"), "axisymmetric"),
-                              .message = "curved boundaries are not supported in axisymmetric runs yet",
-                              .fix = "Set curved_geometry = false in [mesh]",
-                              .docs = "docs/input.md#axisymmetric-flows"});
-        }
         if (mesh->is_rotational()) {
             throw InputError({.key = "physics.axisymmetric",
                               .line = line_of(input.at("physics"), "axisymmetric"),
@@ -601,7 +598,35 @@ void Solver::init_mesh() {
         mesh->make_axisymmetric();
         mesh_setup.settings.emplace_back("Geometry", "axisymmetric about the x axis (y = r), per radian");
     }
+    if (mesh->curved_geometry && is_distributed()) exchange_halo_geometry();
     mesh->copy_host_to_device();
+}
+
+void Solver::exchange_halo_geometry() {
+    // Centroid and volume in the flow block, the axisymmetric measure and covariance as species columns
+    const uint32_t n_revolved = mesh->axisymmetric ? 4 : 0;
+    const State geometry("halo_geometry", mesh->n_cells, n_revolved);
+    auto h_flow = Kokkos::create_mirror_view(geometry.flow);
+    auto h_revolved = Kokkos::create_mirror_view(geometry.species);
+    for (uint32_t c = 0; c < mesh->n_owned(); c++) {
+        FOR_I_DIM h_flow(c, i) = mesh->h_cell_coords(c, i);
+        h_flow(c, N_DIM) = mesh->h_cell_volume(c);
+        if (n_revolved == 0) continue;
+        h_revolved(c, 0) = mesh->h_cell_measure(c);
+        for (uint32_t k = 0; k < 3; k++) h_revolved(c, k + 1) = mesh->h_cell_covariance(c, k);
+    }
+    Kokkos::deep_copy(geometry.flow, h_flow);
+    Kokkos::deep_copy(geometry.species, h_revolved);
+    halo.exchange(geometry);
+    Kokkos::deep_copy(h_flow, geometry.flow);
+    Kokkos::deep_copy(h_revolved, geometry.species);
+    for (uint32_t c = mesh->n_owned(); c < mesh->n_cells; c++) {
+        FOR_I_DIM mesh->h_cell_coords(c, i) = h_flow(c, i);
+        mesh->h_cell_volume(c) = h_flow(c, N_DIM);
+        if (n_revolved == 0) continue;
+        mesh->h_cell_measure(c) = h_revolved(c, 0);
+        for (uint32_t k = 0; k < 3; k++) mesh->h_cell_covariance(c, k) = h_revolved(c, k + 1);
+    }
 }
 
 int Solver::base_halo_layers() const {
@@ -1638,7 +1663,8 @@ void Solver::init_numerics() {
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
 
-    switch (it_face->second) {
+    // The case view's geometry needs no stencils
+    switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
             face_reconstruction = std::make_unique<FirstOrder>();
             break;
@@ -1684,6 +1710,7 @@ void Solver::init_numerics() {
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
     flux_weights = face_reconstruction->face_quad_weights;
+    flux_normals = face_reconstruction->face_quad_normals;
     if (axisymmetric) init_axisymmetric_weights();
     const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
     positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
@@ -1833,16 +1860,63 @@ void Solver::init_axisymmetric_weights() {
     const auto & points = face_reconstruction->quadrature_face.h_points;
     const auto & weights = face_reconstruction->quadrature_face.h_weights;
     const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
-    flux_weights = share_face_weights("flux_weights", mesh->n_state_faces(), n_q, [&](const uint32_t f, rtype * w_f) {
+    Kokkos::View<rtype **, Kokkos::HostSpace> h_weights("flux_weights_host", mesh->n_state_faces(), n_q);
+    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
         const uint32_t a = mesh->h_node_of_face(f, 0), b = mesh->h_node_of_face(f, 1);
         const rtype dy = mesh->h_node_coords(b, 1) - mesh->h_node_coords(a, 1);
         for (uint32_t q = 0; q < n_q; q++) {
             const rtype r_q = mesh->h_face_coords(f, 1) + 0.5_r * points(q, 0) * dy;
-            w_f[q] = weights(q) * std::max(r_q, 0.0_r);
+            h_weights(f, q) = weights(q) * std::max(r_q, 0.0_r);
         }
+    }
+    if (mesh->curved_geometry) revolve_curved_flux_points(h_weights);
+    flux_weights = share_face_weights("flux_weights", mesh->n_state_faces(), n_q, [&](const uint32_t f, rtype * w_f) {
+        for (uint32_t q = 0; q < n_q; q++) w_f[q] = h_weights(f, q);
     });
     geometric_source = Kokkos::View<rtype *>("geometric_source", mesh->n_cells);
     if (!is_mixture() && physics.is_viscous()) cell_mu = Kokkos::View<rtype *>("cell_mu", mesh->n_cells);
+}
+
+void Solver::revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights) {
+    // The points' area vectors r_q w_q n_q, shifted by a common vector so that they sum to the
+    // face's int r n dS: uniform states then stay uniform, as the geometric source integrates p
+    // over the curved cell
+    const curved::Geometry & geometry = *mesh->curved_geometry;
+    const auto & points = face_reconstruction->quadrature_face.h_points;
+    const auto & weights = face_reconstruction->quadrature_face.h_weights;
+    const uint32_t n_q = static_cast<uint32_t>(points.extent(0));
+    std::vector<std::array<double, 2>> ref(n_q);
+    std::vector<double> ref_w(n_q);
+    double w_sum = 0.0;
+    for (uint32_t q = 0; q < n_q; q++) {
+        ref[q] = {double(points(q, 0)), 0.0};
+        ref_w[q] = double(weights(q));
+        w_sum += ref_w[q];
+    }
+    flux_normals = Kokkos::View<rtype ***>("flux_normals", mesh->n_state_faces(), n_q, N_DIM);
+    Kokkos::deep_copy(flux_normals, face_reconstruction->face_quad_normals);
+    auto h_normals = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), flux_normals);
+    std::vector<curved::Vec3> x, n, V(n_q);
+    std::vector<double> w;
+    for (uint32_t f = 0; f < mesh->n_state_faces(); f++) {
+        if (!geometry.face_is_curved(f)) continue;
+        geometry.face_rule(f, ref, ref_w, x, n, w);
+        const curved::Vec3 R = geometry.revolved_area_vector(f);
+        curved::Vec3 shift = R;
+        for (uint32_t q = 0; q < n_q; q++) {
+            for (size_t i = 0; i < 2; i++) {
+                V[q][i] = std::max(x[q][1], 0.0) * w[q] * n[q][i];
+                shift[i] -= V[q][i];
+            }
+        }
+        for (uint32_t q = 0; q < n_q; q++) {
+            for (size_t i = 0; i < 2; i++) V[q][i] += ref_w[q] / w_sum * shift[i];
+            const double length = std::sqrt(V[q][0] * V[q][0] + V[q][1] * V[q][1]);
+            FOR_I_DIM h_normals(f, q, i) = rtype(V[q][i] / length);
+            h_weights(f, q) = rtype(2.0 * length / double(mesh->h_face_area(f)));
+        }
+    }
+    Kokkos::deep_copy(flux_normals, h_normals);
 }
 
 void Solver::init_run_parameters() {

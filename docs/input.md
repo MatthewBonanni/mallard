@@ -266,7 +266,8 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)), also in
+[axisymmetric runs](#axisymmetric-flows).
 
 | Key | Description |
 |---|---|
@@ -415,8 +416,10 @@ averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
 and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
-mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
+mixture model, chemistry and MPI work as in planar runs, and so do
+[curved boundaries](#curved-boundaries), revolved with the cells next to
+them; meshes cannot be periodic in y. Guide:
+[axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 
@@ -745,7 +748,7 @@ inlet's `u` is of `x`, `y`, `z` only.
 |---|---|
 | `L` | A length of the domain (required) |
 | `sigma` | Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift, large values approach a fixed pressure or velocity) |
-| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
+| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets, whose velocity they would hold off its target ([design](design/nscbc.md#transverse-terms-at-inlets)). Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
 | `sigma_T`, `sigma_t` | Inlets only: relax the temperature and tangential velocity at these rates instead of imposing them |
 
 ```toml
@@ -937,7 +940,7 @@ variable-order BDF, in double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and chemistry call (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within 0.5%). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs |
+| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within 0.5%). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs. The examples where it pays set it ([measurements](design/chemistry.md#explicit-steps-in-the-examples-issue-1090)) |
 | `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). Each pair of ranks moves at most its capacity of cells per call, which starts at 0 and follows the cells the pair asked for (growing at once, shrinking after 256 steps of less than half); the rest stay with their owner, and a balanced run moves none. With NCCL the messages carry the whole capacity, so that the step's CUDA graph keeps its sizes; a change of the capacities records it again. The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
