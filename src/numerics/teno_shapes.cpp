@@ -671,47 +671,57 @@ void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n,
 
 std::vector<std::vector<uint64_t>> ShapeKeys::records(const teno_setup::TableBatch & batch, const uint32_t n,
                                                       const Kokkos::View<uint32_t *[2]> & size) {
-    auto host = [](const auto & a) { return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), a.data); };
-    auto lane = [](const auto & h, const auto & a, const size_t slot, const size_t k) {
-        return a.interleaved ? h(slot + k * a.slots) : h(slot * a.cap + k);
-    };
-    auto h_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), size);
-    auto depth = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.gather_depth);
-    auto invalid = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.invalid_small);
-    auto large_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.large_size);
-    auto small_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.small_size);
-    auto small_total = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), batch.small_total);
-    auto mean = host(batch.basis_mean), si = host(batch.si);
-    auto large_cells = host(batch.large_cells), large_faces = host(batch.large_faces);
-    auto large_pinv = host(batch.large_pinv);
-    auto small_cells = host(batch.small_cells), small_faces = host(batch.small_faces);
-    auto small_pinv = host(batch.small_pinv);
+    const auto used = std::make_pair(0u, n);
+    auto h_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(size, used, Kokkos::ALL));
+    auto h_large = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(batch.large_size, used));
+    auto h_small = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(batch.small_total, used));
     const size_t nk = batch.nk;
-    std::vector<std::vector<uint64_t>> out(n);
-    gated::parallel_for("teno_shape_records", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, n), [&](const uint32_t j) {
-        std::vector<uint64_t> & r = out[j];
-        if (h_size(j, 0) == 0) {
-            r = {0};
+    const size_t head = 6 + teno::MAX_FACES + batch.basis_mean.cap + batch.si.cap;
+    Kokkos::View<uint64_t *> offset(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_record_offsets"), n + 1);
+    auto h_offset = Kokkos::create_mirror_view(offset);
+    h_offset(0) = 0;
+    for (uint32_t j = 0; j < n; j++) {
+        const size_t length = h_size(j, 0) == 0 ? 1 : head + h_large(j) * (2 + nk) + h_small(j) * (2 + size_t(teno::NK_SMALL));
+        h_offset(j + 1) = h_offset(j) + length;
+    }
+    Kokkos::deep_copy(offset, h_offset);
+    Kokkos::View<uint64_t *> data(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_record_data"), h_offset(n));
+    gated::parallel_for("teno_shape_records", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
+        uint64_t * r = data.data() + offset(j);
+        if (size(j, 0) == 0) {
+            r[0] = 0;
             return;
         }
-        r = {1, h_size(j, 0), h_size(j, 1), depth(j), invalid(j), large_size(j)};
-        for (int k = 0; k < teno::MAX_FACES; k++) r.push_back(small_size(j, k));
-        auto values = [&](const auto & h, const auto & a, const size_t count) {
-            for (size_t k = 0; k < count; k++) r.push_back(std::bit_cast<uint64_t>(double(lane(h, a, j, k))));
+        const uint32_t n_large = batch.large_size(j), n_small = batch.small_total(j);
+        size_t i = 0;
+        r[i++] = 1;
+        r[i++] = size(j, 0);
+        r[i++] = size(j, 1);
+        r[i++] = batch.gather_depth(j);
+        r[i++] = batch.invalid_small(j);
+        r[i++] = n_large;
+        for (int k = 0; k < teno::MAX_FACES; k++) r[i++] = batch.small_size(j, k);
+        auto values = [&](const auto & a, const size_t count) {
+            const auto v = a.lane(j);
+            for (size_t k = 0; k < count; k++) r[i++] = Kokkos::bit_cast<uint64_t>(double(v[k]));
         };
-        auto stencil = [&](const auto & cells, const auto & a, const auto & faces, const auto & b, const size_t count) {
+        auto stencil = [&](const auto & cells, const auto & faces, const size_t count) {
+            const auto c = cells.lane(j), f = faces.lane(j);
             for (size_t k = 0; k < count; k++) {
-                r.push_back(uint64_t(lane(cells, a, j, k)));
-                r.push_back(uint64_t(int64_t(lane(faces, b, j, k))));
+                r[i++] = uint64_t(c[k]);
+                r[i++] = uint64_t(int64_t(f[k]));
             }
         };
-        values(mean, batch.basis_mean, batch.basis_mean.cap);
-        values(si, batch.si, batch.si.cap);
-        stencil(large_cells, batch.large_cells, large_faces, batch.large_faces, large_size(j));
-        values(large_pinv, batch.large_pinv, large_size(j) * nk);
-        stencil(small_cells, batch.small_cells, small_faces, batch.small_faces, small_total(j));
-        values(small_pinv, batch.small_pinv, small_total(j) * size_t(teno::NK_SMALL));
+        values(batch.basis_mean, batch.basis_mean.cap);
+        values(batch.si, batch.si.cap);
+        stencil(batch.large_cells, batch.large_faces, n_large);
+        values(batch.large_pinv, n_large * nk);
+        stencil(batch.small_cells, batch.small_faces, n_small);
+        values(batch.small_pinv, n_small * size_t(teno::NK_SMALL));
     });
+    auto h_data = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), data);
+    std::vector<std::vector<uint64_t>> out(n);
+    for (uint32_t j = 0; j < n; j++) out[j].assign(h_data.data() + h_offset(j), h_data.data() + h_offset(j + 1));
     return out;
 }
 
