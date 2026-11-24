@@ -727,14 +727,13 @@ std::vector<Monitor> Solver::monitors() const {
         const comm::SelfScope scope = s.communication_scope();
         values = broadcast(values);
     }
-    const bool si = units::system() == units::System::SI;
     std::vector<Monitor> out;
     out.reserve(monitored.size());
     for (size_t i = 0; i < monitored.size(); i++) {
         Monitor m;
         const auto & [name, dimension] = monitored[i];
         m.name = name;
-        m.unit = si ? dimension.udunits() : std::string("1");
+        m.unit = units::of(dimension);
         m.value = values[i];
         if (steps[i] != Probes::NO_VALUE) m.step = steps[i];
         out.push_back(std::move(m));
