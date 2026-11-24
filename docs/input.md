@@ -1770,7 +1770,7 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)) |
+| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)). With `filled = false`, the surface itself; an open one (edges of one triangle only) is a surface (2D: curve) only, facing as its first triangle by the right-hand rule ([Open surfaces from CAD](guide/geometry.md#open-surfaces-from-cad)) |
 | `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, `Y_<species>`, `MACH`, `H`, `X_<species>`, `VORTICITY` (3D: `VORTICITY_X`, `_Y`, `_Z`) and `Q_CRITERION` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
 | `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
@@ -1827,7 +1827,9 @@ Filled regions and flat surfaces may also have `filled` (default `true`):
 `filled = false` is the region's boundary, the same as
 `{type = "boundary", of = {...}}`: `{type = "sphere", ..., filled = false}` is
 the sphere's surface (2D: its circle), `{type = "rectangle", ..., filled = false}`
-in 3D its four edges. On a curve, `filled = false` is an error; take the
+in 3D its four edges. An `stl` or `obj` file of an open surface needs
+`filled = false`, which is that surface itself (default `true`: an error, as it
+has no inside). On a curve, `filled = false` is an error; take the
 boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 
 | Region | `boundary` | `interior` |
@@ -1835,6 +1837,7 @@ boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 | filled (volume; 2D: area) | its closed surface (2D: curve), facing out | error: already filled |
 | closed surface (2D: closed curve), e.g. a sphere's surface, a `circle` in 2D | error: closed | the filled region it encloses |
 | open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
+| open surface from an `stl` or `obj` file | error: not supported yet | error: not closed |
 | closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
 | boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
 

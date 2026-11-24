@@ -280,12 +280,15 @@ class FaceReconstruction {
          * @param select_troubled Output (probes, snapshots): troubled cells too, from the
          *        polynomial the scheme's stencil selection would choose for the
          *        whole cell, except where that falls back to the cell mean.
+         * @param by_cell Equal cells come in runs, whose polynomials may then be
+         *        fitted once.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
         virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                   Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, bool /*select_troubled*/) {
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, bool /*select_troubled*/,
+                                  bool /*by_cell*/) {
             return false;
         }
 
@@ -542,7 +545,7 @@ class TENO : public FaceReconstruction {
                                  uint32_t n_cells) override;
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
-                          bool select_troubled) override;
+                          bool select_troubled, bool by_cell) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -755,7 +758,7 @@ class TENO : public FaceReconstruction {
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                            Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
-                           bool select_troubled);
+                           bool select_troubled, bool by_cell);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);
