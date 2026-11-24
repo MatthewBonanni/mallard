@@ -316,6 +316,8 @@ class DataWriter {
         OutputSummary summary() const;
 
         DataFormat get_format() const { return format; }
+        /** @brief Whether a field it writes reads the data array. */
+        bool reads(const Data & data) const;
         /** @brief Whether its region follows the solution: a write reads the solution's cell values. */
         bool follows_solution() const { return subset_solution; }
         const std::string & get_prefix() const { return prefix; }
