@@ -273,6 +273,7 @@ struct MixtureViscousFluxFunctor {
     FacePointGradients point_gradients = {};
     Kokkos::View<rtype *> quad_weights = {};
     FaceWeights<> face_weights = {};
+    Kokkos::View<rtype *> planar_area = {};  // axisymmetric: the faces' planar lengths, as face_weights carry r
     rtype jump_damping = 4.0_r / 3.0_r;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
@@ -590,7 +591,7 @@ struct MixtureViscousFluxFunctor {
             dX_dn = static_cast<double>(0.5_r * (ga + gb) + (Xb - Xa) * inv_d);
             return 0.5 * (static_cast<double>(Xa) + static_cast<double>(Xb));
         };
-        const rtype area = face_area(i_face);
+        const rtype area = axisymmetric ? planar_area(i_face) : face_area(i_face);
         uint8_t n_quad;
         if constexpr (N_DIM == 2) {
             n_quad = static_cast<uint8_t>(quad_weights.extent(0));
@@ -598,9 +599,14 @@ struct MixtureViscousFluxFunctor {
             n_quad = static_cast<uint8_t>(face_weights.extent(1));
         }
         for (uint8_t q = 0; q < n_quad; q++) {
-            rtype w_q;
+            rtype w_q, r = 0.0_r;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, q) : quad_weights(q);
+                if (axisymmetric) {
+                    // Weights r_q w_q (Solver::init_axisymmetric_weights), zero on the axis
+                    if (w_q == 0.0_r) continue;
+                    r = w_q / quad_weights(q);
+                }
             } else {
                 w_q = face_weights(i_face, q);
                 if (w_q == 0.0_r) continue;
@@ -616,7 +622,7 @@ struct MixtureViscousFluxFunctor {
                 FOR_I_DIM g_f[k][i] = 0.5_r * (ga[k][i] + gb[k][i]) + jump * G.n[i];
             }
             rtype tau_n[N_DIM];
-            viscous_traction(mu, g_f, G.n, tau_n, 0.0_r);
+            viscous_traction(mu, g_f, G.n, tau_n, axisymmetric ? hoop_divergence(r, q_f, g_f) : 0.0_r);
             FOR_I_DIM out.momentum(i, A, tau_n[i]);
             const rtype dT_dn = dot<N_DIM>(g_f[N_DIM], G.n);
             rtype energy = dot<N_DIM>(q_f, tau_n) + lambda * dT_dn;

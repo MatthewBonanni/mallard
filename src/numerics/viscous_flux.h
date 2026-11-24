@@ -147,6 +147,7 @@ struct ViscousFluxFunctor {
     Kokkos::View<rtype *> quad_weights = {};
     FaceWeights<> face_weights = {};
     Kokkos::View<rtype ***> quad_normals = {};
+    Kokkos::View<rtype *> planar_area = {};  // axisymmetric: the faces' planar lengths, as face_weights carry r
     rtype jump_damping = 4.0_r / 3.0_r;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
@@ -228,9 +229,10 @@ struct ViscousFluxFunctor {
     }
 
     /**
-     * @brief Integrates point_flux(q, n, total) over the quadrature points of
-     *        face i_face (n the unit normal at point q, total the weighted
-     *        sum it adds to) and adds the result times the face area to out.
+     * @brief Integrates point_flux(q, n, total, r) over the quadrature points
+     *        of face i_face (n the unit normal at point q, total the weighted
+     *        sum it adds to, r its radius in axisymmetric runs, else 0) and
+     *        adds the result times the face area to out.
      */
     template <typename PointFlux>
     KOKKOS_INLINE_FUNCTION void integrate_points(const uint32_t i_face, PointFlux && point_flux, rtype * out) const {
@@ -245,20 +247,25 @@ struct ViscousFluxFunctor {
         }
         rtype total[N_CONSERVATIVE] = {};
         for (uint8_t q = 0; q < n_quad; q++) {
-            rtype w_q;
+            rtype w_q, r = 0.0_r;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, q) : quad_weights(q);
+                if (axisymmetric) {
+                    // Weights r_q w_q (Solver::init_axisymmetric_weights), zero on the axis
+                    if (w_q == 0.0_r) continue;
+                    r = w_q / quad_weights(q);
+                }
             } else {
                 w_q = face_weights(i_face, q);
                 if (w_q == 0.0_r) continue;
             }
             rtype n_q[N_DIM], point[N_CONSERVATIVE] = {};
             const rtype * n = quad_normal(quad_normals, i_face, q, n_face, n_q);
-            point_flux(q, n, point);
+            point_flux(q, n, point, r);
             FOR_I_CONSERVATIVE total[i] += w_q * point[i];
         }
         // Weights sum to 2, on curved faces to twice their area over face_area
-        const rtype scale = 0.5_r * face_area(i_face);
+        const rtype scale = 0.5_r * (axisymmetric ? planar_area(i_face) : face_area(i_face));
         FOR_I_CONSERVATIVE out[i] += scale * total[i];
     }
 
@@ -286,7 +293,7 @@ struct ViscousFluxFunctor {
             mu_t = 0.5_r * (sgs(c0, 0) + sgs(c1, 0));
             kappa_t = 0.5_r * (sgs(c0, 1) + sgs(c1, 1));
         }
-        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point) {
+        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point, const rtype r) {
             rtype qa[NQ], ga[NQ][N_DIM], qb[NQ], gb[NQ][N_DIM], q_f[NQ], g_f[NQ][N_DIM];
             point_gradients.load(i_face, q, 0, qa, ga);
             point_gradients.load(i_face, q, 1, qb, gb);
@@ -307,7 +314,7 @@ struct ViscousFluxFunctor {
                 kappa += kappa_t;
             }
             rtype tau_n[N_DIM];
-            viscous_traction(mu, g_f, n, tau_n);
+            viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(r, q_f, g_f) : 0.0_r);
             point[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + kappa * dot<N_DIM>(g_f[N_DIM], n);
             FOR_I_DIM point[1 + i] = tau_n[i];
         }, out);
@@ -333,7 +340,7 @@ struct ViscousFluxFunctor {
         const bool isothermal = bc.type == BoundaryType::WALL_ISOTHERMAL;
         const uint8_t n_set = isothermal ? NQ : N_DIM;
         const rtype heat_flux = bc.type == BoundaryType::WALL_HEAT_FLUX ? bc.data[N_DIM + 1] : 0.0_r;
-        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point) {
+        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point, const rtype r) {
             rtype qa[NQ], g_f[NQ][N_DIM], q_f[NQ];
             point_gradients.load(i_face, q, 0, qa, g_f);
             for (uint8_t k = 0; k < N_DIM; k++) q_f[k] = bc.data[1 + k];
@@ -346,7 +353,7 @@ struct ViscousFluxFunctor {
             rtype kappa = physics.conductivity(mu);
             if (sgs_only) mu = kappa = 0.0_r;
             rtype tau_n[N_DIM];
-            viscous_traction(mu, g_f, n, tau_n);
+            viscous_traction(mu, g_f, n, tau_n, axisymmetric ? hoop_divergence(r, q_f, g_f) : 0.0_r);
             point[N_DIM + 1] = dot<N_DIM>(q_f, tau_n) + (isothermal ? kappa * dot<N_DIM>(g_f[N_DIM], n) : heat_flux);
             FOR_I_DIM point[1 + i] = tau_n[i];
         }, out);
@@ -358,13 +365,13 @@ struct ViscousFluxFunctor {
      */
     KOKKOS_INLINE_FUNCTION
     void polynomial_symmetry_flux(const uint32_t i_face, rtype * out) const {
-        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point) {
+        integrate_points(i_face, [&](const uint8_t q, const rtype * n, rtype * point, const rtype r) {
             rtype qa[NQ], ga[NQ][N_DIM];
             point_gradients.load(i_face, q, 0, qa, ga);
             rtype mu = physics.viscosity(qa[N_DIM]);
             if (sgs_only) mu = 0.0_r;
             rtype tau_n[N_DIM];
-            viscous_traction(mu, ga, n, tau_n);
+            viscous_traction(mu, ga, n, tau_n, axisymmetric ? hoop_divergence(r, qa, ga) : 0.0_r);
             const rtype tau_nn = dot<N_DIM>(tau_n, n);
             FOR_I_DIM point[1 + i] = tau_nn * n[i];
         }, out);

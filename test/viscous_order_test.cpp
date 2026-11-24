@@ -754,13 +754,4 @@ TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason
         EXPECT_NE(e.find(reason), std::string::npos) << e;
         EXPECT_NE(e.find("viscous_gradients"), std::string::npos) << e;
     }
-    if constexpr (N_DIM == 2) {
-        const std::string axisymmetric =
-            replaced(replaced(base, "[[periodic]]\nzones = [\"bottom\", \"top\"]\n",
-                              "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"top\"\n"
-                              "type = \"wall_adiabatic\"\n"),
-                     "Pr = 0.72\n", "Pr = 0.72\naxisymmetric = true\n");
-        const std::string e = error_of(axisymmetric);
-        EXPECT_NE(e.find("axisymmetric"), std::string::npos) << e;
-    }
 }
