@@ -2,7 +2,7 @@
  * @file region_surface.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Regions from CAD surfaces: reading, checking and laying out STL and
- *        OBJ files.
+ *        OBJ files, closed or open.
  * @version 0.1
  * @date 2026-11-19
  *
@@ -205,6 +205,13 @@ struct Edge {
 
 using Corners = std::array<uint32_t, 3>;
 
+/** @brief The end of the run of sorted edges from e that join the same two vertices. */
+std::size_t same_edge_end(const std::vector<Edge> & edges, const std::size_t e) {
+    std::size_t f = e;
+    while (f < edges.size() && edges[f].lo == edges[e].lo && edges[f].hi == edges[e].hi) f++;
+    return f;
+}
+
 std::vector<Edge> edges_of(const std::vector<Corners> & tris) {
     std::vector<Edge> edges;
     edges.reserve(3 * tris.size());
@@ -239,13 +246,14 @@ std::vector<double> layout(const std::vector<Vec> & points, const std::vector<Co
     }
     const std::vector<Edge> edges = edges_of(tris);
     std::vector<std::array<Vec, 3>> edge_normal(n);
-    for (std::size_t e = 0; e + 1 < edges.size(); e += 2) {
-        const Edge & a = edges[e];
-        const Edge & b = edges[e + 1];
-        Vec s;
-        for (std::size_t i = 0; i < 3; i++) s[i] = normal[a.triangle][i] + normal[b.triangle][i];
-        edge_normal[a.triangle][std::size_t{a.k}] = s;
-        edge_normal[b.triangle][std::size_t{b.k}] = s;
+    for (std::size_t e = 0; e < edges.size();) {
+        const std::size_t f = same_edge_end(edges, e);
+        Vec s = normal[edges[e].triangle];
+        for (std::size_t g = e + 1; g < f; g++) {
+            for (std::size_t i = 0; i < 3; i++) s[i] += normal[edges[g].triangle][i];
+        }
+        for (std::size_t g = e; g < f; g++) edge_normal[edges[g].triangle][std::size_t{edges[g].k}] = s;
+        e = f;
     }
     // The hierarchy: boxes split at the median of the triangles' centroids along the longest side
     std::vector<uint32_t> order(n);
@@ -373,31 +381,23 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
     }
     const double diagonal = norm(sub(hi, lo));
 
-    // Closed: every edge in exactly two triangles
+    // Closed: every edge in exactly two triangles; open: some in one only
     const std::vector<Edge> edges = edges_of(tris);
-    std::size_t open = 0, shared = 0;
+    const uint32_t none = std::numeric_limits<uint32_t>::max();
+    std::size_t shared = 0;
     const Edge * open_example = nullptr;
     const Edge * shared_example = nullptr;
+    Packed out;
     for (std::size_t e = 0; e < edges.size();) {
-        std::size_t f = e;
-        while (f < edges.size() && edges[f].lo == edges[e].lo && edges[f].hi == edges[e].hi) f++;
+        const std::size_t f = same_edge_end(edges, e);
         if (f - e == 1) {
-            open++;
+            out.n_open++;
             if (!open_example) open_example = &edges[e];
         } else if (f - e > 2) {
             shared++;
             if (!shared_example) shared_example = &edges[e];
         }
         e = f;
-    }
-    const std::string surface_regions = "Open surfaces are not regions yet";
-    if (open > 0) {
-        fail(where,
-             file + " is not closed: it has " + logging::count(open, "edge") + " of one triangle only (holes or gaps), "
-                 "e.g. the edge from " + point(points[open_example->lo]) + " to " + point(points[open_example->hi]) +
-                 ", and a filled region needs a closed (watertight) surface",
-             "Close the holes in the CAD tool or a mesh repair tool, and export the surface again; vertices must match "
-             "exactly across neighboring triangles. " + surface_regions);
     }
     if (shared > 0) {
         fail(where,
@@ -407,7 +407,8 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
              "Remove duplicated triangles, or export each body to its own file and combine them with "
              "{type = \"union\", regions = [...]}");
     }
-    std::vector<std::array<uint32_t, 3>> neighbor(tris.size());
+    if (open_example) out.open_edge = {points[open_example->lo], points[open_example->hi]};
+    std::vector<std::array<uint32_t, 3>> neighbor(tris.size(), {none, none, none});
     std::vector<std::array<bool, 3>> same(tris.size());  // the neighbor runs along the edge the same way
     Sets fans(3 * tris.size());
     const auto corner_of = [&](const uint32_t t, const uint32_t v) {
@@ -416,14 +417,18 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
         }
         return 3 * t;
     };
-    for (std::size_t e = 0; e < edges.size(); e += 2) {
-        const Edge & a = edges[e];
-        const Edge & b = edges[e + 1];
-        neighbor[a.triangle][std::size_t{a.k}] = b.triangle;
-        neighbor[b.triangle][std::size_t{b.k}] = a.triangle;
-        same[a.triangle][std::size_t{a.k}] = same[b.triangle][std::size_t{b.k}] = a.forward == b.forward;
-        fans.join(corner_of(a.triangle, a.lo), corner_of(b.triangle, a.lo));
-        fans.join(corner_of(a.triangle, a.hi), corner_of(b.triangle, a.hi));
+    for (std::size_t e = 0; e < edges.size();) {
+        const std::size_t f = same_edge_end(edges, e);
+        if (f - e == 2) {
+            const Edge & a = edges[e];
+            const Edge & b = edges[e + 1];
+            neighbor[a.triangle][std::size_t{a.k}] = b.triangle;
+            neighbor[b.triangle][std::size_t{b.k}] = a.triangle;
+            same[a.triangle][std::size_t{a.k}] = same[b.triangle][std::size_t{b.k}] = a.forward == b.forward;
+            fans.join(corner_of(a.triangle, a.lo), corner_of(b.triangle, a.lo));
+            fans.join(corner_of(a.triangle, a.hi), corner_of(b.triangle, a.hi));
+        }
+        e = f;
     }
     // Manifold at the corners too: each vertex's triangles one fan
     std::vector<uint32_t> fan_of(points.size(), std::numeric_limits<uint32_t>::max());
@@ -440,8 +445,7 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
         }
     }
 
-    // One orientation per closed surface, spread across its edges
-    const uint32_t none = std::numeric_limits<uint32_t>::max();
+    // One orientation per connected surface, spread across its edges from its first triangle
     std::vector<uint32_t> component(tris.size(), none);
     std::vector<bool> flip(tris.size(), false);
     uint32_t n_components = 0;
@@ -453,6 +457,7 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
             const uint32_t t = queue[q];
             for (std::size_t k = 0; k < 3; k++) {
                 const uint32_t m = neighbor[t][k];
+                if (m == none) continue;
                 const bool want = flip[t] != same[t][k];
                 if (component[m] == none) {
                     component[m] = n_components;
@@ -470,6 +475,12 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
     }
     for (std::size_t t = 0; t < tris.size(); t++) {
         if (flip[t]) std::swap(tris[t][1], tris[t][2]);
+    }
+    out.n_triangles = static_cast<uint32_t>(tris.size());
+    if (out.n_open > 0) {
+        out.n_bodies = n_components;
+        out.data = layout(points, tris, where);
+        return out;
     }
     // Each closed surface facing out of the volume it encloses
     std::vector<double> volume(n_components, 0.0);
@@ -548,14 +559,22 @@ Packed pack(const std::vector<Triangle> & soup, const std::string & file, const 
             }
         }
     }
-    Packed out;
     for (uint32_t c = 0; c < n_components; c++) (depth[c] % 2 == 0 ? out.n_bodies : out.n_cavities)++;
     for (std::size_t t = 0; t < tris.size(); t++) {
         if (depth[component[t]] % 2 == 1) std::swap(tris[t][1], tris[t][2]);
     }
-    out.n_triangles = static_cast<uint32_t>(tris.size());
     out.data = layout(points, tris, where);
     return out;
+}
+
+void not_closed(const Packed & packed, const std::string & file, const Where & where) {
+    fail(where,
+         file + " is not closed: it has " + logging::count(packed.n_open, "edge") + " of one triangle only (holes or "
+             "gaps), e.g. the edge from " + point(packed.open_edge[0]) + " to " + point(packed.open_edge[1]) +
+             ", and a filled region needs a closed (watertight) surface",
+         "Close the holes in the CAD tool or a mesh repair tool, and export the surface again; vertices must match "
+         "exactly across neighboring triangles. For the open surface itself, as a surface region (probes, "
+         "statistics), give filled = false");
 }
 
 std::vector<Triangle> triangles(const double * s) {
@@ -575,9 +594,11 @@ std::array<Vec, 2> box(const double * s) {
     return {Vec{root[0], root[1], root[2]}, Vec{root[3], root[4], root[5]}};
 }
 
-std::vector<Segment> section(const double * s, const double z0) {
+std::vector<Segment> section(const double * s, const double z0) { return section(triangles(s), z0); }
+
+std::vector<Segment> section(const std::vector<Triangle> & tris, const double z0) {
     std::vector<Segment> out;
-    for (const Triangle & t : triangles(s)) {
+    for (const Triangle & t : tris) {
         Vec cut[2];
         int n = 0;
         for (std::size_t k = 0; k < 3; k++) {
@@ -589,7 +610,7 @@ std::vector<Segment> section(const double * s, const double z0) {
             cut[n++] = {a[0] + w * (b[0] - a[0]), a[1] + w * (b[1] - a[1]), z0};
         }
         if (n != 2 || cut[0] == cut[1]) continue;
-        // The solid on the left: along z x the outward normal
+        // The normal on the right: along z x the normal
         const Vec normal = cross(sub(t[1], t[0]), sub(t[2], t[0]));
         if ((cut[1][0] - cut[0][0]) * -normal[1] + (cut[1][1] - cut[0][1]) * normal[0] < 0.0) std::swap(cut[0], cut[1]);
         out.push_back({cut[0], cut[1]});
