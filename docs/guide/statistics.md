@@ -420,8 +420,8 @@ point, with the same names), one sample each time the monitor writes one.
 The values, a row of `file` and the monitor `convergence` of the run record,
 are `stationary` (0 or 1), `t_stationary`, `converged` (with `tolerance`) and,
 per signal, `<signal>_mean`, `_ci` (the half width), `_variance`,
-`_variance_ci`, `_tau`, `_n_eff` and `_samples`; they are NaN before the run
-is stationary. Triggers read them as `convergence_<value>`, e.g.
+`_variance_ci`, `_tau`, `_n_eff`, `_samples` and `_nonfinite`; all but `_nonfinite`
+are NaN before the run is stationary. Triggers read them as `convergence_<value>`, e.g.
 `convergence_stationary`, `convergence_integrals_kinetic_energy_ci`: start
 the statistics or stop the run with them, as above, or with a tolerance of
 your own (`convergence_forces_cylinder_Fy_pressure_ci < 1e-3` for a mean near
@@ -433,6 +433,11 @@ histories, so a continued run keeps them.
   domain converge faster than any point; a point probe is the strict test.
 - Samples equally spaced in time (a probe's `time_interval`) are best: a
   sample is a sample, whatever time separates it from the last.
+- A sample that is not finite (NaN or infinite) means the run diverged:
+  `converged` is 0 from then on, `<signal>_nonfinite` counts such samples,
+  and the first prints the warning
+  [`W-CONVERGENCE-NONFINITE`](running.md#w-convergence-nonfinite). The
+  other values leave the sample out, so they stay finite.
 - The statistics start when the trigger fires, after the transient has been
   detected, not at `t_stationary`: what came before was not kept.
 - Costs nothing on the device: the analysis runs on the host each time a

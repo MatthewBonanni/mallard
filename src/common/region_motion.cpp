@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "curved.h"
+#include "expression.h"
 #include "region_cut.h"
 #include "mesh.h"
 #include "region_clip.h"
@@ -325,7 +326,7 @@ SolutionLevels::SolutionLevels(const Mesh & mesh, const std::vector<Condition> &
     n_conditions(static_cast<uint32_t>(conditions.size())), n_species(static_cast<uint32_t>(species.size())),
     axisymmetric(mesh.axisymmetric), fields(fields_) {
     const std::vector<std::string> variables = condition_variables(species);
-    for (const Condition & c : conditions) programs.emplace_back(c.key, c.level, variables, expression_unit_hint);
+    for (const Condition & c : conditions) programs.push_back(compile_expression(c.key, c.line, c.level, variables));
     std::vector<const kexpr::Program *> all;
     for (const auto & p : programs) all.push_back(&p);
     table = kexpr::ProgramTable<>(all);

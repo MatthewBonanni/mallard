@@ -313,7 +313,7 @@ A maintainer releases version X.Y.Z in three steps:
    (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
    `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
 2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
-   container images, the relocatable archives and the Spack package from `main`, pushes
+   container images, the portable binaries and the Spack package from `main`, pushes
    the images, and only then creates the tag `vX.Y.Z` and a draft release holding the
    archives and `release-manifest.json`. A failed build leaves no tag: fix it on `main`
    and dispatch again.
