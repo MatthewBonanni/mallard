@@ -264,6 +264,8 @@ class Probes {
         /** @brief Whether a probe due now samples point values (ProbeFields::W must then be current). */
         bool point_values_due(uint64_t step, rtype t) const;
         bool any_point_values() const;
+        /** @brief Whether a probe or snapshot reads the cell data array. */
+        bool reads(const Data & data) const;
         /** @brief Whether a probe due now needs the gradients (ProbeFields::W current) / mixture transport properties. */
         bool gradients_due(uint64_t step, rtype t) const;
         /**
