@@ -388,6 +388,14 @@ TEST(BoundaryCoordinatesTest, CoordinatesThatCannotBeComputedAreInputErrors) {
                  "is 0 on every face");
     expect_error(channel("type = \"inlet_mass_flow\"\nT = 1.0\nmdot = \"0.5 + n\"\n", run, "wall_adiabatic"),
                  "not on x, y, z, the local coordinates or data");
+    try {
+        Solver solver;
+        solver.init(parse_toml(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + n\"\n", run,
+                                       "wall_adiabatic\"\nwhere = \"(1 + x")));
+        ADD_FAILURE() << "a wall's where that does not compile was accepted";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("bottom.where: \"(1 + x\": expected ')'"), std::string::npos) << e.what();
+    }
 #if N_DIM == 2
     expect_error(channel("type = \"inlet_state\"\n" + u_inlet() + "p = 1.0\nT = \"1 + v\"\n", run),
                  "a 2D boundary is a curve");

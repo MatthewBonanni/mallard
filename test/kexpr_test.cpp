@@ -484,6 +484,10 @@ TEST(KexprTest, RejectsInvalidExpressions) {
         {"shl(x, 2)", "'shl' is exprtk's, not kexpr's"},
         {"sin(x, y)", "wrong number of arguments"},
         {"(x + 1", "expected ')'"},
+        {"(x + 1]", "expected ')' to match the '(' at position 1 at position 7"},
+        {"{x + 1)", "expected '}' to match the '{' at position 1"},
+        {"x * [y + (z - 1])", "expected ')' to match the '(' at position 10"},
+        {"sin[x}", "expected ']' after the arguments of sin to match the '[' at position 4"},
         {"x y", "expected ';'"},
         {"x ? 1", "':' of the ternary operator"},
         {"'abc' == 'abc'", "strings are not supported"},
@@ -516,6 +520,28 @@ TEST(KexprTest, RejectsInvalidExpressions) {
     }
 }
 
+TEST(KexprTest, BracketsMatchAndNestBoundedly) {
+    const double vars[] = {0.5, 2.0, 0.0, 0.0};
+    EXPECT_EQ(kexpr::Program("test", "[x + 1] * {y - 3} + max[x, {y}]", VARIABLES)(vars), 0.5);
+    const auto nested = [](const size_t n) { return std::string(n, '(') + "x" + std::string(n, ')'); };
+    EXPECT_EQ(kexpr::Program("test", nested(200), VARIABLES)(vars), 0.5);
+    std::string powers = "x", chain;
+    for (int i = 0; i < 100000; i++) {
+        powers += "^x";
+        chain += "if (x < 0) 1; else ";
+    }
+    chain += "x";
+    for (const std::string & deep : {nested(100000), powers, chain}) {
+        try {
+            const kexpr::Program program("test", deep, VARIABLES);
+            ADD_FAILURE() << deep.substr(0, 40) << "... compiled";
+        } catch (const std::invalid_argument & e) {
+            EXPECT_NE(std::string(e.what()).find("nested more than 256 levels deep"), std::string::npos)
+                << deep.substr(0, 40);
+        }
+    }
+}
+
 TEST(KexprTest, ExpressionDerivativeIsTheFourthOrderCentralDifference) {
     const Expression e("e", "s^3 - 2 * s", {"s"});
     const double s = 0.7, h = 1e-8;
@@ -535,7 +561,7 @@ TEST(KexprTest, LoopsStopAtTheIterationCap) {
     const kexpr::Program stopped("test", runaway, VARIABLES);
     EXPECT_TRUE(stopped.has_loops());
     EXPECT_THROW(stopped(p), std::invalid_argument);
-    EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::runtime_error);
+    EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::invalid_argument);
 
     const kexpr::Program fine("test", "x + y", VARIABLES);
     EXPECT_FALSE(fine.has_loops());
