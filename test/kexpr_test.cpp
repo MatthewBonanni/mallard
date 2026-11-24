@@ -561,7 +561,7 @@ TEST(KexprTest, LoopsStopAtTheIterationCap) {
     const kexpr::Program stopped("test", runaway, VARIABLES);
     EXPECT_TRUE(stopped.has_loops());
     EXPECT_THROW(stopped(p), std::invalid_argument);
-    EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::runtime_error);
+    EXPECT_THROW(Expression("test", runaway)(0.3, -0.7, 0.25, 0.5), std::invalid_argument);
 
     const kexpr::Program fine("test", "x + y", VARIABLES);
     EXPECT_FALSE(fine.has_loops());
