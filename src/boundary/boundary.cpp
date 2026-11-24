@@ -136,9 +136,8 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
         return sigma / L;
     };
     bc.relax[Relax::ACOUSTIC] = contains_optional(table, "sigma") ? rate("sigma", 0.0_r) : 0.25_r / L;
-    // A turbulent inlet's incoming wave follows the target's own, which carries the target's
-    // transverse terms: by default it leaves out the face's, which would count them twice
-    bc.relax[Relax::BETA] = (inlet && InletProfile::turbulent(entry)) ? 0.0_r : -1.0_r;
+    // Transverse terms in an inlet's incoming wave hold its velocity off the target by beta T- / (K rho c)
+    bc.relax[Relax::BETA] = inlet ? 0.0_r : -1.0_r;
     if (contains_optional(table, "beta")) {
         bc.relax[Relax::BETA] = find_real(table, "beta", dim::none);
         if (!(bc.relax[Relax::BETA] >= 0.0_r && bc.relax[Relax::BETA] <= 1.0_r)) {

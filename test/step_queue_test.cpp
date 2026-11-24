@@ -34,6 +34,7 @@
 #include "example_inputs.h"
 #include "json.h"
 #include "particles.h"
+#include "run_log.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -356,6 +357,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         o.rejected = solver.get_rejected_steps();
         o.queued = solver.get_queued_steps();
     }
+    // Rank 0 keeps a distributed run's log open, and NFS shows other nodes an open file's old contents
+    run_log::close();
     comm::barrier();
     if (comm::is_root()) fs::remove("STOP");
     // Messages name the run's files

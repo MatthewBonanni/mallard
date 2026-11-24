@@ -22,7 +22,7 @@ program instead, see the [C++ API](cpp_api.md).
 
 ## Installing
 
-Every installer but the [relocatable archive](../installation.md#relocatable-archive)
+Every installer but the [portable binaries](../installation.md#portable-binaries)
 installs the package with Mallard, so `import mallard` works after its usual
 command:
 
