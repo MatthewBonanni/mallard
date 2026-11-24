@@ -58,6 +58,12 @@ on:
           still build and run their other checks in full; empty runs every test
         type: string
         default: ''
+      stamp:
+        description: >-
+          Space-separated head commits of the pull requests in this batch branch: when the run
+          passes, it sets `CI` on each (as batch.yml would), so they can merge with no other run
+        type: string
+        default: ''
 
 permissions:
   actions: read
@@ -756,14 +762,18 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/tutorials/${{ github.sha }}
-      # Both dimensions in one install, run through the mallard front end
+      # Both dimensions in one install, run through the mallard front end. The checks after it
+      # are independent, so each runs whether or not the ones before it pass
       - name: Install (2D and 3D)
+        id: install
         run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
       # A program built against the install with find_package(Mallard) runs a case as mallard -i does
       - name: C++ API of the install
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: examples/cpp_api/ci.sh ${{ runner.temp }}/mallard ${{ runner.temp }}/cpp_api
       # The scripts the install wrote: bash and fish complete through them, zsh parses its own
       - name: Shell completion of the install
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           export PATH=${{ runner.temp }}/mallard/bin:$PATH
           share=${{ runner.temp }}/mallard/share
@@ -783,9 +793,11 @@ jobs:
           bash -c ". $share/bash-completion/completions/mallard; COMP_WORDS=(mallard new ''); COMP_CWORD=2; _mallard
                    printf '%s\n' \"\${COMPREPLY[@]}\"" | grep -qx cylinder
       - name: Run the tutorials
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys/ is what setup reads from the examples and tutorials
       - name: Check the key catalog
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
           n=$(ls docs/input-keys | wc -l)
@@ -794,6 +806,7 @@ jobs:
                  python3 -c 'import json, sys; print(len(json.load(sys.stdin)["keys"]))') -eq $n
       # Every case template (mallard new --quick)
       - name: Run the case templates
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: templates/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/templates
       - name: Report the job's result
         if: always()
@@ -1212,6 +1225,7 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
           ONLY: ${{ inputs.only }}
           COVERED: ${{ needs.device.outputs.covered }}
+          STAMP: ${{ inputs.stamp }}
         run: |
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
             --jq '.jobs[] | select(.name != "CI result" and .status == "completed"
@@ -1248,6 +1262,19 @@ jobs:
             elif [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
               gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
             fi
+          fi
+          if [ "$state" = success ] && [ -n "$STAMP" ] && [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            for sha in $STAMP; do
+              case "$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq .status)" in ahead|identical) ;;
+                *) echo "::error::$sha is not in $GITHUB_SHA: no CI set on the heads"; exit 1 ;;
+              esac
+            done
+            for sha in $STAMP; do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context=CI \
+                -f description="Passed in batch ${GITHUB_SHA:0:8} (run $GITHUB_RUN_ID)" -f target_url="$url" > /dev/null
+              echo "CI success on $sha"
+            done
           fi
           [ "$state" = success ]
       # Each build's newest compiler cache on main is the one branches restore; the older ones

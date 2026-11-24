@@ -37,6 +37,8 @@
   "examples/hot_gas_regions/input.toml",
   "examples/moving_heaters/input.toml",
   "examples/noh_axisymmetric/input.toml",
+  "examples/particle_bounce/input.toml",
+  "examples/particle_centrifuge/input.toml",
   "examples/poiseuille_pipe/input.toml",
   "examples/premixed_flame/ch4/input.toml",
   "examples/premixed_flame/input.toml",
