@@ -333,7 +333,8 @@ class CompositionExpressions {
                     }
                     listed.push_back(k);
                     texts.push_back(given ? quantity_or_expression(table.at(keys[k]), keys[k], dim::none) : "0");
-                    values.emplace_back(where + "." + keys[k], texts.back(), variables, shadowable);
+                    values.emplace_back(where + "." + keys[k], line_of(table, keys[k]), texts.back(), variables,
+                                        shadowable);
                 }
                 return;
             }
@@ -347,8 +348,9 @@ class CompositionExpressions {
                 const int32_t k = mixture.mechanism().species_index(species);
                 if (k < 0) throw InputError(where + "." + key + ": no species " + species + " in the mechanism.");
                 listed.push_back(k);
-                texts.push_back(quantity_or_expression(value, species, dim::none));
-                values.emplace_back(where + "." + key + "." + species, texts.back(), variables, shadowable);
+                texts.push_back(quantity_or_expression(value, where + "." + key + "." + species, dim::none));
+                values.emplace_back(where + "." + key + "." + species, line_of(value), texts.back(), variables,
+                                    shadowable);
             }
             if (table.contains("balance")) {
                 const std::string species = find_value<std::string>(table, "balance");
@@ -494,7 +496,7 @@ void Solver::update_transport() {
     with_rotations(mesh->periodic_maps(), [&](auto rotations) {
         gated::parallel_for("mixture_gradients", n_gradient_cells(),
                              MixtureGradientFunctor<decltype(rotations)::value>{
-                                 viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                 viscous_gradient(), transport_values, transport_gradients, bc_transport_values,
                                  mixture.n_species, cell_transport, mixture.flamelet});
     });
 }

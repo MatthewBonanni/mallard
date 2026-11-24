@@ -142,7 +142,6 @@ TABLES = [
 
 # Input guards that reject a pair of features: (file, part of the message, feature, feature)
 GUARDS = [
-    ("src/solver/solver.cpp", "curved boundaries are not supported in axisymmetric runs", "axisymmetric", "curved"),
     ("src/solver/solver.cpp", "rotational periodicity is not supported in axisymmetric runs",
      "axisymmetric", "rotational"),
     ("src/solver/solver.cpp", "its thermodynamics are frozen over a step", "double_flux", "simpler"),
@@ -176,6 +175,7 @@ OTHER_GUARDS = [
     ("src/chemistry/mechanism.cpp", "transport model"),
     ("src/chemistry/mechanism.cpp", "(NASA7, NASA9, constant-cp)"),
     ("src/mesh/read_gmsh.cpp", "parametric nodes are not supported"),
+    ("src/mesh/curved.cpp", "a curved zone on an open surface from an STL or OBJ file is not supported yet"),
     ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
     ("src/solver/solver.cpp", "is not available yet with chemistry.coupling"),

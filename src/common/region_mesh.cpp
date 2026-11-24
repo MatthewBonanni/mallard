@@ -487,7 +487,7 @@ class Builder {
                 } else if (conditional(p)) {
                     m_out.exact = false;
                     extract(p);
-                } else if (!exact_piece(p)) {
+                } else if (!exact_piece(p) && !on_sheet(p)) {
                     m_out.exact = m_out.exact && affine(p);
                     extract(p);
                 }
@@ -1099,6 +1099,11 @@ class Builder {
 
         const Node & only_node(const uint32_t i) const { return m_views[i].nodes(0); }
         bool single(const uint32_t i) const { return m_region.filled()[i].count == 1; }
+        static bool sheet(const Node & n) { return n.kind == Kind::TRIANGLES && n.p[0] != 0.0; }
+        /** @brief Whether a piece lies on an open surface from a file, which has only its exact form (none: outside the domain). */
+        bool on_sheet(const Piece & p) const {
+            return p.carriers.size() == 1 && single(p.carriers[0]) && sheet(only_node(p.carriers[0]));
+        }
 
         /** @brief The range of local coordinate k over the domain's bounding box. */
         std::pair<double, double> local_range(const Node & n, const size_t k) const {
@@ -1263,6 +1268,21 @@ class Builder {
         /** @brief The surface (2D: curve) of a primitive, in patches, or none if it has no exact form here. */
         std::optional<std::vector<Patch>> surface(const Node & n) const {
             std::vector<Patch> out;
+            if (N_DIM == 2 && sheet(n)) {
+                // The section by the plane z = 0 of the world, in local coordinates (q = m x + d)
+                std::vector<::region::surface::Triangle> world;
+                const Local map(n);
+                for (const auto & t : ::region::surface::triangles(m_views[0].vertices.data() + 2 * n.first)) {
+                    world.push_back({map.point(t[0]), map.point(t[1]), map.point(t[2])});
+                }
+                const auto local = [&](const Vec & x) {
+                    Vec q;
+                    for (size_t i = 0; i < 3; i++) q[i] = n.m[3 * i] * x[0] + n.m[3 * i + 1] * x[1] + n.m[3 * i + 2] * x[2] + n.d[i];
+                    return q;
+                };
+                for (const auto & [a, b] : ::region::surface::section(world, 0.0)) out.push_back(segment(local(a), local(b)));
+                return out;
+            }
             if (N_DIM == 2) {
                 if (!planar(n)) return std::nullopt;
                 if (n.kind == Kind::SPHERE) {

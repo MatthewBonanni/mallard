@@ -202,6 +202,55 @@ TEST(ErrorMessages, EveryAccessorReportsAValueOfTheWrongTypeWithItsKeyAndLine) {
     }
 }
 
+TEST(ErrorMessages, EveryAccessorNamesAKeyOfASubTableByItsFullPath) {
+    using Read = std::function<void(const Input &)>;
+    const auto reactor = [](const Input & in) -> const Input & { return in.at("reactor"); };
+    const auto boundary = [](const Input & in) { return find_value<std::vector<Input>>(in, "boundaries")[1]; };
+    const std::string reactor_input = "[reactor]\nend_time = 1.0\nwrong = \"x\"\n";
+    const std::string reactor_docs = "See docs/input.md#mallard-reactor";
+    const std::string boundaries = "[[boundaries]]\nname = \"a\"\n[[boundaries]]\nname = \"b\"\nwrong = \"x\"\n";
+    struct Case {
+        std::string name, input;
+        Read read;
+        std::vector<std::string> parts;
+    };
+    const std::vector<Case> cases = {
+        {"find_double, missing", reactor_input, [&](const Input & in) { find_double(reactor(in), "T", dim::temperature); },
+         {"line 1: reactor.T: missing", "Add T = ... to [reactor]", reactor_docs}},
+        {"find_double_or, wrong type", reactor_input,
+         [&](const Input & in) { find_double_or(reactor(in), "wrong", dim::none, 1.0); }, {"line 3: reactor.wrong: "}},
+        {"find_value, missing", reactor_input, [&](const Input & in) { find_value<std::string>(reactor(in), "type"); },
+         {"reactor.type: missing", reactor_docs}},
+        {"find_value, in a table, missing", "[reactor.inner]\n",
+         [&](const Input & in) { find_value<std::string>(reactor(in), "inner", "type"); }, {"reactor.inner.type: missing"}},
+        {"find_value_or, wrong type", reactor_input,
+         [&](const Input & in) { find_value_or<int>(reactor(in), "wrong", 0); }, {"reactor.wrong: ", reactor_docs}},
+        {"find_real, missing", boundaries, [&](const Input & in) { find_real(boundary(in), "p", dim::pressure); },
+         {"line 3: boundaries[1].p: missing", "See docs/input.md#boundaries"}},
+        {"find_real_or, wrong type", boundaries,
+         [&](const Input & in) { find_real_or(boundary(in), "wrong", dim::pressure, 1.0_r); }, {"boundaries[1].wrong: "}},
+        {"find_real_vector, missing", boundaries,
+         [&](const Input & in) { find_real_vector(boundary(in), "axis", dim::none); }, {"boundaries[1].axis: missing"}},
+    };
+    for (const Case & c : cases) {
+        SCOPED_TRACE(c.name);
+        const Input input = parse_input_string(c.input);
+        try {
+            c.read(input);
+            ADD_FAILURE() << "no error";
+        } catch (const InputError & e) {
+            for (const auto & part : c.parts) EXPECT_NE(std::string(e.what()).find(part), std::string::npos) << e.what();
+        }
+    }
+}
+
+TEST(ErrorMessages, ValuesOfABoundaryReadDirectlyNameTheBoundaryEntry) {
+    const std::string u = N_DIM == 3 ? "[1.0, 0.0, 0.0]" : "[1.0, 0.0]";
+    const std::string input =
+        replaced(box(), "type = \"symmetry\"", "type = \"dirichlet\"\nrho = 1.0\nu = " + u + "\np = \"300 K\"");
+    expect_parts(run_error(input), {"boundaries[name = \"left\"].p: \"300 K\" has the dimension of temperature"});
+}
+
 TEST(ErrorMessages, ARemovedKeyWhoseValueCannotBeConvertedNamesTheKey) {
     for (const std::string value : {"\"two\"", "2.5", "true"}) {
         SCOPED_TRACE(value);
@@ -402,6 +451,24 @@ TEST(ErrorMessages, TextErrorsThatStartWithAKeyLinkItsDocs) {
     EXPECT_EQ(std::string(InputError("[[periodic]] angle must be nonzero.").what()),
               "[[periodic]] angle must be nonzero. See docs/input.md#periodic.");
     EXPECT_EQ(std::string(InputError("cannot read the file.").what()), "cannot read the file.");
+}
+
+TEST(ErrorMessages, ExpressionsThatDoNotCompileNameTheKeyLineAndGuide) {
+    const std::string input =
+        replaced(replaced(box(), "[initialize]\n", "[initialize]\ntype = \"analytical\"\n"), "T = 1.0", "T = \"(1 + x\"");
+    expect_parts(run_error(input), {line_prefix(input, "T = \"") + "initialize.T: \"(1 + x\": expected ')'",
+                                    "at position 7", "See docs/guide/expressions.md."});
+    CheckOptions options;
+    options.input_file = "case.toml";
+    Solver solver;
+    const CheckReport report = solver.check(parse_input_string(input), options);
+    ASSERT_EQ(report.errors().size(), 1u);
+    EXPECT_EQ(report.errors()[0], "case.toml: " + run_error(input));
+    const std::string dirichlet =
+        replaced(box(), "name = \"left\"\ntype = \"symmetry\"\n",
+                 std::string("name = \"left\"\ntype = \"dirichlet\"\nrho = \"(1 + y\"\np = 1.0\nu = [1.0, 0.0") +
+                     (N_DIM == 3 ? ", 0.0" : "") + "]\n");
+    expect_parts(run_error(dirichlet), {line_prefix(dirichlet, "rho = \"") + "left.rho: \"(1 + y\": expected ')'"});
 }
 
 TEST(ErrorMessages, DataFileErrorsLinkTheDocsOfTheKeyThatReadsThem) {

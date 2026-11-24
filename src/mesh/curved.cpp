@@ -382,6 +382,10 @@ Shape shape_of(const Input & entry, const std::string & where, const Input * nam
         throw InputError(where + " is " + (N_DIM == 2 ? "an area" : "a volume") + ", and a curved zone lies on " +
                          surface + ": add filled = false for its boundary.");
     }
+    if (region::open_surface(*region)) {
+        throw InputError(where + ": a curved zone on an open surface from an STL or OBJ file is not supported yet; "
+                         "give a closed surface with filled = false, or a primitive's.");
+    }
     const auto & pieces = region->pieces();
     if (region->dimension() != N_DIM - 1 || pieces.size() != 1 || pieces[0].carriers.size() != 1 ||
         !pieces[0].inside.empty() || !pieces[0].outside.empty() ||
@@ -878,6 +882,37 @@ Vec3 Geometry::area_vector(uint32_t f) const {
         }
     }
     return A;
+}
+
+namespace {
+
+constexpr size_t REVOLVED_POINTS = 16;
+
+}  // namespace
+
+Vec3 Geometry::revolved_area_vector(uint32_t f) const {
+    const std::vector<Vec3> v = face_nodes(f);
+    std::vector<double> g, gw;
+    gauss_legendre(REVOLVED_POINTS, g, gw);
+    double ry = 0.0;
+    for (size_t q = 0; q < g.size(); q++) {
+        Vec3 x, dx[2];
+        eval(f, &g[q], x, dx);
+        ry -= gw[q] * x[1] * dx[0][0];
+    }
+    return {0.5 * (v[1][1] * v[1][1] - v[0][1] * v[0][1]), ry, 0.0};
+}
+
+double Geometry::revolved_area(uint32_t f) const {
+    std::vector<double> g, gw;
+    gauss_legendre(REVOLVED_POINTS, g, gw);
+    double out = 0.0;
+    for (size_t q = 0; q < g.size(); q++) {
+        Vec3 x, dx[2];
+        eval(f, &g[q], x, dx);
+        out += gw[q] * std::max(x[1], 0.0) * std::sqrt(dot(dx[0], dx[0]));
+    }
+    return out;
 }
 
 void Geometry::face_rule(uint32_t f, const std::vector<std::array<double, 2>> & ref, const std::vector<double> & ref_w,
