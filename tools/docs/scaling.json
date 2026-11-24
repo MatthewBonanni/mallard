@@ -1,0 +1,128 @@
+{
+ "device": "NVIDIA A100-SXM4-80GB",
+ "commit": "9da4ab1e7 / a7a5432e4",
+ "from_step": 60,
+ "points": [
+  {
+   "series": "strong",
+   "gpus": 1,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 244.877,
+   "runs": [
+    244.568,
+    245.996
+   ]
+  },
+  {
+   "series": "strong",
+   "gpus": 2,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 119.578,
+   "runs": [
+    118.972,
+    119.878
+   ]
+  },
+  {
+   "series": "strong",
+   "gpus": 4,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 60.941,
+   "runs": [
+    60.973,
+    60.775
+   ]
+  },
+  {
+   "series": "strong",
+   "gpus": 8,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 31.992,
+   "runs": [
+    29.286,
+    32.017
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 1,
+   "nodes": 1,
+   "cells": 262144,
+   "ms_per_step": 30.583,
+   "runs": [
+    30.578,
+    30.59
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 2,
+   "nodes": 1,
+   "cells": 524288,
+   "ms_per_step": 30.787,
+   "runs": [
+    30.72,
+    30.821
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 2,
+   "nodes": 2,
+   "cells": 524288,
+   "ms_per_step": 31.097,
+   "runs": [
+    31.065,
+    31.114
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 4,
+   "nodes": 1,
+   "cells": 1048576,
+   "ms_per_step": 31.098,
+   "runs": [
+    31.092,
+    31.109
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 8,
+   "nodes": 1,
+   "cells": 2097152,
+   "ms_per_step": 31.029,
+   "runs": [
+    31.055,
+    31.019
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 8,
+   "nodes": 2,
+   "cells": 2097152,
+   "ms_per_step": 31.05,
+   "runs": [
+    31.043,
+    31.058
+   ]
+  },
+  {
+   "series": "weak",
+   "gpus": 14,
+   "nodes": 2,
+   "cells": 3670016,
+   "ms_per_step": 31.053,
+   "runs": [
+    31.059,
+    31.051
+   ]
+  }
+ ]
+}
