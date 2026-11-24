@@ -11,7 +11,7 @@ this page by platform, with the support policy.
 When a job runs:
 
 - **every PR**: the gate, the CI run a pull request needs before it merges (`ci.yml`), and every push to `main` whose tree did not already pass it in a batch;
-- **main**: on `main` every 3 hours when it has changed since its last full run, and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
+- **main**: on `main` nightly when it has changed since its last full run, and on a branch with `-f full=true`; a failure opens an issue labeled `ci-main`;
 - **device PRs**: pull requests whose changes touch device code ([`device_changes.sh`](../../tools/dev/device_changes.sh)), before they merge;
 - **nightly**, **release** (each release, before its tag, and by hand on a branch) and **by hand** (before a release).
 
@@ -65,7 +65,7 @@ durations of `main`'s newest passed run, or [`test_times.json`](../../tools/dev/
 |---|---|---|---|---|---|
 | CPU image: OpenMP, MPI, dKaMinPar, HDF5, CGNS, zlib, 2D and 3D | x86-64 and arm64 CPU | Run | Examples compared with reference solutions (`docker/smoke`); also through Apptainer on x86-64 | release | `release.yml/cpu` |
 | CUDA image: sm_80, 86, 89 and 90, OpenMP host, MPI, NCCL, HDF5, CGNS, zlib, 2D and 3D | | Compile | Libraries resolve and the executables start (no GPU) | release | `release.yml/cuda` |
-| Relocatable archive: OpenMP, MPICH ABI, HDF5, CGNS, zlib, 2D and 3D, built with GCC 16 on glibc 2.28 (manylinux_2_28) | x86-64 and arm64 CPU | Run | Unpacked on Ubuntu 26.04: examples compared with reference solutions (`docker/smoke`), and Sod on two ranks of Ubuntu's MPICH in place of the archive's | release | `release.yml/archive` |
+| Portable binaries: OpenMP, MPICH or Open MPI ABI, HDF5, CGNS, zlib, 2D and 3D, built with GCC 16 on glibc 2.28 (manylinux_2_28) | x86-64 and arm64 CPU | Run | Unpacked on Ubuntu 26.04: examples compared with reference solutions (`docker/smoke`), and Sod on two ranks of Ubuntu's MPICH or Open MPI in place of the archive's | release | `release.yml/archive` |
 | Spack `mallard@main`: OpenMP, MPI, HDF5, CGNS, zlib, 2D and 3D, with Ubuntu's GCC, CMake and Open MPI | x86-64 CPU | Run | `spack test run` and the container smoke test | release | `release.yml/spack` |
 | Spack `+cuda`, `+rocm`, `+cuda +nccl`, `~mpi precision=single` | | Concretized only | | release | `release.yml/spack` |
 

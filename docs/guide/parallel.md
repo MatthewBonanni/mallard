@@ -66,7 +66,7 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 
 - `multijagged` (the default since 0.8.0): equal slabs along x, each slab cut along y and, in 3D, along z, with the number of pieces per axis that leaves the least area between the blocks. A box of cuboid cells gets cuboid parts; the blocks are numbered along a Hilbert curve, so the ranks of a node hold a compact group.
 - `hilbert` (the default before 0.8.0): cells split along a Hilbert curve through their centroids.
-- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB).
+- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB), or `spack install mallard +kaminpar`.
 
 On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), every feature included, as long as halos go through NCCL: with MPI's exchanges (`halo_exchange = "mpi"`, or a build without NCCL) the steps run kernel by kernel, with the host synchronizing at every exchange.
 
@@ -204,6 +204,68 @@ the run: GPU-aware MPI, NCCL, unbound OpenMP threads
 ## Multi-GPU scaling
 
 The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/#scaling) plots the efficiencies below.
+
+### 3D Taylor–Green vortex, Mallard 0.11.0 {#scaling-3d-taylor-green}
+
+The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and SSPRK3, on hexahedra, from `examples/taylor_green_3d/scaling.toml`. The hardware is NVIDIA A100-SXM4-80GB GPUs, 8 per node, with NVLink within a node and HDR InfiniBand with GPUDirect RDMA between nodes. There is one rank per GPU (12 OpenMP host threads each), NCCL halo exchanges, multi-jagged partitions and the step's CUDA graph, all defaults. Each point is the median time per step from step 60 to 160 over two runs, setup excluded. Efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong scaling and T<sub>1</sub>/T<sub>n</sub> for weak scaling.
+
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-light.svg#gh-light-mode-only)
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-dark.svg#gh-dark-mode-only)
+
+**Strong scaling**, 128³ hexahedra (2,097,152 cells), main a7a5432e4:
+
+| GPUs | cells per GPU | time per step | efficiency |
+|---:|---:|---:|---:|
+| 1 | 2,097,152 | 244.9 ms | |
+| 2 | 1,048,576 | 119.6 ms | 102% |
+| 4 | 524,288 | 60.9 ms | 100.5% |
+| 8 | 262,144 | 32.0 ms | 95.7% |
+
+**Weak scaling**, 64³ hexahedra per GPU (Nx = 64 n), main 9da4ab1e7 (the solver's step is unchanged between the two commits):
+
+| GPUs | mesh | one node | efficiency | two nodes | efficiency |
+|---:|---|---:|---:|---:|---:|
+| 1 | 64³ | 30.58 ms | | | |
+| 2 | 128 × 64 × 64 | 30.79 ms | 99.3% | 31.10 ms (1 + 1) | 98.3% |
+| 4 | 256 × 64 × 64 | 31.10 ms | 98.3% | | |
+| 8 | 512 × 64 × 64 | 31.03 ms | 98.6% | 31.05 ms (4 + 4) | 98.5% |
+| 14 | 896 × 64 × 64 | | | 31.05 ms (7 + 7) | 98.5% |
+
+- **Strong scaling:** at or above 100% up to 4 GPUs. An A100 advances 8.77M cells per second with 1M cells, against 8.56M with 2.1M or 262,144 cells. At 8 GPUs each rank holds a 64³ cube with neighbors on all six sides, whereas the weak-scaling boxes are cut along x only. The larger partition surface is the likely cause of the extra 1 ms per step over the weak-scaling run with the same cells per GPU (32.0 against 31.0 ms).
+- **Crossing nodes costs nothing measurable:** 4 + 4 GPUs on two nodes run as fast as 8 on one, and the step stays a single CUDA graph across nodes.
+- **What weak scaling loses** is 0.2 ms per step at 2 GPUs and about 0.5 ms (1.5–1.7%) from 4 on: the halo-dependent cells' and NCCL's kernels share the device with the interior cells' reconstruction.
+
+**Measuring your own machine.** `scaling.py` in the example writes the inputs of the whole study. Run them one after the other, then reduce their run logs:
+
+```bash
+cd examples/taylor_green_3d
+python scaling.py --gpus 1 2 4 8          # writes strong/n1 ... weak/n8 and prints the command of each run
+# run the printed commands one at a time (on a cluster, from your job script), then:
+python ../../tools/docs/scaling.py --strong strong/n* --weak weak/n* --out scaling.json
+```
+
+The input is the example's flow, shortened to 160 steps with no output, so the time per step is all that is measured:
+
+```toml
+[run]
+n_steps = 160
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 128   # weak scaling: Nx = 64 n and Lx = 2 pi n on n GPUs, Ny = Nz = 64
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+```
+
+It adds no keys; `[output] check_interval = 20` sets how often the progress records that `tools/docs/scaling.py` reads are written. Pitfalls:
+
+- **Grow the box, not the cells.** The weak-scaling boxes keep cubic cells and grow along x. Refining in one direction changes TENO's stencils and their cost, so the time per step would no longer compare.
+- **Skip the first steps.** The first steps include capturing the step graph and warming up the GPU, so the times start at step 60 (`--from`).
+- **One run per GPU at a time.** Two runs sharing a GPU, or a rank count above the GPUs of the node without `--kokkos-map-device-id-by=mpi_rank`, measure contention rather than Mallard.
 
 ### 3D, Mallard 0.8.0 {#scaling-3d}
 

@@ -19,8 +19,9 @@ kexpr follows the grammar, operator semantics and numerics of
 [exprtk](https://www.partow.net/programming/exprtk/) (Arash Partow, MIT License), to
 the last bit of its literal conversion and integer powers, without its
 strings and vectors, and with case-sensitive names. Every key accepts the
-same language and reports the same errors, with the expression and the
-position of the problem, and `mallard check` reports them before a run. Every
+same language and reports the same errors, with the key, its line, the
+expression and the position of the problem, and `mallard check` reports them
+before a run. Every
 section also evaluates it with the same code, on the device where the solver
 runs: the values on GPUs are those on CPUs up to the last bits of library
 functions such as `sin` and `exp`.
@@ -38,6 +39,7 @@ and probe curves their parameter `s`. Names are case sensitive: `T` is not `t`.
 
 | What | Syntax |
 |---|---|
+| Grouping | `( )`, `[ ]` or `{ }`, each closed by its own kind (`(x + 1]` is an error), nested at most 256 deep |
 | Arithmetic | `+ - * / % ^`; `^` binds from the right and above unary minus (`-x^2` is `-(x^2)`); `2x`, `2(x + 1)` and `(x)(y)` multiply |
 | Comparisons | `< <= > >= == !=` (also `=` and `<>`), giving 1 or 0 |
 | Logic | `and`, `or`, `xor`, `nand`, `nor`, `xnor`, `&`, `\|`, `not(x)`; any value other than 0 is true |
