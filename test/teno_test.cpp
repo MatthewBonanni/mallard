@@ -13,6 +13,7 @@
 #include <Kokkos_Core.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -1019,6 +1020,88 @@ TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
     EXPECT_EQ(distinct.size(), 110u);
     EXPECT_EQ(digest, 6536239145204640138ULL);
 #endif
+}
+
+namespace {
+
+KOKKOS_INLINE_FUNCTION rtype record_mean(const uint32_t s, const size_t k) { return rtype(0.5 + s + 0.125 * double(k)); }
+KOKKOS_INLINE_FUNCTION rtype record_si(const uint32_t s, const size_t k) { return rtype(-1.0 - s - 0.25 * double(k)); }
+KOKKOS_INLINE_FUNCTION int32_t record_cell(const uint32_t s, const size_t k) { return int32_t(100 * s + k); }
+KOKKOS_INLINE_FUNCTION int32_t record_face(const uint32_t s, const size_t k) { return k % 2 ? int32_t(64 * k + s) : -1; }
+KOKKOS_INLINE_FUNCTION rtype record_pinv(const uint32_t s, const size_t k) { return rtype(s + double(k) / 16.0); }
+
+// The setup's writes of slots [0, n) with a record (size(j) > 0), and nothing else (a free function: CUDA's
+// extended lambdas cannot be in a test's TestBody)
+void set_up_record_slots(const teno_setup::TableBatch & b, const uint32_t n, const Kokkos::View<uint32_t *[2]> & size,
+                         const Kokkos::View<uint16_t *> & large, const Kokkos::View<uint16_t *> & small) {
+    const size_t nk = b.nk;
+    Kokkos::parallel_for(Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
+        if (size(j, 0) == 0) return;
+        b.gather_depth(j) = uint8_t(2 + j);
+        b.invalid_small(j) = uint8_t(j);
+        b.large_size(j) = large(j);
+        b.small_total(j) = small(j);
+        for (uint32_t f = 0; f < teno::MAX_FACES; f++) b.small_size(j, f) = uint16_t(f + j);
+        for (size_t k = 0; k < b.basis_mean.cap; k++) b.basis_mean.lane(j)[k] = record_mean(j, k);
+        for (size_t k = 0; k < b.si.cap; k++) b.si.lane(j)[k] = record_si(j, k);
+        for (size_t k = 0; k < large(j); k++) {
+            b.large_cells.lane(j)[k] = record_cell(j, k);
+            b.large_faces.lane(j)[k] = record_face(j, k);
+        }
+        for (size_t k = 0; k < large(j) * size_t(nk); k++) b.large_pinv.lane(j)[k] = record_pinv(j, k);
+        for (size_t k = 0; k < small(j); k++) {
+            b.small_cells.lane(j)[k] = record_cell(j + 10, k);
+            b.small_faces.lane(j)[k] = record_face(j + 10, k);
+        }
+        for (size_t k = 0; k < small(j) * size_t(teno::NK_SMALL); k++) b.small_pinv.lane(j)[k] = record_pinv(j + 10, k);
+    });
+}
+
+}  // namespace
+
+TEST(TENOSetup, ShapeRecordsHoldWhatTheirSlotsSetUp) {
+    // Only what the setup writes is set: the arrays past each stencil's size, slot 1 (no record) and slot 3 (past
+    // n) stay uninitialized, which compute-sanitizer's initcheck reports if a record copies them
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    constexpr uint32_t slots = 4, n = 3;
+    constexpr uint8_t nk = 3;
+    const std::vector<uint32_t> h_size = {7, 0, 9}, h_layers = {2, 0, 3};
+    const std::vector<uint16_t> n_large = {2, 0, 3}, n_small = {4, 0, 1};
+    for (const bool interleaved : {false, true}) {
+        teno_setup::TableBatch batch(slots, nk, 4, 5, interleaved);
+        Kokkos::View<uint32_t *[2]> size("size", n);
+        auto h = Kokkos::create_mirror_view(size);
+        for (uint32_t j = 0; j < n; j++) {
+            h(j, 0) = h_size[j];
+            h(j, 1) = h_layers[j];
+        }
+        Kokkos::deep_copy(size, h);
+        Kokkos::View<uint16_t *> large("large", n), small("small", n);
+        Kokkos::deep_copy(large, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(n_large.data(), n));
+        Kokkos::deep_copy(small, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(n_small.data(), n));
+        set_up_record_slots(batch, n, size, large, small);
+        const std::vector<std::vector<uint64_t>> records = teno::ShapeKeys::records(batch, n, size);
+        ASSERT_EQ(records.size(), n);
+        EXPECT_EQ(records[1], std::vector<uint64_t>{0});
+        for (const uint32_t j : {0u, 2u}) {
+            std::vector<uint64_t> want = {1, h_size[j], h_layers[j], 2 + j, j, n_large[j]};
+            for (uint32_t f = 0; f < teno::MAX_FACES; f++) want.push_back(uint64_t(f + j));
+            auto bits = [](const rtype v) { return std::bit_cast<uint64_t>(double(v)); };
+            for (size_t k = 0; k < batch.basis_mean.cap; k++) want.push_back(bits(record_mean(j, k)));
+            for (size_t k = 0; k < batch.si.cap; k++) want.push_back(bits(record_si(j, k)));
+            for (size_t k = 0; k < n_large[j]; k++) {
+                want.push_back(uint64_t(record_cell(j, k)));
+                want.push_back(uint64_t(int64_t(record_face(j, k))));
+            }
+            for (size_t k = 0; k < n_large[j] * size_t(nk); k++) want.push_back(bits(record_pinv(j, k)));
+            for (size_t k = 0; k < n_small[j]; k++) {
+                want.push_back(uint64_t(record_cell(j + 10, k)));
+                want.push_back(uint64_t(int64_t(record_face(j + 10, k))));
+            }
+            for (size_t k = 0; k < n_small[j] * size_t(teno::NK_SMALL); k++) want.push_back(bits(record_pinv(j + 10, k)));
+            EXPECT_EQ(records[j], want) << "slot " << j << (interleaved ? ", interleaved" : "");
+        }
+    }
 }
 
 namespace {
