@@ -23,7 +23,7 @@ Pr = 0.72
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 60 more.
+and 61 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -146,8 +146,11 @@ half O-grid (`make_cylinder_mesh.py --half`, drawn coarser than it runs).*
   only its axial component is meaningful.
 - Every reconstruction, Riemann solver, viscous and mixture model, chemistry
   and MPI work as in planar runs, at design order up to the axis.
-- Not available: periodicity in y, curved boundaries, and `[les]` (planar
-  runs only).
+- [Curved boundaries](meshes.md#curved-boundaries) (a sphere, a nozzle
+  contour) work as in planar runs: the cells and faces next to them get their
+  revolved volumes, centroids and areas from the curved geometry, and uniform
+  flow stays uniform between curved walls.
+- Not available: periodicity in y, and `[les]` (planar runs only).
 
 Examples, each checked against an exact or reference solution:
 [`poiseuille_pipe`](https://matthewbonanni.github.io/mallard/docs/examples/#poiseuille-pipe),

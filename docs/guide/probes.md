@@ -41,7 +41,7 @@ interval = 10
 [`moving_heaters`](https://matthewbonanni.github.io/mallard/docs/examples/#moving-heaters),
 [`hot_gas_regions`](https://matthewbonanni.github.io/mallard/docs/examples/#hot-gas-regions),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
-and 4 more.
+and 5 more.
 
 ```toml
 # Wake survey: high-order point values on an arc, a VTK series for ParaView,

@@ -110,9 +110,16 @@ const std::unordered_map<std::string, Reduction> REDUCTIONS = {
 /** @brief A share of a region outside the domain small enough to be the cell fractions' error: no warning. */
 constexpr double CLIPPED_SHARE = 1e-3;
 
-/** @brief The units of a filled region's volume (2D: area; axisymmetric: volume per radian) and of its surface. */
+/** @brief The units of a filled region's volume (2D: area; axisymmetric: volume per radian), for messages. */
 const char * volume_units(const bool revolved) { return N_DIM == 3 ? "m^3" : revolved ? "m^3 rad^-1" : "m^2"; }
-const char * surface_units(const bool revolved) { return N_DIM == 3 ? "m^2" : revolved ? "m^2 rad^-1" : "m"; }
+
+/** @brief The dimensions of a filled region's volume and of its surface. */
+Dimension volume_dimension(const bool revolved) {
+    return dim::of(0, N_DIM == 3 || revolved ? 3 : 2, 0, 0, 0, N_DIM == 2 && revolved ? -1 : 0);
+}
+Dimension surface_dimension(const bool revolved) {
+    return dim::of(0, N_DIM == 3 || revolved ? 2 : 1, 0, 0, 0, N_DIM == 2 && revolved ? -1 : 0);
+}
 
 /** @brief The names of a filled region's measures: volume and surface_area, or in 2D area and perimeter. */
 std::pair<const char *, const char *> measure_names(const bool revolved) {
@@ -1008,15 +1015,15 @@ std::string Probes::Probe::sampling_json() const {
     if (!locations.empty()) {
         for (const char * k : {"points.requested", "points.centroid", "points.distance", "points.max_distance",
                                "points.mean_distance"}) {
-            units.add(k, "m");
+            units.add(k, units::of(dim::length));
         }
     }
-    if (average) units.add("variables.average.start", "s");
+    if (average) units.add("variables.average.start", units::of(dim::time));
     if (!measures.empty()) {
         const auto [volume, surface] = measure_names(geometry.revolved);
         for (const char * part : {"region", "in_domain"}) {
-            units.add(std::string("measures.") + part + "." + volume, volume_units(geometry.revolved));
-            units.add(std::string("measures.") + part + "." + surface, surface_units(geometry.revolved));
+            units.add(std::string("measures.") + part + "." + volume, units::of(volume_dimension(geometry.revolved)));
+            units.add(std::string("measures.") + part + "." + surface, units::of(surface_dimension(geometry.revolved)));
         }
     }
     b.raw("units", units.str());
@@ -3240,7 +3247,7 @@ void accumulate_cells(std::vector<uint64_t> & cells, std::vector<double> & mean_
         const bool old = i < cells.size() && (j == x_cells.size() || cells[i] <= x_cells[j]);
         const bool sampled = j < x_cells.size() && (i == cells.size() || x_cells[j] <= cells[i]);
         all.push_back(old ? cells[i] : x_cells[j]);
-        auto mean = [&](double m, double x) { return m + a * (x - m); };
+        auto mean = [&](double m, double x) { return m + rounded_product(a, x - m); };
         weights.push_back(mean(old ? mean_weights[i] : 0.0, sampled ? x_weights[j] : 0.0));
         for (size_t v = 0; v < n_cols; v++) {
             values.push_back(mean(old ? mean_values[i * n_cols + v] : 0.0, sampled ? x_values[j * n_cols + v] : 0.0));
