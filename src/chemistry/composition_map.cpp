@@ -325,7 +325,7 @@ CompositionMap::Result CompositionMap::map(const double * Y_from, double * Y_to)
             if (dual >= dual_start + 1e-4 * t * slope || residual <= tolerance) break;
         }
     }
-    if (residual > 1e3 * tolerance) {
+    if (!(residual <= 1e3 * tolerance)) {  // also a non-finite residual
         std::ostringstream o;
         o << "the projection onto the target's species did not conserve the elements (residual " << residual
           << "): no composition of the target species has the source's element mass fractions";
