@@ -2980,11 +2980,6 @@ void Solver::start_run() {
 
         run_hold = std::make_unique<RunHold>(control_enabled);
         publishing = control_enabled && control_socket && comm::is_root() && run_hold->server.start();
-        if (control_enabled && comm::is_root()) {
-            run_endpoint::write(provenance::run_id(), comm::size(),
-                                {.state = "running", .outcome = "", .socket = publishing,
-                                 .control_file_interval = control_file_interval, .run_log = endpoint_run_log});
-        }
         control_stop = {};
         trigger_stop = {};
         if (control_file_interval > 0) control_files_polled = step / control_file_interval;
@@ -3015,6 +3010,12 @@ void Solver::start_run() {
             print_progress();
             unflush_chemistry();
             publish_status();
+            // Running once its status is published: a client that finds the run answers to status with its step
+            if (control_enabled && comm::is_root()) {
+                run_endpoint::write(provenance::run_id(), comm::size(),
+                                    {.state = "running", .outcome = "", .socket = publishing,
+                                     .control_file_interval = control_file_interval, .run_log = endpoint_run_log});
+            }
             // Strang splitting with the half steps of consecutive steps fused into one chemistry call
             defer_chemistry = reacting && fuse_chemistry;
             use_device_steps = device_steps_unsupported().empty();
