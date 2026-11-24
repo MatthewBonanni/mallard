@@ -15,6 +15,7 @@
 #define REGION_H
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -78,12 +79,13 @@ struct Copy {
 /**
  * @brief A condition on the solution: where its level, an expression of the
  *        fields and x, y, z, t (condition_variables), is negative. key names
- *        it in the input, text is as given.
+ *        it in the input, on line, and text is as given.
  */
 struct Condition {
     std::string level;
     std::string key;
     std::string text;
+    std::size_t line = 0;
 };
 
 /** @brief The fields of conditions that read the velocity gradient, last among condition_variables. */

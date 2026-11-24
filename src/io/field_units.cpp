@@ -351,7 +351,7 @@ FieldDescription describe(const std::string & name) {
 
 std::string csv_line(const std::vector<Dimension> & columns) {
     std::string line = "# units: ";
-    for (size_t i = 0; i < columns.size(); i++) line += (i ? "," : "") + columns[i].udunits();
+    for (size_t i = 0; i < columns.size(); i++) line += (i ? "," : "") + units::of(columns[i]);
     return line;
 }
 
