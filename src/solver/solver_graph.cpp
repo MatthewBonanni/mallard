@@ -565,7 +565,7 @@ void Solver::device_step_body() {
         const uint32_t any = n_probes + (reduced ? 1 : 0);
         flush_chemistry_if(&probe_due.data()[any], 1);
         device_if(&probe_due.data()[any], [&] {
-            const auto [cell_W, transport, all_gradients] = probes.staged_needs(wall_model_on);
+            const auto [cell_W, transport, all_gradients] = probes.staged_needs(wall_model_on || polynomial_viscous);
             if (cell_W) {
                 update_cell_W();
                 if (is_mixture() && transport) update_transport();

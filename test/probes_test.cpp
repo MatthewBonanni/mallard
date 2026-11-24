@@ -935,6 +935,51 @@ TEST(ProbesTest, DiffusiveFluxesOfReconstructionGradientsAreTheSchemesPolynomial
     }
 }
 
+TEST(ProbesTest, WallShearHeatFluxAndForcesOfReconstructionGradientsConverge) {
+    // With viscous_gradients = "reconstruction", fitted walls report the scheme's polynomial wall flux: TENO5's
+    // wall fits make the wall shear stress, the heat flux and the force converge at third order or more, where
+    // the least-squares wall gradients converge at first
+    SKIP_IN_SINGLE_PRECISION("the finest errors are near single-precision round-off");
+    const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double tau = COUETTE_MU * COUETTE_U;
+    std::vector<double> n_cells, e_tau, e_q, e_force;
+    for (uint32_t n : {8u, 16u}) {
+        const std::string dir = fresh_dir("couette_polynomial_walls");
+        const std::string extra = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
+                                  "fields = [\"TAU_W\", \"Q_W\"]\n"
+                                  "[[forces]]\nzone = \"bottom\"\nfile = \"" + dir + "/forces.csv\"\n";
+        std::string text = couette_case(n, extra);
+        text.replace(text.find("type = \"MUSCL\""), 14, "type = \"TENO\"\norder = 5");
+        text.insert(text.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+        Solver solver;
+        solver.init(parse_toml(text));
+        run(solver);
+        double error_tau = 0.0, error_q = 0.0;
+        for (const auto & row : read_csv(dir + "/walls.csv")) {
+            if (row.at("step") != 0.0) continue;
+            const bool top = row.at("ny") > 0.0;
+            error_tau = std::max(error_tau, std::fabs(row.at("TAU_W") - tau) / tau);
+            const double q = top ? q_top : q_bottom;
+            error_q = std::max(error_q, std::fabs(row.at("Q_W") - q) / std::fabs(q));
+        }
+        // The fluid drags the wall at rest along the flow, over a unit area
+        const auto forces = read_csv(dir + "/forces.csv");
+        ASSERT_FALSE(forces.empty());
+        n_cells.push_back(n);
+        e_tau.push_back(error_tau);
+        e_q.push_back(error_q);
+        e_force.push_back(std::fabs(forces[0].at("Fx_viscous") - tau) / tau);
+    }
+    const std::string cells = "quadrilaterals";
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients", cells,
+                                "max wall shear stress error of surface probes, Couette flow", n_cells, e_tau, 3.0, 2.5});
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients", cells,
+                                "max wall heat flux error of surface probes, Couette flow", n_cells, e_q, 3.0, 2.5});
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients", cells,
+                                "viscous wall force error, Couette flow", n_cells, e_force, 3.0, 2.5});
+}
+
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
     // Cell sampling takes the forces monitor's wall pressure and gradients;
     // axisymmetric runs integrate over a radian of the revolved wall, as

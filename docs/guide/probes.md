@@ -171,8 +171,11 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 
 On walls with a [wall model](les.md#wall-models-wall_model), the shear stress,
 the tractions and `Q_W` are the model's, so `integral` of
-`TRACTION_VISCOUS` and `Q_W` are the `[[forces]]` force and `Q`. The
-`moment` reduction gives the moment of each vector variable about
+`TRACTION_VISCOUS` and `Q_W` are the `[[forces]]` force and `Q`. With
+`viscous_gradients = "reconstruction"`, walls with a wall fit report the
+scheme's polynomial wall flux instead of least-squares gradients, in the
+probes and in `[[forces]]` alike ([Numerics](numerics.md#viscous-gradients)).
+The `moment` reduction gives the moment of each vector variable about
 `moment_center`, from the same faces as the forces:
 
 ```toml

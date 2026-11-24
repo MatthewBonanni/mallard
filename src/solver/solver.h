@@ -1094,6 +1094,8 @@ class Solver {
         void update_probe_gradients();
         /** @brief TENO's face point gradients of the current state, for the polynomial fluxes of probes. */
         void update_point_gradients();
+        /** @brief The single-gas viscous flux functor of outputs (probes, forces) on the current point data. */
+        ViscousFluxFunctor output_viscous_flux() const;
 
     private:
         /**

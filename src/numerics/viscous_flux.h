@@ -377,6 +377,20 @@ struct ViscousFluxFunctor {
         }, out);
     }
 
+    /**
+     * @brief Adds the polynomial flux of wall face i_face (polynomial_wall_flux) to out, if the face has one:
+     *        a wall of a fitted cell whose point data are usable.
+     */
+    KOKKOS_INLINE_FUNCTION
+    bool fitted_wall_flux(const uint32_t i_face, rtype * out) const {
+        if (!point_gradients.on() || cells_of_face(i_face, 1) >= 0 || !point_gradients.usable(i_face, 0)) return false;
+        if (fitted_walls.extent(0) == 0 || !fitted_walls(i_face)) return false;
+        const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
+        if (!bc.is_wall()) return false;
+        polynomial_wall_flux(i_face, bc, out);
+        return true;
+    }
+
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t i_face) const {
         rtype out[N_CONSERVATIVE] = {};
@@ -403,11 +417,8 @@ struct ViscousFluxFunctor {
                     return;
                 }
             } else {
+                if (fitted_wall_flux(i_face, out)) return;
                 const BoundaryCondition & bc = boundaries.bcs(boundaries.face_bc(i_face));
-                if (bc.is_wall() && fitted_walls.extent(0) && fitted_walls(i_face)) {
-                    polynomial_wall_flux(i_face, bc, out);
-                    return;
-                }
                 if (bc.type == BoundaryType::SYMMETRY) {
                     polynomial_symmetry_flux(i_face, out);
                     return;
