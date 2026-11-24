@@ -50,14 +50,19 @@ struct OverList {
     void operator()(const uint32_t k) const { f(list(k)); }
 };
 
-/** @brief Calls f(i) for every index i of a set, under a range policy with the given traits. */
+/** @brief Calls f(i) for every index i of a set on exec, under a range policy with the given traits. */
+template <typename... Traits, typename F>
+void parallel_for_set(const Kokkos::DefaultExecutionSpace & exec, const char * label, const IndexSet & set, const F & f) {
+    if (set.list.extent(0) == 0) {
+        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(exec, set.begin, set.end), f);
+    } else {
+        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(exec, 0, set.list.extent(0)), OverList<F>{f, set.list});
+    }
+}
+
 template <typename... Traits, typename F>
 void parallel_for_set(const char * label, const IndexSet & set, const F & f) {
-    if (set.list.extent(0) == 0) {
-        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(set.begin, set.end), f);
-    } else {
-        gated::parallel_for(label, Kokkos::RangePolicy<Traits...>(0, set.list.extent(0)), OverList<F>{f, set.list});
-    }
+    parallel_for_set<Traits...>(Kokkos::DefaultExecutionSpace(), label, set, f);
 }
 
 #endif // INDEX_SET_H

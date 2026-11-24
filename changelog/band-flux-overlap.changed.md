@@ -1,0 +1,1 @@
+- With partition faces exchanged between ranks, their convective fluxes run on the high-priority stream as soon as the face states arrive, beside the viscous gradients, instead of after them on the critical path; results are bitwise unchanged (#305).

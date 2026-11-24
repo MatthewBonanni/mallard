@@ -242,8 +242,9 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         }
         face_exchange.finish(comm_space, face_solution);
         if (polynomial_viscous) polynomial_exchange.finish(comm_space, polynomials);
+        // Beside the gradients as soon as the states arrive, rather than in a tail after them
+        if (partition_faces.size() > 0) launch_convective_flux(partition_faces, comm_space);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
-        if (partition_faces.size() > 0) launch_convective_flux(partition_faces);
     } else {
         launch_convective_flux(rhs_faces);
     }
