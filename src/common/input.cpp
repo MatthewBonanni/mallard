@@ -163,13 +163,16 @@ toml::detail::parse_value<InputConfig>(location & loc, context<InputConfig> & ct
 
 namespace {
 
-void forget_lookups(Input & v) {
+/** @brief Forget the lookups parsing made, and give every table its path. */
+void forget_lookups(Input & v, const std::string & path = "") {
     if (v.is_table()) {
         auto & table = v.as_table();
         table.forget_lookups();
-        for (auto & entry : table.entries()) forget_lookups(entry.second);
+        table.set_path(path);
+        for (auto & entry : table.entries()) forget_lookups(entry.second, path.empty() ? entry.first : path + "." + entry.first);
     } else if (v.is_array()) {
-        for (auto & item : v.as_array()) forget_lookups(item);
+        auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) forget_lookups(array[i], path + "[" + std::to_string(i) + "]");
     }
 }
 
@@ -580,6 +583,24 @@ std::vector<Diagnostic> unused_keys(const Input & input) {
     return out;
 }
 
+void reject_unused_keys(const Input & input) {
+    const std::vector<Diagnostic> unused = unused_keys(input);
+    if (unused.empty()) return;
+    std::string list;
+    for (const Diagnostic & key : unused) list += "\n  " + describe(key);
+    InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" + list);
+    error.code = diagnostic_code::KEY_UNUSED;
+    throw error;
+}
+
+std::string possibly_misspelled(const Input & input) {
+    std::string misspelled;
+    for (const Diagnostic & key : unused_keys(input)) {
+        if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
+    }
+    return misspelled.empty() ? misspelled : "\npossibly misspelled:" + misspelled;
+}
+
 std::string describe(const Diagnostic & key) {
     std::string text = key.line > 0 ? "line " + std::to_string(key.line) + ": " : "";
     text += key.key;
@@ -807,7 +828,7 @@ const Input * holder(const Input & v, const std::string & table, const std::stri
     const Input * outer = holder(v, table + "." + key);
     if (!outer || !outer->as_table().contains(table)) return nullptr;
     const Input & inner = outer->as_table().at(table);
-    if (!inner.is_table()) throw wrong_type(inner, table, "a table", 0, 0);
+    if (!inner.is_table()) throw wrong_type(inner, path_of(v, table), "a table", 0, 0);
     return &inner;
 }
 

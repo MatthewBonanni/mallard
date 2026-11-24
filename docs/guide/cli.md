@@ -42,6 +42,7 @@ A few things hold for every command:
 | Capabilities | `mallard version --format json` | `mallard-capabilities` |
 | Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
 | Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Case view | the `view` of `mallard check INPUT --view DIR --format json` and of `mallard info MESH --view DIR --format json`; each block's field data ([The case view](input_files.md#the-case-view)) | `mallard-case-view` |
 | Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
 | Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
 | Snapshot block | every snapshot and restart file | `mallard-snapshot` |
@@ -92,7 +93,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -161,6 +162,8 @@ Commands:
     mallard pack              One archive that reproduces a run, with a manifest
                               of hashes
   Maintain
+    mallard install verify    Check that this install works here: its
+                              environment, and a quick run of every solver
     mallard test              Run the unit and regression tests
     mallard completion        Print the shell completion script for bash, zsh or
                               fish
@@ -183,6 +186,15 @@ Options:
                            progress records, one JSON object per line as
                            mallard.jsonl has them, for live monitoring and
                            plotting, and the text on stderr. Default: text.
+  --set KEY=VALUE          Change a setting before the first step, as mallard
+                           ctl set does while the run goes on: the same keys
+                           (n_steps, t_stop, t_wall_stop, check_interval,
+                           control_file_interval, an output's or probe's
+                           interval or time_interval, ...) and checks; a setting
+                           it refuses is an error. Give it once per setting.
+                           Each is a set event of mallard.jsonl, and mallard
+                           pack's rerun command repeats it. Default: the input's
+                           settings.
   --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
                            per rank) or --kokkos-device-id=1 (the GPU; by
                            default each rank gets its own).
@@ -224,9 +236,11 @@ ETA, memory and the state of each trigger. checkpoint: write a restart file now;
 the reply names it. stop: write a restart file and end the run (exit status 3).
 set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
-t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
-.time_interval, probes.<name>.interval or .time_interval,
-forces.<zone>.interval, integrals.interval. Other keys are refused.
+t_wall_stop=2h), check_interval, control_file_interval, write_data.<prefix or
+index>.interval or .time_interval, probes.<name>.interval or .time_interval,
+forces.<zone>.interval, integrals.interval. Other keys are refused. A SET file
+in run-dir does the same from anywhere the directory is visible, with [run]
+control_file_interval: lines of key = value, the run log the reply.
 
 Options:
   -h, --help  Show this page.
@@ -488,19 +502,39 @@ Options:
   --catalog KEYS.json       Write every key the setup looked up, with its type,
                             unit, default and accepted values, as JSON. Default:
                             none.
+  --initial PREFIX          Write the initial state, as the run would start from
+                            it (initialize, its regions and data, or a restart),
+                            to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds
+                            without HDF5), the default snapshot format: RHO, U,
+                            P, T and, for mixtures, Y_*. Default: none.
   --view DIR                Write the case view, without running the case:
                             DIR/case.vtkhdf for ParaView (builds without HDF5:
                             DIR/case.vtm), one block each for the mesh, every
-                            boundary zone, region the case uses (filled regions
-                            as their cells with their fractions, surfaces and
-                            curves with their normals or tangents and measures),
-                            probe and periodic pair; and DIR/case-light.svg and
-                            DIR/case-dark.svg, the annotated image (3D: an
-                            isometric view over three orthographic ones) with
-                            every boundary labeled by its name and condition and
-                            every region and probe by its name, a legend, axes,
-                            a scale bar and the domain's extent in its units.
-                            Default: none.
+                            boundary zone (walls with their first cells' y+ as
+                            the field y_plus once it is estimated), region the
+                            case uses (filled regions as their cells with their
+                            fractions, surfaces and curves with their normals or
+                            tangents and measures), probe and periodic pair (a
+                            setup that stops draws the mesh alone); and
+                            DIR/case-light.svg and DIR/case-dark.svg, the
+                            annotated image (3D: an isometric view over three
+                            orthographic ones) with every boundary labeled by
+                            its name and condition and every region and probe by
+                            its name, a legend, axes, a scale bar and the
+                            domain's extent in its units. Every block carries
+                            its metadata (kind, key, element, element_index,
+                            zone) as field data, and the JSON report's view
+                            lists them. Default: none.
+  --geometry-only           Set up and check only what the case view draws: the
+                            mesh, its zones, the boundaries' conditions, the
+                            regions, probes, snapshot regions and periodic
+                            pairs, without the numerics (stencils), the initial
+                            state and the checks of the run (time step,
+                            resolution, mesh quality, memory, cost); walls'
+                            y_plus and regions defined by the solution, which
+                            need the initial state, are left out, and keys are
+                            not checked for use. For previews that follow each
+                            edit of a large case. Default: the whole check.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
@@ -513,6 +547,7 @@ Examples:
   $ mpirun -n 4 mallard check input.toml --mesh-fields mesh
   $ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils
   $ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView
+  $ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time
 
 Exit status:
   0  no errors (there may be warnings)
@@ -1467,6 +1502,68 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-pack
 ```
 
+### mallard install
+
+```text
+Usage: mallard install <command> [options]
+
+Commands on this install of Mallard.
+
+Commands:
+  mallard install verify      Check that this install works here: its
+                              environment, and a quick run of every solver
+
+mallard install <command> --help shows the page of a command.
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-install
+```
+
+### mallard install verify
+
+```text
+Usage: mallard install verify [--format text|json] [--launcher COMMAND] [--keep DIR] [Kokkos options]
+
+Checks an install where it is, for each solver it has (mallard2d, mallard3d):
+the environment, as mallard check without an input reports it (the build,
+devices, MPI), with no error; and a quick run, the Sod shock tube of mallard new
+sod --quick (a slab one cell thick in 3D) to t = 0.2, which must finish and
+match the exact solution: the undisturbed state ahead of the shock (rho 0.125, p
+0.1, within 2%) and the largest Mach number (0.929, within 0.05), from the run
+log's monitors.
+
+Run it where the install will run, as a short job on the partition the runs use:
+under --launcher, each check runs on the job's ranks. The JSON verdict holds
+every check with its time and why it failed, the version and the prefix; an
+installer records it with the install. A few seconds per solver on a CPU.
+
+Options:
+  --format text|json  text: one row per check with its status, time and why;
+                      json: the verdict as one JSON object (schema
+                      mallard-install-verify), for scripts and the GUI. Default:
+                      text.
+  --launcher COMMAND  Run the checks under this command, split at spaces: the
+                      job's launcher ("srun -n 2", "mpirun -n 2"), or a
+                      container runtime. Default: none, one process.
+  --keep DIR          Make the checks' cases in DIR and keep them, with their
+                      logs. Default: a temporary directory, removed.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard install verify
+  $ srun -n 1 -c 4 mallard install verify --format json --kokkos-num-threads=4
+  $ mallard install verify --launcher "mpirun -n 2" --keep verify
+
+Exit status:
+  0  every check passed
+  1  a check failed, or no solver is installed
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-install-verify
+```
+
 ### mallard test
 
 ```text
@@ -1519,8 +1616,8 @@ made from the same table as the help pages and from the catalogs mallard list
 keys and mallard list fields print, so it knows every command, key and field of
 this build; templates come from mallard new when completing.
 
-An install (cmake --install, Spack, the containers, the archives) puts the
-scripts where the shells look: share/bash-completion/completions/mallard,
+An install (cmake --install, Spack, the containers, the portable binaries) puts
+the scripts where the shells look: share/bash-completion/completions/mallard,
 share/zsh/site-functions/_mallard and
 share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree,
 or a prefix the shell does not search, load it from the shell's startup file, as

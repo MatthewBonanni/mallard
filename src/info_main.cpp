@@ -719,10 +719,12 @@ std::string quality_json(const std::array<QualitySummary, MeshQuality::N_METRICS
                      json::Object().add("value", c.value).add("cell", c.cell).raw("x", x + "]").str();
         }
         o.raw(MeshQuality::FIELDS[m], json::Object()
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", worst + "]")
                                           .str());
     }
@@ -785,10 +787,12 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         std::cout.rdbuf(out);
     }
     std::vector<std::string> view;
+    std::vector<case_view::BlockInfo> view_blocks;
     if (const std::string dir = args.value_or("--view", ""); !dir.empty()) {
         if (!mesh->high_order_faces.empty()) mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_input_string("")));
-        view = case_view::write_view(dir, mesh_view(*mesh, region::MeshRegions(*mesh)).blocks,
-                                     std::filesystem::path(path).filename().string());
+        const std::vector<case_view::Block> blocks = mesh_view(*mesh, region::MeshRegions(*mesh)).blocks;
+        view = case_view::write_view(dir, blocks, std::filesystem::path(path).filename().string());
+        view_blocks = case_view::describe(blocks);
     }
     if (args.value_or("--format", "text") == "json") {
         std::string out = output::to_json(c);
@@ -797,7 +801,8 @@ int mesh_info(const std::string & path, const cli::Args & args, int argc, char *
         for (const std::string & f : view) files += (files.empty() ? "" : ",") + json::quote(f);
         std::cout << out << ",\"quality\":" << quality_json(summary)
                   << ",\"mesh_fields_file\":" << (written.empty() ? "null" : json::quote(written))
-                  << ",\"case_view\":[" << files << "]}\n";
+                  << ",\"case_view\":[" << files << "]"
+                  << ",\"view\":" << (view.empty() ? "null" : case_view::json(view, view_blocks, true)) << "}\n";
         return 0;
     }
     print_contents(c);
