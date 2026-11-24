@@ -571,6 +571,7 @@ void Solver::calc_rhs_mixture(State state, State rhs_state, rtype t_stage, rtype
                 functor.point_gradients = dynamic_cast<const TENO &>(*face_reconstruction).point_gradients;
                 functor.quad_weights = face_reconstruction->quadrature_face.weights;
                 functor.face_weights = flux_weights;
+                if (axisymmetric) functor.planar_area = mesh->face_area;
             }
             parallel_for_set("mixture_viscous_flux", rhs_faces, functor);
         });

@@ -394,6 +394,139 @@ INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricOrder,
 
 namespace {
 
+constexpr double MMS_MU = 0.01, MMS_PR = 0.72;
+
+/** @brief Viscous flux tau . n (axial, radial) and u . tau . n + kappa grad T . n of the manufactured state, and tau_thetatheta. */
+std::array<double, 4> mms_viscous_flux(double x, double r, double nx, double nr) {
+    const double k = 2 * PI, s = std::sin(k * x), co = std::cos(k * x), sr = std::sin(PI * r), cr = std::cos(PI * r);
+    const auto [rho, u, v, p] = mms_state(x, r);
+    const double u_x = -0.1 * k * s * cr, u_r = -0.1 * PI * co * sr;
+    const double v_x = 0.05 * k * co * sr, v_r = 0.1 * PI * cr * (1.0 + 0.5 * s);
+    const double rho_x = 0.2 * k * co * cr, rho_r = -0.2 * PI * s * sr;
+    const double p_x = -0.2 * k * s * cr, p_r = -0.2 * PI * co * sr;
+    const double T_x = (p_x * rho - p * rho_x) / (rho * rho), T_r = (p_r * rho - p * rho_r) / (rho * rho);
+    const double hoop = v / r, div = u_x + v_r + hoop;
+    const double t_xx = MMS_MU * (2 * u_x - 2.0 / 3.0 * div), t_xr = MMS_MU * (u_r + v_x);
+    const double t_rr = MMS_MU * (2 * v_r - 2.0 / 3.0 * div), t_tt = MMS_MU * (2 * hoop - 2.0 / 3.0 * div);
+    const double kappa = MMS_MU * GAMMA / (GAMMA - 1.0) / MMS_PR;
+    const double fx = t_xx * nx + t_xr * nr, fr = t_xr * nx + t_rr * nr;
+    return {fx, fr, u * fx + v * fr + kappa * (T_x * nx + T_r * nr), t_tt};
+}
+
+/** @brief The viscous part of dU/dt of each cell's r-weighted average (momentum and energy) under the manufactured state. */
+std::vector<std::array<double, 3>> mms_exact_viscous_rhs(const Mesh & mesh) {
+    const double gx[6] = {-0.9324695142031521, -0.6612093864662645, -0.2386191860831969,
+                          0.2386191860831969, 0.6612093864662645, 0.9324695142031521};
+    const double gw[6] = {0.1713244923791704, 0.3607615730481386, 0.4679139345726910,
+                          0.4679139345726910, 0.3607615730481386, 0.1713244923791704};
+    std::vector<std::array<double, 3>> out(mesh.n_cells);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        const uint32_t nn = mesh.h_n_nodes_of_cell(c);
+        std::vector<double> px(nn), py(nn);
+        for (uint32_t k = 0; k < nn; k++) {
+            px[k] = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), 0));
+            py[k] = double(mesh.h_node_coords(mesh.h_node_of_cell(c, k), 1));
+        }
+        double orient = 0.0;
+        for (uint32_t k = 0; k < nn; k++) orient += px[k] * py[(k + 1) % nn] - px[(k + 1) % nn] * py[k];
+        orient = orient > 0 ? 1.0 : -1.0;
+        std::array<double, 3> flux = {};
+        for (uint32_t k = 0; k < nn; k++) {
+            const double ax = px[k], ay = py[k], bx = px[(k + 1) % nn], by = py[(k + 1) % nn];
+            const double L = std::hypot(bx - ax, by - ay);
+            const double nx = orient * (by - ay) / L, nr = -orient * (bx - ax) / L;
+            for (size_t q = 0; q < 6; q++) {
+                const double t = 0.5 * (gx[q] + 1.0);
+                const double x = ax + t * (bx - ax), r = ay + t * (by - ay);
+                if (r <= 0.0) continue;
+                const auto F = mms_viscous_flux(x, r, nx, nr);
+                for (size_t i = 0; i < 3; i++) flux[i] += 0.5 * gw[q] * L * r * F[i];
+            }
+        }
+        // The hoop stress takes -int tau_thetatheta dA from the radial momentum
+        double source = 0.0, volume = 0.0;
+        for (uint32_t k = 1; k + 1 < nn; k++) {
+            const double ex = px[k] - px[0], ey = py[k] - py[0], fx = px[k + 1] - px[0], fy = py[k + 1] - py[0];
+            const double det = std::abs(ex * fy - ey * fx);
+            for (size_t i = 0; i < 6; i++) {
+                for (size_t j = 0; j < 6; j++) {
+                    const double s = 0.5 * (gx[i] + 1.0), t = 0.5 * (gx[j] + 1.0) * (1.0 - s);
+                    const double w = 0.25 * gw[i] * gw[j] * (1.0 - s) * det;
+                    const double x = px[0] + s * ex + t * fx, r = py[0] + s * ey + t * fy;
+                    source += w * mms_viscous_flux(x, r, 1.0, 0.0)[3];
+                    volume += w * r;
+                }
+            }
+        }
+        flux[1] -= source;
+        for (size_t i = 0; i < 3; i++) out[c][i] = flux[i] / volume;
+    }
+    return out;
+}
+
+/**
+ * @brief Mean error over cells with r < 0.6 of the viscous residual (momentum and energy) at the exact
+ *        manufactured cell averages: the residual at viscosity 2 mu minus that at mu, which cancels the
+ *        convective terms, against the exact viscous part.
+ */
+double mms_viscous_residual_error(const std::string & mesh, uint32_t n, const std::string & reconstruction,
+                                  const std::string & gradients) {
+    Solver once, twice;
+    std::vector<std::array<double, N_CONSERVATIVE>> rhs[2];
+    for (int k = 0; k < 2; k++) {
+        Case c;
+        c.mesh = mesh;
+        c.n = n;
+        c.reconstruction = reconstruction;
+        std::ostringstream physics;
+        physics.precision(17);
+        physics << "type = \"navier_stokes\"\nmu = " << (k + 1) * MMS_MU << "\nPr = " << MMS_PR;
+        c.physics = physics.str();
+        c.init = "type = \"analytical\"\nn_subdivisions = 6\n"
+                 "rho = \"1 + 0.2 * sin(2 * pi * x) * cos(pi * y)\"\n"
+                 "u = [\"0.3 + 0.1 * cos(2 * pi * x) * cos(pi * y)\", \"0.1 * sin(pi * y) * (1 + 0.5 * sin(2 * pi * x))\"]\n"
+                 "p = \"1 + 0.2 * cos(2 * pi * x) * cos(pi * y)\"\n";
+        c.top = "type = \"outlet_extrapolation\"";
+        std::string text = input(c);
+        text.insert(text.find("[numerics]\n") + 11, "viscous_gradients = \"" + gradients + "\"\n");
+        Solver & solver = k == 0 ? once : twice;
+        solver.set_distributed(false);
+        solver.init(parse_toml(text));
+        rhs[k] = host_rhs(solver);
+    }
+    const Mesh & mm = *once.get_mesh();
+    const auto exact = mms_exact_viscous_rhs(mm);
+    double sum = 0.0;
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < mm.n_cells; i++) {
+        if (double(mm.h_cell_coords(i, 1)) > 0.6) continue;
+        for (size_t v = 0; v < 3; v++) sum += std::abs(rhs[1][i][1 + v] - rhs[0][i][1 + v] - exact[i][v]);
+        count++;
+    }
+    return sum / count;
+}
+
+} // namespace
+
+class AxisymmetricViscousOrder : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(AxisymmetricViscousOrder, ResidualOfReconstructionGradientsConvergesAtDesignOrder) {
+    // The hoop stress and the r-weighted face integrals from TENO5's polynomials, up to the axis; with
+    // least squares the residual converges at first order on triangles
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const std::string mesh = GetParam();
+    const std::string teno = "type = \"TENO\"\norder = 5";
+    verification::expect_order({"axisymmetric", "TENO5, reconstruction gradients", verification::cells_of(mesh),
+                                "mean viscous residual error, manufactured solution", {32, 64},
+                                {mms_viscous_residual_error(mesh, 32, teno, "reconstruction"),
+                                 mms_viscous_residual_error(mesh, 64, teno, "reconstruction")},
+                                3.0, 2.7});
+}
+
+INSTANTIATE_TEST_SUITE_P(Axisymmetric, AxisymmetricViscousOrder, ::testing::Values("cartesian", "cartesian_tri"));
+
+namespace {
+
 constexpr double SHELL_IN = 1.0, SHELL_OUT = 2.0;
 
 /**

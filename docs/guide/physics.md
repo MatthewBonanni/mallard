@@ -144,8 +144,9 @@ half O-grid (`make_cylinder_mesh.py --half`, drawn coarser than it runs).*
 - Fluxes, sources, forces (`[[forces]]`), `[integrals]` and conserved totals
   are **per radian**: multiply a force by `2 pi` for the force on the body;
   only its axial component is meaningful.
-- Every reconstruction, Riemann solver, viscous and mixture model, chemistry
-  and MPI work as in planar runs, at design order up to the axis.
+- Every reconstruction, Riemann solver, viscous and mixture model
+  (`viscous_gradients = "reconstruction"` included), chemistry and MPI work as
+  in planar runs, at design order up to the axis.
 - [Curved boundaries](meshes.md#curved-boundaries) (a sphere, a nozzle
   contour) work as in planar runs: the cells and faces next to them get their
   revolved volumes, centroids and areas from the curved geometry, and uniform

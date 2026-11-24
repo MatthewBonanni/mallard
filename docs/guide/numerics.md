@@ -401,9 +401,15 @@ the same order as the viscous stress. The transport coefficients stay the
 means of the two cells'. Walls of mixtures keep least squares (the wall fits
 above are for a single gas), as do flamelet gases, which Mallard rejects.
 
+In axisymmetric runs the polynomials are fitted to the r-weighted cell
+averages, the face fluxes are integrated with the weights `r w_q` of the
+revolved faces, and the hoop term `u_r / r` of the stress comes from the
+polynomial at each face point (its limit `du_r/dr` on the axis), so the
+viscous fluxes converge at the same order as in planar runs, up to the axis.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous and species diffusion face gradients from the TENO polynomials, and at single-gas walls from one-sided fits (TENO4 or higher, planar runs, no flamelet gases) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous and species diffusion face gradients from the TENO polynomials, and at single-gas walls from one-sided fits (TENO4 or higher, no flamelet gases) |
 
 Two convergence studies on periodic boxes of every cell type
 (`tools/docs/viscous_gradients.py`) compare the two paths against their design
@@ -470,7 +476,7 @@ Pitfalls:
   whose polynomial is negative in density or pressure at a face point, keep
   the least-squares gradients, as do the walls and boundaries listed above.
   Near shocks the flux is then second order, as before.
-- **Not yet available** for flamelet gases, axisymmetric runs, LES, the
+- **Not yet available** for flamelet gases, LES, the
   hybrid convective flux, curved meshes and rotational
   periodicity, where Mallard reports an error. Probes of the diffusive fluxes
   on faces (`[[probes]]` surfaces) still report the least-squares fluxes.

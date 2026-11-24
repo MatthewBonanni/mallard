@@ -277,6 +277,17 @@ TEST(MPITest, ReconstructionGradientsAtWallsAndSymmetryPlanesMatchSerial) {
     }
 }
 
+TEST(MPITest, AxisymmetricReconstructionGradientsMatchSerial) {
+    // r-weighted face points and the hoop stress at the face points, with wall fits on the top wall
+    for (const std::string mesh : {"cartesian", "cartesian_tri"}) {
+        std::string input = box_input(mesh, "type = \"TENO\"\norder = 5\n", NS + "axisymmetric = true\n",
+                                      bcs("type = \"outlet_extrapolation\"\n", "type = \"outlet_extrapolation\"\n",
+                                          "type = \"wall_isothermal\"\nT = 1.2\n", "type = \"symmetry\"\n"), 10);
+        input.insert(input.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+        expect_matches_serial(input);
+    }
+}
+
 TEST(MPITest, TENOOnTrianglesMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",

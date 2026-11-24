@@ -1787,7 +1787,6 @@ void Solver::init_viscous_gradients(const TENO * teno) {
                           "least-squares ones",
                           "Set order = 4 or more in [numerics.face_reconstruction]");
     }
-    if (axisymmetric) throw unavailable("is not available for axisymmetric runs yet", "Use a planar run");
     if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
     if (hybrid_flux) {
         throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");

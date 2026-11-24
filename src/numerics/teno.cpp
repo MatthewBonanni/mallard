@@ -4541,7 +4541,8 @@ void TENO::init_wall_fits() {
     auto cell_center = [&](const uint32_t c, double * x) { FOR_I_DIM x[i] = double(m.h_cell_coords(c, i)); };
     auto node = [&](const uint32_t n, double * x) { FOR_I_DIM x[i] = double(m.h_node_coords(n, i)); };
 
-    // Means of the monomials of (x - x0) / h over cell j, placed nearest to x0, over its simplices
+    // Means of the monomials of (x - x0) / h over cell j, placed nearest to x0, over its simplices (r-weighted in
+    // axisymmetric runs, as TENO's cell averages)
     const int n_rule = degree / 2 + 3;
     const TriangleRule tri(n_rule);
     const TetrahedronRule tet(n_rule);
@@ -4551,7 +4552,9 @@ void TENO::init_wall_fits() {
         nearest(raw, x0, xj);
         for (int l = 0; l < nk; l++) means[l] = 0.0;
         double volume = 0.0;
-        auto add = [&](const double * p, const double w) {
+        auto add = [&](const double * p, double w) {
+            if (m.axisymmetric) w *= std::abs(p[1]);
+            volume += w;
             double xi[N_DIM], phi[teno::MAX_NK];
             FOR_I_DIM xi[i] = (p[i] - x0[i]) / h;
             teno::monomials(degree, xi, phi);
@@ -4569,7 +4572,6 @@ void TENO::init_wall_fits() {
             if constexpr (N_DIM == 2) {
                 const double e1[2] = {v[0][0] - xj[0], v[0][1] - xj[1]}, e2[2] = {v[1][0] - xj[0], v[1][1] - xj[1]};
                 const double area = 0.5 * std::abs(e1[0] * e2[1] - e1[1] * e2[0]);
-                volume += area;
                 for (size_t q = 0; q < tri.w.size(); q++) {
                     const double p[2] = {xj[0] + tri.xi[q] * e1[0] + tri.eta[q] * e2[0],
                                          xj[1] + tri.xi[q] * e1[1] + tri.eta[q] * e2[1]};
@@ -4593,7 +4595,6 @@ void TENO::init_wall_fits() {
                                                 e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
                                                 e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0])) /
                                        6.0;
-                    volume += vol;
                     for (size_t q = 0; q < tet.w.size(); q++) {
                         double p[3];
                         for (size_t i = 0; i < 3; i++) {
