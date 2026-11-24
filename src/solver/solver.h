@@ -976,6 +976,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
+        /** @brief What a start from a restart file does with each key the case changes (restart_changes.h). */
+        void check_restart(CheckReport & report, const Input & case_input, const std::string & resolved) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
         void check_initial(CheckReport & report, const CheckOptions & options);

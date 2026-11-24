@@ -52,6 +52,7 @@ set(MALLARD_TEST_SOURCES
     numerics_preset_test.cpp
     tfles_test.cpp
     check_test.cpp
+    restart_changes_test.cpp
     stencils_test.cpp
     run_report_test.cpp
     run_page_test.cpp

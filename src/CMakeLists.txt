@@ -98,6 +98,7 @@ add_library(MallardCore STATIC
     solver/solver_check.cpp
     solver/solver_mesh_fields.cpp
     solver/check_report.cpp
+    solver/restart_changes.cpp
     solver/run_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp

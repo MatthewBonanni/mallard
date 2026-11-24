@@ -25,6 +25,7 @@
 #include "memory_tracker.h"
 #include "mesh_quality.h"
 #include "report.h"
+#include "restart_changes.h"
 
 /** @brief The share of the memory per rank that sizing keeps free (fragmentation, allocations in the run). */
 constexpr double SIZING_MARGIN = 0.05;
@@ -161,6 +162,17 @@ struct CheckEnvironment {
     bool nccl_used = false;             // halo exchanges by NCCL (several ranks, [parallel] halo_exchange)
 };
 
+/** @brief A start from a restart file (check --restart, or [initialize] type = "restart"): the file and each key
+ *         the case changes from the input it was written with (restart_changes.h). */
+struct CheckRestart {
+    std::string file;
+    uint64_t step = 0;
+    double t = 0.0;
+    std::string run_id;           // of the run that wrote it, or empty
+    bool input_recorded = false;  // its run block holds the resolved input it was written with
+    std::vector<restart_changes::Change> changes;
+};
+
 struct CheckReport {
     std::vector<CheckDiagnostic> diagnostics;
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
@@ -168,6 +180,8 @@ struct CheckReport {
     std::string resolved;  // the input with every key explicit (resolve_input), once setup is done
     std::string input_file;
     CheckEnvironment environment;
+    bool has_restart = false;
+    CheckRestart restart;
 
     std::vector<CheckBoundary> boundaries;
     std::vector<CheckUnassigned> unassigned;

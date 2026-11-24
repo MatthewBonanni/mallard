@@ -503,6 +503,8 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | <a id="e-initial-write"></a>`E-INITIAL-WRITE` | `--initial PREFIX` could not write the initial state | Check the path and its permissions ([The initial state](#the-initial-state-before-a-run)) |
 | <a id="w-cfl-limit"></a>`W-CFL-LIMIT` | The CFL number at the initial state is above the time integrator's stability limit for smooth flow (1.2 for SSPRK3, 1.35 for RK4) | Lower `run.cfl`, or `run.dt` |
 | <a id="w-trigger-never"></a>`W-TRIGGER-NEVER` | A `[[triggers]]` entry cannot fire before `t_stop`: its `for` is longer than the run, or its condition reads only `t`, compared with numbers, and is false at every time to `t_stop` | Check the condition's numbers and their units (seconds), or `for`; raise `run.t_stop` if the run is too short ([Triggers](running.md#triggers)) |
+| <a id="e-restart-incompatible"></a>`E-RESTART-INCOMPATIBLE` | A start from a restart file whose input the case changes so that the file cannot be continued: another mesh, units, variables (species), dimension or precision, or other averages to continue ([Restarting with an edited input](#restarting-with-an-edited-input)) | Undo the change; start on another mesh with `[initialize] type = "remap"`; set `statistics.reset = true` for other averages |
+| <a id="w-restart-resets"></a>`W-RESTART-RESETS` | A start from a restart file whose input the case changes so that some state the file holds starts afresh: the averages of `statistics.reset`, an averaged probe's average, particles' added properties, characteristic boundary states, a renamed trigger's firings ([Restarting with an edited input](#restarting-with-an-edited-input)) | None needed if that is intended |
 | <a id="w-tfles-thickening"></a>`W-TFLES-THICKENING` | TFLES thickens the flame by more than 5 (`F = n_res Delta / delta_L`). Beyond that the flame's response to turbulence is unreliable | Refine the mesh where the flame goes, or lower `les.combustion.n_res` ([LES](les.md#thickened-flames-lescombustion)) |
 | <a id="w-wall-y-plus"></a>`W-WALL-Y-PLUS` | First cells of walls without a wall model above y+ 1, which DNS and wall-resolved LES need. The message gives the first-cell distance to aim for | Refine toward the walls, or model them (`wall_model`) ([Resolution](#resolution)) |
 | <a id="w-wall-spacing"></a>`W-WALL-SPACING` | Wall cells longer along the flow (x+) or wider across it (z+) than the regime needs: 15 and 8 for DNS, 150 and 40 for wall-resolved LES | Refine along the walls ([Resolution](#resolution)) |
@@ -535,11 +537,29 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak`, `steady` and `released_on_devices` (of `steady`, what GPU runs free after setup and this CPU build keeps) |
 | `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `limit` (`memory` or `view_entries`: what limits `max_local_cells`), `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
 | `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
+| `restart` | `null`, or for a start from a restart file: `{file, step, t, run_id, input_recorded, changes: [{key, restart, case, effect, detail}]}` ([Restarting with an edited input](#restarting-with-an-edited-input); JSON Schema: [`docs/schemas/check-restart.schema.json`](../schemas/check-restart.schema.json)) |
 | `cost` | `cells`, `ranks`, `throughput` (cells/s per rank), `wall_per_time` (wall seconds per unit simulated time), `flow_through_time`, `t_stop`, `n_steps` |
 
 ```sh
 mallard check input.toml --format json | python3 -c "import json, sys; r = json.load(sys.stdin); print(r['status'], [d['code'] for d in r['diagnostics']])"
 ```
+
+### Restarting with an edited input
+
+`mallard check input.toml --restart FILE` (or an input with `[initialize] type = "restart"`) checks the run as
+started from FILE, and compares the case's resolved input with the one the file was written with (its run block's).
+Each key that differs is listed with both values and what a start from the file does with it:
+
+| Effect | Means | Keys |
+|---|---|---|
+| `accepted` | The run continues the file's state with the new value | Most: stop conditions, CFL, output, numerics, models without state, boundary values |
+| `resets` | The run starts, and some state the file holds starts afresh at its time (a `W-RESTART-RESETS` warning) | Any `[statistics]` key with `reset = true`; a probe with `average` or `spectra`; `[particles]` (added velocities, temperatures, quantities); a boundary's `type` (characteristic wave states); a trigger's `name` |
+| `incompatible` | The file cannot be continued (an `E-RESTART-INCOMPATIBLE` error) | `[mesh]` (except `cell_order` and curved geometry), `physics.units`, a change of the variables (species) the file holds, other `[statistics]` fields, products, batches, spectra, phase or conditional averages without `reset = true`, another dimension or precision |
+
+`[initialize]`, which the restart replaces, is left out. Values are compared as resolved, so a file named by
+another path (relative in one input, absolute in the other) counts as a change. A setup that stops on an error
+lists only the keys it got to. A file whose run block holds no resolved input (written before Mallard 0.10) lists
+no keys. The JSON report's `restart` member holds the list.
 
 ### Resolution
 

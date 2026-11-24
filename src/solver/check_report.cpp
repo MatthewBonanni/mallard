@@ -146,6 +146,30 @@ void input_section(report::Text & text, const CheckReport & r) {
     text.table({"check", "result"}, rows);
 }
 
+void restart_section(report::Text & text, const CheckReport & r) {
+    const CheckRestart & s = r.restart;
+    Status status = Status::OK;
+    std::vector<Row> rows;
+    for (const restart_changes::Change & c : s.changes) {
+        const Status row = c.effect == restart_changes::Effect::INCOMPATIBLE ? Status::ERROR
+                           : c.effect == restart_changes::Effect::RESETS     ? Status::WARNING
+                                                                             : Status::OK;
+        status = report::worse(status, row);
+        rows.push_back({row, {c.key, c.restart_value.empty() ? "-" : c.restart_value,
+                              c.case_value.empty() ? "-" : c.case_value, restart_changes::name(c.effect),
+                              c.detail.empty() ? "-" : c.detail}});
+    }
+    text.section("Restart", status);
+    text.note("From " + s.file + " (step " + std::to_string(s.step) + ", t = " + g4(s.t) + ")" +
+              (s.run_id.empty() ? "" : ", written by run " + s.run_id) + ".");
+    if (!s.input_recorded) text.note("Its run block holds no resolved input: the keys it was written with are unknown.");
+    if (rows.empty()) {
+        if (s.input_recorded) text.note("The case changes no key of the input the file was written with.");
+        return;
+    }
+    text.table({"key", "restart", "case", "effect", "detail"}, rows);
+}
+
 void boundaries_section(report::Text & text, const CheckReport & r) {
     text.section("Boundaries", Status::OK);
     text.note("Every boundary face has a condition: " + count(r.boundaries.size(), "zone") +
@@ -698,6 +722,7 @@ std::string check_text(const CheckReport & r, const bool color) {
     overview(text, r);
     if (!environment_only(r)) {
         input_section(text, r);
+        if (r.has_restart) restart_section(text, r);
         if (r.setup_done) boundaries_section(text, r);
         regions_section(text, r);
         if (r.has_quality) quality_section(text, r);
@@ -723,6 +748,27 @@ std::string check_json(const CheckReport & r) {
         .add("setup_done", r.setup_done)
         .add("dim", N_DIM);
     o.raw("environment", environment_json(r.environment));
+    if (r.has_restart) {
+        const CheckRestart & s = r.restart;
+        o.raw("restart", json::Object()
+                             .add("file", s.file)
+                             .add("step", s.step)
+                             .raw("t", json::number(s.t))
+                             .raw("run_id", s.run_id.empty() ? "null" : json::quote(s.run_id))
+                             .add("input_recorded", s.input_recorded)
+                             .raw("changes", array_json(s.changes, [](const restart_changes::Change & c) {
+                                      return json::Object()
+                                          .add("key", c.key)
+                                          .raw("restart", c.restart_value.empty() ? "null" : json::quote(c.restart_value))
+                                          .raw("case", c.case_value.empty() ? "null" : json::quote(c.case_value))
+                                          .add("effect", std::string(restart_changes::name(c.effect)))
+                                          .raw("detail", c.detail.empty() ? "null" : json::quote(c.detail))
+                                          .str();
+                                  }))
+                             .str());
+    } else {
+        o.raw("restart", "null");
+    }
     o.raw("diagnostics", diagnostics_json(r));
     o.raw("unused_keys", array_json(r.unused, [](const Diagnostic & d) {
               return json::Object()
