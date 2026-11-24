@@ -99,6 +99,7 @@ void Solver::init_solution_restart() {
                           "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
     }
     const std::string file = find_value<std::string>(input, "initialize", "file");
+    restart_reached = true;
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;

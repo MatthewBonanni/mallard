@@ -71,6 +71,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     } restore{output_files_enabled(), &check_only};
     set_output_files_enabled(false);
     check_only = true;
+    restart_reached = false;
 
     memory::Tracker tracker;
     try {
@@ -141,7 +142,7 @@ void Solver::check_restart(CheckReport & r, const Input & case_input, const std:
     r.restart = {restart.file, restart.step, restart.t, restart.run_id, !restart.resolved.empty(), {}};
     const Input now = parse_input_string(resolved, "the resolved input");
     r.restart.changes = restart_changes::classify(
-        restart, now, r.setup_done ? restart_variables() : std::vector<std::string>{}, r.setup_done);
+        restart, now, r.setup_done || restart_reached ? restart_variables() : std::vector<std::string>{}, r.setup_done);
     for (const restart_changes::Change & c : r.restart.changes) {
         if (c.effect == restart_changes::Effect::INCOMPATIBLE) {
             r.error(diagnostic_code::RESTART_INCOMPATIBLE, c.key + ": " + c.detail + ".");

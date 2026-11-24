@@ -807,6 +807,36 @@ TEST(CheckRestart, EachKeyTheCaseChangesFromTheRestartsInputIsClassified) {
     EXPECT_EQ(json::parse(check_json(check(input)))["restart"].type, json::Value::Type::NUL);
 }
 
+TEST(CheckRestart, AnotherMechanismsSpeciesAreIncompatibleThoughTheSetupStopsOnTheFile) {
+    const auto mixture = [](const std::string & mechanism, const std::string & X) {
+        std::ostringstream s;
+        s << "[run]\nn_steps = 1\ndt = 1e-9\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 0.1\nLy = 0.1\n"
+          << (N_DIM == 3 ? "Nz = 4\nLz = 0.1\n" : "")
+          << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+          << (N_DIM == 3 ? "[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+          << "[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" << source_dir() << "/mechanisms/"
+          << mechanism << "\"\n[initialize]\np = 101325.0\nT = 300.0\nu = [" << (N_DIM == 3 ? "1.0, 0.0, 0.0" : "1.0, 0.0")
+          << "]\nX = {" << X << "}\n[output]\ncheck_interval = 1000000\n";
+        return s.str();
+    };
+    const std::string prefix = (rank_scratch_dir() / "gri30_restart").string();
+    Solver writer;
+    writer.set_distributed(false);
+    writer.init(parse_input_string(mixture("gri30.yaml", "CH4 = 0.5, H2 = 1.0, O2 = 2.0, N2 = 7.52") +
+                                   "[[write_data]]\nprefix = \"" + prefix + "\"\nformat = \"restart\"\ninterval = 1\n"));
+    writer.run();
+    // The file's species are not the case's: the setup stops on the file, and the mechanism is why
+    Input other = parse_input_string(mixture("ch4_bfer.yaml", "CH4 = 0.5, O2 = 2.0, N2 = 7.52"));
+    Solver::start_from_restart(other, prefix + "_000001.restart");
+    const CheckReport r = Solver().check(other, {});
+    ASSERT_TRUE(r.has_restart);
+    std::map<std::string, restart_changes::Effect> effects;
+    for (const restart_changes::Change & c : r.restart.changes) effects[c.key] = c.effect;
+    EXPECT_EQ(effects.at("physics.mechanism"), restart_changes::Effect::INCOMPATIBLE);
+    EXPECT_EQ(effects.at("variables"), restart_changes::Effect::INCOMPATIBLE);
+    EXPECT_TRUE(mentions(r.errors(), "physics.mechanism: the restart file's variables are not this case's"));
+}
+
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
     if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
     const auto mesh = make_mesh("cartesian", 10, 2, 1.0, 1.0);  // cells 0.1 x 0.5

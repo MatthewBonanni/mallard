@@ -1296,6 +1296,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        bool restart_reached = false;  // check(): the setup got to the restart file, so restart_variables() holds
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;

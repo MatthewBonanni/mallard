@@ -237,8 +237,9 @@ std::vector<Change> classify(const Restart & restart, const Input & case_resolve
             if (std::find(case_variables.begin(), case_variables.end(), v) == case_variables.end()) extra.push_back(v);
         }
         if (!missing.empty() || !extra.empty()) {
-            c.variables = "the restart file's variables are not this case's: it has no " + list(missing) +
-                          ", and this case has no " + list(extra);
+            c.variables = "the restart file's variables are not this case's:";
+            if (!missing.empty()) c.variables += " it lacks " + list(missing) + (extra.empty() ? "" : ";");
+            if (!extra.empty()) c.variables += " this case has no " + list(extra);
             changes.push_back({"variables", list(restart.variables), list(case_variables), Effect::INCOMPATIBLE,
                                c.variables});
         }
