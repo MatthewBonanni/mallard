@@ -3,7 +3,8 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Regions from CAD surfaces (STL, OBJ): signed distances against exact
  *        ones, the readers, orientation and nesting, units and transforms,
- *        measures, fractions, exact surfaces, and the errors of broken files.
+ *        measures, fractions, exact surfaces, open surfaces as surface regions,
+ *        and the errors of broken files.
  * @version 0.1
  * @date 2026-11-19
  *
@@ -17,6 +18,8 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <numbers>
 #include <random>
 #include <sstream>
 #include <string>
@@ -27,6 +30,7 @@
 #include "region_input.h"
 #include "region_mesh.h"
 #include "region_sampler.h"
+#include "statistics.h"
 #include "test_fixtures.h"
 
 namespace {
@@ -210,6 +214,65 @@ struct HostNodes {
         for (size_t d = 0; d < 3; d++) x[d] = d < N_DIM ? double(mesh.h_node_coords(n, d)) : 0.0;
     }
 };
+
+/**
+ * @brief An open surface: a polyline (x, y) extruded over z in [z0, z1] (2D: its section z = 0 is the polyline),
+ *        each band two triangles facing (b - a) x z for its segment from a to b.
+ */
+std::vector<Tri> extruded(const std::vector<std::array<double, 2>> & line, const double z0, const double z1) {
+    std::vector<Tri> out;
+    for (size_t i = 0; i + 1 < line.size(); i++) {
+        const Vec a0 = {line[i][0], line[i][1], z0}, b0 = {line[i + 1][0], line[i + 1][1], z0};
+        const Vec a1 = {line[i][0], line[i][1], z1}, b1 = {line[i + 1][0], line[i + 1][1], z1};
+        out.push_back({a0, b0, b1});
+        out.push_back({a0, b1, a1});
+    }
+    return out;
+}
+
+/** @brief The vector area of triangles, the sum of (b - a) x (c - a) / 2. */
+Vec vector_area(const std::vector<Tri> & tris) {
+    Vec s = {0.0, 0.0, 0.0};
+    for (const Tri & t : tris) {
+        const Vec u = {t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]};
+        const Vec v = {t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]};
+        s[0] += 0.5 * (u[1] * v[2] - u[2] * v[1]);
+        s[1] += 0.5 * (u[2] * v[0] - u[0] * v[2]);
+        s[2] += 0.5 * (u[0] * v[1] - u[1] * v[0]);
+    }
+    return s;
+}
+
+/** @brief The sum of measure times direction of the elements. */
+Vec vector_measure(const region::Elements & e) {
+    Vec s = {0.0, 0.0, 0.0};
+    for (size_t k = 0; k < e.size(); k++) {
+        for (size_t i = 0; i < 3; i++) s[i] += e.measure[k] * e.direction[k][i];
+    }
+    return s;
+}
+
+double total_measure(const region::Elements & e) {
+    double m = 0.0;
+    for (const double x : e.measure) m += x;
+    return m;
+}
+
+std::shared_ptr<Mesh> surface_mesh(const std::string & name) {
+    auto mesh = std::make_shared<Mesh>();
+#if N_DIM == 2
+    mesh->init_file(write_temp_shared(name + ".msh", jittered_mixed_mesh(10)));
+#else
+    (void)name;
+    mesh->init_cart_3d(6, 6, 6, 1.0, 1.0, 1.0, MeshType::CARTESIAN_TET);
+#endif
+    return mesh;
+}
+
+// A tent: in 3D a roof across z, in 2D its polyline section; inside the unit square or cube
+const std::vector<std::array<double, 2>> TENT = {{0.15, 0.3}, {0.5, 0.75}, {0.85, 0.35}};
+
+std::vector<Tri> tent() { return extruded(TENT, N_DIM == 3 ? 0.2 : -0.5, N_DIM == 3 ? 0.8 : 0.5); }
 
 } // namespace
 
@@ -430,4 +493,125 @@ TEST(RegionSurfaceTest, BrokenFilesAndKeysAreErrorsThatSayWhatToFix) {
         EXPECT_NE(error_of(stl_region(above, ", translate = [0, 0, 0.5]")).find("spans z = 0.5 to 1.5 m"), std::string::npos);
         EXPECT_EQ(error_of(stl_region(above, ", translate = [0, 0, -0.5]")), "");
     }
+}
+
+TEST(RegionSurfaceTest, OpenSurfacesAreSurfaceRegionsOfTheirExactMeasure) {
+    // Their pieces of about half a cell, each in the cell holding its center, add up to the area (2D: the section's
+    // length), and face as the file's first triangle does, also under transforms that leave z = 0 in 2D
+    const auto mesh = surface_mesh("mallard_region_open_surface");
+    const std::vector<Tri> tris = tent();
+    const std::string path = file("tent.stl", stl_ascii(tris));
+    const double length = std::hypot(TENT[1][0] - TENT[0][0], TENT[1][1] - TENT[0][1]) +
+                          std::hypot(TENT[2][0] - TENT[1][0], TENT[2][1] - TENT[1][1]);
+    const double measure = N_DIM == 3 ? 0.6 * length : length;
+    const Vec facing = vector_area(tris);
+    const region::Region r = read(stl_region(path, ", filled = false"));
+    EXPECT_EQ(r.dimension(), N_DIM - 1);
+    EXPECT_FALSE(r.closed());
+    EXPECT_NE(r.summary().find("open"), std::string::npos) << r.summary();
+    const region::Elements e = region::elements(*mesh, r);
+    EXPECT_TRUE(e.exact);
+    EXPECT_NEAR(total_measure(e), measure, 1e-12);
+    const Vec along = vector_measure(e);
+    for (size_t i = 0; i < size_t(N_DIM); i++) EXPECT_NEAR(along[i], facing[i], 1e-12) << i;
+    std::vector<std::array<double, N_DIM>> centers;
+    for (const auto & c : e.center) {
+        std::array<double, N_DIM> x;
+        for (size_t i = 0; i < size_t(N_DIM); i++) x[i] = c[i];
+        centers.push_back(x);
+    }
+    const std::vector<int32_t> located = locate_points(*mesh, centers);
+    for (size_t k = 0; k < e.size(); k++) EXPECT_EQ(located[k], int32_t(e.cell[k])) << k;
+    // The orders of corners of the first triangle decide; flip reverses
+    std::vector<Tri> mixed = tris, inverted = tris;
+    for (size_t t = 1; t < mixed.size(); t += 2) std::swap(mixed[t][1], mixed[t][2]);
+    for (Tri & t : inverted) std::swap(t[1], t[2]);
+    const std::vector<std::pair<std::string, double>> facings = {
+        {stl_region(file("tent_mixed.stl", stl_ascii(mixed)), ", filled = false"), 1.0},
+        {stl_region(file("tent_inverted.stl", stl_ascii(inverted)), ", filled = false"), -1.0},
+        {stl_region(path, ", filled = false, flip = true"), -1.0}};
+    for (const auto & [table, sign] : facings) {
+        const Vec v = vector_measure(region::elements(*mesh, read(table)));
+        for (size_t i = 0; i < size_t(N_DIM); i++) EXPECT_NEAR(v[i], sign * facing[i], 1e-12) << table;
+    }
+    // Rotated about z and moved (in 2D along z too): the same measure, its facing rotated
+    const std::string moved = std::string(", filled = false, rotate = ") + (N_DIM == 3 ? "{axis = [0, 0, 1], angle = 30}" : "30") +
+                              ", pivot = [0.5, 0.5" + (N_DIM == 3 ? ", 0.5]" : "]") + ", translate = [0.02, -0.03, 0.1]";
+    const region::Elements m = region::elements(*mesh, read(stl_region(path, moved)));
+    EXPECT_TRUE(m.exact);
+    EXPECT_NEAR(total_measure(m), measure, 1e-12);
+    const double c = std::cos(std::numbers::pi / 6.0), s = std::sin(std::numbers::pi / 6.0);
+    const Vec v = vector_measure(m);
+    EXPECT_NEAR(v[0], c * facing[0] - s * facing[1], 1e-12);
+    EXPECT_NEAR(v[1], s * facing[0] + c * facing[1], 1e-12);
+}
+
+TEST(RegionSurfaceTest, FilledRegionsClipOpenSurfacesAndUnionsJoinThem) {
+    // Clipped at x = 0.5 by a half space: the tent's part beyond it, half of each band's run in x for the first
+    const auto mesh = surface_mesh("mallard_region_open_clip");
+    const std::string sheet = stl_region(file("tent_clip.stl", stl_ascii(tent())), ", filled = false");
+    const double l1 = std::hypot(TENT[1][0] - TENT[0][0], TENT[1][1] - TENT[0][1]);
+    const double l2 = std::hypot(TENT[2][0] - TENT[1][0], TENT[2][1] - TENT[1][1]);
+    const double width = N_DIM == 3 ? 0.6 : 1.0;
+    const region::Region clipped = read("{type = \"intersection\", regions = [" + sheet +
+                                        ", {type = \"half_space\", point = [0.5, 0.5" + (N_DIM == 3 ? ", 0.5" : "") +
+                                        "], normal = [-1, 0" + (N_DIM == 3 ? ", 0" : "") + "]}]}");
+    EXPECT_NEAR(total_measure(region::elements(*mesh, clipped)), width * l2, 1e-9);
+    const region::Region both = read("{type = \"union\", regions = [" + sheet + ", " + sheet + "]}");
+    EXPECT_NEAR(total_measure(region::elements(*mesh, both)), 2.0 * width * (l1 + l2), 1e-12);
+}
+
+TEST(RegionSurfaceTest, OpenSurfacesWhereSolidsAreNeededAndBrokenOnesAreErrors) {
+    const std::string open = file("open_tent.stl", stl_ascii(tent()));
+    // A Moebius strip: one-sided
+    std::vector<Tri> moebius;
+    const int n = 12;
+    const auto at = [](const int i, const double w) {
+        const double u = 2.0 * std::numbers::pi * i / n;
+        return Vec{0.5 + (0.3 + w * std::cos(u / 2)) * std::cos(u), 0.5 + (0.3 + w * std::cos(u / 2)) * std::sin(u),
+                   w * std::sin(u / 2)};
+    };
+    for (int i = 0; i < n; i++) {
+        // The last band joins the first turned over, at the same corners
+        const Vec a0 = at(i, -0.1), a1 = at(i, 0.1), b0 = i + 1 < n ? at(i + 1, -0.1) : at(0, 0.1),
+                  b1 = i + 1 < n ? at(i + 1, 0.1) : at(0, -0.1);
+        moebius.push_back({a0, b0, b1});
+        moebius.push_back({a0, b1, a1});
+    }
+    // A fin on the diagonal of a band: an edge of three triangles
+    std::vector<Tri> fin = tent();
+    fin.push_back({fin[0][0], fin[0][2], Vec{0.5, 0.1, 0.0}});
+    const std::string sheet = stl_region(open, ", filled = false");
+    struct Bad {
+        std::string table, says;
+    };
+    const std::vector<Bad> bad = {
+        {stl_region(open), "is not closed: it has 6 edges of one triangle only"},
+        {stl_region(open), "give filled = false"},
+        {stl_region(open, ", filled = true"), "a filled region needs a closed (watertight) surface"},
+        {stl_region(file("moebius.stl", stl_ascii(moebius)), ", filled = false"), "is not orientable"},
+        {stl_region(file("fin.stl", stl_ascii(fin)), ", filled = false"), "it has 1 edge of more than two triangles"},
+        {"{type = \"boundary\", of = " + sheet + "}", "the boundary of an open surface from a file"},
+        {"{type = \"interior\", of = " + sheet + "}", "has a boundary (it is not closed), so it has no interior"},
+        {"{type = \"union\", regions = [" + sheet + ", " + box_region() + "]}", "a union combines regions of one dimension"},
+        {"{type = \"intersection\", regions = [" + sheet + ", {type = \"where\", condition = \"P < 1\"}]}",
+         "clips an open surface from a file with a region of the solution"},
+    };
+    for (const Bad & b : bad) {
+        const std::string message = error_of(b.table);
+        EXPECT_NE(message.find(b.says), std::string::npos) << b.table << "\n" << message;
+    }
+    // Where a solid is needed, the error says that it encloses nothing
+    try {
+        const Input root = parse_toml("r = " + sheet);
+        region::require_full_dimension(read(sheet), root.at("r"), "r");
+        ADD_FAILURE() << "an open surface taken as a solid";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("open surface from an STL or OBJ file, which encloses nothing"), std::string::npos)
+            << e.what();
+    }
+    // A closed surface with filled = false is still its own closed surface
+    const region::Region closed = read(stl_region(file("closed.stl", stl_ascii(cube(LO, HI))), ", filled = false"));
+    EXPECT_TRUE(closed.closed());
+    EXPECT_EQ(closed.summary().find("open"), std::string::npos);
 }
