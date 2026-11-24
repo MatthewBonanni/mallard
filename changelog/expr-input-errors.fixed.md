@@ -1,0 +1,1 @@
+- An expression that does not compile is an input error like any other: it names the key and its line and links docs/guide/expressions.md, and `mallard check` lists it as an input diagnostic (E-INPUT) instead of stopping with E-SETUP (#1108).
