@@ -257,6 +257,13 @@ class Solver {
         std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value, bool apply = true);
 
         /**
+         * @brief Applies "key=value" settings with apply_setting, each accepted one recorded as a set event of
+         *        the run log with its source ("mallard ctl", "SET file", "--set"): whether all were accepted, and
+         *        a line per setting.
+         */
+        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source);
+
+        /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
          *        with the next step's first half (Strang splitting).
@@ -927,6 +934,12 @@ class Solver {
 
     protected:
         void init_mesh();
+        /**
+         * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
+         *        covariances. A curved cell's rule sums over its faces as the local mesh orients them, which
+         *        differs in the outermost halo layer, and so rounds differently (collective among neighbors).
+         */
+        void exchange_halo_geometry();
         /** @brief Mixtures: read [radiation]; subtract the optically thin radiative loss from the energy RHS. */
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);
@@ -941,7 +954,8 @@ class Solver {
         /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
         void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
         void init_boundaries();
-        std::string zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
+        std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -970,6 +984,8 @@ class Solver {
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
+        /** @brief The initial state's primitive fields as a snapshot (check --initial). */
+        void check_initial(CheckReport & report, const CheckOptions & options);
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
         void init_run_parameters();
@@ -1023,6 +1039,19 @@ class Solver {
          */
         void allocate_stage_scratch();
         void register_data();
+        /** @brief viscous_gradients, for the vertex gradient or the reconstruction's cell gradients. */
+        void allocate_viscous_gradients();
+        /**
+         * @brief The vertex gradient's weights, once every writer, probe and model is set up, if one of
+         *        them reads it (they take as much memory as the mesh's connectivity).
+         */
+        void init_vertex_gradient();
+        /** @brief The vertex gradient, which fills viscous_gradients from W_cells (init_vertex_gradient). */
+        const LSQVertexGradientFunctor & viscous_gradient() const;
+        /** @brief The host staging of Y_* and X_* that a writer or probe reads, once they are set up. */
+        void init_mixture_fractions();
+        /** @brief Stages Y_* (Y) and X_* (X) from now on, besides those staged already. */
+        void stage_mixture_fractions(bool Y, bool X);
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         RunEnd stop_reason() const;       // Empty while no stop condition holds
         rtype t_stop_reached() const;     // The run has reached t_stop once t is at least this
@@ -1208,6 +1237,8 @@ class Solver {
         void describe_partition_surface();
         void init_rhs_split();
         void init_axisymmetric_weights();
+        /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
+        void revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights);
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
@@ -1283,6 +1314,7 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        bool geometry_only = false;  // within check(): set up what the case view draws, no numerics or initial state
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
@@ -1378,6 +1410,9 @@ class Solver {
         // Weights of the convective flux points, (face, q): 3D faces, and 2D Gauss
         // weights times the radius in axisymmetric runs; empty for planar 2D runs
         FaceWeights<> flux_weights;
+        // Unit normals of the convective flux points, (face, q, dim): curved meshes, else empty.
+        // The face reconstruction's, but r-weighted on curved faces of axisymmetric runs
+        Kokkos::View<rtype ***> flux_normals;
 
         // Work arrays
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_cells;
@@ -1387,7 +1422,7 @@ class Solver {
         memory::ScratchArena stage_scratch;
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
-        LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
+        LSQVertexGradientFunctor vertex_gradient;  // viscous_gradient(); without weights if nothing reads it
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;
@@ -1470,7 +1505,7 @@ class Solver {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output, when read
 
         // Chemistry (Strang splitting around each flow step)
         bool reacting = false;

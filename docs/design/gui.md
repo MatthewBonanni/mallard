@@ -900,15 +900,15 @@ match what the GUI needs:
     1. **Detect**: architecture and glibc (`uname -m`, `ldd --version`), the
        scheduler, partitions and GPU types (`sinfo`), modules (`module -t avail`
        for compilers, MPI, CUDA, ROCm), Apptainer, Spack.
-    2. **Choose**, in this order: a prebuilt relocatable archive for the
-       architecture and backend (CPU, CUDA, HIP; a new release artifact; built
-       against the MPICH ABI, so it runs with the site's MPICH-derived MPI through
-       `module load`),
+    2. **Choose**, in this order: prebuilt portable binaries for the
+       architecture, backend (CPU, CUDA, HIP; a new release artifact) and MPI
+       family (MPICH ABI or Open MPI), so they run with the site's MPI through
+       `module load`,
        downloaded by the login node from the GitHub release with its SHA-256
        checked; the release's container image through Apptainer (`apptainer pull`)
        for single-node runs; a Spack build in user space with the detected
        compilers, MPI and GPU toolkits as externals, run as a batch job: the
-       fallback for clusters that need their own MPI (Open MPI); slow.
+       fallback for clusters with neither family's MPI; slow.
     3. **Install** into `<root>/mallard/<version>-<variant>/` with an
        `install.toml` (version, variant, artifact and SHA-256, how it was
        installed), recorded in the global remote config. Versions live side by
@@ -942,7 +942,7 @@ tests the Spack package. For the GUI it must also produce:
 
 - `mallard-python` wheels with the `mallard` executables (CPU), for macOS arm64
   and manylinux x86-64 and arm64 (extends #792);
-- relocatable archives per architecture and backend (CPU, CUDA 12 and 13, ROCm)
+- portable binaries per architecture, backend (CPU, CUDA 12 and 13, ROCm) and MPI family
   with SHA-256 sums, as release assets;
 - immutable version tags for every image variant (`:<version>-cpu-amd64`
   exists; `:<version>-cuda` too), with digests published;
@@ -1091,16 +1091,16 @@ tested like any other.
 |---|---|---|
 | Programmatic API (#345) | open | not needed for the MVP: `mallard session` is the interface |
 | `mallard session` ([design](session.md), [#1340](https://github.com/MatthewBonanni/mallard/issues/1340)) | missing | the resident JSON-RPC process, its schemas, routed `mallard ctl` with acknowledgments, detached launch |
-| `mallard check` (#321) | done: `--format json`, `--view`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON; no block metadata in the case view; no geometry-only view |
+| `mallard check` (#321) | done: `--format json`, `--view` with block metadata, `--geometry-only`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON |
 | Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; no variants for arrays of tables; no roles for file keys; the general catalog is read from a data directory, not the binary |
-| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node; no `SET` control file |
-| Control files | done: `STOP`, `CHECKPOINT` | off by default (`control_file_interval = 0`); `--set` is listed in [Command line](cli.md) but not implemented |
+| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node |
+| Control files | done: `STOP`, `CHECKPOINT`, `SET` (#1316) | off by default (`control_file_interval = 0`); `--set control_file_interval=N` turns them on |
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
 | Remote helpers | partly: `info RUN_DIR`, `pack` list files with SHA-256 | `mallard files` (manifest, hashes of files, ranges and prefixes) |
 | Write-once outputs | done ([#1326](https://github.com/MatthewBonanni/mallard/issues/1326)): snapshots, series and rewinds; probe HDF5 and VTKHDF files stay live | none |
-| Install verification | missing | `mallard install verify` |
+| Install verification | done: `mallard install verify --format json` (#1320) | none |
 | Decimated surfaces for viewing | missing | `mallard post extract` with decimation |
 
 ## Prototype findings
@@ -1229,7 +1229,7 @@ Filed, each part of #346.
 | What | Issue |
 |---|---|
 | `mallard-python` wheels with the CPU `mallard` executables (extends #792) | [#1321](https://github.com/MatthewBonanni/mallard/issues/1321) |
-| Relocatable archives per architecture and backend, against the MPICH ABI | [#1322](https://github.com/MatthewBonanni/mallard/issues/1322) |
+| Portable binaries per architecture and backend, against the MPICH and Open MPI ABIs | [#1322](https://github.com/MatthewBonanni/mallard/issues/1322) |
 | `release-manifest.json` of artifacts, digests and interface versions | [#1323](https://github.com/MatthewBonanni/mallard/issues/1323) |
 
 **Website**: the builder generated from the exported catalog, without its

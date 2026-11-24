@@ -538,6 +538,46 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
     }
 }
 
+TEST(ProbesTest, OpenSurfacesFromFilesAreTheSameOnAnyNumberOfRanks) {
+    // An open STL surface, a roof of two planes (2D: its section, a polyline): its exact area or length
+    const double z0 = N_DIM == 3 ? 0.2 : -0.5, z1 = N_DIM == 3 ? 0.8 : 0.5;
+    const double line[3][2] = {{0.15, 0.3}, {0.5, 0.75}, {0.85, 0.35}};
+    std::ostringstream stl;
+    stl.precision(17);
+    stl << "solid roof\n";
+    for (int i = 0; i < 2; i++) {
+        const double a0[3] = {line[i][0], line[i][1], z0}, b0[3] = {line[i + 1][0], line[i + 1][1], z0};
+        const double a1[3] = {line[i][0], line[i][1], z1}, b1[3] = {line[i + 1][0], line[i + 1][1], z1};
+        for (const auto & t : {std::array<const double *, 3>{a0, b0, b1}, std::array<const double *, 3>{a0, b1, a1}}) {
+            stl << "facet normal 0 0 0\nouter loop\n";
+            for (const double * x : t) stl << "vertex " << x[0] << " " << x[1] << " " << x[2] << "\n";
+            stl << "endloop\nendfacet\n";
+        }
+    }
+    stl << "endsolid roof\n";
+    const std::string path = write_temp_shared("mallard_probe_roof.stl", stl.str());
+    const std::string dir = fresh_dir("open_surface_ranks");
+    auto input = [&](const std::string & suffix) {
+        return box_case(10, SINE_RHO, "type = \"MUSCL\"\n",
+                        "[[probes]]\nname = \"roof\"\nfields = [\"RHO\", \"P\"]\nregion = {type = \"stl\", file = \"" +
+                            path + "\", units = \"m\", filled = false}\nreductions_file = \"" + dir + "/roof_" + suffix +
+                            ".csv\"\n",
+                        "n_steps = 2\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input(serial_name("serial"))));
+    run(serial);
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/roof_distributed.csv")), without_run_metadata(read_all(dir + "/roof_serial.csv")))
+        << "on " << comm::size() << " ranks";
+    const double length = std::hypot(0.35, 0.45) + std::hypot(0.35, 0.4);
+    const auto rows = read_csv(dir + "/roof_serial.csv");
+    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "length" : "area"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
+}
+
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
     const std::string region = "region = {type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") +
                                ", radius = 0.2}\n";
@@ -984,6 +1024,42 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
             EXPECT_NEAR(total, 2.0 * std::numbers::pi * r, 1e-3 * r) << zone;
         }
         EXPECT_LT(error[1], 0.2 * error[0]) << zone << ": point " << error[1] << ", cell " << error[0];
+    }
+}
+#endif
+
+#if N_DIM == 2
+TEST(ProbesTest, AxisymmetricSurfacesOnCurvedWallsMeasureTheRevolvedSpheres) {
+    // The meridian half-plane of a spherical shell with projected arcs: a
+    // radian of each sphere has the area 2 R^2, where the planar arc length
+    // would give pi R
+    const double r_in = 1.0, r_out = 2.0;
+    const std::string file = write_temp_shared("probes_half_annulus.msh", half_annulus_gmsh(4, 12, r_in, r_out));
+    const std::string dir = fresh_dir("half_annulus");
+    std::string input =
+        "[run]\nn_steps = 1\ndt = 1.0e-9\n[mesh]\ntype = \"file\"\nfilename = \"" + file + "\"\n"
+        "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+        "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 2.0\n"
+        "[initialize]\ntype = \"constant\"\nu = [0.0, 0.0]\np = 1.0\nT = 1.0\n"
+        "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
+        "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n"
+        "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+        "[numerics.face_reconstruction]\ntype = \"FO\"\n"
+        "[physics]\ntype = \"euler\"\naxisymmetric = true\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        "[output]\ncheck_interval = 1000000\n";
+    for (const char * zone : {"inner", "outer"}) {
+        input += std::string("[[probes]]\nname = \"") + zone + "\"\nboundary = \"" + zone +
+                 "\"\nsamples = false\nfields = [\"P\"]\nreductions = [\"integral\"]\nreductions_file = \"" + dir +
+                 "/" + zone + ".csv\"\n";
+    }
+    Solver solver;
+    solver.init(parse_toml(input));
+    run(solver);
+    if (!comm::is_root()) return;
+    for (const auto & [zone, r] : {std::pair{"inner", r_in}, std::pair{"outer", r_out}}) {
+        const auto row = read_csv(dir + "/" + zone + ".csv").front();
+        EXPECT_NEAR(row.at("area"), 2.0 * r * r, roundoff(1e-12)) << zone;
+        EXPECT_NEAR(row.at("integral_P"), 2.0 * r * r, roundoff(1e-12)) << zone;
     }
 }
 #endif
