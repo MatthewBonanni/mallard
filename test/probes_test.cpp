@@ -1017,8 +1017,8 @@ TEST(ProbesTest, AxisymmetricSurfacesOnCurvedWallsMeasureTheRevolvedSpheres) {
     if (!comm::is_root()) return;
     for (const auto & [zone, r] : {std::pair{"inner", r_in}, std::pair{"outer", r_out}}) {
         const auto row = read_csv(dir + "/" + zone + ".csv").front();
-        EXPECT_NEAR(row.at("area"), 2.0 * r * r, roundoff(1e-12)) << zone;
-        EXPECT_NEAR(row.at("integral_P"), 2.0 * r * r, roundoff(1e-12)) << zone;
+        EXPECT_NEAR(row.at("AREA"), 2.0 * r * r, roundoff(1e-12)) << zone;
+        EXPECT_NEAR(row.at("INTEGRAL_P"), 2.0 * r * r, roundoff(1e-12)) << zone;
     }
 }
 #endif

@@ -1771,7 +1771,7 @@ TEST(StepQueueTest, TriggersOfTimeAveragesOfAMovingRegionAcrossTwoCellsAreReduce
     std::string triggers;
     for (uint64_t step = 3; step < 30; step += 3) {
         const std::string when =
-            written_at(reference, "dot", {"integral_MEAN_P", "mean_MEAN_P", "min_MEAN_P", "max_MEAN_P"}, "pt", "P", step) + " and step == " +
+            written_at(reference, "dot", {"INTEGRAL_MEAN_P", "MEAN_MEAN_P", "MIN_MEAN_P", "MAX_MEAN_P"}, "pt", "P", step) + " and step == " +
             std::to_string(step + 2);
         triggers += "[[triggers]]\nname = \"at_" + std::to_string(step) + "\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
     }
