@@ -225,15 +225,15 @@ TEST(Units, ExpressionsTakeQuantitiesWholeAndAreOtherwiseSI) {
     EXPECT_EQ(text("v = 2", dim::pressure), "2");
     EXPECT_THROW(text("v = \"1 atm\"", dim::temperature), InputError);
     try {
-        Expression("p", "1 + 2 atm");
+        Expression("p", 3, "1 + 2 atm");
         ADD_FAILURE() << "compiled";
-    } catch (const std::runtime_error & e) {
+    } catch (const InputError & e) {
         EXPECT_TRUE(contains(e.what(), "expressions are in SI units")) << e.what();
     }
     try {
-        Expression("p", "1 + max(x, 2) +");
+        Expression("p", 3, "1 + max(x, 2) +");
         ADD_FAILURE() << "compiled";
-    } catch (const std::runtime_error & e) {
+    } catch (const InputError & e) {
         EXPECT_FALSE(contains(e.what(), "SI units")) << e.what();
     }
 }
