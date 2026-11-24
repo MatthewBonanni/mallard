@@ -13,6 +13,8 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 mallard="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+# The post-processing scripts' Python package finds the library next to it
+export MALLARD_EXECUTABLE="$mallard"
 work="${2:-$(mktemp -d)}"
 shift $(( $# < 2 ? $# : 2 ))
 mkdir -p "$work"
