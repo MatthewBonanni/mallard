@@ -1399,9 +1399,9 @@ class TableBuilder {
             scheme.stencil_small_size = Kokkos::View<uint16_t **>("teno_stencil_small_size", n_cells, teno::MAX_FACES);
             scheme.gather_depth.assign(n_cells, 0);
             if (GrowingBuffer::supported() && !scheme.share_tables) {
-                // The searches cap central stencils at 3.5 nk + 64 entries and sectors
-                // at twice small_stencil_size; the reservation is address space only
-                large.stream(n_cells, 4 * size_t(nk) + 64, "teno_stencil_large");
+                // The most entries a central stencil and sectors (twice small_stencil_size) can
+                // hold; the reservation is address space only
+                large.stream(n_cells, teno_setup::widest_large(nk), "teno_stencil_large");
                 small.stream(n_cells, teno::MAX_FACES * 2 * size_t(scheme.n_stencil_small), "teno_stencil_small");
             }
         }
@@ -1545,6 +1545,9 @@ class KeyedSetup {
                 for (uint32_t j = 0; j < nb; j++) records[rep_group[r0 + j]] = std::move(chunk[j]);
             }
             groups.exchange(records);
+            // Records from other ranks may hold central stencils wider than any this rank has set up
+            const uint16_t widest = teno::ShapeKeys::widest(records);
+            if (widest > out.max_large) teno_setup::widen(out, widest, 0);
             host_group.assign(n_rows, teno::ShapeGroups::NONE);
             for (uint32_t c = 0; c < n; c++) {
                 const uint32_t k = groups.group[c];

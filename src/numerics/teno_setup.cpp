@@ -1671,7 +1671,8 @@ struct CellSetup {
         uint16_t n_used = 0;
         uint32_t try_max = uint32_t(n_entries) < ns_max ? uint32_t(n_entries) : ns_max;
         bool full_rank = false;
-        auto select = [&](const uint32_t n_max) {
+        // Sizes below n_from are known not to be full rank
+        auto select = [&](const uint32_t n_max, const uint32_t n_from = 0) {
             fit = fit_columns(flat, at_wall ? wall_nk : nk);
             nf = fit.n;
             const uint16_t n_first = flat != 0 ? static_cast<uint16_t>(Kokkos::ceil(stencil_factor * nf))
@@ -1680,7 +1681,7 @@ struct CellSetup {
             n_used = n_first;
             bool found = false;
             uint32_t n_tried = 0;
-            for (uint32_t n_try = n_first; n_try <= n_max; n_try++) {
+            for (uint32_t n_try = n_from > n_first ? n_from : n_first; n_try <= n_max; n_try++) {
                 if (splits_tie(static_cast<uint32_t>(n_entries), n_try)) continue;
                 if (!build(static_cast<int>(n_try))) continue;
                 const double lebesgue = lebesgue_constant(w.psi, n_psi, nk, w.X, static_cast<int>(n_try), w.coef, w.A);
@@ -1714,14 +1715,18 @@ struct CellSetup {
             const int depth = reach_layers(g, w, scratch.caps.hash, scratch.caps.visits, ns_wide, 64, end, n_end, exhausted, n_hash, truncated, ok);
             if (!ok) return OUT_OF_SCRATCH;
             layers_used = depth > layers_used ? depth : layers_used;
+            // The same list holds no full-rank size up to try_max; a deeper one is sorted anew
+            uint32_t n_from = try_max + 1;
             if (depth != entries_depth) {
                 entries_depth = depth;
                 n_entries = gather(w, i, end[depth], x0, h, n_planes, n_plane_faces);
                 if (n_entries < 0) return uint8_t(-n_entries);
                 n_means = 0;
+                n_from = 0;
+                at_wall = wall_nk < nk && reaches_wall(w, uint32_t(n_entries) < n_full ? uint32_t(n_entries) : n_full);
             }
             try_max = uint32_t(n_entries) < ns_wide ? uint32_t(n_entries) : ns_wide;
-            found = select(try_max);
+            found = select(try_max, n_from);
         }
         // The search grows stencils past their first n_full entries, possibly to a curved-wall
         // cell: they stop short of it, or else fit the wall degree
@@ -3500,7 +3505,6 @@ void copy_slots(const TableBatchT<Space> & from, const TableBatchT<Space> & to, 
 
 bool batch_interleaved() { return !DEVICE_IS_HOST; }
 
-/** @brief The device copy of a host batch. */
 void widen(TableBatch & out, const uint16_t width, const uint32_t n) {
     TableBatch wide(out.slots, out.nk, width, out.max_small, out.large_cells.interleaved);
     copy_slots<DefaultMem>(out, wide, {}, {}, n);
@@ -3508,6 +3512,7 @@ void widen(TableBatch & out, const uint16_t width, const uint32_t n) {
     out = wide;
 }
 
+/** @brief The device copy of a host batch. */
 TableBatch device_copy(const TableBatchT<Kokkos::HostSpace> & h) {
     TableBatchT<DefaultMem> d;
     d.slots = h.slots;
@@ -3603,7 +3608,7 @@ class Setup3D {
             wall_ns = opt.wall_ns;
             nss = opt.nss;
             ns_max = static_cast<uint16_t>(std::ceil(3.5 * nk)) + 64;
-            ns_wide = static_cast<uint16_t>(WIDE_FACTOR * ns_max);
+            ns_wide = widest_large(nk);
             nss_max = 2 * nss;
             pyramid_ns = pyramid_start(opt.degree, ns);
             pyramid_wall_ns = pyramid_start(opt.curved_wall_degree, wall_ns);

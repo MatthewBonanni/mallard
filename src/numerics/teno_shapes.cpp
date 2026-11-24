@@ -578,6 +578,14 @@ std::vector<std::vector<uint64_t>> ShapeKeys::records(const teno_setup::TableBat
     return out;
 }
 
+uint16_t ShapeKeys::widest(const std::vector<std::vector<uint64_t>> & records) {
+    uint16_t out = 0;
+    for (const auto & rec : records) {
+        if (!rec.empty() && rec[0] == 1) out = std::max(out, static_cast<uint16_t>(rec[4]));
+    }
+    return out;
+}
+
 ShapeKeys::Records ShapeKeys::upload(const std::vector<std::vector<uint64_t>> & records) {
     Records out;
     out.offset = Kokkos::View<uint64_t *>("teno_shape_record_offsets", records.size() + 1);
@@ -611,11 +619,9 @@ void ShapeKeys::decode(const uint32_t c0, const uint32_t n, const Kokkos::View<u
         const uint8_t depth = static_cast<uint8_t>(rec[at++]);
         const uint8_t invalid = static_cast<uint8_t>(rec[at++]);
         const uint32_t n_large = static_cast<uint32_t>(rec[at++]);
+        const size_t at_small = at;
         uint32_t n_small = 0;
-        for (int k = 0; k < teno::MAX_FACES; k++) {
-            out.small_size(t, k) = static_cast<uint16_t>(rec[at + size_t(k)]);
-            n_small += static_cast<uint32_t>(rec[at + size_t(k)]);
-        }
+        for (int k = 0; k < teno::MAX_FACES; k++) n_small += static_cast<uint32_t>(rec[at + size_t(k)]);
         at += teno::MAX_FACES;
         ok = ok && n_large <= out.max_large && n_small <= out.max_small;
         if (ok) {
@@ -649,12 +655,14 @@ void ShapeKeys::decode(const uint32_t c0, const uint32_t n, const Kokkos::View<u
             if (ok) stencil(out.small_cells.lane(t), out.small_faces.lane(t), n_small);
             if (ok) values(out.small_pinv.lane(t), size_t(n_small) * teno::NK_SMALL);
         }
+        // A rejected slot holds no stencils, which the batch's copies rely on
         out.status(t) = teno_setup::OK;
         out.gather_depth(t) = depth;
         out.failed_large(t) = 0;
         out.invalid_small(t) = invalid;
-        out.large_size(t) = static_cast<uint16_t>(n_large);
-        out.small_total(t) = static_cast<uint16_t>(n_small);
+        out.large_size(t) = ok ? static_cast<uint16_t>(n_large) : uint16_t(0);
+        out.small_total(t) = ok ? static_cast<uint16_t>(n_small) : uint16_t(0);
+        for (int k = 0; k < teno::MAX_FACES; k++) out.small_size(t, k) = ok ? static_cast<uint16_t>(rec[at_small + size_t(k)]) : uint16_t(0);
         out.scale.lane(t)[0] = rtype(g.h(c));
         bad(t) = !ok;
         g.clear(w, r.n);

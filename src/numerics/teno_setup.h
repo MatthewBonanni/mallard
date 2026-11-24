@@ -57,6 +57,12 @@ constexpr double PYRAMID_ODD_FACTOR = 2.5;
 // prisms stretched 1.2 to 1.6 : 1 along their axis need 1.2 to 1.85 times the cap
 constexpr double WIDE_FACTOR = 2.0;
 
+/** @brief The most entries a central stencil of nk monomials can have: the search's cap, in 3D times WIDE_FACTOR. */
+inline uint16_t widest_large(const uint8_t nk) {
+    const auto cap = static_cast<uint16_t>(std::ceil(3.5 * nk));
+    return N_DIM == 3 ? static_cast<uint16_t>(WIDE_FACTOR * (cap + 64)) : cap;
+}
+
 /** @brief Central stencil size to start from on a pyramid, at degree r, given the size ns elsewhere. */
 inline uint16_t pyramid_start(const uint8_t r, const uint16_t ns) {
     if (r % 2 == 0) return ns;
