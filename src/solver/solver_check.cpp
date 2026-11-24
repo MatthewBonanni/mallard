@@ -62,16 +62,20 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     const comm::SelfScope scope = communication_scope();
     CheckReport r;
     r.input_file = options.input_file;
+    r.geometry_only = options.geometry_only;
     struct Restore {
         bool files = output_files_enabled();
         bool * check;
+        bool * geometry;
         ~Restore() {
             set_output_files_enabled(files);
             *check = false;
+            *geometry = false;
         }
-    } restore{output_files_enabled(), &check_only};
+    } restore{output_files_enabled(), &check_only, &geometry_only};
     set_output_files_enabled(false);
     check_only = true;
+    geometry_only = options.geometry_only;
 
     memory::Tracker tracker;
     try {
@@ -82,7 +86,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     } catch (const std::exception & e) {
         r.error(diagnostic_code::SETUP, error_text(e));
     }
-    for (const Diagnostic & key : unused_keys(input)) {
+    // A geometry-only setup leaves the keys of the numerics and the initial state unread
+    for (const Diagnostic & key : options.geometry_only ? std::vector<Diagnostic>{} : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
         r.error(diagnostic_code::KEY_UNUSED, describe(key));
@@ -99,21 +104,26 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     if (!r.setup_done && mesh && !options.view_dir.empty()) {
         // The mesh alone, so that what the setup stopped on (a zone without a condition) can be seen
         try {
+            const std::vector<case_view::Block> blocks = mesh_view(*mesh, region::MeshRegions(*mesh)).blocks;
             const std::vector<std::string> files = case_view::write_view(
-                options.view_dir, mesh_view(*mesh, region::MeshRegions(*mesh)).blocks,
-                options.input_file.empty() ? "case view" : options.input_file);
+                options.view_dir, blocks, options.input_file.empty() ? "case view" : options.input_file);
             r.view_file = files[0];
             r.view_images.assign(files.begin() + 1, files.end());
+            r.view_blocks = case_view::describe(blocks);
         } catch (const std::exception &) {
             // A mesh read only in part draws nothing; the setup's error says why
         }
     }
     if (!r.setup_done || !mesh) return r;
 
-    check_memory(r, options, tracker);
+    if (!options.geometry_only) check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
     r.periodic = periodic_summary(*mesh);
     r.t = static_cast<double>(t);
+    if (options.geometry_only) {
+        check_regions(r, options);
+        return r;
+    }
     check_time_step(r);
     const CheckFields resolution = check_resolution(r);
     check_mesh_quality(r, options, resolution);
@@ -1064,6 +1074,59 @@ void check_surface_file(CheckReport & r, const std::string & label, const Box & 
     }
 }
 
+/**
+ * @brief The input element that holds the block's key and its index in its array of tables: the table whose
+ *        index, name or prefix the key selects it by (sponges[0].region, probes[name = "s"].region), found
+ *        without reading any key.
+ */
+void link_to_element(const Input & input, case_view::Block & b) {
+    const size_t open = b.key.find('[');
+    if (open == std::string::npos) {
+        const size_t dot = b.key.rfind('.');
+        b.element = dot == std::string::npos ? "" : b.key.substr(0, dot);
+        return;
+    }
+    const std::string array = b.key.substr(0, open);
+    const Input * node = &input;
+    for (size_t at = 0; node && at <= array.size();) {
+        const size_t dot = std::min(array.find('.', at), array.size());
+        const Input * next = nullptr;
+        if (node->is_table()) {
+            const auto & entries = node->as_table().entries();
+            const auto it = entries.find(array.substr(at, dot - at));
+            if (it != entries.end()) next = &it->second;
+        }
+        node = next;
+        at = dot + 1;
+    }
+    auto selects = [&](const std::string & element) {
+        return b.key.starts_with(element) &&
+               (b.key.size() == element.size() || b.key[element.size()] == '.' || b.key[element.size()] == '[');
+    };
+    if (node && node->is_array()) {
+        const auto & tables = node->as_array();
+        for (size_t i = 0; i < tables.size(); i++) {
+            std::vector<std::string> names = {array + "[" + std::to_string(i) + "]"};
+            for (const char * field : {"name", "prefix"}) {
+                if (!tables[i].is_table()) continue;
+                const auto & entries = tables[i].as_table().entries();
+                const auto it = entries.find(field);
+                if (it != entries.end() && it->second.is_string()) {
+                    names.push_back(array + "[" + field + " = \"" + it->second.as_string() + "\"]");
+                }
+            }
+            for (const std::string & element : names) {
+                if (!selects(element)) continue;
+                b.element = element;
+                b.index = static_cast<int64_t>(i);
+                return;
+            }
+        }
+    }
+    const size_t close = b.key.find(']', open);
+    b.element = close == std::string::npos ? b.key : b.key.substr(0, close + 1);
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -1075,6 +1138,8 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, con
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
+        if (name != "domain") m.block.zone = name;
+        if (name != "domain") m.block.zone = name;
         if (zone && mesh.curved_geometry) follow_curved_faces(mesh, m.block);
         v.regions.push_back(entry(mesh, name, region, m, true));
         v.blocks.push_back(std::move(m.block));
@@ -1100,6 +1165,8 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
             if (block_name(boundary_summary[i].zone) != b.name) continue;
             if (b.condition.empty()) {
                 b.condition = boundary_summary[i].condition;
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
                 if (drawn) add_wall_y_plus(*mesh, r.face_y_plus, boundary_summary[i].zone, b);
             }
             conditions += (conditions.empty() ? "" : "; ") + condition_text(resolved, i, boundary_summary[i]);
@@ -1107,16 +1174,27 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         if (!conditions.empty()) b.label = b.name + ": " + conditions;
     }
     const std::vector<std::string> mesh_names = automatic.names();
+    const Input * names = region::named_regions(input);
+    auto link_input = [&](case_view::Block & b, const std::string & label) {
+        if (names && names->is_table() && names->as_table().entries().contains(label)) {
+            b.key = b.element = "regions." + label;
+        } else {
+            b.key = label;
+            link_to_element(input, b);
+        }
+    };
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
         const case_view::Kind kind = label.starts_with("probes[")       ? case_view::Kind::PROBE
                                      : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                                         : case_view::Kind::REGION;
         if (region->solution()) {
+            if (options.geometry_only) continue;
             const auto levels =
                 std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
             OnMesh m = on_mesh(*mesh, *region, block_name(label), false, false, levels, static_cast<double>(t));
             m.block.kind = kind;
+            link_input(m.block, label);
             CheckRegion g = entry(*mesh, label, *region, m, false);
             g.resolution = 0;
             g.solution = true;
@@ -1126,6 +1204,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
+        link_input(m.block, label);
         CheckRegion g = entry(*mesh, label, *region, m, false);
         g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
                                   [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
@@ -1145,12 +1224,19 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         blocks.push_back(std::move(m.block));
     }
-    for (case_view::Block & b : probes.view_blocks()) blocks.push_back(std::move(b));
+    for (case_view::Block & b : probes.view_blocks()) {
+        link_input(b, b.name);
+        blocks.push_back(std::move(b));
+    }
+    for (case_view::Block & b : blocks) {
+        if (b.kind == case_view::Kind::BOUNDARY && !b.key.empty()) link_to_element(input, b);
+    }
     if (!options.view_dir.empty()) {
         const std::string title = options.input_file.empty() ? "case view" : options.input_file;
         const std::vector<std::string> files = case_view::write_view(options.view_dir, blocks, title);
         r.view_file = files[0];
         r.view_images.assign(files.begin() + 1, files.end());
+        r.view_blocks = case_view::describe(blocks);
     }
 }
 

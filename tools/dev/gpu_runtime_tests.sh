@@ -41,6 +41,7 @@ sanitized+=':StepQueueTest.RestartedRunsCaptureTheStepGraphAgainAndContinueBitFo
 sanitized+=':StepQueueTest.DerivedFieldsAndRatesAreSampledWithoutStoppingTheDevice'
 sanitized+=':InsituStatisticsTest.SpectraAndPhasesAreSampledInTheStepGraph'
 sanitized+=':IOTest.AsynchronousOutputWritesTheSameFiles'
+sanitized+=':TENOSetup.ShapeRecordsHoldWhatTheirSlotsSetUp'
 sanitized+=':MPITest.TENOOnQuadsMatchesSerial:MPITest.LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs'
 sanitized+=':MPITest.CharacteristicBoundariesAndSpongesMatchSerialWithAndWithoutStepGraphs'
 sanitized_distributed='MPITest.StreamsWaitForEachOtherWhenOneRunsLate:StepQueueTest.DistributedRunsAsTheHostTakesThem'
@@ -67,14 +68,17 @@ mpi() { [ "${mpiexec[*]}" != none ]; }
 # (hazards it does not rate as errors) include Kokkos' CUDA reductions of values over 16 bytes: every lane of the
 # first warp stores the result, and thread 0 reads it for final() with no __syncwarp between. memcheck and
 # initcheck skip the CUDA API errors NCCL and Open MPI make and handle (the suppressions file); memcheck
-# reports explicit API errors only, as the driver's log lines ("extended" errors) cannot be suppressed
+# reports explicit API errors only, as the driver's log lines ("extended" errors) cannot be suppressed. synccheck
+# and initcheck leave out NCCL's kernels, whose protocols read flags in buffers they never initialized and whose
+# send/receive kernel diverges at barriers by design (across nodes: errors in NCCL's code only)
 suppressions=$(cd "$(dirname "$0")" && pwd)/compute_sanitizer_suppressions.xml
 sanitizer() {
     sanitize=(env MALLARD_TEST_CUDA_GRAPHS=off compute-sanitizer --tool "$1" --target-processes application-only
               --error-exitcode 99 --print-limit 20)
     case $1 in
         memcheck) sanitize+=(--report-api-errors explicit --suppressions "$suppressions") ;;
-        initcheck) sanitize+=(--suppressions "$suppressions") ;;
+        initcheck) sanitize+=(--suppressions "$suppressions" --kernel-name-exclude kns=ncclDevKernel_) ;;
+        synccheck) sanitize+=(--kernel-name-exclude kns=ncclDevKernel_) ;;
         racecheck) sanitize+=(--racecheck-detect-level error) ;;
     esac
 }
