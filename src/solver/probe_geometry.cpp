@@ -201,8 +201,8 @@ std::pair<Vec3, Vec3> circle_frame(const Input & entry, const std::string & key,
 /** @brief An expression of the curve parameter s, or of the surface parameters u and v. */
 class ParameterExpression {
     public:
-        ParameterExpression(const std::string & text, const std::string & what, bool surface = false)
-            : e(what, text, surface ? std::vector<std::string>{"u", "v"} : std::vector<std::string>{"s"}),
+        ParameterExpression(const std::string & text, const std::string & what, std::size_t line, bool surface = false)
+            : e(what, line, text, surface ? std::vector<std::string>{"u", "v"} : std::vector<std::string>{"s"}),
               two_parameters(surface) {}
         double operator()(double a, double b = 0.0) const {
             const double p[2] = {a, b};
@@ -263,7 +263,8 @@ region::Grid parametric_grid(const Input & entry, const std::string & key, const
     for (size_t d = 0; d < 3; d++) {
         const std::string name(1, "xyz"[d]);
         if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of u and v) not specified.");
-        f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name, true));
+        f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name,
+                                                         line_of(entry, name), true));
     }
     auto range = [&](const char * name) {
         if (!entry.contains(name)) return std::pair{0.0, 1.0};
@@ -572,7 +573,8 @@ Geometry make_geometry(const Input & entry, const std::string & key) {
         for (size_t d = 0; d < N_DIM; d++) {
             const std::string name(1, "xyz"[d]);
             if (!entry.contains(name)) throw InputError(key + ": " + name + " (an expression of s) not specified.");
-            f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name));
+            f.push_back(std::make_shared<ParameterExpression>(find_value<std::string>(entry, name), key + "." + name,
+                                                             line_of(entry, name)));
         }
         double s0 = 0.0, s1 = 1.0;
         if (entry.contains("s_range")) {
