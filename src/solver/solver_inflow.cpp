@@ -104,9 +104,10 @@ MassFlowInput Solver::read_mass_flow(const Input & bound, const BoundaryConditio
         throw InputError(where + ".mdot must be " + (m.mdot_of_t ? "non-negative (at t = 0)" : "positive") + ".");
     }
     if (bound.contains("profile")) {
-        m.shape = std::make_shared<const kexpr::Program>(
-            where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-            BoundaryValue::variables(bound), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
+        m.shape = std::make_shared<const kexpr::Program>(compile_expression(
+            where + ".profile", line_of(bound, "profile"),
+            quantity_or_expression(bound.at("profile"), where + ".profile", dim::none), BoundaryValue::variables(bound),
+            BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
     }
     return m;
 }
