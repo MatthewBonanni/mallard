@@ -479,8 +479,10 @@ Pitfalls:
 - **Probes.** Surface probes of the diffusive fluxes (`ENERGY_DIFFUSIVE_FLUX`,
   `SPECIES_DIFFUSIVE_FLUX_*`) report the polynomial fluxes the scheme applies,
   at the probe's state: writing them reconstructs that state once more.
-  Tractions and heat fluxes (`TRACTION_VISCOUS`, `TAU_W`, `Q_W`, `[[forces]]`)
-  still come from least-squares gradients.
+  On walls with a wall fit, the viscous tractions, wall shear stresses and
+  heat fluxes of probes (`TRACTION_VISCOUS`, `TAU_W`, `CF`, `Q_W`, `U_TAU`,
+  `Y_PLUS`) and the viscous forces of `[[forces]]` are the scheme's
+  polynomial wall flux too; other faces keep least squares.
 
 ## Riemann solvers
 

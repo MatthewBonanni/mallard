@@ -1,0 +1,1 @@
+- With `viscous_gradients = "reconstruction"`, walls with a wall fit report the scheme's polynomial wall flux in probes (`TRACTION_VISCOUS`, `TAU_W`, `CF`, `Q_W`, `U_TAU`, `Y_PLUS`) and in `[[forces]]`, instead of least-squares wall gradients: on Couette flow with TENO5 the wall shear stress and heat flux errors converge at fifth to sixth order instead of first (#1542).

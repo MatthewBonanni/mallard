@@ -3508,7 +3508,7 @@ void Solver::write_data(bool force) {
         // Regions of lower dimension: point values, written as probes write them
         update_cell_W();
         if (is_mixture() && probes.snapshots_need_transport()) update_transport();
-        if (probes.all_gradients_due(step, t, wall_model_on, true, force)) update_probe_gradients();
+        if (probes.all_gradients_due(step, t, wall_model_on || polynomial_viscous, true, force)) update_probe_gradients();
         ProbeFluxes fluxes;
         probes.write(step, t, probe_fields(fluxes), true, force);
     }
@@ -3569,7 +3569,7 @@ void Solver::write_probes() {
     if (probes.point_values_due(step, t) || probes.gradients_due(step, t)) {
         update_cell_W();
         if (is_mixture() && probes.transport_due(step, t)) update_transport();
-        if (probes.all_gradients_due(step, t, wall_model_on)) update_probe_gradients();
+        if (probes.all_gradients_due(step, t, wall_model_on || polynomial_viscous)) update_probe_gradients();
     } else {
         update_primitives();
     }
@@ -3586,7 +3586,7 @@ void Solver::write_particle_probes() {
 }
 
 void Solver::sample_probe_averages() {
-    const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on);
+    const auto [cell_W, transport, all_gradients] = probes.average_needs(wall_model_on || polynomial_viscous);
     if (cell_W) {
         update_cell_W();
         if (is_mixture() && transport) update_transport();
@@ -3657,13 +3657,18 @@ ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
             if (axisymmetric) fluxes.mixture.planar_area = mesh->face_area;
         }
     } else if (is_viscous()) {
-        fluxes.viscous = ViscousFluxFunctor{
-            mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
-            mesh->periodic_maps(), mesh->face_shift, W_cells, viscous_gradients, boundary_data, {}, physics,
-            axisymmetric, mesh->cell_covariance, {}, false, wall_model.out};
-        if (polynomial_viscous) set_polynomial_flux(fluxes.viscous);
+        fluxes.viscous = output_viscous_flux();
     }
     return fields;
+}
+
+ViscousFluxFunctor Solver::output_viscous_flux() const {
+    ViscousFluxFunctor functor{
+        mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
+        mesh->periodic_maps(), mesh->face_shift, W_cells, viscous_gradients, boundary_data, {}, physics,
+        axisymmetric, mesh->cell_covariance, {}, false, wall_model.out};
+    if (polynomial_viscous) set_polynomial_flux(functor);
+    return functor;
 }
 
 void Solver::take_step() {
@@ -3986,6 +3991,7 @@ struct ForceFunctor {
     bool axisymmetric = false;  // per radian: tractions weighted by the face radius
 
     WallModelFlux wall_model = {};  // modeled walls: their stress and heat flux, else empty
+    ViscousFluxFunctor wall_flux = {};  // viscous_gradients = "reconstruction": the fitted walls' polynomial flux
 
     struct value_type {
         rtype v[2 * N_DIM + 1];
@@ -4022,6 +4028,11 @@ struct ForceFunctor {
             sum[2 * N_DIM] += A * wall_model.flux(row, N_DIM);
             return;
         }
+        rtype F[N_CONSERVATIVE] = {};
+        if (wall_flux.fitted_wall_flux(f, F)) {
+            FOR_I_DIM sum[N_DIM + i] -= F[1 + i];
+            return;
+        }
         rtype g[N_DIM][N_DIM];
         for (uint8_t v = 0; v < N_DIM; v++) {
             FOR_I_DIM g[v][i] = gradients(c, 1 + v, i);
@@ -4052,10 +4063,12 @@ void Solver::reduce_force(const Kokkos::View<uint32_t *> & faces, double * out) 
         gated::parallel_for("force_gradients", n_gradient_cells(), viscous_gradient);
         if (is_mixture()) update_transport();
         if (wall_model_on) update_wall_model();
+        if (polynomial_viscous) update_point_gradients();
     }
     ForceFunctor functor{faces, mesh->face_normals, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
                          W_cells, viscous_gradients, boundary_data, physics, is_viscous(),
                          is_mixture() ? cell_transport : Kokkos::View<rtype *[3]>(), axisymmetric, wall_model.out};
+    if (polynomial_viscous && !is_mixture()) functor.wall_flux = output_viscous_flux();
     using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
     constexpr size_t n = 2 * N_DIM + 1;
     const Kokkos::View<rtype *> sum = monitor_sums;

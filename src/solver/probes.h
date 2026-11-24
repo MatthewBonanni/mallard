@@ -210,7 +210,7 @@ class Probes {
          * @brief Whether the averaging probes need point values or gradients (ProbeFields::W current),
          *        transport, and, as all_gradients_due, the gradients of every cell and the wall model.
          */
-        std::tuple<bool, bool, bool> average_needs(bool wall_model) const;
+        std::tuple<bool, bool, bool> average_needs(bool wall_state) const;
         /** @brief Adds the samples at (step, t) to the time averages of the averaging probes (collective). */
         void sample_averages(uint64_t step, rtype t, const ProbeFields & fields);
         /**
@@ -268,10 +268,11 @@ class Probes {
         bool gradients_due(uint64_t step, rtype t) const;
         /**
          * @brief Whether a probe or snapshot due now (or forced) needs the gradients of every cell
-         *        and the wall model on the current state: diffusive fluxes, or, with a wall model,
-         *        any wall quantity.
+         *        and the wall model on the current state: diffusive fluxes, or, with wall_state (a wall
+         *        model, or the polynomial wall fluxes of viscous_gradients = "reconstruction"), any wall
+         *        quantity.
          */
-        bool all_gradients_due(uint64_t step, rtype t, bool wall_model, bool snapshots = false,
+        bool all_gradients_due(uint64_t step, rtype t, bool wall_state, bool snapshots = false,
                                bool force = false) const;
         bool transport_due(uint64_t step, rtype t) const;
         bool any_gradients() const;
@@ -324,7 +325,7 @@ class Probes {
         /** @brief Adds staged averaging probe k's samples at (step, t) from record slot `slot` (collective). */
         void sample_staged_average(size_t k, uint64_t step, rtype t, uint64_t slot);
         /** @brief As average_needs, of the staged probes. */
-        std::tuple<bool, bool, bool> staged_needs(bool wall_model) const;
+        std::tuple<bool, bool, bool> staged_needs(bool wall_state) const;
         /**
          * @brief Enqueues staged moving probe k's covered cells at the device's time, and sets *overflow (device
          *        memory) to whether they are more than its staging holds.

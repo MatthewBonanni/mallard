@@ -1263,6 +1263,8 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
     const ProbeReference ref = reference;
     const WallModelFunctor wall_model = fields.wall_model;
     const bool modeled = wall_model.wm.active();
+    // With viscous_gradients = "reconstruction", fitted walls take the scheme's polynomial wall flux
+    const ViscousFluxFunctor wall_flux = need_gradients && on_faces && fields.fluxes ? fields.fluxes->viscous : ViscousFluxFunctor{};
     gated::parallel_for("probe_values", n, KOKKOS_LAMBDA(const uint32_t s) {
         if (counted && s >= *counted) return;
         const uint32_t c = cell(s);
@@ -1313,6 +1315,16 @@ void Probes::Samples::evaluate(Sampling sampling, Kokkos::View<int32_t *> codes,
             q_n = kappa * dot<N_DIM>(gT, nv);
             if (bc.type == BoundaryType::WALL_ADIABATIC) q_n = 0.0_r;
             if (bc.type == BoundaryType::WALL_HEAT_FLUX) q_n = bc.data[N_DIM + 1];
+            rtype F[N_CONSERVATIVE] = {};
+            if (wall_flux.fitted_wall_flux(face(s), F)) {
+                const rtype A = wall_flux.face_area(face(s));
+                rtype work = 0.0_r;
+                FOR_I_DIM {
+                    tau_n[i] = F[1 + i] / A;
+                    work += bc.data[1 + i] * F[1 + i];
+                }
+                q_n = (F[E] - work) / A;
+            }
         }
         // Modeled walls: the model's traction and heat flux, and its exchange point's state
         int32_t row = -1;
@@ -2483,9 +2495,9 @@ bool Probes::transport_due(uint64_t step, rtype t) const {
                        [&](const auto & p) { return !p->snapshot && p->transport && p->due(step, t); });
 }
 
-bool Probes::all_gradients_due(uint64_t step, rtype t, bool wall_model, bool snapshots, bool force) const {
+bool Probes::all_gradients_due(uint64_t step, rtype t, bool wall_state, bool snapshots, bool force) const {
     return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
-        return p->snapshot == snapshots && (p->diffusive || (wall_model && p->gradients)) &&
+        return p->snapshot == snapshots && (p->diffusive || (wall_state && p->gradients)) &&
                p->due_or_forced(step, t, force);
     });
 }
@@ -2918,13 +2930,13 @@ void Probes::sample_staged_average(const size_t k, const uint64_t step, const rt
     sample_average(*probes[k], t, nullptr, static_cast<int64_t>(slot));
 }
 
-std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_model) const {
+std::tuple<bool, bool, bool> Probes::staged_needs(bool wall_state) const {
     bool cell_W = false, transport = false, all_gradients = false;
     for (const auto & p : probes) {
         if (!p->staged) continue;
         cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients;
         transport = transport || p->transport;
-        all_gradients = all_gradients || p->diffusive || (wall_model && p->gradients);
+        all_gradients = all_gradients || p->diffusive || (wall_state && p->gradients);
     }
     return {cell_W, transport, all_gradients};
 }
@@ -3272,13 +3284,13 @@ bool Probes::averages_due(uint64_t step, rtype t) const {
            std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->average; });
 }
 
-std::tuple<bool, bool, bool> Probes::average_needs(bool wall_model) const {
+std::tuple<bool, bool, bool> Probes::average_needs(bool wall_state) const {
     bool cell_W = false, transport = false, all_gradients = false;
     for (const auto & p : probes) {
         if (!p->average) continue;
         cell_W = cell_W || p->sampling == Sampling::POINT || p->gradients || p->solution;
         transport = transport || p->transport;
-        all_gradients = all_gradients || p->diffusive || (wall_model && p->gradients);
+        all_gradients = all_gradients || p->diffusive || (wall_state && p->gradients);
     }
     return {cell_W, transport, all_gradients};
 }
