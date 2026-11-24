@@ -2219,7 +2219,11 @@ void Solver::init_output(region::Regions & regions) {
 
 std::vector<Solver::WriterTarget> Solver::write_data_targets(const Input & output, region::Regions & regions) const {
     const bool one = output.contains("region"), several = output.contains("regions");
-    if (!one && !several) return {{.kind = probe::RegionValue::Kind::WHOLE_MESH}};
+    if (!one && !several) {
+        WriterTarget whole_mesh;
+        whole_mesh.kind = probe::RegionValue::Kind::WHOLE_MESH;
+        return {whole_mesh};
+    }
     if (one && several) {
         throw InputError({.key = "write_data.regions",
                           .line = line_of(output, "regions"),

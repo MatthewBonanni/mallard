@@ -100,7 +100,9 @@ std::vector<Triggers::Entry> Triggers::read(const Input & input) {
     for (size_t i = 0; i < entries.size(); i++) {
         const Input & entry = entries[i];
         const std::string where = "triggers[" + std::to_string(i) + "]";
-        Entry e{.input = entry, .where = where};
+        Entry e;
+        e.input = entry;
+        e.where = where;
         e.name = find_value_or<std::string>(entry, "name", "trigger_" + std::to_string(i));
         if (!is_name(e.name)) {
             throw InputError({.key = where + ".name",

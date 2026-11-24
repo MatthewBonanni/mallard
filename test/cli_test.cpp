@@ -378,7 +378,7 @@ TEST(CliTest, InputUpgradeSaysWhereItLookedForTheMesh) {
 
 namespace {
 
-/** @brief Runs a two-step case in the working directory: VTU snapshots and restart files under case/. */
+/** @brief Whether two JSON values are equal, member names and order included. */
 bool same(const json::Value & a, const json::Value & b) {
     if (a.type != b.type || a.boolean != b.boolean || a.number != b.number || a.string != b.string ||
         a.names != b.names || a.array.size() != b.array.size()) {
@@ -393,6 +393,7 @@ bool same(const json::Value & a, const json::Value & b) {
     return true;
 }
 
+/** @brief Runs a two-step case in the working directory: VTU snapshots and restart files under case/. */
 Result small_run() {
     const bool three = Mallard_DIM == 3;
     std::ofstream("small.toml")
@@ -1245,7 +1246,9 @@ TEST(CliTest, InputResolveNeedsNoMesh) {
     const json::Value without = json::parse(listed.out)["keys"];
     EXPECT_EQ(without.keys(), with_mesh.keys());
     for (const std::string & key : with_mesh.keys()) {
-        if (without.has(key)) EXPECT_TRUE(same(without[key], with_mesh[key])) << key;
+        if (without.has(key)) {
+            EXPECT_TRUE(same(without[key], with_mesh[key])) << key;
+        }
     }
 
     const Result resolved = run({"input", "resolve", "mesh.toml"}, true);
