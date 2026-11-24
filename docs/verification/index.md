@@ -9,7 +9,7 @@ described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-232 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
+244 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
 <!-- END GENERATED summary -->
 
 ## How the tables are made
@@ -472,6 +472,16 @@ and the interpolation study above covers the particles there.
 ![Tracer pathlines in a compact vortex under mesh refinement, by cell type](../images/verification/particles-pathlines-light.svg#gh-light-mode-only)
 ![Tracer pathlines in a compact vortex under mesh refinement, by cell type](../images/verification/particles-pathlines-dark.svg#gh-dark-mode-only)
 
+The forces that read gas gradients: the acceleration over one forward Euler
+step of solid particles at rest in gas at rest with a sinusoidal pressure
+(the pressure-gradient force), and of particles moving through a sinusoidal
+shear whose vorticity has no zero near them (Saffman lift), against that of
+the exact gas. Each particle sits at the same offset in its cell on every
+mesh, so that the largest error compares like with like. The gradient is
+that of the polynomial the particle reads, so order $k - 1$ with TENO of
+order $k$; the cell's least-squares gradient of earlier versions, constant
+in the cell, gave 0.6 to 1.2.
+
 <!-- BEGIN GENERATED table-particles -->
 | Method | Cells | Error | Resolutions | Errors | Design | Observed | Asserted | Result |
 |---|---|---|---|---|---|---|---|---|
@@ -540,6 +550,18 @@ and the interpolation study above covers the particles there.
 | SSPRK54 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 3.30e-06 → 2.06e-07 → 1.29e-08 | 4 | 4.00 | > 3.85 | pass |
 | RK4, exponential | – | max position error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 2.34e-06 → 3.52e-07 → 4.72e-08 | 3 | 2.90 | > 2.6 | pass |
 | RK4, exponential | – | max velocity error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 8.27e-04 → 1.53e-04 → 2.21e-05 | 3 | 2.79 | > 2.6 | pass |
+| TENO3 | quadrilaterals | max pressure_gradient acceleration error | 16 → 32 → 64 | 5.52e-03 → 1.54e-03 → 3.87e-04 | 2 | 1.99 | > 1.75 | pass |
+| TENO4 | quadrilaterals | max pressure_gradient acceleration error | 16 → 32 → 64 | 1.30e-03 → 1.76e-04 → 2.25e-05 | 3 | 2.97 | > 2.75 | pass |
+| TENO3 | triangles | max pressure_gradient acceleration error | 16 → 32 → 64 | 2.26e-03 → 6.37e-04 → 1.65e-04 | 2 | 1.95 | > 1.75 | pass |
+| TENO4 | triangles | max pressure_gradient acceleration error | 16 → 32 → 64 | 5.79e-04 → 7.12e-05 → 9.36e-06 | 3 | 2.93 | > 2.75 | pass |
+| TENO4 | quadrilaterals | max saffman_lift acceleration error | 16 → 32 → 64 | 2.93e-06 → 4.18e-07 → 4.87e-08 | 3 | 3.10 | > 2.5 | pass |
+| TENO4 | triangles | max saffman_lift acceleration error | 16 → 32 → 64 | 2.01e-06 → 2.64e-07 → 3.82e-08 | 3 | 2.79 | > 2.5 | pass |
+| TENO3 | hexahedra | max pressure_gradient acceleration error | 8 → 16 → 32 | 5.12e-02 → 1.37e-02 → 3.70e-03 | 2 | 1.89 | > 1.5 | pass |
+| TENO4 | hexahedra | max pressure_gradient acceleration error | 8 → 16 → 32 | 5.47e-02 → 8.96e-03 → 1.17e-03 | 3 | 2.94 | > 2.5 | pass |
+| TENO3 | tetrahedra | max pressure_gradient acceleration error | 6 → 12 → 24 | 4.99e-02 → 1.67e-02 → 4.24e-03 | 2 | 1.98 | > 1.5 | pass |
+| TENO4 | tetrahedra | max pressure_gradient acceleration error | 6 → 12 → 24 | 3.25e-02 → 4.77e-03 → 6.09e-04 | 3 | 2.97 | > 2.5 | pass |
+| TENO4 | hexahedra | max saffman_lift acceleration error | 8 → 16 → 32 | 1.05e-04 → 1.14e-05 → 1.81e-06 | 3 | 2.66 | > 2.5 | pass |
+| TENO4 | tetrahedra | max saffman_lift acceleration error | 8 → 16 → 32 | 4.32e-05 → 3.45e-06 → 4.30e-07 | 3 | 3.01 | > 2.5 | pass |
 <!-- END GENERATED table-particles -->
 
 ## Not covered
