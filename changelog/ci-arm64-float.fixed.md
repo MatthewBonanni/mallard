@@ -1,0 +1,1 @@
+- Builds with Clang (and Apple Clang) on CPUs with fused multiply-add, such as arm64 and Apple silicon, no longer contract multiplies and adds, as GCC builds already did: their results no longer depend on how equal expressions are written or inlined, and single-precision TENO stencil shapes match other CPUs'.
