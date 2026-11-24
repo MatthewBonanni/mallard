@@ -485,6 +485,17 @@ CUDA graphs.
   `4 width^2 / h^2` in 2D and `6 width^2 / h^2` in 3D for cells of size `h`,
   each with a halo exchange on several ranks.
 
+![Edges of a curtain of glass beads hit by a Mach 1.66 shock: coupled two ways, the upstream edge follows the experiment and the downstream edge moves about half as fast; coupled one way, the curtain moves as a block](../images/guide/shock_curtain_edges-light.svg#gh-light-mode-only)
+![Edges of a curtain of glass beads hit by a Mach 1.66 shock: coupled two ways, the upstream edge follows the experiment and the downstream edge moves about half as fast; coupled one way, the curtain moves as a block](../images/guide/shock_curtain_edges-dark.svg#gh-dark-mode-only)
+
+*The [`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain)
+example: a Mach 1.66 shock on a curtain of glass beads at 19% volume fraction,
+against the Sandia multiphase shock tube (Wagner et al., 2012). Coupled two
+ways, the curtain reflects part of the shock and spreads, and its upstream edge
+follows the experiment; its downstream edge moves about half as fast, because
+the dilute model leaves out the volume the beads take from the gas and the
+effect of neighbors on drag. Coupled one way, the curtain moves as a block.*
+
 ## Evaporating droplets
 
 ```toml

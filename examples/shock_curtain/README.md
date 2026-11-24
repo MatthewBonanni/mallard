@@ -52,6 +52,9 @@ shock reached the curtain. Wagner et al. tracked them in schlieren movies at
 mid-height in four runs at Mach 1.66; `wagner_edges.csv` holds the median
 and range of the four, digitized from Beresh et al. (2011), Fig. 20.
 
+![Edges of the curtain against the experiment, coupled two ways and one way](../../docs/images/guide/shock_curtain_edges-light.svg#gh-light-mode-only)
+![Edges of the curtain against the experiment, coupled two ways and one way](../../docs/images/guide/shock_curtain_edges-dark.svg#gh-dark-mode-only)
+
 | t after impact (µs) | Upstream edge, experiment (mm) | Upstream edge, Mallard (mm) | Downstream edge, experiment (mm) | Downstream edge, Mallard (mm) |
 |---|---|---|---|---|
 | 100 | 0.5 | 0.6 | 2.6 | 0.8 |
@@ -140,6 +143,11 @@ python animate_shock_curtain.py extract .
 python animate_shock_curtain.py edges .
 python animate_shock_curtain.py render shock_curtain.mp4 . --poster shock_curtain.jpg --poster-t 300
 ```
+
+The figure of the edges is redrawn from the edges of this run and of a run
+with `coupling = "one-way"` (each with its `frames.npz`) by
+`python tools/docs/shock_curtain.py --two-way RUN --one-way RUN`, from the
+repository's root.
 
 6,440 steps, 73 minutes on 2 threads of an Apple M4 Pro. The restart frames of the animation (every 2.5 µs, 281 frames,
 which carry the beads) take 7.8 GB; `extract` reduces them to `frames.npz`.
