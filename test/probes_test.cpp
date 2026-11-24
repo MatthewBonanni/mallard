@@ -52,6 +52,7 @@
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
+#include "verification.h"
 #include "transport.h"
 
 #ifdef Mallard_HAS_HDF5
@@ -841,6 +842,57 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
     EXPECT_GT(std::log2(e_q[1] / e_q[2]), 0.8) << e_q[1] << " " << e_q[2];
     EXPECT_LT(e_energy.back(), 0.05);
     EXPECT_GT(std::log2(e_energy[1] / e_energy[2]), 0.8) << e_energy[1] << " " << e_energy[2];
+}
+
+TEST(ProbesTest, DiffusiveFluxesOfReconstructionGradientsAreTheSchemesPolynomialFluxes) {
+    // With viscous_gradients = "reconstruction" the wall faces' diffusive energy flux is the scheme's polynomial
+    // flux at the probe's state (here the initial one, before any stage): from TENO5's wall fits it converges at
+    // third order, where least squares converges at first
+    SKIP_IN_SINGLE_PRECISION("the finest errors are near single-precision round-off");
+    const double q_bottom = -COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double q_top = COUETTE_KAPPA * (COUETTE_T1 - COUETTE_T0) - 0.5 * COUETTE_MU * COUETTE_U * COUETTE_U;
+    const double e_bottom = -q_bottom, e_top = -(COUETTE_MU * COUETTE_U * COUETTE_U + q_top);
+    std::vector<double> n_cells, errors;
+    for (uint32_t n : {8u, 16u}) {
+        const std::string dir = fresh_dir("couette_polynomial");
+        const std::string probe = "[[probes]]\nname = \"walls\"\nfile = \"" + dir + "/walls.csv\"\nboundary_type = \"wall\"\n"
+                                  "fields = [\"ENERGY_DIFFUSIVE_FLUX\"]\n";
+        std::string text = couette_case(n, probe);
+        text.replace(text.find("type = \"MUSCL\""), 14, "type = \"TENO\"\norder = 5");
+        text.insert(text.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+        Solver solver;
+        solver.init(parse_toml(text));
+        run(solver);
+        double error = 0.0;
+        for (const auto & row : read_csv(dir + "/walls.csv")) {
+            if (row.at("step") != 0.0) continue;
+            const double e = row.at("ny") > 0.0 ? e_top : e_bottom;
+            error = std::max(error, std::fabs(row.at("ENERGY_DIFFUSIVE_FLUX") - e) / std::fabs(e));
+        }
+        n_cells.push_back(n);
+        errors.push_back(error);
+    }
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients", "quadrilaterals",
+                                "max wall diffusive energy flux error of surface probes, Couette flow", n_cells, errors,
+                                3.0, 2.5});
+    // Reconstructing for the probes leaves the solution bitwise as without them
+    auto final_state = [](const std::string & probe) {
+        std::string text = couette_case(8, probe, "n_steps = 4\ndt = 1.0e-3\n");
+        text.replace(text.find("type = \"MUSCL\""), 14, "type = \"TENO\"\norder = 5");
+        text.insert(text.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+        Solver solver;
+        solver.init(parse_toml(text));
+        run(solver);
+        return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver.state().flow);
+    };
+    const std::string dir = fresh_dir("couette_polynomial_steps");
+    const auto with = final_state("[[probes]]\nname = \"walls\"\nfile = \"" + dir +
+                                  "/walls.csv\"\nboundary_type = \"wall\"\nfields = [\"ENERGY_DIFFUSIVE_FLUX\"]\n");
+    const auto without = final_state("");
+    ASSERT_EQ(with.extent(0), without.extent(0));
+    for (size_t i = 0; i < with.extent(0); i++) {
+        for (size_t v = 0; v < N_CONSERVATIVE; v++) EXPECT_EQ(with(i, v), without(i, v)) << "cell " << i;
+    }
 }
 
 TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {

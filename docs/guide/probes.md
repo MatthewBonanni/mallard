@@ -165,7 +165,7 @@ In 3D the faces are polygons; ParaView colors the `.vtp` series by any variable:
 | `CF`, `CP` | Skin friction and pressure coefficients of `reference` (the probe's, else `[output] reference`) |
 | `Q_W` | Heat flux into the fluid |
 | `U_TAU`, `Y_PLUS` | Friction velocity and first-cell `y+` |
-| `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain |
+| `ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*` | The viscous flux's diffusive energy flux (conduction, viscous work, species enthalpy) and species mass fluxes, positive out of the domain (with `viscous_gradients = "reconstruction"`, the polynomial fluxes) |
 | `ENERGY_TOTAL_FLUX`, `SPECIES_TOTAL_FLUX_*` | Convective plus diffusive |
 | `WALL_MODEL_U`, `WALL_MODEL_T`, `WALL_MODEL_H` | On [modeled walls](les.md#wall-models-wall_model): the exchange point's tangential speed, temperature and height |
 
