@@ -97,18 +97,12 @@
  "type": "string",
  "value_notes": {
   "FO": {
-   "cost": "cheap",
-   "cost_why": "no reconstruction",
    "summary": "First order: the cell values on both sides of each face"
   },
   "MUSCL": {
-   "cost": "cheap",
-   "cost_why": "one gradient per cell and a limiter",
    "summary": "Second order: limited linear states from one least-squares gradient per cell"
   },
   "TENO": {
-   "cost": "expensive",
-   "cost_why": "candidate stencils of many cells and their weights per face: several times MUSCL per step",
    "summary": "High order (TENO-E, order face_reconstruction.order): nonlinear weights of candidate stencils"
   }
  },

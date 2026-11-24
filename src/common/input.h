@@ -209,7 +209,11 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
 
-/** @brief Roughly what a value of a closed set costs per cell or particle, against its alternatives. */
+/**
+ * @brief Roughly what a value of a closed set costs per cell or particle, against its alternatives. Tiers are
+ *        for opt-in extras whose cost buys nothing else on the same case (the forces of solid particles), never
+ *        for choices that trade cost for accuracy or physics (a reconstruction, a gas model): those stay unrated.
+ */
 enum class Cost : uint8_t { UNRATED, CHEAP, MODERATE, EXPENSIVE };
 
 /** @brief "cheap", "moderate", "expensive", or "" if unrated. */

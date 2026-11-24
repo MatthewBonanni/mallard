@@ -852,15 +852,12 @@ void Solver::init_physics() {
     }
     const std::string gas = find_value_or<std::string>(input, "physics", "gas", "perfect");
     record_options("physics.gas", {"perfect", "mixture", "flamelet"});
-    describe_options(
-        "physics.gas",
-        {{"flamelet",
-          {"Reacting gas from a flamelet table, transporting the mixture fraction and a progress variable", Cost::CHEAP,
-           "six or seven values per cell and table lookups, no stiff chemistry"}},
-         {"mixture",
-          {"Mixture of species from a mechanism, with mixture-averaged transport and finite-rate chemistry",
-           Cost::EXPENSIVE, "5 + N_species values per cell, mixture properties and usually stiff chemistry per cell"}},
-         {"perfect", {"A single calorically perfect gas", Cost::CHEAP, "five values per cell, closed-form properties"}}});
+    describe_options("physics.gas",
+                     {{"flamelet",
+                       {"Reacting gas from a flamelet table, transporting the mixture fraction and a progress variable"}},
+                      {"mixture",
+                       {"Mixture of species from a mechanism, with mixture-averaged transport and finite-rate chemistry"}},
+                      {"perfect", {"A single calorically perfect gas"}}});
     const std::string unit_system = find_value_or<std::string>(input, "physics", "units", "SI");
     record_options("physics.units", {"SI", "nondimensional"});
     if (unit_system != "SI" && unit_system != "nondimensional") {
@@ -1662,15 +1659,10 @@ void Solver::init_numerics() {
         return input.contains("numerics") ? line_of(input.at("numerics"), key) : size_t(0);
     };
     describe_options("numerics.face_reconstruction.type",
-                     {{"FO",
-                       {"First order: the cell values on both sides of each face", Cost::CHEAP, "no reconstruction"}},
-                      {"MUSCL",
-                       {"Second order: limited linear states from one least-squares gradient per cell", Cost::CHEAP,
-                        "one gradient per cell and a limiter"}},
+                     {{"FO", {"First order: the cell values on both sides of each face"}},
+                      {"MUSCL", {"Second order: limited linear states from one least-squares gradient per cell"}},
                       {"TENO",
-                       {"High order (TENO-E, order face_reconstruction.order): nonlinear weights of candidate stencils",
-                        Cost::EXPENSIVE,
-                        "candidate stencils of many cells and their weights per face: several times MUSCL per step"}}});
+                       {"High order (TENO-E, order face_reconstruction.order): nonlinear weights of candidate stencils"}}});
     auto it_face = find_option(FACE_RECONSTRUCTION_TYPES, "numerics.face_reconstruction.type", face_reconstruction_str,
                                line_of(face_reconstruction_input, "type"));
     auto it_riemann =
