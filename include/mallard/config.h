@@ -443,10 +443,10 @@ class BoundariesNscbc : public Table {
          */
         BoundariesNscbc & L(Quantity v) { put("L", v); return *this; }
         /** @brief The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at
-         *        outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with
-         *        turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other
-         *        boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the
-         *        outlet from driving it unstable.
+         *        outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets,
+         *        whose velocity they would hold off its target (design). Faces next to walls and other boundaries, and
+         *        faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving
+         *        it unstable.
          */
         BoundariesNscbc & beta(double v) { put("beta", v); return *this; }
         /** @brief Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift, large values
@@ -1407,7 +1407,8 @@ class Chemistry : public Table {
          *        a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame:
          *        chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within
          *        0.5%). Results change within the chemistry's tolerances (see the design notes) and stay bitwise
-         *        independent of ranks, partition, balancing and step graphs.
+         *        independent of ranks, partition, balancing and step graphs. The examples where it pays set it
+         *        (measurements).
          */
         Chemistry & explicit_step(bool v) { put("explicit_step", v); return *this; }
         /** @brief Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call

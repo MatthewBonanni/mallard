@@ -376,10 +376,10 @@ class BoundariesNscbc(Table):
         L: A length of the domain (required). Length (m), a number in SI units or a quantity with its unit;
             required.
         beta: The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at
-            outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with
-            turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other
-            boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the
-            outlet from driving it unstable.
+            outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets,
+            whose velocity they would hold off its target (design). Faces next to walls and other boundaries, and
+            faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving
+            it unstable.
         sigma: Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift,
             large values approach a fixed pressure or velocity).
         sigma_T: Inlets only: relax the temperature and tangential velocity at these rates instead of imposing
@@ -1199,7 +1199,8 @@ class Chemistry(Table):
             fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a
             2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are
             (`flame_3d`: within 0.5%). Results change within the chemistry's tolerances (see the design notes) and
-            stay bitwise independent of ranks, partition, balancing and step graphs.
+            stay bitwise independent of ranks, partition, balancing and step graphs. The examples where it pays set
+            it (measurements).
         fuse_half_steps: Strang: `true` fuses the closing half step of a step with the next step's opening one,
             one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with
             the pending half step applied, as the run without fusing has it, on a copy the run does not continue
