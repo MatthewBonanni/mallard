@@ -1,0 +1,2 @@
+- Portable binaries for Open MPI sites: each release from 0.11.0 attaches `mallard-<version>-linux-<arch>-cpu-openmpi.tar.gz` (Open MPI 4.x and 5.x, `libmpi.so.40`) beside `...-cpu-mpich.tar.gz` (MPICH, Cray MPICH, Intel MPI, MVAPICH), for x86-64 and arm64; `archive.toml` and `release-manifest.json` record `mpi = "mpich"` or `"openmpi"` ([installation](docs/installation.md#portable-binaries)).
+- Spack variant `+kaminpar`: the dKaMinPar graph partitioner (`partitioner = "graph"`), with Spack's oneTBB.

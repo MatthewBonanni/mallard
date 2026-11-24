@@ -1,0 +1,1 @@
+- `mallard completion --help` calls the release archives portable binaries, as the installation guide does (#1510).
