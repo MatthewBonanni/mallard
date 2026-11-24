@@ -238,7 +238,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             polynomial_exchange.start(comm_space, polynomials);
         }
         if (viscous_gradients_due) {
-            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         face_exchange.finish(comm_space, face_solution);
         if (polynomial_viscous) polynomial_exchange.finish(comm_space, polynomials);
@@ -262,7 +262,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
         if (viscous_gradients_due && !own_faces) {
-            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (wall_model_on) update_wall_model();
@@ -421,7 +421,7 @@ uint32_t Solver::n_gradient_cells() const {
 }
 
 void Solver::update_upwind_sensor() {
-    gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+    gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     if (is_mixture()) cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
     gated::parallel_for("upwind_sensor", n_gradient_cells(),
