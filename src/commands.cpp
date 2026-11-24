@@ -114,7 +114,15 @@ constexpr Option CHECK_OPTIONS[] = {
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
      "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
-     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
+     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
+     "lists them. Default: none."},
+    {"--geometry-only", "", "",
+     "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
+     "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
+     "and the checks of the run (time step, resolution, mesh quality, memory, cost); walls' y_plus and regions "
+     "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
+     "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
 };
 
@@ -821,7 +829,8 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView\n"
+                    "$ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time",
         .exit_status = "0  no errors (there may be warnings); with --partial, none but missing pieces\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -1449,6 +1458,7 @@ std::string capabilities_json() {
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
                                  .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
                                  .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
