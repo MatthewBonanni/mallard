@@ -105,7 +105,7 @@ sponge layers to $\Delta t \le 1/\max_i\sigma_i$
 exactly on the end time and on output times. Each cell's step for
 $\mathrm{CFL} = 1$ comes from its convective and viscous spectral radii
 ([Blazek 2015](../references.md#blazek-2015), eqs. 6.20-6.21 with $C = 4$;
-`TimeStepFunctor`, `src/solver/solver.cpp`):
+`TimeStepFunctor`, `src/solver/solver_time_step.cpp`):
 
 $$
 \begin{equation}
