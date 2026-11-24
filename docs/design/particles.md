@@ -405,7 +405,7 @@ A probe samples on the host after a step it is due at: the gas at the
 particles of the current state (the same path as the stage evaluation,
 `Particles::sample`, after `update_cell_W`), then one kernel writes each
 field's value per slot, NaN outside the probe's region. Counts, sums and sums
-of squares are `ExactSums` (fixed point), so the statistics are bitwise the
+of squares are `ExactSums` (exact, rounded once), so the statistics are bitwise the
 same on any rank count; minima and maxima are order independent. Steps decided
 on the device stop at the probes' steps (`step_horizon`), so device steps stay
 on for runs with probes. Staging the reductions in the step graph, as the gas
