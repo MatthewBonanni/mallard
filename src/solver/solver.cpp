@@ -244,14 +244,14 @@ void Solver::setup_from_input() {
         init_boundaries();
     });
     // The halo holds every layer the stencil searches visit before the numerics are set up on it
-    while (halo_too_shallow(stencil_reach().get())) {
+    while (!geometry_only && halo_too_shallow(stencil_reach().get())) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
         });
     }
     timed_phase("numerics", [&] { init_numerics(); });
-    if (halo_too_shallow(dynamic_cast<const TENO *>(face_reconstruction.get()))) {
+    if (!geometry_only && halo_too_shallow(dynamic_cast<const TENO *>(face_reconstruction.get()))) {
         throw std::logic_error("TENO: the stencil searches need a deeper halo than find_gather_depth found");
     }
     trim_halo();
@@ -266,10 +266,12 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) {
             init_particles(*used_regions);
-            allocate_time_stepping();
+            if (!geometry_only) allocate_time_stepping();
         }
-        init_les();
-        init_rhs_split();
+        if (!geometry_only) {
+            init_les();
+            init_rhs_split();
+        }
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -282,8 +284,10 @@ void Solver::setup_from_input() {
         init_output(*used_regions);
         init_check_inputs();
     });
-    timed_phase("initial solution", [&] { init_solution(); });
-    init_health();
+    if (!geometry_only) {
+        timed_phase("initial solution", [&] { init_solution(); });
+        init_health();
+    }
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
@@ -1681,7 +1685,8 @@ void Solver::init_numerics() {
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
 
-    switch (it_face->second) {
+    // The case view's geometry needs no stencils
+    switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
             face_reconstruction = std::make_unique<FirstOrder>();
             break;
