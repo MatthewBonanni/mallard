@@ -298,6 +298,7 @@ struct WallFits {
     Kokkos::View<rtype *> scale;        // (fit): h
     Kokkos::View<uint16_t *> size;      // (fit): stencil entries
     Kokkos::View<uint32_t **> entries;  // (fit, s): the stencil's cells
+    Kokkos::View<int8_t **> turns;      // (fit, s): its entry_rotations row (-1: none), on rotational meshes
     Kokkos::View<rtype **> mean;        // (fit, l)
     Kokkos::View<rtype ***> free_pinv;  // (fit, l, s)
     Kokkos::View<rtype ***> wall_pinv;  // (fit, l, s)

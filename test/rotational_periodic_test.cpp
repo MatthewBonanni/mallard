@@ -24,6 +24,7 @@
 #include <string>
 #include <tuple>
 
+#include "face_reconstruction.h"
 #include "gradient.h"
 #include "mesh_block.h"
 #include "mesh_quality.h"
@@ -54,6 +55,7 @@ struct Annulus {
     bool full = false;    // the whole annulus instead of one sector
     std::string recon = "type = \"MUSCL\"\n";
     std::string physics = "type = \"euler\"\n";
+    std::string numerics;  // more [numerics] keys
     uint32_t n_steps = 8;
     std::string extra;
 };
@@ -70,7 +72,7 @@ std::string annulus_input(const Annulus & a) {
       << "[[boundaries]]\nname = \"inner\"\ntype = \"symmetry\"\n"
       << "[[boundaries]]\nname = \"outer\"\ntype = \"" << (a.physics.find("navier") != std::string::npos ? "wall_adiabatic" : "symmetry")
       << "\"\n"
-      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n" << a.numerics
       << "[numerics.face_reconstruction]\n" << a.recon
       << "[physics]\n" << a.physics << "gamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
       << "[output]\ncheck_interval = 1000000\n" << a.extra;
@@ -188,6 +190,19 @@ double sector_annulus_difference(const Annulus & a) {
         FOR_I_DIM diff = std::max(diff, std::abs(double(full->h_conservatives(c, 1 + i)) - m[i]));
     }
     return diff;
+}
+
+/** @brief Viscous gradients of the reconstruction on an annulus fine enough for TENO5 to find the swirl smooth. */
+Annulus polynomial_annulus() {
+    Annulus a;
+    a.physics = "type = \"navier_stokes\"\nmu = 0.01\n";
+    a.numerics = "viscous_gradients = \"reconstruction\"\n";
+    a.recon = "type = \"TENO\"\norder = 5\n";
+    a.n_theta = N_DIM == 2 ? 48 : 24;
+    a.n_r = N_DIM == 2 ? 24 : 12;
+    a.n_z = N_DIM == 2 ? 3 : 8;
+    a.n_steps = 2;
+    return a;
 }
 
 using SchemeParam = std::tuple<std::string, std::string>;  // reconstruction, physics
@@ -374,8 +389,9 @@ TEST_P(RotationalSector, MatchesTheFullAnnulus) {
     const auto [recon, physics] = GetParam();
     Annulus a;
     a.physics = physics == "NS" ? "type = \"navier_stokes\"\nmu = 0.01\n" : "type = \"euler\"\n";
+    if (physics == "NS polynomial") a = polynomial_annulus();
     a.recon = recon == "MUSCL" ? "type = \"MUSCL\"\n" : "type = \"TENO\"\norder = " + recon.substr(4) + "\n";
-    if (N_DIM == 3 && recon.rfind("TENO", 0) == 0) {
+    if (N_DIM == 3 && recon.rfind("TENO", 0) == 0 && physics != "NS polynomial") {
         a.n_theta = 5;
         a.n_r = 4;
     }
@@ -385,7 +401,27 @@ TEST_P(RotationalSector, MatchesTheFullAnnulus) {
 
 INSTANTIATE_TEST_SUITE_P(Rotational, RotationalSector,
     ::testing::Values(SchemeParam{"MUSCL", "Euler"}, SchemeParam{"MUSCL", "NS"}, SchemeParam{"TENO3", "Euler"},
-                      SchemeParam{"TENO5", "Euler"}, SchemeParam{"TENO5", "NS"}));
+                      SchemeParam{"TENO5", "Euler"}, SchemeParam{"TENO5", "NS"},
+                      SchemeParam{"TENO5", "NS polynomial"}));
+
+TEST(RotationalPeriodicSetup, ReconstructionViscousGradientsCrossTheSeamAsInteriorFaces) {
+    // The full-annulus comparison (RotationalSector, "NS polynomial") holds the seam's polynomial fluxes to the
+    // interior faces' only if the seam takes them: both of its sides' point gradients usable (in 3D, two thirds
+    // of the seam: TENO5 finds cells near the boundaries troubled on this mesh)
+    auto solver = start(polynomial_annulus());
+    solver->run();
+    const Mesh & mesh = *solver->get_mesh();
+    const auto & teno = dynamic_cast<const TENO &>(solver->get_face_reconstruction());
+    const auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno.point_gradients.values);
+    uint32_t seam = 0, polynomial = 0;
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        if (mesh.h_cells_of_face(f, 1) < 0 || !mesh.h_rotated_row(mesh.h_face_shift(f))) continue;
+        seam++;
+        polynomial += !std::isnan(double(values(f, 0, 0, 0))) && !std::isnan(double(values(f, 0, 1, 0)));
+    }
+    EXPECT_GT(seam, 0u);
+    EXPECT_GE(3 * polynomial, (N_DIM == 2 ? 3 : 2) * seam);
+}
 
 TEST(RotationalPeriodicSetup, TENOStateDoesNotDependOnTheTroubledCellsOfARound) {
     // Most cells of the swirl are troubled, so the two capacities put different
@@ -462,6 +498,14 @@ TEST(MPI_SUITE, RotationalSectorsMatchSerial) {
                 }
             });
         }
+        // Polynomial viscous gradients: seam faces cut by the partition, and wall fits turning cells across the seam
+        Annulus a = polynomial_annulus();
+        a.extra = "[parallel]\npartitioner = \"" + partitioner + "\"\n";
+        std::string input = annulus_input(a);
+        const std::string init = "[initialize]\ntype = \"constant\"\nu = [" +
+                                 std::string(N_DIM == 2 ? "0.0, 0.0" : "0.0, 0.0, 0.0") + "]\np = 1.0\nT = 1.0\n";
+        input.replace(input.find(init), init.size(), swirl_initializer(a.sectors));
+        expect_matches_serial_with_and_without_step_graphs(input);
     }
 }
 

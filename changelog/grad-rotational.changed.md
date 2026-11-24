@@ -1,0 +1,1 @@
+- `viscous_gradients = "reconstruction"` now runs with rotational periodicity: the seam's faces take both cells' polynomial gradients turned into each other's frames, and the wall fits take cells across the seam turned into the fitted cell's frame, so a sector matches the full annulus to round-off.

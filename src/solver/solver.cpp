@@ -1790,9 +1790,6 @@ void Solver::init_viscous_gradients(const TENO * teno) {
     if (mesh->curved_geometry) {
         throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
     }
-    if (mesh->is_rotational()) {
-        throw unavailable("is not available with rotational periodicity yet", "Use translational periodicity");
-    }
 }
 
 void Solver::describe_block_path() {
