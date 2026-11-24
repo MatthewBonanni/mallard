@@ -72,6 +72,26 @@ Kokkos::View<uint8_t *> flatten(const std::vector<std::vector<uint8_t>> & lists,
     return v;
 }
 
+Kokkos::View<uint32_t *[2]> messages_of(const std::vector<uint32_t> & offsets, const char * label) {
+    Kokkos::View<uint32_t *[2]> v(label, offsets.back());
+    auto h = Kokkos::create_mirror_view(v);
+    for (size_t n = 0; n + 1 < offsets.size(); n++) {
+        for (uint32_t k = offsets[n]; k < offsets[n + 1]; k++) {
+            h(k, 0) = offsets[n];
+            h(k, 1) = offsets[n + 1] - offsets[n];
+        }
+    }
+    Kokkos::deep_copy(v, h);
+    return v;
+}
+
+/** @brief Where value v of face side k goes in its message (see FaceExchange::send_messages). */
+KOKKOS_INLINE_FUNCTION size_t message_index(const Kokkos::View<uint32_t *[2]> & messages, const uint32_t k,
+                                            const uint32_t v, const uint32_t n_values) {
+    const uint32_t first = messages(k, 0);
+    return size_t(first) * n_values + size_t(v) * messages(k, 1) + (k - first);
+}
+
 } // namespace
 
 FacePlan plan_face_exchange(const Distribution & dist, const Mesh & mesh, const std::vector<RemoteFaceSide> & needed) {
@@ -123,6 +143,8 @@ FaceExchange::FaceExchange(const FacePlan & plan, const uint8_t n_quad, const bo
     recv_faces = flatten(plan.recv_faces, recv_offsets, "face_exchange_recv_faces");
     send_sides = flatten(plan.send_sides, "face_exchange_send_sides");
     recv_sides = flatten(plan.recv_sides, "face_exchange_recv_sides");
+    send_messages = messages_of(send_offsets, "face_exchange_send_messages");
+    recv_messages = messages_of(recv_offsets, "face_exchange_recv_messages");
     send_buffer = Kokkos::View<rtype *>("face_exchange_send", size_t(send_offsets.back()) * n_values);
     recv_buffer = Kokkos::View<rtype *>("face_exchange_recv", size_t(recv_offsets.back()) * n_values);
     h_send_buffer = Kokkos::create_mirror_view(send_buffer);
@@ -134,14 +156,16 @@ void FaceExchange::start(const Kokkos::DefaultExecutionSpace & exec,
     if (!active()) return;
 #ifdef Mallard_HAS_MPI
     const uint32_t stride = n_values;
-    const uint32_t n_quad = n_values / N_CONSERVATIVE;
     Kokkos::View<uint32_t *> f_list = send_faces;
     Kokkos::View<uint8_t *> s_list = send_sides;
+    Kokkos::View<uint32_t *[2]> messages = send_messages;
     Kokkos::View<rtype *> buf = send_buffer;
-    gated::parallel_for("face_pack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
+    const uint32_t n_sides = static_cast<uint32_t>(f_list.extent(0));
+    gated::parallel_for("face_pack", Kokkos::RangePolicy<>(exec, 0, size_t(n_sides) * stride),
                          KOKKOS_LAMBDA(const uint32_t idx) {
-        const uint32_t k = idx / n_quad, q = idx % n_quad;
-        FOR_I_CONSERVATIVE buf(k * stride + q * N_CONSERVATIVE + i) = face_solution(f_list(k), q, s_list(k), i);
+        const uint32_t k = idx % n_sides, v = idx / n_sides;
+        buf(message_index(messages, k, v, stride)) =
+            face_solution(f_list(k), v / N_CONSERVATIVE, s_list(k), v % N_CONSERVATIVE);
     });
 #ifdef Mallard_HAS_NCCL
     if (nccl) {
@@ -196,14 +220,16 @@ void FaceExchange::finish(const Kokkos::DefaultExecutionSpace & exec,
     }
     if (stage_through_host && !nccl) Kokkos::deep_copy(exec, recv_buffer, h_recv_buffer);
     const uint32_t stride = n_values;
-    const uint32_t n_quad = n_values / N_CONSERVATIVE;
     Kokkos::View<uint32_t *> f_list = recv_faces;
     Kokkos::View<uint8_t *> s_list = recv_sides;
+    Kokkos::View<uint32_t *[2]> messages = recv_messages;
     Kokkos::View<rtype *> buf = recv_buffer;
-    gated::parallel_for("face_unpack", Kokkos::RangePolicy<>(exec, 0, f_list.extent(0) * n_quad),
+    const uint32_t n_sides = static_cast<uint32_t>(f_list.extent(0));
+    gated::parallel_for("face_unpack", Kokkos::RangePolicy<>(exec, 0, size_t(n_sides) * stride),
                          KOKKOS_LAMBDA(const uint32_t idx) {
-        const uint32_t k = idx / n_quad, q = idx % n_quad;
-        FOR_I_CONSERVATIVE face_solution(f_list(k), q, s_list(k), i) = buf(k * stride + q * N_CONSERVATIVE + i);
+        const uint32_t k = idx % n_sides, v = idx / n_sides;
+        face_solution(f_list(k), v / N_CONSERVATIVE, s_list(k), v % N_CONSERVATIVE) =
+            buf(message_index(messages, k, v, stride));
     });
 #else
     (void)exec;

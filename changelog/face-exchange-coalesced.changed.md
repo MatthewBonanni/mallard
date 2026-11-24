@@ -1,0 +1,1 @@
+- The exchange of partition-face states between ranks packs and unpacks its messages value by value across consecutive faces, so that its kernels read and write contiguous memory and take less of the GPU from the convective fluxes they run beside; results are bitwise unchanged (#305).

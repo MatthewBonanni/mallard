@@ -75,6 +75,10 @@ class FaceExchange {
         std::vector<uint32_t> send_offsets, recv_offsets;  // per neighbor, in face sides
         Kokkos::View<uint32_t *> send_faces, recv_faces;
         Kokkos::View<uint8_t *> send_sides, recv_sides;
+        // Per face side, the first face side and the size of its neighbor's message, which holds value v of
+        // face side k at (first * n_values + v * size + k - first), so that the threads of a warp move one value of
+        // consecutive face sides
+        Kokkos::View<uint32_t *[2]> send_messages, recv_messages;
         Kokkos::View<rtype *> send_buffer, recv_buffer;
         Kokkos::View<rtype *>::host_mirror_type h_send_buffer, h_recv_buffer;
 #ifdef Mallard_HAS_MPI
