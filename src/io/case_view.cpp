@@ -11,21 +11,38 @@
 
 #include "case_view.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <span>
 #include <stdexcept>
 
 #include "case_image.h"
 #include "comm.h"
 #include "common_io.h"
+#include "interfaces.h"
+#include "json.h"
 #ifdef Mallard_HAS_HDF5
 #include "hdf5_util.h"
 #include "provenance.h"
 #endif
 
 namespace case_view {
+
+const char * kind_name(const Kind kind) {
+    switch (kind) {
+        case Kind::MESH: return "mesh";
+        case Kind::BOUNDARY: return "boundary";
+        case Kind::CELL_ZONE: return "cell_zone";
+        case Kind::REGION: return "region";
+        case Kind::PROBE: return "probe";
+        case Kind::SNAPSHOT: return "snapshot";
+        case Kind::PERIODIC: return "periodic";
+    }
+    return "region";
+}
 
 void Block::add_cell(const uint8_t type, const std::vector<std::array<double, 3>> & vertices) {
     for (const auto & x : vertices) {
@@ -52,6 +69,14 @@ Block::Field & Block::field(const std::string & field_name, const int components
 
 namespace {
 
+/** @brief A block's metadata as its field data: (name, value) of the strings, then the integers. */
+std::vector<std::pair<const char *, std::string>> metadata_strings(const Block & b) {
+    return {{"kind", kind_name(b.kind)}, {"key", b.key}, {"element", b.element}, {"zone", b.zone}};
+}
+std::vector<std::pair<const char *, int64_t>> metadata_integers(const Block & b) {
+    return {{"element_index", b.index}, {"metadata_version", interfaces::CASE_VIEW.version}};
+}
+
 /** @brief Every rank's part of a block, in rank order (on every rank). */
 Block gather(const Block & local) {
     if (comm::size() == 1) return local;
@@ -61,6 +86,10 @@ Block gather(const Block & local) {
     all.kind = local.kind;
     all.label = local.label;
     all.condition = local.condition;
+    all.key = local.key;
+    all.element = local.element;
+    all.index = local.index;
+    all.zone = local.zone;
     std::vector<double> xyz;
     for (const auto & x : local.points) xyz.insert(xyz.end(), x.begin(), x.end());
     std::vector<double> sizes = {double(local.points.size()), double(local.n_cells()), double(local.connectivity.size())};
@@ -87,12 +116,28 @@ Block gather(const Block & local) {
 }
 
 #ifndef Mallard_HAS_HDF5
+/** @brief The block's metadata as VTK XML field data: strings as their bytes, each ended by 0. */
+void write_vtu_field_data(std::ostream & out, const Block & b) {
+    out << "<FieldData>\n";
+    for (const auto & [name, value] : metadata_strings(b)) {
+        out << "<Array type=\"String\" Name=\"" << name << "\" NumberOfTuples=\"1\" format=\"ascii\">\n";
+        for (const char ch : value) out << int(static_cast<unsigned char>(ch)) << " ";
+        out << "0\n</Array>\n";
+    }
+    for (const auto & [name, value] : metadata_integers(b)) {
+        out << "<DataArray type=\"Int64\" Name=\"" << name << "\" NumberOfTuples=\"1\" format=\"ascii\">\n"
+            << value << "\n</DataArray>\n";
+    }
+    out << "</FieldData>\n";
+}
+
 void write_vtu(const std::string & path, const Block & b) {
     std::ofstream out(path);
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "<?xml version=\"1.0\"?>\n<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"LittleEndian\" "
-           "header_type=\"UInt64\">\n<UnstructuredGrid>\n<Piece NumberOfPoints=\""
-        << b.points.size() << "\" NumberOfCells=\"" << b.n_cells() << "\">\n<Points>\n"
+           "header_type=\"UInt64\">\n<UnstructuredGrid>\n";
+    write_vtu_field_data(out, b);
+    out << "<Piece NumberOfPoints=\"" << b.points.size() << "\" NumberOfCells=\"" << b.n_cells() << "\">\n<Points>\n"
         << "<DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
     for (const auto & x : b.points) out << x[0] << " " << x[1] << " " << x[2] << "\n";
     out << "</DataArray>\n</Points>\n<Cells>\n<DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n";
@@ -154,8 +199,13 @@ std::string write_gathered(const std::string & path, const std::vector<Block> & 
         for (const Block::Field & f : b.fields) {
             write_rows<double>(cell_data, f.name.c_str(), n_cells, f.components, 0, n_cells, f.values.data(), dxpl);
         }
-        for (const char * name : {"PointData", "FieldData"}) {
-            Handle empty(H5Gcreate2(group, name, H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, name);
+        Handle point_data(H5Gcreate2(group, "PointData", H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, "PointData");
+        Handle field_data(H5Gcreate2(group, "FieldData", H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, "FieldData");
+        for (const auto & [name, value] : metadata_strings(b)) {
+            put_string_row(field_data, name, 1, 0, true, value, std::max<size_t>(value.size(), 1), dxpl);
+        }
+        for (const auto & [name, value] : metadata_integers(b)) {
+            write_rows<int64_t>(field_data, name, 1, 1, 0, 1, &value, dxpl);
         }
         Handle node(H5Gcreate2(assembly, b.name.c_str(), H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, b.name);
         check(H5Lcreate_soft(("/VTKHDF/" + b.name).c_str(), node, b.name.c_str(), H5P_DEFAULT, H5P_DEFAULT),
@@ -187,6 +237,47 @@ std::vector<Block> gather_all(const std::vector<Block> & local) {
 }
 
 } // namespace
+
+std::vector<BlockInfo> describe(const std::vector<Block> & blocks) {
+    std::vector<uint64_t> cells;
+    for (const Block & b : blocks) cells.push_back(b.n_cells());
+    if (comm::size() > 1) comm::allreduce(std::span<uint64_t>(cells), comm::Op::SUM);
+    std::vector<BlockInfo> out;
+    for (size_t i = 0; i < blocks.size(); i++) {
+        const Block & b = blocks[i];
+        out.push_back({b.name, b.kind, b.key, b.element, b.zone, b.index, cells[i], b.condition,
+                       b.label.empty() ? b.name : b.label});
+    }
+    return out;
+}
+
+std::string json(const std::vector<std::string> & files, const std::vector<BlockInfo> & blocks,
+                 const bool geometry_only, const std::string & frames) {
+    auto text_or_null = [](const std::string & s) { return s.empty() ? std::string("null") : json::quote(s); };
+    std::string file_list, block_list;
+    for (const std::string & f : files) file_list += (file_list.empty() ? "" : ", ") + json::quote(f);
+    for (const BlockInfo & b : blocks) {
+        block_list += (block_list.empty() ? "" : ", ") + json::Object()
+                                                             .add("name", b.name)
+                                                             .add("kind", std::string(kind_name(b.kind)))
+                                                             .raw("key", text_or_null(b.key))
+                                                             .raw("element", text_or_null(b.element))
+                                                             .raw("index", b.index < 0 ? "null" : std::to_string(b.index))
+                                                             .raw("zone", text_or_null(b.zone))
+                                                             .add("cells", b.cells)
+                                                             .raw("condition", text_or_null(b.condition))
+                                                             .add("label", b.label)
+                                                             .str();
+    }
+    return json::Object()
+        .add("schema", interfaces::CASE_VIEW.name)
+        .add("version", interfaces::CASE_VIEW.version)
+        .add("geometry_only", geometry_only)
+        .raw("files", "[" + file_list + "]")
+        .raw("blocks", "[" + block_list + "]")
+        .raw("frames", frames)
+        .str();
+}
 
 std::string write(const std::string & path, const std::vector<Block> & local) {
     const std::vector<Block> blocks = gather_all(local);
