@@ -33,7 +33,8 @@
   "examples/taylor_green_3d/remap.toml",
   "examples/triple_flame/input.toml",
   "examples/triple_flame/tfles/input.toml",
-  "examples/triple_flame/thick/input.toml"
+  "examples/triple_flame/thick/input.toml",
+  "tools/dev/catalog_inputs/2d/restart_convert.toml"
  ],
  "type": "string"
 }

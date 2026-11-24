@@ -1,4 +1,4 @@
-# Table format for tabulated chemistry (HDF5, version 1)
+# Table format for tabulated chemistry (HDF5, version 2)
 
 Status: specified (#631). The contract between Mallard and the programs that
 write tables for it. Mallard reads tables and does not generate them: tables are
@@ -100,7 +100,7 @@ tolerance of the linearity of `C` in `Lambda` relaxed from 1e-9 to 1e-6.
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `format` | string | yes | `"mallard-table"` |
-| `version` | integer | yes | `1` |
+| `version` | integer | yes | `2` (Mallard also reads `1`, [section 8](#8-versioning-and-new-models)) |
 | `model` | string | yes | Model tag ([section 5](#5-models)): what the axes and the model's fields mean |
 | `thermodynamics` | string | yes | Thermodynamics tag ([section 6](#6-thermodynamics)) |
 | `species` | array of strings | yes | The species block, possibly empty: species names as in the mechanism. Species `k` is stored as the field `Y_k` (mass fraction, units `"1"`). Every field whose name starts with `Y_` must be in this list |
@@ -221,8 +221,13 @@ line they are interpolated to the mixing solution:
 | Object | Kind | Meaning |
 |---|---|---|
 | `Z_st` | number attribute, in (0, 1) | Stoichiometric mixture fraction |
-| `progress_variable` | group, at least one attribute | The weights `w_k` of `C`: one number attribute per species, named by the species |
-| `streams/fuel`, `streams/oxidizer` | groups | The streams that define `Z = 1` and `Z = 0`: number attribute `T` (K, positive) and a group `Y` with one number attribute per species, its mass fraction in [0, 1] |
+| `progress_variable` | group, at least one attribute | The weights `w_k` of `C = sum_k w_k Y_k`: one number attribute per species, named by the species. Every weighted species is in the species block, and the field `C` equals `sum_k w_k Y_k` of the stored mass fractions at every node |
+| `mixture_fraction` | string attribute | How `Z` is defined: `"bilger"`, Bilger's element-based mixture fraction between the two streams, `Z = (beta - beta_ox) / (beta_fuel - beta_ox)` with `beta = 2 Z_C / W_C + Z_H / (2 W_H) - Z_O / W_O` of the element mass fractions `Z_e` |
+| `streams/fuel`, `streams/oxidizer` | groups | The streams that define `Z = 1` and `Z = 0`: number attribute `T` (K, positive) and a group `Y` with one number attribute per species, its mass fraction in [0, 1], summing to 1 |
+
+Together, `progress_variable`, `mixture_fraction` and the streams define `Z`
+and `C` of any composition, which is what converting a finite-rate solution to
+the table needs ([flamelet.md](../guide/flamelet.md#converting-between-finite-rate-and-fpv)).
 
 ### 5.2 Reserved model tags
 
@@ -273,7 +278,7 @@ Mallard reads a table once at setup and refuses it, with the file name and the
 reason, unless:
 
 1. The build has HDF5, and the file is an HDF5 file.
-2. The root's `format` is `"mallard-table"` and `version` is 1.
+2. The root's `format` is `"mallard-table"` and `version` is 1 or 2.
 3. `model` and `thermodynamics` are tags this version of Mallard supports. An
    unknown or reserved tag is refused by name, with the list of supported tags.
 4. Every required attribute, group and dataset is present with its type.
@@ -291,14 +296,25 @@ reason, unless:
 9. Every field required by the model, the thermodynamics, transport and the
    species block is present, with exactly the listed units, and its values
    meet the listed checks.
-10. Model-specific checks pass. For `fpv`, `C` is linear in `Lambda`.
+10. Model-specific checks pass. For `fpv`, `C` is linear in `Lambda`; in
+    version 2, `mixture_fraction` is `"bilger"`, every species
+    `progress_variable` weighs is in the species block, `C` equals
+    `sum_k w_k Y_k` at every node to `1e-9` (float64) or `1e-6` (float32) of
+    the largest `|C|` or `sum_k |w_k Y_k|`, and each stream's mass fractions
+    sum to 1 within `1e-6`.
 
 At run time (stage 2), Mallard also warns when the table's `pressure` differs
 from the run's reference pressure by more than 10%.
 
 ## 8. Versioning and new models
 
-- Version 1 is this page. The version changes when the layout changes, when a
+- Version 2 is this page. It adds the required `/model_data/mixture_fraction`
+  of `fpv` tables and the checks of the definitions of `Z` and `C`
+  (section 7, item 10). Mallard still runs version 1 tables, whose weights and
+  streams it reads unchecked; converting a solution to or from one needs the
+  definitions of `Z` and `C` from the user
+  ([flamelet.md](../guide/flamelet.md#converting-between-finite-rate-and-fpv)).
+- The version changes when the layout changes, when a
   required attribute, group, dataset or field is added or removed, or when the
   meaning of an existing one or of a tag changes. Mallard refuses versions it
   does not know.
@@ -307,7 +323,7 @@ from the run's reference pressure by more than 10%.
 - New models and thermodynamics are new tags, specified here before Mallard
   reads them. They need no new version. A Mallard that does not support a tag
   refuses the table by name.
-- Values are float64 or float32 within version 1 (section 2).
+- Values are float64 or float32 (section 2).
 
 ## 9. Reading a table with h5py
 
@@ -315,12 +331,14 @@ from the run's reference pressure by more than 10%.
 import h5py
 
 with h5py.File("table.h5", "r") as f:
-    assert f.attrs["format"] == "mallard-table" and f.attrs["version"] == 1
+    assert f.attrs["format"] == "mallard-table" and f.attrs["version"] == 2
     values = f["values"]
     axes = {a: f["axes"][a][()] for a in values.attrs["axes"]}
     fields = list(values.attrs["fields"])
     T0 = values[..., fields.index("T0")]  # shape (n_Z, n_Sz, n_Lambda)
     weights = dict(f["model_data/progress_variable"].attrs)
+    assert f["model_data"].attrs["mixture_fraction"] == "bilger"
+    fuel = dict(f["model_data/streams/fuel/Y"].attrs)
     writer = f["provenance/input"][()].decode()
 ```
 
@@ -339,6 +357,12 @@ table in float32. Their fields are synthetic functions, multilinear in
 script that wrote them is in their own `/provenance/input`. A generator can
 compare its writer against these files, and Mallard's tests
 (`test/flamelet_table_test.cpp`) read them.
+
+[`convert_h2.h5`](../../test/data/flamelet/convert_h2.h5) is the table of the
+conversion tests (`test/restart_convert_test.cpp`): H2/N2 against air, with
+every species of `mechanisms/h2o2.yaml`, whose species conserve the streams'
+elements, so that Bilger's `Z` of each node's composition is its `Z` and
+`C = Y_H2O`. Its writer is also in its `/provenance/input`.
 
 ## References
 

@@ -23,6 +23,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
+#include "common_io.h"
 #include "diagnostic_code.h"
 #include "log.h"
 #include "run_control.h"
@@ -362,6 +363,70 @@ std::string Solver::write_restarts() {
     }
     swap_unflushed();
     return file;
+}
+
+void Solver::write_restart_as(const std::string & path) {
+    namespace fs = std::filesystem;
+    update_primitives();
+    copy_device_to_host();
+    const fs::path file(path);
+    Input entry(Input::table_type{});
+    entry.as_table()["prefix"] = (file.parent_path() / (".converting_" + file.stem().string())).string();
+    entry.as_table()["format"] = "restart";
+    entry.as_table()["interval"] = 1;
+    const bool files = output_files_enabled();
+    set_output_files_enabled(true);
+    std::string written;
+    try {
+        DataWriter writer;
+        writer.init(entry, data, mesh, restart_variables());
+        writer.write(step, t, true, restart_attributes(), characteristic_restart_faces(), restart_arrays());
+        writer.finish();
+        written = writer.last_written();
+    } catch (...) {
+        set_output_files_enabled(files);
+        throw;
+    }
+    set_output_files_enabled(files);
+    std::string error;
+    if (comm::is_root()) {
+        std::error_code ec;
+        fs::rename(written, file, ec);
+        if (ec) error = "could not write " + path + ": " + ec.message();
+    }
+    error = comm::broadcast(error);
+    if (!error.empty()) throw std::runtime_error(error);
+}
+
+std::optional<gas_conversion::Summary> Solver::convert_restart(Input input_in, const std::string & source,
+                                                               std::function<bool(const gas_conversion::Summary &)> approve,
+                                                               const std::string & output) {
+    struct Restore {
+        bool files;
+        bool * check;
+        std::function<bool(const gas_conversion::Summary &)> * approval;
+        ~Restore() {
+            set_output_files_enabled(files);
+            *check = false;
+            *approval = nullptr;
+        }
+    } restore{output_files_enabled(), &check_only, &conversion_approval};
+    set_output_files_enabled(false);
+    check_only = true;
+    conversion_approval = std::move(approve);
+    start_from_restart(input_in, source);
+    init(input_in);
+    const std::vector<Diagnostic> unused = unused_keys(input);
+    if (!unused.empty()) {
+        std::string list;
+        for (const Diagnostic & key : unused) list += "\n  " + describe(key);
+        InputError error("keys that are unknown or unused with these settings:" + list);
+        error.code = diagnostic_code::KEY_UNUSED;
+        throw error;
+    }
+    if (!conversion) return std::nullopt;
+    write_restart_as(output);
+    return conversion;
 }
 
 void Solver::write_checkpoint() {

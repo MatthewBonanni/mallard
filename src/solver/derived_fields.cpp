@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "composition_map.h"
 #include "mixture.h"
 #include "probes.h"
 
@@ -20,24 +21,10 @@ namespace derived {
 
 namespace {
 
+using chemistry::atoms;
+using chemistry::bilger_coefficient;
+
 const char * const DOCS = "docs/guide/output.md#derived-fields";
-
-/** @brief Atoms of element e in species s. */
-double atoms(const chemistry::Species & s, const char * e) {
-    for (const auto & [element, n] : s.composition) {
-        if (element == e) return n;
-    }
-    return 0.0;
-}
-
-/**
- * @brief Bilger's coupling function per unit mass fraction of species s,
- *        (2 C + H / 2 - O) / W [kmol/kg]: beta = sum_k b_k Y_k is conserved
- *        by reactions (Bilger, Starner & Kee 1990), so Z = (beta - beta_O) / (beta_F - beta_O).
- */
-double bilger_coefficient(const chemistry::Species & s) {
-    return (2.0 * atoms(s, "C") + 0.5 * atoms(s, "H") - atoms(s, "O")) / s.molecular_weight;
-}
 
 /** @brief The mass fractions of the stream `key` of a table at `where`: a composition table, or a [[boundaries]] name. */
 std::vector<double> stream(const Input & input, const Input & table, const std::string & where, const std::string & key,

@@ -7,7 +7,7 @@ user-facing pages are in [Command line](../guide/cli.md).
 
 ```text
 Run       mallard -i input.toml [--restart latest] [--set k=v] | ctl | reactor
-Set up    mallard new | input upgrade | input resolve
+Set up    mallard new | input upgrade | input resolve | restart convert
 Inspect   mallard check [input.toml] | info <file> | list fields|species|templates|keys | diff
 Mesh      mallard mesh convert | extrude
 Post      mallard post extract|derive|average|convergence|render
@@ -20,6 +20,7 @@ Maintain  mallard test | completion | version
 | `mallard -i input.toml`, `ctl`, `reactor` | Run | available |
 | `--restart latest` | Run | available |
 | `new`, `input upgrade`, `input resolve` | Set up | available |
+| `restart convert` | Set up | available; on the case setup of `check`, with the restart path's [gas conversion](../guide/flamelet.md#converting-between-finite-rate-and-fpv) |
 | `check input.toml` | Inspect | available |
 | `check --view DIR`, `info MESH --view DIR` (the case view) | Inspect | available: ParaView file and annotated images; particle injectors with them ([#759](https://github.com/MatthewBonanni/mallard/issues/759)) |
 | `check` with no input (the environment) | Inspect | available |

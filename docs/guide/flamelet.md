@@ -310,6 +310,69 @@ n_res = 5
 The partially stirred reactor (`model = "pasr"`) scales finite-rate rates and
 is an input error with the flamelet gas.
 
+## Converting between finite-rate and FPV
+
+A finite-rate solution (`gas = "mixture"`) starts an FPV case, and an FPV
+solution starts a finite-rate one, through `mallard restart convert`
+([command line](cli.md#mallard-restart-convert)) or directly from the target's
+`[initialize]` `type = "restart"` or `--restart`:
+
+```bash
+mallard restart convert finite_rate/restart_002000.restart -i fpv/input.toml --dry-run
+mallard restart convert finite_rate/restart_002000.restart -i fpv/input.toml -o fpv/start.restart
+mallard -i fpv/input.toml --restart fpv/start.restart
+```
+
+The source's run block says which gas, mechanism or table wrote it; `--mechanism`
+and `--table` (or `[initialize.convert] mechanism`, `table`) point to them
+where they are elsewhere. Pressure, velocity and the temperature are kept: the
+temperature of an FPV solution is `T`, that of its energy equation, not
+`T_TABLE`.
+
+- **Finite-rate to FPV.** `Z` is Bilger's mixture fraction of each cell's
+  elements between the table's streams, and `C = sum_k w_k Y_k` with the
+  table's weights, clamped to the table's range at `Z`. The subgrid variance is
+  zero; with `variance = "transported"`, `Z2 = Z^2`. Every species the
+  progress variable weighs must be a species of the source, or aliased to one
+  (`--alias "A=B"`). Density and energy are the table's at `(Z, C)`, `p` and
+  `T`.
+- **FPV to finite-rate.** The mass fractions are the table's at each cell's
+  `(Z, Sz, C)`, with `Sz` from the transported `Z2`, or zero otherwise. The
+  table's species map onto the mechanism's as between two mechanisms
+  ([Converting between species sets](thermochemistry.md#converting-between-species-sets)):
+  by name, with the mass of species the mechanism lacks moved onto its species
+  by the element-conserving rule `element-projection`; their compositions come
+  from the mechanism of the table (`--mechanism`) where the target's lacks them.
+  Density and energy are the mechanism's at `p`, `T` and that composition.
+
+The conversion is exact when the composition maps without moving mass or
+aliases, no `Z` or `C` is clamped, and the table's species give back `Z` and `C`
+to round-off. Otherwise it prints a summary and writes only once the user
+accepts the rule: `y` on a terminal, `--accept-mapping element-projection`
+without one, or `[initialize.convert] accept = "element-projection"` when the
+case starts from the source directly. `--dry-run` prints the summary only, and
+`--format json` prints it for programs (schema `mallard-restart-convert`).
+The summary also reports the change of total energy, the species dropped and
+added, and the tables' and mechanisms' SHA-256 for provenance; mechanisms are
+matched by their species, never by hash.
+
+Statistics, particles and the restart's other contents carry over; the
+chemistry integrator's step seed (`CHEM_H`) is dropped. Averages of fields the
+target does not sample are left out, and a target that samples fields the
+source did not average refuses the file unless `[statistics] reset = true`.
+
+A table of [format version 2](../design/table_format.md) defines `Z` and `C`
+itself. A table of version 1 does not, so converting to or from one needs the
+definitions: `--progress-variable H2O=1 --fuel H2:1,N2:1 --oxidizer O2:0.21,N2:0.79`
+(mole fractions of the streams), or in `[initialize.convert]`:
+
+```toml
+[initialize.convert]
+progress_variable = {H2O = 1.0}
+fuel = {X = {H2 = 1.0, N2 = 1.0}}         # or Y = {...}: mass fractions
+oxidizer = {X = {O2 = 0.21, N2 = 0.79}}
+```
+
 ## Not yet supported
 
 These are input errors with `gas = "flamelet"`, each naming the key:

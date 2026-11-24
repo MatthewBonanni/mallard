@@ -32,6 +32,7 @@
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/profile_files.toml",
+  "tools/dev/catalog_inputs/2d/restart_convert.toml",
   "tutorials/cluster/input.toml"
  ],
  "type": "integer"

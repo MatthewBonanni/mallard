@@ -96,6 +96,60 @@ energy conservation (about 0.2% over a multicomponent shock tube). Use it for
 interfaces of very different gases (the `shock_bubble_3d` example), not for
 flames.
 
+### Converting between species sets
+
+A solution of one mechanism starts a case of another (a detailed mechanism's
+solution for a skeletal one, or the reverse) with `mallard restart convert`
+([command line](cli.md#mallard-restart-convert)), or directly from
+`[initialize]` `type = "restart"` or `--restart`, which convert the same way:
+
+```bash
+mallard restart convert detailed.restart -i skeletal.toml --dry-run
+mallard restart convert detailed.restart -i skeletal.toml -o start.restart \
+    --accept-mapping element-projection
+```
+
+Pressure, temperature and velocity are kept; density and total energy are
+recomputed with the target mechanism's thermodynamics, and the summary reports
+the change of the total energy. Species match by name. A name both mechanisms
+use for species of different elemental compositions is an error, unless an
+alias maps it onto another species (`--alias "CH2*=CH2(S)"`, or
+`[initialize.convert] aliases = {"CH2*" = "CH2(S)"}`). Species only the target
+has start at zero.
+
+Where species only the source has hold mass, the rule `element-projection`
+moves it onto the target's species: of the compositions `Y >= 0` with exactly
+the source's element mass fractions, the conversion takes the one closest to
+the source's mass fractions `Y0` of the shared species, in the chi-square
+distance
+
+$$
+\min_Y \sum_k \frac{(Y_k - Y^0_k)^2}{w_k}, \qquad w_k = \max(Y^0_k, 10^{-12}),
+\qquad \sum_k \mu_{ek} Y_k = z_e, \qquad Y_k \ge 0,
+$$
+
+with `mu_ek` the mass of element `e` per mass of species `k` and `z_e` the
+source's element mass fractions (so `sum_k Y_k = 1` follows). The distance is
+the second-order expansion of the relative entropy of `Y` to `Y0`
+([Kullback 1959](../references.md#kullback-1959)), so species change in
+proportion to their own mass fraction: a minor species absorbs little, and a
+species the source lacks takes mass only when nothing else can carry an
+element. The problem is strictly convex, so its solution is unique and
+independent of the species' order; it is solved by a semismooth Newton
+iteration on its dual ([Qi & Sun 1993](../references.md#qi-sun-1993)) to
+round-off. A species carrying an element the source has none of stays zero,
+and an element no species of the target carries is an error. Cells where the
+dropped species hold no mass copy their mass fractions unchanged.
+
+A conversion is exact when no mass moves, no alias applies and the energy
+changes by no more than round-off; otherwise it prints its summary (the rule,
+the species dropped and added, the mass moved per element, the largest change
+of a shared species, the change of total energy) and writes nothing until the
+user accepts the rule: on a terminal by answering `y`, otherwise with
+`--accept-mapping element-projection` or `[initialize.convert] accept =
+"element-projection"`. `--format json` prints the summary for programs (schema
+`mallard-restart-convert`).
+
 ## Finite-rate chemistry
 
 ```toml

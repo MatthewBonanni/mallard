@@ -176,6 +176,8 @@ class FlameletModel {
         FlameletModel(std::shared_ptr<const Table> table, bool viscous);
 
         const Table & table() const { return *m_table; }
+        /** @brief The table's file, as the input names it (empty for a table read elsewhere). */
+        const std::string & file() const { return m_file; }
         const Gas<> & device() const { return gas; }
         const Gas<Kokkos::HostSpace> & host() const { return host_gas; }
         bool viscous() const { return m_viscous; }

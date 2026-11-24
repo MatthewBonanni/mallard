@@ -41,6 +41,7 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "gas_conversion.h"
 #include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
@@ -181,6 +182,20 @@ class Solver {
          *        tells about the run (see check.h).
          */
         CheckReport check(const Input & input, const CheckOptions & options);
+
+        /**
+         * @brief `mallard restart convert`: sets up the case of input as started from the restart file source,
+         *        whose gas differs, and writes the converted state to output if approve accepts the conversion's
+         *        summary (called on every rank with the same summary; a declined conversion throws
+         *        gas_conversion::Declined and writes nothing). Collective.
+         * @return The summary and the file written; no summary for a restart of the case's own species
+         */
+        std::optional<gas_conversion::Summary> convert_restart(Input input, const std::string & source,
+                                                               std::function<bool(const gas_conversion::Summary &)> approve,
+                                                               const std::string & output);
+
+        /** @brief Writes the state as the restart file path, with every variable the run's restart files hold (collective). */
+        void write_restart_as(const std::string & path);
 
         /**
          * @brief Post-processing of output (`mallard post extract`), set before init(): the
@@ -996,6 +1011,8 @@ class Solver {
          *        for the local cells; resume_output continues the output series.
          */
         void apply_restart(const RestartData & restart, const std::string & file, bool resume_output);
+        /** @brief Converts a restart of another gas to this case's (gas_conversion), as [initialize.convert] allows. */
+        void convert_gas(RestartData & restart, const std::string & file);
         /** @brief The state of state_reader: its conservative variables, or those of its RHO or P and T, U and Y_*; the primitives are left to their users. */
         void apply_output_state(RestartData state);
         void update_boundary_states(rtype t_eval, rtype c = 0.0_r);
@@ -1295,6 +1312,8 @@ class Solver {
         Input input;
         bool check_only = false;  // within check()
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
+        std::function<bool(const gas_conversion::Summary &)> conversion_approval;  // restart convert, else accept
+        std::optional<gas_conversion::Summary> conversion;  // of the initial restart, if its gas differed
         std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
