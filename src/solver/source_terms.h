@@ -117,7 +117,8 @@ class SourceTerms {
         struct Entry {
             std::string where, label;  // its place in the input ("source", "sources[0]"), its name in the run log
             bool total = false, per_copy = false;
-            std::vector<std::tuple<uint32_t, std::string, std::string>> values;  // (column, expression, name)
+            // (column, expression, name, line)
+            std::vector<std::tuple<uint32_t, std::string, std::string, std::size_t>> values;
             std::vector<kexpr::Program> programs;                              // of values
             const Input * region = nullptr;
         };

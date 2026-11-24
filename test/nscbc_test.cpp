@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 #include <Kokkos_Core.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <sstream>
@@ -481,6 +482,58 @@ TEST(NSCBCTest, SpongeAbsorbsWhatAPressureOutletReflects) {
     // Strength 0 leaves the pressure outlet reflecting
     const Reflection off = measure_reflection(run(sponge_input("0")), 0.0);
     EXPECT_GT(off.max_measured, 0.95 * 2 * EPS);
+}
+
+namespace {
+
+/**
+ * @brief Two inlet_state halves on the left of [0, 2] x [0, 1], cold at
+ *        u = 0.1 below y = 0.5 and hot (T 3.83 times higher) at u = 0.2
+ *        above, as at the edge of a splitter plate, with characteristic
+ *        outlets on the other sides; started from the step everywhere, from
+ *        which a viscous mixing layer (mu = 1e-3) grows.
+ */
+std::string stepped_inlet_input() {
+    std::ostringstream s, outlet_bc;
+    s.precision(17);
+    outlet_bc.precision(17);
+    const double T_hot = 3.83 * P0;
+    outlet_bc << "type = \"outlet_pressure\"\np = " << P0 << "\nnscbc.L = 2.0\n";
+    s << "[run]\nt_stop = 20.0\ncfl = 0.5\n" << mesh_input("cartesian", 40, 20, 2.0, 1.0, 40)
+      << "[initialize]\ntype = \"analytical\"\nu = [\"y < 0.5 ? 0.1 : 0.2\", \"0.0\"]\np = \"" << P0
+      << "\"\nT = \"y < 0.5 ? " << P0 << " : " << T_hot << "\"\n"
+      << "[[boundaries]]\nname = \"left\"\nwhere = \"y < 0.5\"\ntype = \"inlet_state\"\nu = [0.1, 0.0]\np = " << P0
+      << "\nT = " << P0 << "\nnscbc.L = 2.0\n"
+      << "[[boundaries]]\nname = \"left\"\nwhere = \"y >= 0.5\"\ntype = \"inlet_state\"\nu = [0.2, 0.0]\np = " << P0
+      << "\nT = " << T_hot << "\nnscbc.L = 2.0\n"
+      << "[[boundaries]]\nname = \"right\"\n" << outlet_bc.str() << "[[boundaries]]\nname = \"top\"\n" << outlet_bc.str()
+      << "[[boundaries]]\nname = \"bottom\"\n" << outlet_bc.str()
+      << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n"
+      << "[numerics.face_reconstruction]\ntype = \"MUSCL\"\n"
+      << "[physics]\ntype = \"navier_stokes\"\ngamma = 1.4\np_ref = " << P0 << "\nT_ref = " << P0
+      << "\nrho_ref = 1.0\nmu = 1e-3\nPr = 0.72\n[output]\ncheck_interval = 1000000\n";
+    return s.str();
+}
+
+/** @brief Largest |u - u_target| over the cells next to the inlet. */
+double stepped_inlet_error(const Result & r) {
+    double err = 0.0;
+    for (uint32_t c = 0; c < r.mesh->n_owned(); c++) {
+        if (double(r.mesh->h_cell_coords(c, 0)) > 0.05) continue;
+        const double target = double(r.mesh->h_cell_coords(c, 1)) < 0.5 ? 0.1 : 0.2;
+        err = std::max(err, std::abs(double(r.solver->h_primitives(c, 0)) - target));
+    }
+    return err;
+}
+
+} // namespace
+
+TEST(NSCBCTest, SteppedInletHoldsItsTarget) {
+    // Where the mixing layer starts, the transverse terms are O(rho c^2 du / h).
+    // In the incoming wave they held the inlet's velocity off its target by
+    // beta T- / (K rho c): half the step here, more on finer meshes. The
+    // viscous layer itself puts the cells next to the step 0.1 of it off
+    EXPECT_LT(stepped_inlet_error(run(stepped_inlet_input())), 0.2 * 0.1);
 }
 
 TEST(NSCBCTest, InvalidCharacteristicInputIsRejected) {

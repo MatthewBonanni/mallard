@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "data_paths.h"
+#include "interfaces.h"
 #include "json.h"
 #include "output_reader.h"
 
@@ -659,6 +660,33 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     EXPECT_TRUE(contains(not_a_mesh.err, "--mesh-fields takes a mesh file")) << not_a_mesh.err;
 }
 
+TEST(CliTest, InfoOfAMeshFileListsItsCaseViewBlocksWithTheirZones) {
+    SKIP_UNDER_MPI();
+    const std::string mesh =
+        source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
+    const Result r = run({"info", "--view", "view", "--format", "json", mesh}, true);
+    ASSERT_EQ(r.status, 0) << r.err;
+    const json::Value view = json::parse(r.out)["view"];
+    EXPECT_EQ(view["schema"].string, interfaces::CASE_VIEW.name);
+    EXPECT_TRUE(view["geometry_only"].boolean);
+    size_t zones = 0;
+    for (const json::Value & b : view["blocks"].array) {
+        if (b["kind"].string != "boundary") continue;
+        zones++;
+        EXPECT_EQ(b["zone"].string, b["name"].string);
+        EXPECT_TRUE(b["key"].is_null());
+        EXPECT_GT(b["cells"].number, 0.0);
+    }
+    EXPECT_GT(zones, 0u);
+}
+
+TEST(CliTest, GeometryOnlyChecksRefuseTheOptionsOfTheWholeCheck) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"check", "input.toml", "--geometry-only", "--initial", "state"});
+    EXPECT_EQ(r.status, 2);
+    EXPECT_TRUE(contains(r.err, "--initial needs the whole check, not --geometry-only")) << r.err;
+}
+
 namespace {
 
 /** @brief The working directory moved to dir while it lives. */
@@ -957,6 +985,103 @@ TEST(CliTest, ListFieldsAndSpeciesNeedNoMesh) {
     const json::Value listed = json::parse(species.out);
     for (const auto & s : listed["species"].array) names.push_back(s.string);
     EXPECT_EQ(names, (std::vector<std::string>{"H2", "H", "O", "O2", "OH", "H2O", "HO2", "H2O2", "AR", "N2"}));
+}
+
+namespace {
+
+/**
+ * @brief A reactor input of the repository, run from anywhere and cut short:
+ *        its mechanism by absolute path, fewer cells and a shorter time (the same keys).
+ */
+std::string short_reactor_input(const fs::path & file) {
+    const std::map<std::string, std::string> shorter = {
+        {"end_time", "2.0e-6"}, {"output_interval", "1.0e-6"}, {"cells", "16"}, {"samples", "4"}, {"repeats", "1"}};
+    std::istringstream in(read_file(file));
+    std::string out;
+    for (std::string line; std::getline(in, line);) {
+        const std::string key = line.substr(0, line.find_first_of(" ="));
+        if (key == "mechanism") {
+            const size_t open = line.find('"');
+            const fs::path mechanism = line.substr(open + 1, line.rfind('"') - open - 1);
+            line = "mechanism = \"" + (file.parent_path() / mechanism).lexically_normal().string() + "\"";
+        } else if (shorter.count(key)) {
+            line = key + " = " + shorter.at(key);
+        }
+        out += line + "\n";
+    }
+    return out;
+}
+
+/** @brief The line of the input's text that starts with this text, from 1. */
+size_t line_starting(const std::string & text, const std::string & start) {
+    std::istringstream in(text);
+    size_t n = 1;
+    for (std::string line; std::getline(in, line); n++) {
+        if (line.rfind(start, 0) == 0) return n;
+    }
+    return 0;
+}
+
+} // namespace
+
+TEST(CliTest, ReactorRejectsUnusedKeysAsARunDoes) {
+    SKIP_UNDER_MPI();
+    const std::string input = short_reactor_input(source_dir() + "/examples/h2_ignition/input.toml");
+    const auto with = [&](const std::string & after, const std::string & line) {
+        std::string text = input;
+        text.insert(text.find(after) + after.size(), line);
+        std::ofstream("reactor_keys.toml") << text;
+        return text;
+    };
+    fs::remove("reactor.csv");
+    const std::string misspelled = with("[chemistry]\n", "max_step = 1000\n");
+    const Result unused = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(unused.status, 1);
+    EXPECT_TRUE(contains(unused.err, "E-KEY-UNUSED")) << unused.err;
+    EXPECT_TRUE(contains(unused.err, "reactor_keys.toml: keys that are unknown or unused with these settings "
+                                     "(mallard check lists them all):\n  line " +
+                                         std::to_string(line_starting(misspelled, "max_step")) +
+                                         ": chemistry.max_step (did you mean chemistry.max_steps?)"))
+        << unused.err;
+    EXPECT_FALSE(fs::exists("reactor.csv"));
+
+    const std::string benchmark = with("atol = 1.0e-10\n", "[benchmark]\ncells = 16\nsamples = 4\nrepeats = 1\n"
+                                                           "dt = [1.0e-8]\nlane = 4\noutput = \"keys.csv\"\n");
+    const Result bench = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(bench.status, 1);
+    EXPECT_TRUE(contains(bench.err, "line " + std::to_string(line_starting(benchmark, "lane =")) +
+                                        ": benchmark.lane (did you mean benchmark.lanes?)"))
+        << bench.err;
+
+    std::string missing = input;
+    missing.replace(missing.find("\nend_time = "), 12, "\nend_tim = ");
+    std::ofstream("reactor_keys.toml") << missing;
+    const Result stopped = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(stopped.status, 1);
+    EXPECT_TRUE(contains(stopped.err, "possibly misspelled:\n  line " +
+                                          std::to_string(line_starting(missing, "end_tim =")) +
+                                          ": reactor.end_tim (did you mean reactor.end_time?)"))
+        << stopped.err;
+}
+
+TEST(CliTest, EveryReactorInputOfTheRepositoryRunsClean) {
+    SKIP_UNDER_MPI();
+    if (!fs::exists(source_dir() + "/benchmarks")) GTEST_SKIP() << "no benchmarks in an install tree";
+    size_t ran = 0;
+    for (const char * dir : {"/examples", "/benchmarks"}) {
+        for (const auto & entry : fs::recursive_directory_iterator(source_dir() + dir)) {
+            if (entry.path().extension() != ".toml" || line_starting(read_file(entry.path()), "[reactor]") == 0) continue;
+            const std::string text = short_reactor_input(entry.path());
+            const size_t open = text.find("mechanism = \"") + 13;
+            if (!fs::exists(text.substr(open, text.find('"', open) - open))) continue;  // a mechanism fetched apart
+            std::ofstream("reactor_input.toml") << text;
+            const Result r = run({"reactor", "-i", "reactor_input.toml", "--kokkos-num-threads=1"}, true);
+            EXPECT_EQ(r.status, 0) << entry.path() << "\n" << r.err;
+            EXPECT_FALSE(contains(r.err, "E-")) << entry.path() << "\n" << r.err;
+            ran++;
+        }
+    }
+    EXPECT_GE(ran, 5u);
 }
 
 TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
