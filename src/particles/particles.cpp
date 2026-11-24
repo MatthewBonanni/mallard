@@ -459,7 +459,7 @@ void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[
         linear(pc(s), r, out);
         FOR_I_CONSERVATIVE Wp(s, i) = out[i];
     });
-    reconstruction.point_values(W, pc, off, Wp);
+    reconstruction.point_values(W, pc, off, Wp, false);
 }
 
 void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
