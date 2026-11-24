@@ -1,0 +1,2 @@
+- The vertex gradient's weights are built only when something reads them: `mallard post` of a TENO case without probes of gradients, LES or viscous mixtures no longer allocates them, nor does a run with TENO whose gradients feed only its outputs (#1050).
+- Gas mixtures stage `Y_*` and `X_*` for output, and compute the mole fractions, only when a `[[write_data]]` writer or snapshot writes them (#1050).
