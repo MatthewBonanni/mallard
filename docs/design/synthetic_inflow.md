@@ -139,7 +139,7 @@ profile once, and from the generator at every stage:
 
 - **Transverse terms.** The target's own incoming wave already holds the
   target's transverse terms; adding the face's (`beta T-`) counts them
-  twice. Turbulent inlets therefore default to `beta = 0`.
+  twice. Inlets default to `beta = 0` ([nscbc.md](nscbc.md#transverse-terms-at-inlets)).
 - **Temperature** stays imposed (no temperature fluctuations).
 
 Restart files carry the faces' `p_b` and `u_b` ([nscbc.md](nscbc.md)), and

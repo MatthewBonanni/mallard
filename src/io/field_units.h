@@ -23,8 +23,8 @@ struct FieldDescription {
     std::string standard_name;  // the CF standard name, empty where none fits
     std::string non_si_units;   // UDUNITS units of a field not in SI units ("degree"), else empty
 
-    /** @brief The field's units in UDUNITS syntax ("kg m-3", "1"). */
-    std::string units() const { return non_si_units.empty() ? dimension.udunits() : non_si_units; }
+    /** @brief The field's units in UDUNITS syntax ("kg m-3", "1"; "1" for a physical quantity of a nondimensional case). */
+    std::string units() const { return non_si_units.empty() ? units::of(dimension) : non_si_units; }
 };
 
 /** @brief A field, or a pattern of fields (Y_<s>, MEAN_<A>), of the catalog mallard list fields shows. */
