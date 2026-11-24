@@ -29,10 +29,11 @@ accuracy of every method, from the convergence tests; the sources are in
 5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.
-6. [Lagrangian particles](particles.md): tracers and solid particles, drag
-    laws, the gas at a particle from the reconstruction, integration in
-    time (exponential for relaxations faster than the step), walls and
-    other boundaries.
+6. [Lagrangian particles](particles.md): tracers and solid particles, the
+    drag laws with their Reynolds, Mach and Knudsen number dependence, the
+    pressure-gradient, added-mass and Saffman lift forces, heat transfer,
+    walls and other boundaries; their discretization is in
+    [Numerical methods for particles](../numerics/particles.md).
 
 ### Part II: the discretization, in the order a step assembles it
 
