@@ -449,6 +449,42 @@ void monomials(const uint8_t r, const T * x, T * phi) {
 }
 
 /**
+ * @brief Gradients of the monomials of degree 1..r at a point x (N_DIM
+ *        coordinates, already scaled), in the order of monomials():
+ *        dphi[l N_DIM + d] = d phi_l / d x_d.
+ */
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomial_gradients(const uint8_t r, const T * x, T * dphi) {
+    T p[N_DIM][MAX_DEGREE + 1];
+    for (uint8_t d = 0; d < N_DIM; d++) {
+        p[d][0] = T(1);
+        for (uint8_t k = 1; k <= r; k++) p[d][k] = p[d][k - 1] * x[d];
+    }
+    uint8_t l = 0;
+    auto add = [&](const uint8_t (&e)[N_DIM]) {
+        for (uint8_t d = 0; d < N_DIM; d++) {
+            T m = e[d] == 0 ? T(0) : T(e[d]) * p[d][e[d] - 1];
+            for (uint8_t j = 0; j < N_DIM; j++) {
+                if (j != d) m *= p[j][e[j]];
+            }
+            dphi[l * N_DIM + d] = m;
+        }
+        l++;
+    };
+    for (uint8_t deg = 1; deg <= r; deg++) {
+        if constexpr (N_DIM == 2) {
+            for (uint8_t b = 0; b <= deg; b++) add({static_cast<uint8_t>(deg - b), b});
+        } else {
+            for (int i = deg; i >= 0; i--) {
+                for (int j = deg - i; j >= 0; j--) {
+                    add({static_cast<uint8_t>(i), static_cast<uint8_t>(j), static_cast<uint8_t>(deg - i - j)});
+                }
+            }
+        }
+    }
+}
+
+/**
  * @brief Left (L) and right (R) eigenvectors of the Euler flux Jacobian in
  *        direction n for conservative variables, at state W = [rho, u, p].
  *        Characteristic order: u_n - a, u_n (entropy), u_n + a, then one

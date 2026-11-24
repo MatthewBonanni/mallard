@@ -114,8 +114,10 @@ already builds:
   cell is smooth by TENO's measure and the value admissible.
 - Elsewhere (troubled cells, first-order and MUSCL schemes), the cell's linear
   least-squares fit (`LSQVertexGradientFunctor`, the gradient of the viscous
-  fluxes and probes), computed only in the cells that hold particles, with the
-  cell average where the linear value is not admissible.
+  fluxes and probes), with the cell average where the linear value is not
+  admissible. Viscous runs and the hybrid flux compute these gradients in
+  every stage, and the particles read them; elsewhere they are computed only
+  in the cells that hold particles.
 
 Both evaluate W = [rho, u, p], so the temperature, species and derived fields
 of later layers take the same path (#511).
@@ -145,8 +147,9 @@ scheme's order in space.
 ## Time integration within the step graph
 
 On the step path, per stage: the offsets from the start cells (one kernel),
-gradients of the marked cells (one kernel over the owned cells), the linear
-values, `point_values`, the velocity (one kernel each). After the step, `Particles::relocate` walks each
+gradients of the marked cells where the stage computes none (one kernel over
+the owned cells), the linear values, `point_values`, the velocity (one kernel
+each). After the step, `Particles::relocate` walks each
 particle to its new cell, applies reflections and removals, and writes the
 position in the new cell's frame. All are plain kernels over fixed sizes,
 captured in the step graph (`record_step`) and checked by `StepGraphGuard` in
@@ -234,8 +237,11 @@ and velocity. tau = m d^2 / (18 mu f) with m = rho_p (+ rho / 2 with added
 mass), the viscosity at the particle's temperature and the drag correlation f.
 The force per volume is rho_p g, then -rho g (buoyancy) or -grad p, then
 (rho g - grad p) / 2 for added mass, then Saffman lift, all divided by m.
-Pressure and velocity gradients come from the cell's LSQ gradient, which the
-gas evaluation copies per particle only when a force reads it. The Basset
+Pressure and velocity gradients are those of the polynomial the particle reads
+W from, at its position: `point_values` differentiates the central polynomial
+it has just evaluated (no other pass, field or fit), and the linear fit gives
+its gradient, the stage's LSQ gradient. The gas evaluation writes them per
+particle only when a force reads them. The Basset
 force needs the history of the slip, a convolution over the path, and is left
 out.
 

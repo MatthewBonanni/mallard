@@ -310,8 +310,8 @@ which in gas at rest under gravity is the buoyancy $-\rho\,\mathbf{g}$:
   adds $(\rho/\rho_p)\,\mathrm{D}\mathbf{u}/\mathrm{D}t$ to the
   acceleration.
 
-$\nabla p$ is the least-squares gradient of the particle's cell
-([numerics](../numerics/particles.md#gradients-for-the-forces)).
+$\nabla p$ is the gradient at the particle of the polynomial its gas is read
+from ([numerics](../numerics/particles.md#gradients-for-the-forces)).
 
 ### Added mass
 
@@ -355,7 +355,7 @@ $$
 \end{equation}
 $$
 
-with the vorticity from the cell's least-squares velocity gradient (in 2D,
+with the vorticity from the velocity gradient at the particle (in 2D,
 $\boldsymbol{\omega} = \omega_z\,\mathbf{e}_z$), and no lift where
 $\boldsymbol{\omega} = 0$. Saffman's analysis assumes
 $Re_p \ll Re_G^{1/2} \ll 1$, with the shear Reynolds number
@@ -481,7 +481,8 @@ averages:
 The derived values the particle reads (the temperature, the viscosity, the
 sound speed, the particle expressions of the quantities) are computed from
 this $\mathbf{W}$; the gradients the pressure-gradient, added-mass and lift
-forces read are the cell's least-squares gradients. Every stage of a step
+forces read are those of the same polynomial at the particle, an error
+$O(h^{k-1})$ with TENO and $O(h)$ with the linear fit. Every stage of a step
 evaluates the polynomial of the cell that held the particle at the start of
 the step, so that the right-hand side is one smooth function of the position
 within the step:

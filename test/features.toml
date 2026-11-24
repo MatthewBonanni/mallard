@@ -209,6 +209,7 @@
 "ParticleOrder.ExponentialIntegrationOfRelaxationsStifferThanTheStep" = ["particles", "rk4"]
 "ParticleSpaceOrder.GasVelocityAtTheParticles" = [["particles", "fo"], ["particles", "muscl"], ["particles", "teno3"], ["particles", "teno4"], ["particles", "teno5"]]
 "ParticleSpaceOrder.TracerPathlinesInACompactVortex" = [["particles", "euler", "fo"], ["particles", "euler", "muscl"], ["particles", "euler", "teno3"], ["particles", "euler", "teno4"], ["particles", "euler", "teno5"]]
+"ParticleForceOrder.ForcesReadTheGradientOfTheReconstructionAtTheParticles" = [["particles", "teno3"], ["particles", "teno4"]]
 
 [periodic_test]
 "PeriodicBox2D.PreservesUniformFlowAndConservesMassMomentumAndEnergy" = ["euler", "fo", "muscl", "teno5", "hllc", "ssprk3", "periodic"]

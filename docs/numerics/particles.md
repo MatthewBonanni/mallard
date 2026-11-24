@@ -46,11 +46,15 @@ nothing and launches no particle kernel.
 ## The gas at a particle
 
 At every stage, one kernel computes each particle's offset
-$\mathbf{r} = \mathbf{x}_p - \mathbf{x}_i$ from the centroid of its cell $i$ and
-marks the cell; a second computes the least-squares gradients of the marked
-cells only; a third evaluates the linear fit at every particle; and the
-reconstruction then overwrites the particles in smooth cells with its own
-polynomial (`Particles::evaluate_gas`, `FaceReconstruction::point_values`).
+$\mathbf{r} = \mathbf{x}_p - \mathbf{x}_i$ from the centroid of its cell $i$;
+a second evaluates the linear fit at every particle; and the reconstruction
+then overwrites the particles in smooth cells with its own polynomial
+(`Particles::evaluate_gas`, `FaceReconstruction::point_values`). The linear
+fit reads the least-squares gradients that the stage's viscous fluxes (or the
+hybrid flux's sensor) have just computed; where the stage computes none
+(inviscid runs without the hybrid flux, mixtures, and sampling outside a
+step), the first kernel also marks the cells holding particles and one more
+kernel computes their gradients only.
 
 **TENO.** In a cell that TENO finds smooth, the troubled-cell measure
 $\sigma_i$ of [TENO-E](../theory/finite_volume.md#teno-e)
@@ -77,7 +81,8 @@ per particle, the troubled-cell measure and the $N_r$ coefficients from the
 stencil's cell averages and the pseudo-inverse $\mathbf{P}$ stored at
 start-up, so it costs a pass over the stencil (about $2N_r$ cells) per
 particle and stage and stores no polynomial. A value with $\rho \le 0$ or
-$p \le 0$ is rejected, and the particle keeps the linear fit.
+$p \le 0$ is rejected, and the particle keeps the linear fit (with its
+gradient, below).
 
 **Elsewhere** (troubled TENO cells, `FO`, `MUSCL`) the value is the cell's
 linear least-squares fit,
@@ -138,13 +143,33 @@ reads a halo cell.
 ### Gradients for the forces
 
 The pressure-gradient, added-mass and lift forces read $\nabla p$ and
-$\nabla\mathbf{u}$, which are the cell's least-squares gradients of
-eq. $\eqref{eq:linear-fit}$, copied per particle only when one of these forces
-is on. The gradient is constant over the cell, so at a particle a distance
-$\lvert\mathbf{r}\rvert \sim h$ from the centroid these forces are first-order
-accurate in space, against the reconstruction's order for the drag. For
-heavy particles they are smaller than the drag by $\rho / \rho_p$ (lift: by
-up to $(\rho/\rho_p)^{1/2}$), so their error is too.
+$\nabla\mathbf{u}$ at the particle from the same polynomial as its value.
+In a smooth TENO cell the kernel that evaluates eq.
+$\eqref{eq:point-polynomial}$ also differentiates it at the particle,
+
+$$
+\begin{equation}
+\nabla\mathbf{U}(\mathbf{x}_p) = \frac{1}{h_i}\sum_{l=1}^{N_r} \mathbf{a}_l \nabla_{\boldsymbol{\xi}}\phi_l(\boldsymbol{\xi}),
+\label{eq:point-gradient}
+\end{equation}
+$$
+
+from the coefficients it already holds, and converts it to $\nabla\mathbf{W}$
+at the particle's state ($\nabla\mathbf{u} = (\nabla(\rho\mathbf{u}) -
+\mathbf{u}\nabla\rho)/\rho$, $\nabla p = (\gamma - 1)(\nabla E -
+\tfrac12\lvert\mathbf{u}\rvert^2\nabla\rho - \rho\,\mathbf{u}\cdot\nabla\mathbf{u})$).
+The derivative of a polynomial with $O(h^k)$ error is $O(h^{k-1})$, so these
+forces converge at order $k - 1$: 2 and 3 for TENO3 and TENO4, measured on
+quadrilaterals, triangles, hexahedra and tetrahedra
+([verification](../verification/index.md#lagrangian-particles)). Where the
+value is the linear fit of eq. $\eqref{eq:linear-fit}$ (troubled cells,
+`FO`, `MUSCL`, or a rejected high-order value) the gradient is that fit's,
+$\nabla\mathbf{W}_i$, constant over the cell and first-order accurate at a
+particle a distance $\lvert\mathbf{r}\rvert \sim h$ from the centroid. The
+gradients are evaluated and stored per particle only when one of these forces
+is on; runs without them do the same arithmetic as before. For heavy
+particles these forces are smaller than the drag by $\rho / \rho_p$ (lift:
+by up to $(\rho/\rho_p)^{1/2}$), so their error is too.
 
 ## Location in unstructured cells
 
@@ -412,7 +437,8 @@ fixed-point sums, which are associative.
   the step stream) is in the [design notes](../design/particles.md#mpi-migration).
 - Location uses planar faces: on curved boundaries, walls are located to
   $O(h^2/R)$.
-- The forces that read gradients are first order in space.
+- The forces that read gradients are first order in space in troubled cells
+  and with `FO` and `MUSCL`, where the gas is the cell's linear fit.
 - Bounces are located within the step for gas uniform over the step's
   travel; in strongly varying gas, and for $\tau < \Delta t$, at first order.
 - Kernels run over every slot, live or not; the particles are not sorted by

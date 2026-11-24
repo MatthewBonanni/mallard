@@ -40,7 +40,7 @@ FILTER = ":".join([
     "AxisymmetricTest.Poiseuille*", "*AxisymmetricOrder.*", "*AxisymmetricCurvedOrder.*",
     "CurvedGeometry.StraightWalls*", "*CurvedTENOOrder.*", "CurvedTENO.CellsReaching*", "Curved3DGeometry.Quadratic*",
     "RemapTest.SmoothPeriodic*", "*MixtureAdvectionOrder.*",
-    "*ParticleTimeOrder.*", "ParticleOrder.*", "*ParticleSpaceOrder.*",
+    "*ParticleTimeOrder.*", "ParticleOrder.*", "*ParticleSpaceOrder.*", "*ParticleForceOrder.*",
 ])
 
 # Studies that fail their bounds for a known, filed reason: (section, method, cells) -> issue number

@@ -250,21 +250,24 @@ class Particles {
          *        the velocity is one smooth function of the position, so the
          *        integrator keeps its order. Solid particles: dx/dt, dv/dt
          *        and dT_p/dt from the forces and heat transfer at the same gas
-         *        state and its least-squares gradient (particles::Solid, which
-         *        integrates exponentially the relaxations faster than the step).
+         *        state and the gradient of the same polynomial at the particle
+         *        (particles::Solid, which integrates exponentially the
+         *        relaxations faster than the step).
          *        The rates of the integrated quantities follow from the same
          *        state, and at the first stage of a step (the step's start) the
          *        extrema and first times are updated.
          * @param W Cell states W = [rho, u, p] of the stage, halo included.
          * @param reconstruction The face reconstruction of the stage.
          * @param gradient Least-squares gradients of W, written to gradients(c).
+         * @param gradients_current Whether gradients already holds those of W in the owned cells, so that
+         *        gradient need not run.
          * @param time The stage time on the device, if reads_time().
          * @param dt The step's dt, or if dt_device is not null the device scalar holding it (captured steps).
          */
         void velocity(const ParticleView & x_stage, const ParticleView & dxdt, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                       FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                      Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, bool first_stage,
-                      const Kokkos::View<rtype> & time, rtype dt, const rtype * dt_device);
+                      Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, bool gradients_current,
+                      bool first_stage, const Kokkos::View<rtype> & time, rtype dt, const rtype * dt_device);
 
         /**
          * @brief The gas state W = [rho, u, p] at the particles' positions, as
@@ -332,10 +335,10 @@ class Particles {
         uint32_t get_capacity() const { return capacity; }
 
         // Public because nvcc rejects device lambdas in non-public member functions
-        /** @brief W at the stage positions x_stage into W_point. */
+        /** @brief W at the stage positions x_stage into W_point, and its gradients into G_point if allocated. */
         void evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
                           FaceReconstruction & reconstruction, const LSQVertexGradientFunctor & gradient,
-                          Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+                          Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, bool gradients_current);
 
     private:
         /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
@@ -374,6 +377,7 @@ class Particles {
         Kokkos::View<uint32_t *> point_cell;  // cell, 0 in empty slots
         Kokkos::View<rtype *[N_DIM]> offsets;
         Kokkos::View<rtype *[N_CONSERVATIVE]> W_point;
+        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> G_point;  // dW/dx at the particles, for forces that read it
         Kokkos::View<uint32_t *> marked;      // (cell): its gradient is needed
 
         // Staged for restart files
