@@ -2574,9 +2574,10 @@ struct TENOFunctor {
         const uint8_t n_quad = this->n_quad();
         for (uint8_t j = 0; j < n_faces; j++) {
             const uint32_t f = faces_of_cell(f_begin + j);
+            const PlanarFace nodes = planar_nodes(f);
             for (uint8_t q = 0; q < n_quad; q++) {
                 rtype psi[NK], U[N_CONSERVATIVE], Wq[N_CONSERVATIVE];
-                if (!face_point_basis(f, q, i_cell, psi)) continue;
+                if (!face_point_basis(f, q, i_cell, nodes, psi)) continue;
                 value_at(psi, U);
                 to_primitives(U, Wq);
                 if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) return false;
