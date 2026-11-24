@@ -1,0 +1,1 @@
+- With `viscous_gradients = "reconstruction"`, surface probes of the diffusive fluxes (`ENERGY_DIFFUSIVE_FLUX`, `SPECIES_DIFFUSIVE_FLUX_*`) report the polynomial fluxes the scheme applies, reconstructed at the probe's state, instead of least-squares fluxes (#1148).

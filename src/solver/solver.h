@@ -1092,6 +1092,8 @@ class Solver {
         ProbeFields probe_fields(ProbeFluxes & fluxes);
         /** @brief Viscous gradients of every cell, and the wall model on them, for probes that read them. */
         void update_probe_gradients();
+        /** @brief TENO's face point gradients of the current state, for the polynomial fluxes of probes. */
+        void update_point_gradients();
 
     private:
         /**

@@ -3611,7 +3611,24 @@ RestartArrays Solver::restart_arrays() const {
 void Solver::update_probe_gradients() {
     // Diffusive fluxes read the gradients of image cells, and modeled walls those of their exchange points
     gated::parallel_for("probe_all_gradients", n_gradient_cells(), viscous_gradient);
+    if (polynomial_viscous) update_point_gradients();
     if (wall_model_on) update_wall_model();
+}
+
+void Solver::update_point_gradients() {
+    // The polynomial fluxes of the current state (W_cells), rather than of the last stage
+    if (reconstruction_started) discard_reconstruction();
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    face_reconstruction->calc_face_values(W_cells, face_solution);
+    if (is_mixture()) {
+        scalar_reconstruction.calc(cell_scalars, W_cells, face_solution, face_thermo);
+        scalar_reconstruction.point_gradients(cell_scalars, teno.point_gradients);
+    } else if (exchanges_partition_faces()) {
+        comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
+        point_gradient_exchange.start(comm_space, teno.point_gradients.values);
+        point_gradient_exchange.finish(comm_space, teno.point_gradients.values);
+        comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
+    }
 }
 
 ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
@@ -3633,11 +3650,18 @@ ProbeFields Solver::probe_fields(ProbeFluxes & fluxes) {
             mesh->periodic_maps(), mesh->face_shift, boundary_data, mixture, cell_scalars, transport_values,
             transport_gradients, cell_transport, cell_diffusion, {}, {}, axisymmetric, mesh->cell_covariance,
             {}, false, {}};
+        if (polynomial_viscous) {
+            fluxes.mixture.point_gradients = dynamic_cast<const TENO &>(*face_reconstruction).point_gradients;
+            fluxes.mixture.quad_weights = face_reconstruction->quadrature_face.weights;
+            fluxes.mixture.face_weights = flux_weights;
+            if (axisymmetric) fluxes.mixture.planar_area = mesh->face_area;
+        }
     } else if (is_viscous()) {
         fluxes.viscous = ViscousFluxFunctor{
             mesh->face_normals, mesh->face_measure, mesh->face_coords, mesh->cell_coords, mesh->cells_of_face,
             mesh->periodic_maps(), mesh->face_shift, W_cells, viscous_gradients, boundary_data, {}, physics,
             axisymmetric, mesh->cell_covariance, {}, false, wall_model.out};
+        if (polynomial_viscous) set_polynomial_flux(fluxes.viscous);
     }
     return fields;
 }
