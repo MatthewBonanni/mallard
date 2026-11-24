@@ -42,6 +42,7 @@ A few things hold for every command:
 | Capabilities | `mallard version --format json` | `mallard-capabilities` |
 | Key catalog | `mallard list keys [INPUT] --format json` | `mallard-key-catalog` |
 | Check report | `mallard check INPUT --format json` | `mallard-check` |
+| Case view | the `view` of `mallard check INPUT --view DIR --format json` and of `mallard info MESH --view DIR --format json`; each block's field data ([The case view](input_files.md#the-case-view)) | `mallard-case-view` |
 | Run log | `mallard.jsonl`, its start record | `mallard-run-log` |
 | Run block | every output file ([Run block](output.md#run-block)) | `mallard-run` |
 | Snapshot block | every snapshot and restart file | `mallard-snapshot` |
@@ -556,9 +557,11 @@ Options:
                             orthographic ones) with every boundary labeled by
                             its name and condition and every region and probe by
                             its name, a legend, axes, a scale bar and the
-                            domain's extent in its units. With --format json,
-                            the report's view lists the files, every block with
-                            its kind and condition, and the frame of each
+                            domain's extent in its units. Every block carries
+                            its metadata (kind, key, element, element_index,
+                            zone) as field data. With --format json, the
+                            report's view lists the files, every block with its
+                            metadata and condition, and the frame of each
                             boundary's local coordinates: where u starts, which
                             way it grows, the inward normal and the length.
                             Default: none.
@@ -576,6 +579,16 @@ Options:
                             --format json, the report's boundary_values gives
                             each file and each column's min, area mean and max.
                             Default: none.
+  --geometry-only           Set up and check only what the case view draws: the
+                            mesh, its zones, the boundaries' conditions, the
+                            regions, probes, snapshot regions and periodic
+                            pairs, without the numerics (stencils), the initial
+                            state and the checks of the run (time step,
+                            resolution, mesh quality, memory, cost); walls'
+                            y_plus and regions defined by the solution, which
+                            need the initial state, are left out, and keys are
+                            not checked for use. For previews that follow each
+                            edit of a large case. Default: the whole check.
   --kokkos-*                Kokkos options, e.g. --kokkos-num-threads=8 (threads
                             per rank) or --kokkos-device-id=1 (the GPU; by
                             default each rank gets its own).
@@ -588,6 +601,7 @@ Examples:
   $ mpirun -n 4 mallard check input.toml --mesh-fields mesh
   $ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils
   $ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView
+  $ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time
 
 Exit status:
   0  no errors (there may be warnings); with --partial, none but missing pieces

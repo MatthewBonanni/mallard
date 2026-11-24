@@ -139,11 +139,13 @@ void input_section(report::Text & text, const CheckReport & r) {
     rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, diagnostic_code::INPUT)
                                                                                         ? diagnostic_code::INPUT
                                                                                         : diagnostic_code::SETUP)
-                                             : "completed: mesh, partition, boundaries, numerics, initial state"}});
+                                             : r.geometry_only ? "completed, geometry only: mesh, partition, boundaries, regions, probes"
+                                                               : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
                      n_unused ? count(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
-                              : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
+                     : r.geometry_only ? "not checked: a geometry-only setup reads only the keys of what it draws"
+                     : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
                      n_deprecated ? count(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
@@ -703,7 +705,7 @@ std::string check_text(const CheckReport & r, const bool color) {
         resolution_section(text, r);
         if (r.bytes > 0) memory_section(text, r);
         sizing_section(text, r);
-        if (r.setup_done) cost_section(text, r);
+        if (r.setup_done && !r.geometry_only) cost_section(text, r);
     }
     if (r.environment.checked) environment_section(text, r);
     diagnostics_section(text, r);
@@ -739,32 +741,17 @@ std::string case_view_json(const CheckReport & r) {
     const auto vec = [](const std::array<double, 3> & v) {
         return "[" + json::number(v[0]) + ", " + json::number(v[1]) + ", " + json::number(v[2]) + "]";
     };
-    const auto text_or_null = [](const std::string & t) { return t.empty() ? std::string("null") : json::quote(t); };
     std::vector<std::string> files = {r.view_file};
     files.insert(files.end(), r.view_images.begin(), r.view_images.end());
-    return json::Object()
-        .add("schema", interfaces::CASE_VIEW.name)
-        .add("version", interfaces::CASE_VIEW.version)
-        .raw("files", array_json(files, [](const std::string & f) { return json::quote(f); }))
-        .raw("blocks", array_json(r.view_blocks,
-                                  [&](const CheckViewBlock & b) {
-                                      return json::Object()
-                                          .add("name", b.name)
-                                          .add("kind", b.kind)
-                                          .raw("condition", text_or_null(b.condition))
-                                          .add("label", b.label)
-                                          .str();
-                                  }))
-        .raw("frames", array_json(r.frames,
-                                  [&](const CheckFrame & f) {
-                                      json::Object o;
-                                      o.add("entry", f.entry).add("zone", f.zone);
-                                      if (!f.error.empty()) return o.raw("shape", "null").add("error", f.error).str();
-                                      o.add("shape", f.shape).raw("origin", vec(f.origin)).raw("u_direction", vec(f.u_direction));
-                                      o.raw("normal", vec(f.normal)).add("length", f.length);
-                                      return o.raw("width", N_DIM == 3 ? json::number(f.width) : "null").raw("error", "null").str();
-                                  }))
-        .str();
+    const std::string frames = array_json(r.frames, [&](const CheckFrame & f) {
+        json::Object o;
+        o.add("entry", f.entry).add("zone", f.zone);
+        if (!f.error.empty()) return o.raw("shape", "null").add("error", f.error).str();
+        o.add("shape", f.shape).raw("origin", vec(f.origin)).raw("u_direction", vec(f.u_direction));
+        o.raw("normal", vec(f.normal)).add("length", f.length);
+        return o.raw("width", N_DIM == 3 ? json::number(f.width) : "null").raw("error", "null").str();
+    });
+    return case_view::json(files, r.view_blocks, r.geometry_only, frames);
 }
 
 std::string check_json(const CheckReport & r) {
@@ -843,6 +830,7 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.add("geometry_only", r.geometry_only);
     o.raw("view", case_view_json(r));
     o.raw("boundary_values", r.boundary_values.empty() ? "null" : r.boundary_values);
     o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
