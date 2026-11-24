@@ -171,10 +171,22 @@ std::string violations(const std::string & name, const json::Value & document) {
     return text;
 }
 
-/** @brief A report without what differs from run to run: the memory measured. */
+/**
+ * @brief A report without what differs from process to process: the memory measured, and the GPU sizing
+ *        but its inputs, as it adds the device memory measured outside Kokkos (a long-lived session's
+ *        CUDA context holds more than a fresh process's).
+ */
 std::string comparable(json::Value report) {
     for (size_t i = 0; i < report.names.size(); i++) {
         if (report.names[i] == "memory") report.members[i] = json::Value();
+        if (report.names[i] != "sizing" || report.members[i].type != json::Value::Type::OBJECT) continue;
+        json::Value & sizing = report.members[i];
+        for (size_t k = 0; k < sizing.names.size(); k++) {
+            const std::string & name = sizing.names[k];
+            if (name != "name" && name != "gpu" && name != "memory" && name != "margin" && name != "halo_fraction") {
+                sizing.members[k] = json::Value();
+            }
+        }
     }
     return json::dump(report);
 }
