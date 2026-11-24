@@ -2129,6 +2129,9 @@ struct TENOFunctor {
     FacePointGradients point_gradients{};
     teno::WallFits wall_fits{};
     struct WallFitPass {};
+    // GradientPass's centroid gradients of the wall-fitted cells below this from their wall fits
+    struct WallFitGradientPass {};
+    uint32_t n_gradient_cells = 0;
 
     /** @brief factor[d] = h^-d (d >= 1) of cell i_cell: its central coefficients of degree d in the unscaled frame over the scaled. */
     KOKKOS_INLINE_FUNCTION
@@ -2172,6 +2175,50 @@ struct TENOFunctor {
     }
 
     /**
+     * @brief The coefficients a(l, i) of wall fit k (TENO::wall_fits) of the conservative variables about its
+     *        cell's U0: V = [rho, rho (u - u_w), rho (E - e_w)] fitted with the wall points' rows asking for
+     *        V = 0, then turned back.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void wall_fit_coefficients(const uint32_t k, rtype (&U0)[N_CONSERVATIVE], rtype (&a)[NK][N_CONSERVATIVE]) const {
+        constexpr uint8_t E = N_DIM + 1;
+        const uint32_t i_cell = wall_fits.cells(k);
+        const BoundaryCondition & bc = boundaries.bcs(wall_fits.bc(k));
+        rtype u_w[N_DIM];
+        FOR_I_DIM u_w[i] = bc.data[1 + i];
+        const bool isothermal = bc.type == BoundaryType::WALL_ISOTHERMAL;
+        const rtype e_w =
+            isothermal ? point_gradients.R / (gamma - 1.0_r) * bc.data[0] + 0.5_r * dot<N_DIM>(u_w, u_w) : 0.0_r;
+        // V = [rho, rho (u - u_w), rho (E - e_w)]: the wall points' rows ask for V = 0
+        auto to_V = [&](rtype * x) {
+            FOR_I_DIM x[1 + i] -= u_w[i] * x[0];
+            if (isothermal) x[E] -= e_w * x[0];
+        };
+        rtype V0[N_CONSERVATIVE];
+        conservatives(i_cell, U0);
+        FOR_I_CONSERVATIVE V0[i] = U0[i];
+        to_V(V0);
+        for (uint8_t l = 0; l < NK; l++) FOR_I_CONSERVATIVE a[l][i] = 0.0_r;
+        for (uint16_t s = 0; s < wall_fits.size(k); s++) {
+            rtype dV[N_CONSERVATIVE];
+            conservatives(wall_fits.entries(k, s), dV);
+            FOR_I_CONSERVATIVE dV[i] -= U0[i];
+            to_V(dV);
+            for (uint8_t l = 0; l < NK; l++) {
+                const rtype P_free = wall_fits.free_pinv(k, l, s), P_wall = wall_fits.wall_pinv(k, l, s);
+                a[l][0] = fmadd(P_free, dV[0], a[l][0]);
+                FOR_I_DIM a[l][1 + i] = fmadd(P_wall, dV[1 + i], a[l][1 + i]);
+                a[l][E] = fmadd(isothermal ? P_wall : P_free, dV[E], a[l][E]);
+            }
+        }
+        for (uint8_t l = 0; l < NK; l++) {
+            const rtype sum = wall_fits.wall_sum(k, l);
+            FOR_I_DIM a[l][1 + i] = fmadd(u_w[i], a[l][0], a[l][1 + i] - sum * V0[1 + i]);
+            if (isothermal) a[l][E] = fmadd(e_w, a[l][0], a[l][E] - sum * V0[E]);
+        }
+    }
+
+    /**
      * @brief Wall fit k (TENO::wall_fits) of a cell found smooth: its values and gradients at the cell's face
      *        points replace those of its central polynomial, unless a face point is inadmissible, which marks
      *        the cell's sides unusable instead.
@@ -2185,39 +2232,8 @@ struct TENOFunctor {
             const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
             const uint32_t f0 = faces_of_cell(f_begin);
             if (!point_gradients.usable(f0, side_of(f0, i_cell))) return;
-            const BoundaryCondition & bc = boundaries.bcs(wall_fits.bc(k));
-            rtype u_w[N_DIM];
-            FOR_I_DIM u_w[i] = bc.data[1 + i];
-            const bool isothermal = bc.type == BoundaryType::WALL_ISOTHERMAL;
-            const rtype e_w =
-                isothermal ? point_gradients.R / (gamma - 1.0_r) * bc.data[0] + 0.5_r * dot<N_DIM>(u_w, u_w) : 0.0_r;
-            // V = [rho, rho (u - u_w), rho (E - e_w)]: the wall points' rows ask for V = 0
-            auto to_V = [&](rtype * x) {
-                FOR_I_DIM x[1 + i] -= u_w[i] * x[0];
-                if (isothermal) x[E] -= e_w * x[0];
-            };
-            rtype U0[N_CONSERVATIVE], V0[N_CONSERVATIVE];
-            conservatives(i_cell, U0);
-            FOR_I_CONSERVATIVE V0[i] = U0[i];
-            to_V(V0);
-            rtype a[NK][N_CONSERVATIVE] = {};
-            for (uint16_t s = 0; s < wall_fits.size(k); s++) {
-                rtype dV[N_CONSERVATIVE];
-                conservatives(wall_fits.entries(k, s), dV);
-                FOR_I_CONSERVATIVE dV[i] -= U0[i];
-                to_V(dV);
-                for (uint8_t l = 0; l < NK; l++) {
-                    const rtype P_free = wall_fits.free_pinv(k, l, s), P_wall = wall_fits.wall_pinv(k, l, s);
-                    a[l][0] = fmadd(P_free, dV[0], a[l][0]);
-                    FOR_I_DIM a[l][1 + i] = fmadd(P_wall, dV[1 + i], a[l][1 + i]);
-                    a[l][E] = fmadd(isothermal ? P_wall : P_free, dV[E], a[l][E]);
-                }
-            }
-            for (uint8_t l = 0; l < NK; l++) {
-                const rtype sum = wall_fits.wall_sum(k, l);
-                FOR_I_DIM a[l][1 + i] = fmadd(u_w[i], a[l][0], a[l][1 + i] - sum * V0[1 + i]);
-                if (isothermal) a[l][E] = fmadd(e_w, a[l][0], a[l][E] - sum * V0[E]);
-            }
+            rtype U0[N_CONSERVATIVE], a[NK][N_CONSERVATIVE];
+            wall_fit_coefficients(k, U0, a);
             const rtype h = wall_fits.scale(k);
             rtype factor[DEG + 1];
             factor[0] = 1.0_r;
@@ -2259,6 +2275,28 @@ struct TENOFunctor {
                                          [&](const uint32_t l, const uint8_t i) { return a[l][i]; }, factor);
                 }
             }
+        }
+    }
+
+    /** @brief The centroid gradients of wall fit k's cell (if below n_gradient_cells) from the fit. */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(WallFitGradientPass, const uint32_t k) const {
+        if constexpr (!PRIM) {
+            const uint32_t i_cell = wall_fits.cells(k);
+            if (i_cell >= n_gradient_cells) return;
+            rtype U0[N_CONSERVATIVE], a[NK][N_CONSERVATIVE];
+            wall_fit_coefficients(k, U0, a);
+            const rtype inv_h = 1.0_r / wall_fits.scale(k);
+            rtype dU[N_CONSERVATIVE][N_DIM], Uc[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE {
+                for (uint8_t d = 0; d < N_DIM; d++) dU[i][d] = a[d][i] * inv_h;
+                Uc[i] = U0[i];
+            }
+            for (uint8_t l = 0; l < NK; l++) {
+                const rtype mean = wall_fits.mean(k, l);
+                FOR_I_CONSERVATIVE Uc[i] = fmadd(-mean, a[l][i], Uc[i]);
+            }
+            store_gradients(i_cell, Uc, dU);
         }
     }
 
@@ -2449,17 +2487,34 @@ struct TENOFunctor {
     }
 
     /**
+     * @brief The central polynomial's conservative variables at the centroid of i_cell, from the cell's U0 and
+     *        its coefficients a(l, i): the monomials' values there are minus their means.
+     */
+    template <typename Coefficient>
+    KOKKOS_INLINE_FUNCTION
+    void centroid_state(const uint32_t i_cell, const rtype * U0, Coefficient && a, rtype * Uc) const {
+        const uint32_t row = cell_shape(i_cell);
+        FOR_I_CONSERVATIVE Uc[i] = U0[i];
+        for (uint8_t l = 0; l < NK; l++) {
+            const rtype mean = basis_mean(row, l);
+            FOR_I_CONSERVATIVE Uc[i] = fmadd(-mean, a(l, i), Uc[i]);
+        }
+    }
+
+    /**
      * @brief gradients(i_cell) of W from dU, the gradients at the centroid of the central polynomial of the
-     *        conservative variables (of W itself with PRIM), whose linear monomials carry them.
+     *        conservative variables (of W itself with PRIM), whose linear monomials carry them, and Uc, the
+     *        polynomial's conservative variables there (unused with PRIM).
      */
     KOKKOS_INLINE_FUNCTION
-    void store_gradients(const uint32_t i_cell, const rtype (&dU)[N_CONSERVATIVE][N_DIM]) const {
+    void store_gradients(const uint32_t i_cell, const rtype * Uc, const rtype (&dU)[N_CONSERVATIVE][N_DIM]) const {
         if constexpr (PRIM) {
             FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) gradients(i_cell, i, d) = dU[i][d];
         } else {
-            const rtype rho = W(i_cell, 0);
+            // The centroid's own state: the cell mean's would cost the gradients an O(h^2) error
+            const rtype rho = Uc[0];
             rtype u[N_DIM];
-            FOR_I_DIM u[i] = W(i_cell, 1 + i);
+            FOR_I_DIM u[i] = Uc[1 + i] / rho;
             FOR_I_DIM {
                 gradients(i_cell, 0, i) = dU[0][i];
                 rtype work = dU[N_DIM + 1][i] - 0.5_r * dot<N_DIM>(u, u) * dU[0][i];
@@ -2478,18 +2533,21 @@ struct TENOFunctor {
     void operator()(GradientPass, const uint32_t i_cell) const {
         rtype U0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
-        rtype dU[N_CONSERVATIVE][N_DIM] = {};
-        const rtype inv_h = 1.0_r / scale(i_cell);
+        rtype aK[NK][N_CONSERVATIVE] = {};
         const auto stencil = stencil_large.template row<TABLE>(i_cell);
         for (uint16_t s = 0; s < stencil_large_size(i_cell); s++) {
             rtype U[N_CONSERVATIVE];
             entry_conservatives(stencil.cell(s), stencil.face(s), U);
-            FOR_I_DIM {
-                const rtype P = stencil.template pinv<NK>(s, i) * inv_h;
-                for (uint8_t v = 0; v < N_CONSERVATIVE; v++) dU[v][i] = fmadd(P, U[v] - U0[v], dU[v][i]);
+            for (uint8_t l = 0; l < NK; l++) {
+                const rtype P = stencil.template pinv<NK>(s, l);
+                FOR_I_CONSERVATIVE aK[l][i] = fmadd(P, U[i] - U0[i], aK[l][i]);
             }
         }
-        store_gradients(i_cell, dU);
+        const rtype inv_h = 1.0_r / scale(i_cell);
+        rtype dU[N_CONSERVATIVE][N_DIM], Uc[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) dU[i][d] = aK[d][i] * inv_h;
+        centroid_state(i_cell, U0, [&](const uint8_t l, const uint8_t i) { return aK[l][i]; }, Uc);
+        store_gradients(i_cell, Uc, dU);
     }
 
     // PointPass (probes, transmissive boundaries)
@@ -2733,7 +2791,9 @@ struct TENOFunctor {
             rtype dU[N_CONSERVATIVE][N_DIM];
             const rtype inv_h = 1.0_r / scale(i_cell);
             FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) dU[i][d] = aK[d][i] * inv_h;
-            store_gradients(i_cell, dU);
+            rtype Uc[N_CONSERVATIVE];
+            centroid_state(i_cell, U0, [&](const uint8_t l, const uint8_t i) { return aK[l][i]; }, Uc);
+            store_gradients(i_cell, Uc, dU);
         }
 
         const uint8_t n_quad = this->n_quad();
@@ -2993,7 +3053,11 @@ struct TENOFunctor {
             FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) {
                 dU[i][d] = aK[(d * N_CONSERVATIVE + i) * TEAM_CELLS + lane] * inv_h;
             }
-            store_gradients(i_cell, dU);
+            rtype Uc[N_CONSERVATIVE];
+            centroid_state(i_cell, U0,
+                           [&](const uint8_t l, const uint8_t i) { return aK[(l * N_CONSERVATIVE + i) * TEAM_CELLS + lane]; },
+                           Uc);
+            store_gradients(i_cell, Uc, dU);
         }
 
         // The cell's face points, shared out among its threads in consecutive
@@ -3820,6 +3884,14 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                     n_troubled,
                     solution, {}, {}, gradients, cell_gamma, cell_molar_mass, selection, entry_rotations, boundary_faces};
     gated::parallel_for("teno_gradients", HeavyRange<typename Functor::GradientPass>(0, n_cells), functor);
+    if (!PRIM && wall_fits.n_fits() > 0) {
+        // Their central polynomials see the odd mirror images across the wall, first order
+        functor.wall_fits = wall_fits;
+        functor.point_gradients = point_gradients;
+        functor.n_gradient_cells = n_cells;
+        gated::parallel_for("teno_wall_fit_gradients",
+                            Kokkos::RangePolicy<typename Functor::WallFitGradientPass>(0, wall_fits.n_fits()), functor);
+    }
 }
 
 template <uint8_t DEG, bool PRIM, typename TABLE>

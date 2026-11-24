@@ -191,6 +191,14 @@ class ScalarReconstruction {
          */
         void point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const;
 
+        /**
+         * @brief TENO, after calc(): the centroid gradients of the combinations sum_k combinations(v, k) Y_k from the
+         *        species' central polynomials (scaled by theta, as their face values), into out(c, v, i), in
+         *        the first n_cells cells that TENO finds smooth; the others keep what out holds.
+         */
+        void cell_gradients(ScalarView scalars, Kokkos::View<rtype **, Kokkos::LayoutRight> combinations,
+                            Kokkos::View<rtype ***, Kokkos::LayoutRight> out, uint32_t n_cells) const;
+
         /** @brief Device evaluator of first-order and MUSCL face values, valid after calc(). */
         ScalarFaceValues face_values(ScalarView scalars) const;
 
@@ -218,6 +226,9 @@ class ScalarReconstruction {
         void calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo);
         template <uint8_t DEG>
         void launch_point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const;
+        template <uint8_t DEG>
+        void launch_cell_gradients(ScalarView scalars, Kokkos::View<rtype **, Kokkos::LayoutRight> combinations,
+                                   Kokkos::View<rtype ***, Kokkos::LayoutRight> out, uint32_t n_cells) const;
 
     private:
         std::shared_ptr<Mesh> mesh;

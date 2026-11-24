@@ -4274,6 +4274,11 @@ void Solver::update_derived_fields() {
         if (derived_selection.need(derived::need::SPECIES_GRADIENTS)) {
             derived::scalar_gradients(derived_settings, cell_scalars, viscous_gradient, boundary_data.bc_Y,
                                       mesh->n_cells, mesh->n_owned(), derived_workspace);
+            if (polynomial_viscous) {
+                update_point_gradients();
+                scalar_reconstruction.cell_gradients(cell_scalars, derived_settings.scalar_weights,
+                                                     derived_workspace.gradients, mesh->n_owned());
+            }
             inputs.scalar_gradients = derived_workspace.gradients;
         }
     }

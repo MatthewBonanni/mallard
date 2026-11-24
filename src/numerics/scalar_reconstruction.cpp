@@ -506,6 +506,44 @@ void ScalarReconstruction::point_gradients(ScalarView scalars, const FacePointGr
     }
 }
 
+template <uint8_t DEG>
+void ScalarReconstruction::launch_cell_gradients(ScalarView scalars, Kokkos::View<rtype **, Kokkos::LayoutRight> combinations,
+                                                 Kokkos::View<rtype ***, Kokkos::LayoutRight> out,
+                                                 const uint32_t n_cells) const {
+    const TENOScalarValues<DEG> values = make_teno_scalar_values<DEG>(*teno, *mesh, boundaries, scalars, theta, n_species);
+    const Kokkos::View<rtype *> sigma = teno->troubled;
+    const rtype threshold = teno->sigma_threshold;
+    const uint32_t ns = n_species;
+    gated::parallel_for("scalar_cell_gradients", HeavyRange<>(0, n_cells), KOKKOS_LAMBDA(const uint32_t c) {
+        if (!(sigma(c) < threshold)) return;
+        constexpr uint8_t NK = teno::n_dof(DEG);
+        const uint32_t n_v = static_cast<uint32_t>(combinations.extent(0));
+        const rtype factor = (values.theta.extent(0) ? values.theta(c) : 1.0_r) / values.scale(c);
+        rtype g[N_DIM * 4] = {};
+        for (uint32_t k = 0; k < ns; k++) {
+            rtype a[NK];
+            values.large_coefficients(c, k, a);
+            for (uint32_t v = 0; v < n_v; v++) {
+                FOR_I_DIM g[v * N_DIM + i] += combinations(v, k) * a[i] * factor;
+            }
+        }
+        for (uint32_t v = 0; v < n_v; v++) FOR_I_DIM out(c, v, i) = g[v * N_DIM + i];
+    });
+}
+
+void ScalarReconstruction::cell_gradients(ScalarView scalars, Kokkos::View<rtype **, Kokkos::LayoutRight> combinations,
+                                          Kokkos::View<rtype ***, Kokkos::LayoutRight> out,
+                                          const uint32_t n_cells) const {
+    if (combinations.extent(0) > 4) throw std::logic_error("ScalarReconstruction: at most 4 combinations.");
+    switch (teno->degree) {
+        case 2: launch_cell_gradients<2>(scalars, combinations, out, n_cells); break;
+        case 3: launch_cell_gradients<3>(scalars, combinations, out, n_cells); break;
+        case 4: launch_cell_gradients<4>(scalars, combinations, out, n_cells); break;
+        case 5: launch_cell_gradients<5>(scalars, combinations, out, n_cells); break;
+        default: throw std::logic_error("ScalarReconstruction: unsupported TENO degree.");
+    }
+}
+
 template <typename Eval>
 void ScalarReconstruction::launch_slots(const Eval & values, Kokkos::View<rtype **> face_mdot,
                                         Kokkos::View<rtype *> quad_weights, FaceWeights<> face_weights,
