@@ -181,7 +181,8 @@ and sets off a transverse slosh between walls.
 [Lodato, Domingo & Vervisch (2008)](../references.md#lodato-2008) cancel them
 in the incoming wave except for a fraction `beta`, equal to the Mach number.
 [Granet et al. (2010)](../references.md#granet-2010) show this matters most
-at low Mach number. The default is the local `beta = M`; `beta = 0` drops
+at low Mach number. The default is the local `beta = M` at outlets and
+`beta = 0` at inlets ([below](#transverse-terms-at-inlets)); `beta = 0` drops
 the terms.
 
 The tangential derivatives are a least-squares fit in the plane of the face,
@@ -233,7 +234,8 @@ leaving through an outlet found three such modes:
   `beta = 0`: they only relax their pressure toward `p_t`, like an inflow at
   held pressure.
 
-**Test case.** A 3D box `[0, 2] x [0, 1]^2`:
+**Test case.** A 3D box `[0, 2] x [0, 1]^2` (measured while inlets still
+took `beta = M`):
 
 - `inlet_state` with `nscbc` at `u = 0.2` (`c = 1`), and `outlet_pressure` with `nscbc = { L = 12 }`
 - symmetry planes on the sides, or no-slip walls with cells clustered toward
@@ -319,6 +321,74 @@ The target is `u_t`, `T_t` and, for mixtures, the composition.
   and does not reflect acoustics. A relaxed composition would need the ghost
   thermodynamics `[gamma, e0]` of a blended composition at every evaluation.
   The flow block uses the target's `[gamma, e0]` on inflow faces.
+
+### Transverse terms at inlets
+
+Inlets leave the transverse terms out of their incoming wave (`beta = 0`).
+A nonzero `beta` remains available but holds the velocity off its target.
+
+The face keeps only its incoming wave; the outgoing one comes from the
+interior at every step. So whatever `-beta T-` adds to `w-` stays, and only
+the relaxation takes it back. A steady face settles where they balance:
+
+```
+K Z (u_b - u_n,t) = beta T-        (inlets)
+K (p_b - p_t)     = -beta T-       (outlets)
+```
+
+At an outlet this offset is the point of the transverse terms: the pressure
+leaves `p_t` to follow the structures crossing the boundary
+([Yoo & Im 2007](../references.md#yoo-im-2007),
+[Lodato et al. 2008](../references.md#lodato-2008)). At an inlet the same
+offset moves the normal velocity, which the inlet is there to hold.
+Characteristic inflows keep the transverse terms out of the velocity:
+
+- The subsonic inflow SI-1 of
+  [Poinsot & Lele](../references.md#poinsot-lele-1992) prescribes the time
+  derivative of the inlet velocity. The incoming wave is whatever holds it.
+- [Marchal et al. (2026)](../references.md#marchal-2026), eqs. 44-46, cancel
+  every transverse term in the velocity equations, so that the velocity
+  relaxes toward its target alone.
+
+The face's one state is its incoming wave, so a transverse term cannot move
+the pressure without moving the velocity. The interior still answers
+transverse divergence with pressure, through the outgoing wave.
+
+The offset is not small where the target varies along the inlet. Two
+streams meeting at a step in velocity (#1179) start a mixing layer at the
+step. Its displacement flow has `dv/dy = -du/dx`, of order `du / h` in the
+first cells, so `T- = rho c^2 dv/dy` grows as the mesh is refined, while `K`
+is weak by design.
+
+**Test case** (`NSCBCTest.SteppedInletHoldsItsTarget`). Two `inlet_state`
+halves on the left of `[0, 2] x [0, 1]`:
+
+- `u = 0.1` below `y = 0.5`, `u = 0.2` and a temperature 3.83 times higher
+  above, `c = 1` in the cold stream
+- `nscbc = { L = 2 }` on the inlet and on characteristic outlets elsewhere
+- `mu = 1e-3`, MUSCL, started from the step everywhere, run to t = 20
+
+The table gives the largest `|u - u_t|` in the cells next to the inlet, as a
+fraction of the step, and the largest Mach number (the inflow's is 0.10):
+
+| Cells | Fixed `inlet_state` | `beta = M` (before) | `beta = 0` (now) |
+|---|---|---|---|
+| `40 x 20` | 0.09, 0.118 | 0.49, 0.129 | 0.13, 0.119 |
+| `80 x 40` | 0.13, 0.246 | 0.74, 0.299 | 0.17, 0.239 |
+| `160 x 80` | 0.19, 0.115 | 3.47, 0.302 | 0.22, 0.112 |
+
+With `beta = M` the error grows under refinement, and on the finest mesh the
+inlet runs away: velocities three times the step. With `beta = 0` the inlet
+stays within 0.03 of the step of the fixed inlet; the rest is the viscous
+layer itself in the cells next to the step. The Mach number of 0.24 to 0.25
+on `80 x 40` is the layer rolling up downstream, with either inlet.
+
+The same holds in the case of #1179, the V11 mixing layer: its run with
+`beta = 0` on the inlet was as quiet as with a fixed `inlet_state`.
+
+Turbulent inlets had `beta = 0` before for another reason: the target's own
+incoming wave already carries the target's transverse terms
+([synthetic_inflow.md](synthetic_inflow.md)).
 
 ## Multicomponent and reacting flows
 

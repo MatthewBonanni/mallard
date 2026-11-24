@@ -193,24 +193,11 @@ int Solver::init(const Input & input_in) {
     try {
         setup_from_input();
     } catch (const std::exception & e) {
-        std::string misspelled;
-        for (const Diagnostic & key : unused_keys(input)) {
-            if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
-        }
+        const std::string misspelled = possibly_misspelled(input);
         if (misspelled.empty() || check_only) throw;
-        throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
+        throw InputError(e.what() + misspelled);
     }
-    if (!check_only && !state_reader) {
-        const std::vector<Diagnostic> unused = unused_keys(input);
-        if (!unused.empty()) {
-            std::string list;
-            for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
-                             list);
-            error.code = diagnostic_code::KEY_UNUSED;
-            throw error;
-        }
-    }
+    if (!check_only && !state_reader) reject_unused_keys(input);
     const ResolvedInput resolved = resolve_input(input);
     provenance::set_resolved(resolved.toml);
     std::vector<std::tuple<std::string, std::string, bool>> preset_settings;
@@ -241,7 +228,7 @@ void Solver::setup_from_input() {
     });
     timed_phase("boundaries", [&] { init_boundaries(); });
     timed_phase("numerics", [&] { init_numerics(); });
-    while (halo_too_shallow()) {
+    while (!geometry_only && halo_too_shallow()) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
@@ -260,10 +247,12 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) {
             init_particles(*used_regions);
-            allocate_time_stepping();
+            if (!geometry_only) allocate_time_stepping();
         }
-        init_les();
-        init_rhs_split();
+        if (!geometry_only) {
+            init_les();
+            init_rhs_split();
+        }
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -276,8 +265,10 @@ void Solver::setup_from_input() {
         init_output(*used_regions);
         init_check_inputs();
     });
-    timed_phase("initial solution", [&] { init_solution(); });
-    init_health();
+    if (!geometry_only) {
+        timed_phase("initial solution", [&] { init_solution(); });
+        init_health();
+    }
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
@@ -962,7 +953,8 @@ void Solver::read_boundaries() {
         }
         // Optional filter selecting part of the zone by face centroid
         if (contains_optional(bound, "where")) {
-            e.where = std::make_shared<const Expression>(name + ".where", find_value<std::string>(bound, "where"));
+            e.where = std::make_shared<const Expression>(name + ".where", line_of(bound, "where"),
+                                                         find_value<std::string>(bound, "where"));
         }
         if (e.bc.type == BoundaryType::DIRICHLET) {
             for (const char * key : {"rho", "u", "p"}) {
@@ -976,9 +968,9 @@ void Solver::read_boundaries() {
             }
             const auto & u = bound.at("u").as_array();
             auto add_state = [&](const Input & v, const std::string & key, const Dimension & dimension) {
-                e.dirichlet.push_back(std::make_shared<const kexpr::Program>(
-                    key, quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound),
-                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
+                e.dirichlet.push_back(std::make_shared<const kexpr::Program>(compile_expression(
+                    key, line_of(v), quantity_or_expression(v, key, dimension), BoundaryValue::variables(bound),
+                    BoundaryValue::hint, boundary_variable::FIRST_LOCAL)));
             };
             add_state(bound.at("rho"), name + ".rho", dim::density);
             FOR_I_DIM add_state(u[i], name + ".u[" + std::to_string(i) + "]", dim::velocity);
@@ -1819,7 +1811,9 @@ void Solver::read_numerics() {
 }
 
 void Solver::init_numerics() {
-    face_reconstruction = make_face_reconstruction(face_reconstruction_type);
+    // The case view's geometry needs no stencils
+    face_reconstruction =
+        make_face_reconstruction(geometry_only ? FaceReconstructionType::FIRST_ORDER : face_reconstruction_type);
     face_reconstruction->set_mesh(mesh);
     face_reconstruction->set_boundaries(boundary_data);
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
@@ -2325,15 +2319,13 @@ std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool 
 }
 
 std::string Solver::progress_units() const {
-    const bool si = units::system() == units::System::SI;
-    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
-    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+    auto object = [](const std::vector<std::pair<std::string, Dimension>> & columns) {
         json::Object o;
-        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        for (const auto & [name, dimension] : columns) o.add(name, units::of(dimension));
         return o.str();
     };
     json::Object u;
-    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("t", units::of(dim::time)).add("dt", units::of(dim::time)).add("cfl", "1").add("progress", "1");
     u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
     for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
         u.add(memory, "B");
