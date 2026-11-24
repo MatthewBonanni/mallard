@@ -244,7 +244,7 @@ void Solver::setup_from_input() {
         init_boundaries();
     });
     timed_phase("numerics", [&] { init_numerics(); });
-    while (halo_too_shallow()) {
+    while (!geometry_only && halo_too_shallow()) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
@@ -263,10 +263,12 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) {
             init_particles(*used_regions);
-            allocate_time_stepping();
+            if (!geometry_only) allocate_time_stepping();
         }
-        init_les();
-        init_rhs_split();
+        if (!geometry_only) {
+            init_les();
+            init_rhs_split();
+        }
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -279,8 +281,10 @@ void Solver::setup_from_input() {
         init_output(*used_regions);
         init_check_inputs();
     });
-    timed_phase("initial solution", [&] { init_solution(); });
-    init_health();
+    if (!geometry_only) {
+        timed_phase("initial solution", [&] { init_solution(); });
+        init_health();
+    }
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     mesh->release_setup_data();
@@ -1659,7 +1663,8 @@ void Solver::init_numerics() {
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
 
-    switch (it_face->second) {
+    // The case view's geometry needs no stencils
+    switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
             face_reconstruction = std::make_unique<FirstOrder>();
             break;
@@ -2264,15 +2269,13 @@ std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool 
 }
 
 std::string Solver::progress_units() const {
-    const bool si = units::system() == units::System::SI;
-    auto unit = [&](const Dimension & d) { return si ? d.udunits() : std::string("1"); };
-    auto object = [&](const std::vector<std::pair<std::string, Dimension>> & columns) {
+    auto object = [](const std::vector<std::pair<std::string, Dimension>> & columns) {
         json::Object o;
-        for (const auto & [name, dimension] : columns) o.add(name, unit(dimension));
+        for (const auto & [name, dimension] : columns) o.add(name, units::of(dimension));
         return o.str();
     };
     json::Object u;
-    u.add("t", unit(dim::time)).add("dt", unit(dim::time)).add("cfl", "1").add("progress", "1");
+    u.add("t", units::of(dim::time)).add("dt", units::of(dim::time)).add("cfl", "1").add("progress", "1");
     u.add("wall", "s").add("wall_per_step", "s").add("cells_per_second", "s-1").add("eta", "s");
     for (const char * memory : {"memory_host", "memory_host_peak", "memory_device", "memory_device_total"}) {
         u.add(memory, "B");
