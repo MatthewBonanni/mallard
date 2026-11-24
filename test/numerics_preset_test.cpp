@@ -290,6 +290,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"taylor_green_3d/coarse.toml", "high_order", 3, "", {}, ""},
     {"taylor_green_3d/input.toml", "high_order", 3, "", {}, ""},
     {"taylor_green_3d/remap.toml", "high_order", 3, "", {}, ""},
+    {"taylor_green_3d/scaling.toml", "high_order", 3, "", {}, ""},
     {"turbulent_inflow_duct/input.toml", "les", 3, "", {}, ""},
     {"vortex_ring_3d/coarse.toml", "high_order", 3,
      "type = \"constant\"\np = 0.7142857142857143\nT = 0.7142857142857143\nu = [0.0, 0.0, 0.0]\n", {}, ""},
