@@ -22,6 +22,7 @@ import axisymmetric_curved
 import boundary_coordinates
 import boundary_data
 import case_view
+import check_resolution
 import chemistry
 import domains
 import effective_resolution
@@ -59,6 +60,7 @@ def main():
     axisymmetric_curved.figures()
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     boundary_data.figures()
+    check_resolution.figures()
     chemistry.figures()
     domains.figures()
     effective_resolution.figures()
