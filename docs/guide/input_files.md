@@ -673,7 +673,12 @@ that every key this reference documents is in it and that the defaults it states
 match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
-each key's type, units, default and accepted values; `mallard list keys
+each key's type, units, default and accepted values. Where setup describes the
+values of a key, the catalog says what each does and, where the choice changes
+the cost per cell or particle, rates it `cheap`, `moderate` or `expensive` with
+a one-line reason (`value_notes`; the text tables show the rating after each
+value): the forces of solid particles, the face reconstruction and the gas
+model. `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
 whether the input sets each key), and a section keeps one table or key path:
 

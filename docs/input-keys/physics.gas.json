@@ -33,6 +33,23 @@
   "tools/dev/catalog_inputs/3d/flamelet_transported.toml"
  ],
  "type": "string",
+ "value_notes": {
+  "flamelet": {
+   "cost": "cheap",
+   "cost_why": "six or seven values per cell and table lookups, no stiff chemistry",
+   "summary": "Reacting gas from a flamelet table, transporting the mixture fraction and a progress variable"
+  },
+  "mixture": {
+   "cost": "expensive",
+   "cost_why": "5 + N_species values per cell, mixture properties and usually stiff chemistry per cell",
+   "summary": "Mixture of species from a mechanism, with mixture-averaged transport and finite-rate chemistry"
+  },
+  "perfect": {
+   "cost": "cheap",
+   "cost_why": "five values per cell, closed-form properties",
+   "summary": "A single calorically perfect gas"
+  }
+ },
  "values": [
   "flamelet",
   "mixture",

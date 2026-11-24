@@ -1579,7 +1579,7 @@ keys.
 | `density` | Material density (`"solid"`). Required for solid particles |
 | `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
-| `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, `"basset_history"` ([the history force](guide/particles.md#solid-particles)), default none |
+| `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, `"basset_history"` ([the history force](guide/particles.md#solid-particles)), default none. All but `"basset_history"` are cheap; `mallard list keys particles` rates each |
 | `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
 | `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
 | `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |

@@ -377,7 +377,12 @@ std::string key_default(const json::Value & k) {
 std::string key_values(const json::Value & k) {
     std::string out;
     if (const json::Value * values = k.find("values")) {
-        for (const json::Value & v : values->array) out += (out.empty() ? "" : ", ") + v.string;
+        const json::Value * notes = k.find("value_notes");
+        for (const json::Value & v : values->array) {
+            out += (out.empty() ? "" : ", ") + v.string;
+            const json::Value * note = notes ? notes->find(v.string) : nullptr;
+            if (const json::Value * cost = note ? note->find("cost") : nullptr) out += " (" + cost->string + ")";
+        }
     }
     return out;
 }

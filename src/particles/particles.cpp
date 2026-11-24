@@ -165,6 +165,22 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
     }
     const std::vector<std::string> forces = {"added_mass", "basset_history", "pressure_gradient", "saffman_lift"};
     record_options("particles.forces", forces);
+    describe_options(
+        "particles.forces",
+        {{"added_mass",
+          {"Half the displaced gas mass moves with the sphere (C_A = 1/2), with the gas's own acceleration",
+           Cost::CHEAP, "reads the cell's gas gradient that the point value already computes; a few operations"}},
+         {"basset_history",
+          {"Basset history force of the slip's past in creeping flow, from 29 exponentials of the kernel",
+           Cost::EXPENSIVE,
+           "29 history vectors per particle (62 values in 2D, 92 in 3D), summed every stage: several times the "
+           "particles' work and memory; order 3/2 in the step"}},
+         {"pressure_gradient",
+          {"Force of the gas pressure gradient over the sphere's volume, in place of plain buoyancy", Cost::CHEAP,
+           "reads the cell's pressure gradient that the point value already computes; a few operations"}},
+         {"saffman_lift",
+          {"Saffman lift of a sphere slipping through a shear", Cost::CHEAP,
+           "reads the cell's velocity gradient already computed: a curl, a square root and a cross product"}}});
     for (const std::string & force : find_value_or<std::vector<std::string>>(table, "forces", {})) {
         if (std::find(forces.begin(), forces.end(), force) == forces.end()) throw not_accepted(table, "particles.forces", force, forces);
         solid.added_mass = solid.added_mass || force == "added_mass";

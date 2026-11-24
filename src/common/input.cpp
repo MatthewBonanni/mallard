@@ -284,6 +284,11 @@ std::map<std::string, std::vector<std::string>> & recorded_options() {
     return options;
 }
 
+std::map<std::string, std::map<std::string, OptionNote>> & recorded_notes() {
+    static std::map<std::string, std::map<std::string, OptionNote>> notes;
+    return notes;
+}
+
 std::map<std::string, Dimension> & recorded_dimensions() {
     static std::map<std::string, Dimension> dimensions;
     return dimensions;
@@ -380,6 +385,7 @@ Input in_plain_units(const Input & v, const Dimension & dimension) {
 
 struct Resolver {
     std::map<std::string, std::vector<std::string>> options;
+    std::map<std::string, std::map<std::string, OptionNote>> notes;
     std::map<std::string, Dimension> dimensions;
     std::vector<KeyRecord> keys;
 
@@ -412,6 +418,7 @@ struct Resolver {
             const auto d = dimensions.find(catalog);
             if (d != dimensions.end() && record.use.dimension.same_as(dim::none)) record.use.dimension = d->second;
             if (const auto o = options.find(catalog); o != options.end()) record.values = o->second;
+            if (const auto n = notes.find(catalog); n != notes.end()) record.notes = n->second;
             std::optional<Input> resolved;
             if (const auto entry = entries.find(key); entry != entries.end()) {
                 record.set = true;
@@ -442,6 +449,21 @@ void record_options(const std::string & key, std::vector<std::string> names) {
     recorded_options()[catalog_path(key)] = std::move(names);
 }
 
+const char * cost_name(const Cost cost) {
+    switch (cost) {
+        case Cost::CHEAP: return "cheap";
+        case Cost::MODERATE: return "moderate";
+        case Cost::EXPENSIVE: return "expensive";
+        case Cost::UNRATED: break;
+    }
+    return "";
+}
+
+void describe_options(const std::string & key, std::map<std::string, OptionNote> notes) {
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_notes()[catalog_path(key)] = std::move(notes);
+}
+
 const KeyRecord * ResolvedInput::find(const std::string & path) const {
     for (const auto & key : keys) {
         if (key.path == path) return &key;
@@ -454,6 +476,7 @@ ResolvedInput resolve_input(const Input & input) {
     {
         std::lock_guard<std::mutex> lock(options_mutex());
         r.options = recorded_options();
+        r.notes = recorded_notes();
         r.dimensions = recorded_dimensions();
     }
     ResolvedInput resolved;
@@ -467,6 +490,7 @@ std::string key_catalog(const ResolvedInput & resolved) {
     struct Entry {
         KeyUse use;
         std::vector<std::string> values;
+        std::map<std::string, OptionNote> notes;
         bool set = false;
     };
     std::map<std::string, Entry> keys;
@@ -475,6 +499,7 @@ std::string key_catalog(const ResolvedInput & resolved) {
         Entry & entry = keys[catalog_path(record.path)];
         if (!record.use.type.empty()) entry.use = record.use;
         if (!record.values.empty()) entry.values = record.values;
+        if (!record.notes.empty()) entry.notes = record.notes;
         entry.set = entry.set || record.set;
     }
     std::string out = "{\n";
@@ -499,6 +524,21 @@ std::string key_catalog(const ResolvedInput & resolved) {
             out += ", \"values\": [";
             for (size_t i = 0; i < entry.values.size(); i++) out += (i ? ", " : "") + json_string(entry.values[i]);
             out += "]";
+        }
+        if (!entry.notes.empty()) {
+            out += ", \"value_notes\": {";
+            bool first_note = true;
+            for (const auto & [value, note] : entry.notes) {
+                out += std::string(first_note ? "" : ", ") + json_string(value);
+                out += ": {\"summary\": " + json_string(note.summary);
+                if (note.cost != Cost::UNRATED) {
+                    out += ", \"cost\": " + json_string(cost_name(note.cost));
+                    out += ", \"cost_why\": " + json_string(note.why);
+                }
+                out += "}";
+                first_note = false;
+            }
+            out += "}";
         }
         out += "}";
     }
