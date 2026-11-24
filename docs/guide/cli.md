@@ -254,11 +254,13 @@ ETA, memory and the state of each trigger. checkpoint: write a restart file now;
 the reply names it. stop: write a restart file and end the run (exit status 3).
 set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
-t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
-.time_interval, probes.<name>.interval or .time_interval,
+t_wall_stop=2h), check_interval, control_file_interval, write_data.<prefix or
+index>.interval or .time_interval, probes.<name>.interval or .time_interval,
 forces.<zone>.interval, integrals.interval. ctl refuses other keys, and values
 of the wrong type, before sending (mallard version --format json lists the keys
-under control.settings).
+under control.settings). A SET file in run-dir does the same from anywhere the
+directory is visible, with [run] control_file_interval: lines of key = value,
+the run log the reply.
 
 Options:
   --wait accepted|done  accepted: return once the run has queued the request;
