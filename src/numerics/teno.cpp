@@ -2381,6 +2381,40 @@ struct TENOFunctor {
     Kokkos::View<rtype *[N_DIM]> point_offsets{};  // from the cell centroid, point_cells.extent(0) groups
     Kokkos::View<rtype *[N_CONSERVATIVE]> point_W{};
 
+    /** @brief The row of cell i_cell in the stencil tables. */
+    KOKKOS_INLINE_FUNCTION
+    uint32_t row_of(const uint32_t i_cell) const {
+        if (i_cell < n_direct_rows) return i_cell;
+        uint32_t lo = 0, hi = static_cast<uint32_t>(extra_cells.extent(0));
+        while (hi - lo > 1) {
+            const uint32_t mid = (lo + hi) / 2;
+            (extra_cells(mid) <= i_cell ? lo : hi) = mid;
+        }
+        KOKKOS_ASSERT(extra_cells(lo) == i_cell);
+        return n_direct_rows + lo;
+    }
+
+    /** @brief W at point p of its cell's central polynomial U0 + aK(l, i) (psi_l - mean psi_l), if admissible. */
+    template <typename Coefficients>
+    KOKKOS_INLINE_FUNCTION
+    void point_value(const uint32_t p, const uint32_t i_row, const rtype * U0, const Coefficients & aK) const {
+        const rtype h = scale(i_row);
+        const uint32_t row = cell_shape(i_row);
+        rtype xi[N_DIM];
+        FOR_I_DIM xi[i] = point_offsets(p, i) / h;
+        rtype psi[NK];
+        teno::monomials(DEG, xi, psi);
+        rtype U[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE U[i] = U0[i];
+        for (uint8_t l = 0; l < NK; l++) {
+            FOR_I_CONSERVATIVE U[i] = fmadd(aK(l, i), psi[l] - basis_mean(row, l), U[i]);
+        }
+        rtype Wq[N_CONSERVATIVE];
+        to_primitives(U, Wq);
+        if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) return;
+        FOR_I_CONSERVATIVE point_W(p, i) = Wq[i];
+    }
+
     /**
      * @brief W at the points of a cell from its central polynomial, if the
      *        cell is smooth by SmoothPass's measure and the value admissible.
@@ -2388,16 +2422,7 @@ struct TENOFunctor {
     KOKKOS_INLINE_FUNCTION
     void operator()(PointPass, const uint32_t k) const {
         const uint32_t i_cell = point_cells(k);
-        uint32_t i_row = i_cell;
-        if (i_cell >= n_direct_rows) {
-            uint32_t lo = 0, hi = static_cast<uint32_t>(extra_cells.extent(0));
-            while (hi - lo > 1) {
-                const uint32_t mid = (lo + hi) / 2;
-                (extra_cells(mid) <= i_cell ? lo : hi) = mid;
-            }
-            KOKKOS_ASSERT(extra_cells(lo) == i_cell);
-            i_row = n_direct_rows + lo;
-        }
+        const uint32_t i_row = row_of(i_cell);
         rtype U0[N_CONSERVATIVE];
         conservatives(i_cell, U0);
         const rtype rho0 = W(i_cell, 0);
@@ -2426,23 +2451,89 @@ struct TENOFunctor {
         }
         const rtype sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
         if (sigma >= sigma_threshold) return;
-        const rtype h = scale(i_row);
-        const uint32_t row = cell_shape(i_row);
         const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / point_cells.extent(0));
         for (uint32_t p = k * m; p < (k + 1) * m; p++) {
-            rtype xi[N_DIM];
-            FOR_I_DIM xi[i] = point_offsets(p, i) / h;
-            rtype psi[NK];
-            teno::monomials(DEG, xi, psi);
-            rtype U[N_CONSERVATIVE];
-            FOR_I_CONSERVATIVE U[i] = U0[i];
-            for (uint8_t l = 0; l < NK; l++) {
-                FOR_I_CONSERVATIVE U[i] = fmadd(aK[l][i], psi[l] - basis_mean(row, l), U[i]);
+            point_value(p, i_row, U0, [&](const uint8_t l, const uint8_t i) { return aK[l][i]; });
+        }
+    }
+
+    // PointTeamPass: PointPass for groups that come by cell (probes). A team
+    // takes POINT_GROUPS consecutive groups and fits the cell of each run of
+    // them once: its threads share out the coefficients, each summing its own
+    // over the stencil in PointPass's order (the entries staged in scratch
+    // POINT_STAGE at a time), then share out the run's points. The values are
+    // PointPass's bit for bit
+    struct PointTeamPass {};
+    static constexpr uint32_t POINT_GROUPS = 128;
+    static constexpr uint32_t POINT_STAGE = 32;
+    static constexpr size_t POINT_SCRATCH = sizeof(rtype) * (NK + POINT_STAGE) * N_CONSERVATIVE + sizeof(rtype);
+
+    template <typename Member>
+    KOKKOS_INLINE_FUNCTION
+    void operator()(PointTeamPass, const Member & team) const {
+        rtype * aK = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * NK * N_CONSERVATIVE));
+        rtype * dU = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype) * POINT_STAGE * N_CONSERVATIVE));
+        rtype * sigma = static_cast<rtype *>(team.team_scratch(0).get_shmem(sizeof(rtype)));
+        const uint32_t n = static_cast<uint32_t>(point_cells.extent(0));
+        const uint32_t m = static_cast<uint32_t>(point_offsets.extent(0) / n);
+        const uint32_t first = static_cast<uint32_t>(team.league_rank()) * POINT_GROUPS;
+        const uint32_t last = Kokkos::min(first + POINT_GROUPS, n);
+        for (uint32_t a = first, b = first; a < last; a = b) {
+            const uint32_t i_cell = point_cells(a);
+            while (b < last && point_cells(b) == i_cell) b++;
+            const uint32_t i_row = row_of(i_cell);
+            rtype U0[N_CONSERVATIVE];
+            conservatives(i_cell, U0);
+            const rtype rho0 = W(i_cell, 0);
+            const uint16_t ns = stencil_large_size(i_row);
+            const auto stencil = stencil_large.template row<TABLE>(i_row);
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(NK) * N_CONSERVATIVE),
+                                 [&](const uint32_t j) { aK[j] = 0.0_r; });
+            rtype g_mean = 0.0, g_m2 = 0.0, m_mean = 0.0, m_m2 = 0.0;
+            for (uint32_t s0 = 0; s0 < ns; s0 += POINT_STAGE) {
+                const uint32_t n_s = Kokkos::min(uint32_t(POINT_STAGE), ns - s0);
+                team.team_barrier();
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, n_s), [&](const uint32_t e) {
+                    rtype U[N_CONSERVATIVE];
+                    entry_conservatives(stencil.cell(s0 + e), stencil.face(s0 + e), U);
+                    FOR_I_CONSERVATIVE dU[e * N_CONSERVATIVE + i] = U[i] - U0[i];
+                });
+                team.team_barrier();
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, uint32_t(NK) * N_CONSERVATIVE), [&](const uint32_t j) {
+                    const uint8_t l = static_cast<uint8_t>(j / N_CONSERVATIVE), i = static_cast<uint8_t>(j % N_CONSERVATIVE);
+                    rtype a_li = aK[j];
+                    for (uint32_t e = 0; e < n_s; e++) {
+                        a_li = fmadd(stencil.template pinv<NK>(s0 + e, l), dU[e * N_CONSERVATIVE + i], a_li);
+                    }
+                    aK[j] = a_li;
+                });
+                // SmoothPass's measure, the entries in order (U[0] - rho0 is dU, U0[0] being rho0)
+                Kokkos::single(Kokkos::PerTeam(team), [&]() {
+                    for (uint32_t e = 0; e < n_s; e++) {
+                        const uint16_t s = static_cast<uint16_t>(s0 + e);
+                        const rtype g = Kokkos::fabs(dU[e * N_CONSERVATIVE]) / rho0;
+                        const rtype delta = g - g_mean;
+                        g_mean += delta / (s + 1);
+                        g_m2 = fmadd(delta, g - g_mean, g_m2);
+                        if constexpr (PRIM) {
+                            const rtype M0 = cell_molar_mass(i_cell);
+                            const rtype mm = Kokkos::fabs(cell_molar_mass(stencil.cell(s)) - M0) / M0;
+                            const rtype delta_m = mm - m_mean;
+                            m_mean += delta_m / (s + 1);
+                            m_m2 = fmadd(delta_m, mm - m_mean, m_m2);
+                        }
+                    }
+                    *sigma = PRIM ? Kokkos::fmax(g_m2, m_m2) / ns : g_m2 / ns;
+                });
             }
-            rtype Wq[N_CONSERVATIVE];
-            to_primitives(U, Wq);
-            if (!(Wq[0] > 0.0_r && Wq[N_DIM + 1] > 0.0_r && Kokkos::isfinite(Wq[N_DIM + 1]))) continue;
-            FOR_I_CONSERVATIVE point_W(p, i) = Wq[i];
+            team.team_barrier();
+            if (*sigma < sigma_threshold) {
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(team, (b - a) * m), [&](const uint32_t q) {
+                    point_value(a * m + q, i_row, U0,
+                                [&](const uint8_t l, const uint8_t i) { return aK[l * N_CONSERVATIVE + i]; });
+                });
+            }
+            team.team_barrier();
         }
     }
 
@@ -3558,7 +3649,8 @@ void TENO::launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
 
 template <uint8_t DEG, bool PRIM, typename TABLE>
 void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                         Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                         const bool by_cell) {
     using Functor = TENOFunctor<DEG, PRIM, TABLE>;
     Functor functor{sigma_threshold, sigma_upper, C_T, characteristic, bound_preserving, boundaries.gamma,
                     mesh->offsets_faces_of_cell, mesh->faces_of_cell, mesh->cells_of_face,
@@ -3574,6 +3666,17 @@ void TENO::launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos:
     functor.extra_cells = extra_cells_device;
     functor.point_offsets = offsets;
     functor.point_W = out;
+    if (by_cell) {
+        using Space = Kokkos::DefaultExecutionSpace;
+        constexpr bool host = Kokkos::SpaceAccessibility<Kokkos::HostSpace, Space::memory_space>::accessible;
+        const uint32_t n = static_cast<uint32_t>(cells.extent(0));
+        const int league = static_cast<int>((n + Functor::POINT_GROUPS - 1) / Functor::POINT_GROUPS);
+        gated::parallel_for("teno_point_values",
+                             Kokkos::TeamPolicy<Space, typename Functor::PointTeamPass>(league, host ? 1 : 32)
+                                 .set_scratch_size(0, Kokkos::PerTeam(Functor::POINT_SCRATCH)),
+                             functor);
+        return;
+    }
     gated::parallel_for("teno_point_values", Kokkos::RangePolicy<typename Functor::PointPass>(0, cells.extent(0)),
                          functor);
 }
@@ -3627,7 +3730,7 @@ void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos
     selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_state_faces(), 2);
 }
 
-bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+void TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const uint32_t n_cells) {
 #if N_DIM == 3
     if (single_tables) {
@@ -3638,7 +3741,7 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
             case 5: launch_gradients<5, false, float>(solution, gradients, n_cells); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
-        return true;
+        return;
     }
 #endif
     switch (degree * 2 + primitive) {
@@ -3652,33 +3755,33 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
         case 11: launch_gradients<5, true, rtype>(solution, gradients, n_cells); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
-    return true;
 }
 
 bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) {
+                        Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                        const bool by_cell) {
     if (cells.extent(0) == 0) return true;
 #if N_DIM == 3
     if (single_tables) {
         switch (degree) {
-            case 2: launch_points<2, false, float>(solution, cells, offsets, out); break;
-            case 3: launch_points<3, false, float>(solution, cells, offsets, out); break;
-            case 4: launch_points<4, false, float>(solution, cells, offsets, out); break;
-            case 5: launch_points<5, false, float>(solution, cells, offsets, out); break;
+            case 2: launch_points<2, false, float>(solution, cells, offsets, out, by_cell); break;
+            case 3: launch_points<3, false, float>(solution, cells, offsets, out, by_cell); break;
+            case 4: launch_points<4, false, float>(solution, cells, offsets, out, by_cell); break;
+            case 5: launch_points<5, false, float>(solution, cells, offsets, out, by_cell); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
         return true;
     }
 #endif
     switch (degree * 2 + primitive) {
-        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out); break;
-        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out); break;
-        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out); break;
-        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out); break;
-        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out); break;
-        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out); break;
-        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out); break;
-        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out); break;
+        case 4: launch_points<2, false, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 6: launch_points<3, false, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 8: launch_points<4, false, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 10: launch_points<5, false, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 5: launch_points<2, true, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 7: launch_points<3, true, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 9: launch_points<4, true, rtype>(solution, cells, offsets, out, by_cell); break;
+        case 11: launch_points<5, true, rtype>(solution, cells, offsets, out, by_cell); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
     return true;

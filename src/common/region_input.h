@@ -84,6 +84,9 @@ Region read(const Input & value, const std::string & where, const Input * names 
 /** @brief The boundary of a filled region, as {type = "boundary", of = ...} gives it. */
 Region boundary(const Region & filled);
 
+/** @brief Whether a region holds an open surface from an STL or OBJ file (only ever a surface or curve region). */
+bool open_surface(const Region & region);
+
 /** @brief An error unless the region given at where has the dimension of the mesh (a volume, or an area in 2D). */
 void require_full_dimension(const Region & region, const Input & value, const std::string & where);
 

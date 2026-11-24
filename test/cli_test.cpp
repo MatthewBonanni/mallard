@@ -821,6 +821,45 @@ TEST(CliTest, PackReproducesARunBitForBit) {
     EXPECT_FALSE(fs::exists("changed.tar.partial"));
 }
 
+TEST(CliTest, RunSetChangesSettingsAsCtlSetDoesAndPackRepeatsThem) {
+    SKIP_UNDER_MPI();
+    fs::create_directories("set_run");
+    {
+        const InDirectory in("set_run");
+        ASSERT_EQ(small_run().status, 0);
+        const Result r =
+            run({"-i", "small.toml", "--set", "n_steps=4", "--set=write_data.1.interval=1", "--kokkos-num-threads=1"}, true);
+        ASSERT_EQ(r.status, 0) << r.err;
+        for (const char * file : {"case/restart_000001.restart", "case/restart_000003.restart", "case/restart_000004.restart"}) {
+            EXPECT_TRUE(fs::exists(file)) << file;
+        }
+        EXPECT_FALSE(fs::exists("case/restart_000005.restart"));
+        std::vector<std::string> settings;
+        std::ifstream log("mallard.jsonl");
+        for (std::string line; std::getline(log, line);) {
+            const json::Value v = json::parse(line);
+            if (v["type"].string != "event" || v["kind"].string != "set") continue;
+            EXPECT_EQ(v["source"].string, "--set");
+            settings.push_back(v["setting"].string);
+        }
+        EXPECT_EQ(settings, (std::vector<std::string>{"n_steps=4", "write_data.1.interval=1"}));
+    }
+    if (std::system("tar --version > /dev/null 2>&1") == 0) {
+        const Result packed = run({"pack", "set_run", "-o", "set_run.tar", "--format", "json"}, true);
+        ASSERT_EQ(packed.status, 0) << packed.err;
+        EXPECT_EQ(json::parse(packed.out)["rerun"]["command"].string,
+                  "mallard -i small.toml --set n_steps=4 --set write_data.1.interval=1");
+    }
+    const InDirectory in("set_run");
+    // The checks of mallard ctl set: a key it does not change, or a setting without a value, is an input error
+    const Result refused = run({"-i", "small.toml", "--set", "n_steps=3", "--set", "cfl=0.5", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(refused.status, 1);
+    EXPECT_TRUE(contains(refused.err, "error E-INPUT: --set cfl: cannot be changed while the run goes on")) << refused.err;
+    const Result bare = run({"-i", "small.toml", "--set", "n_steps", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(bare.status, 1);
+    EXPECT_TRUE(contains(bare.err, "--set expected key=value, got 'n_steps'")) << bare.err;
+}
+
 TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
     SKIP_UNDER_MPI();
     const Result catalog = run({"list", "fields"}, true);
