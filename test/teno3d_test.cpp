@@ -1033,7 +1033,7 @@ TEST(TENO3DOutputPoints, TroubledCellsTakeTheFluxsChoiceAtTheirFacePoints) {
         teno->calc_face_values(W, face_W);
         auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
         auto sigma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->troubled);
-        auto h_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->face_quad_points);
+        const auto h_points = teno->host_face_points();
         auto h_weights = teno->face_quad_weights.host();
 
         // MAX_FACES faces of n_quad points per cell; padding points and missing faces at the centroid
