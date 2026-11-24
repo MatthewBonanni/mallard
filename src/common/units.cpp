@@ -512,6 +512,8 @@ void set_system(const System s) { current = s; }
 
 System system() { return current; }
 
+std::string of(const Dimension & d) { return current == System::SI ? d.udunits() : "1"; }
+
 std::string column(const std::string & si) { return current == System::SI ? si : "-"; }
 
 std::string with(const std::string & number, const std::string & si) {
