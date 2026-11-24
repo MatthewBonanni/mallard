@@ -24,6 +24,8 @@
 #include "solver.h"
 #include "test_fixtures.h"
 #include "teno.h"
+#include "thermo.h"
+#include "transport.h"
 #include "verification.h"
 #include "viscous_flux.h"
 
@@ -462,6 +464,96 @@ TEST_P(ViscousOrder, ResidualAtWallsAndSymmetryPlanesOfReconstructionGradientsCo
 
 namespace {
 
+/** @brief The composition of the binary mixture of mixture_input as a "temperature" with the velocity zero. */
+void exact_composition(const double * x, Dual * u, Dual & Y) {
+    Dual X[3];
+    coordinates(x, X);
+    const double k = 2.0 * PI;
+    for (size_t i = 0; i < N_DIM; i++) u[i] = Dual{};
+    Y = 0.5 + 0.3 * sin(k * X[0]) * cos(k * (X[1] + X[2]));
+}
+
+/**
+ * @brief Two gases of equal molar masses and thermodynamics but different collision parameters at uniform T
+ *        and p, at rest, with the composition of exact_composition: the mixture-averaged fluxes reduce to
+ *        Fick's law with the binary coefficient, uniform here.
+ */
+std::string mixture_input(const std::string & mesh, uint32_t n, uint32_t order, const std::string & type,
+                          const std::string & gradients) {
+    std::ostringstream s;
+    s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
+      << "\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = " << n << "\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nn_subdivisions = " << (N_DIM == 2 ? 8 : 2)
+      << "\np = \"1000\"\nT = \"300\"\nu = [\"0\", \"0\"" << (N_DIM == 3 ? ", \"0\"" : "") << "]\n"
+      << "X = { N2 = \"" << expr("0.5 + 0.3 * sin(2 * pi * x) * cos(2 * pi * (y + z))") << "\", N2B = \""
+      << expr("0.5 - 0.3 * sin(2 * pi * x) * cos(2 * pi * (y + z))") << "\" }\n"
+      << "[physics]\ntype = \"" << type << "\"\ngas = \"mixture\"\nmechanism = \"" << source_dir()
+      << "/test/data/chemistry/test_transport.yaml\"\n[numerics]\nriemann_solver = \"HLLC\"\n";
+    if (!gradients.empty()) s << "viscous_gradients = \"" << gradients << "\"\n";
+    s << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n"
+      << "[output]\ncheck_interval = 1000000\n";
+    return s.str();
+}
+
+std::vector<double> species_rhs_of(Solver & solver) {
+    const uint32_t n = solver.get_mesh()->n_cells;
+    State rhs("rhs", n, uint32_t(solver.state().species.extent(1)));
+    solver.calc_rhs(solver.state(), rhs, 0.0_r);
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), rhs.species);
+    std::vector<double> out(n);
+    for (uint32_t c = 0; c < n; c++) out[c] = double(h(c, 0));
+    return out;
+}
+
+/**
+ * @brief Mean error over the cells of the diffusion residual of the first species of mixture_input against the
+ *        exact cell averages of div(rho D grad Y), relative to rho D.
+ */
+double mixture_residual_error(const std::string & mesh, uint32_t n, uint32_t order, const std::string & gradients) {
+    Solver viscous, inviscid;
+    viscous.set_distributed(false);
+    inviscid.set_distributed(false);
+    viscous.init(parse_toml(mixture_input(mesh, n, order, "navier_stokes", gradients)));
+    inviscid.init(parse_toml(mixture_input(mesh, n, order, "euler", "")));
+    const auto a = species_rhs_of(viscous), b = species_rhs_of(inviscid);
+    const auto mech = chemistry::read_mechanism(source_dir() + "/test/data/chemistry/test_transport.yaml");
+    const auto table = chemistry::make_transport_table<Kokkos::HostSpace>(mech, chemistry::TransportModel::MIXTURE_AVERAGED);
+    const double T = 300.0, p = 1000.0;
+    const double rho_D = p * mech.species[0].molecular_weight / (chemistry::GAS_CONSTANT * T) *
+                         table.binary_diffusion(0, 1, T, p);
+    // exact_flux's energy flux of exact_composition is kappa grad Y . n
+    const double kappa = MU * GAMMA / (GAMMA - 1.0) / PR;
+    const Mesh & m = *viscous.get_mesh();
+    double sum = 0.0;
+    for (uint32_t c = 0; c < m.n_owned(); c++) {
+        double total = 0.0;
+        for (uint32_t k = m.h_offsets_faces_of_cell(c); k < m.h_offsets_faces_of_cell(c + 1); k++) {
+            total += face_integral(m, m.h_faces_of_cell(k), c, exact_composition)[N_DIM + 1] / kappa;
+        }
+        sum += std::abs(a[c] - b[c] - rho_D * total / double(m.h_cell_volume(c)));
+    }
+    return sum / (m.n_owned() * rho_D);
+}
+
+} // namespace
+
+TEST_P(ViscousOrder, SpeciesDiffusionResidualOfReconstructionGradientsConvergesAtDesignOrder) {
+    // Mole fraction gradients of order 4 (TENO5) from the mass fractions' polynomials, whose error the
+    // residual divides by h
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const std::string mesh = GetParam();
+    const std::vector<double> n = N_DIM == 2 ? std::vector<double>{16, 32} : std::vector<double>{8, 16};
+    std::vector<double> e;
+    for (const double k : n) e.push_back(mixture_residual_error(mesh, uint32_t(k), 5, "reconstruction"));
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients", verification::cells_of(mesh),
+                                "mean species diffusion residual error, manufactured binary mixture", n, e, 3.0,
+                                N_DIM == 2 ? 2.75 : 2.5});
+}
+
+namespace {
+
 /** @brief (mesh, TENO order, viscous_gradients) of a study of tools/docs/viscous_gradients.py. */
 using StudyParam = std::tuple<std::string, int, std::string>;
 
@@ -654,11 +746,6 @@ TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason
         {box_input("cartesian", 8, 5, "euler", "reconstruction"), "without viscosity"},
         {replaced(base, teno5, "type = \"MUSCL\"\n"), "needs the TENO reconstruction"},
         {replaced(base, teno5, "type = \"TENO\"\norder = 3\n"), "order 3"},
-        // Viscous mixtures have no single-gas viscosity: the mixture is the reason, not the viscosity
-        {replaced(base, perfect,
-                  "[physics]\ntype = \"navier_stokes\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
-                      "/mechanisms/h2o2.yaml\"\n"),
-         "gas mixtures"},
         {base + "[les]\n", "LES"},
         {replaced(base, "[numerics]\n", "[numerics]\nconvective_flux = \"hybrid\"\n"), "hybrid convective flux"},
     };

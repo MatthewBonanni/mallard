@@ -18,6 +18,7 @@
 
 #include "boundary.h"
 #include "common.h"
+#include "face_point_gradients.h"
 #include "face_reconstruction.h"
 #include "mesh.h"
 #include "teno.h"
@@ -184,6 +185,12 @@ class ScalarReconstruction {
         void species_slots(ScalarView scalars, Kokkos::View<rtype **> face_mdot, Kokkos::View<rtype *> quad_weights,
                            FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
 
+        /**
+         * @brief TENO, after calc(): turn the flow block's point_gradients of W into those of T and add the
+         *        mole fractions (MixturePointGradientsFunctor).
+         */
+        void point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const;
+
         /** @brief Device evaluator of first-order and MUSCL face values, valid after calc(). */
         ScalarFaceValues face_values(ScalarView scalars) const;
 
@@ -209,6 +216,8 @@ class ScalarReconstruction {
                           FaceWeights<> face_weights, Kokkos::View<rtype ***, Kokkos::LayoutRight> slots);
         template <uint8_t DEG>
         void calc_teno(ScalarView scalars, Kokkos::View<rtype **[2][2]> face_thermo);
+        template <uint8_t DEG>
+        void launch_point_gradients(ScalarView scalars, const FacePointGradients & point_gradients) const;
 
     private:
         std::shared_ptr<Mesh> mesh;

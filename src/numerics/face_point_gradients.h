@@ -1,9 +1,9 @@
 /**
  * @file face_point_gradients.h
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief Gradients of velocity and temperature at the face quadrature points
- *        from the cells' central TENO polynomials (viscous_gradients =
- *        "reconstruction").
+ * @brief Gradients of velocity, temperature and (gas mixtures) mole
+ *        fractions at the face quadrature points from the cells' central TENO
+ *        polynomials (viscous_gradients = "reconstruction").
  * @version 0.1
  * @date 2026-11-23
  *
@@ -59,11 +59,17 @@ KOKKOS_INLINE_FUNCTION constexpr Monomial<DEG> monomial(const uint32_t l) {
  *        of each side's polynomial, which TENO's smooth passes evaluate while
  *        they hold the coefficients (near walls, its wall fits: TENO::wall_fits)
  *        and ViscousFluxFunctor reads.
- *        values(face, slot, side, var) packs the NQ x (N_DIM + 1) numbers of
- *        each point into slots of N_CONSERVATIVE, so that a FaceExchange sends
- *        a face side as it sends face states. NaN in a side's first value marks
+ *        values(face, slot, side, var) packs the per_point() numbers of each
+ *        point into slots of N_CONSERVATIVE, so that a FaceExchange sends a
+ *        face side as it sends face states. NaN in a side's first value marks
  *        a cell without a usable polynomial: troubled, or with face values
  *        that fall back to its mean.
+ *        Gas mixtures (n_species > 0) follow each point's NQ x (N_DIM + 1)
+ *        numbers with the density and its gradient, then the mole fractions
+ *        X_k and their derivatives along the face normal dX_k/dn: TENO's
+ *        smooth passes write the polynomials of W = [rho, u, p] in place of
+ *        u, T and the density's (store_primitive), and
+ *        MixturePointGradientsFunctor turns p into T and adds the species.
  */
 struct FacePointGradients {
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
@@ -72,10 +78,32 @@ struct FacePointGradients {
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> values;
     rtype R = 0.0_r;
     rtype gamma = 0.0_r;
+    uint32_t n_species = 0;
 
-    static uint8_t n_slots(const uint8_t n_quad) {
-        return static_cast<uint8_t>((uint32_t(n_quad) * PER_POINT + N_CONSERVATIVE - 1) / N_CONSERVATIVE);
+    /** @brief Numbers per point beyond the NQ x (N_DIM + 1) of u and T. */
+    KOKKOS_INLINE_FUNCTION
+    static constexpr uint32_t n_extra(const uint32_t n_species) { return n_species ? N_DIM + 1 + 2 * n_species : 0; }
+
+    KOKKOS_INLINE_FUNCTION
+    uint32_t per_point() const { return PER_POINT + n_extra(n_species); }
+
+    static uint32_t n_slots(const uint8_t n_quad, const uint32_t n_species = 0) {
+        return (uint32_t(n_quad) * (PER_POINT + n_extra(n_species)) + N_CONSERVATIVE - 1) / N_CONSERVATIVE;
     }
+
+    /** @brief Number j of point q of side `side` of face f. */
+    KOKKOS_INLINE_FUNCTION
+    rtype & at(const uint32_t f, const uint8_t q, const uint8_t side, const uint32_t j) const {
+        const uint32_t k = uint32_t(q) * per_point() + j;
+        return values(f, k / N_CONSERVATIVE, side, k % N_CONSERVATIVE);
+    }
+
+    /** @brief Mixtures: index of the density among a point's numbers, followed by its gradient. */
+    static constexpr uint32_t DENSITY = PER_POINT;
+
+    /** @brief Mixtures: index of X_k among a point's numbers; dX_k/dn follows at species(n_species + k). */
+    KOKKOS_INLINE_FUNCTION
+    static constexpr uint32_t species(const uint32_t k) { return PER_POINT + N_DIM + 1 + k; }
 
     KOKKOS_INLINE_FUNCTION
     bool on() const { return values.extent(0) > 0; }
@@ -91,7 +119,7 @@ struct FacePointGradients {
     /** @brief The values v and gradients g (g[k][i] = d v_k / d x_i) of v = [u, T] of side `side` of face f at point q. */
     KOKKOS_INLINE_FUNCTION
     void load(const uint32_t f, const uint8_t q, const uint8_t side, rtype v[NQ], rtype g[NQ][N_DIM]) const {
-        const uint32_t j0 = uint32_t(q) * PER_POINT;
+        const uint32_t j0 = uint32_t(q) * per_point();
         for (uint8_t k = 0; k < NQ; k++) {
             v[k] = values(f, (j0 + k) / N_CONSERVATIVE, side, (j0 + k) % N_CONSERVATIVE);
             FOR_I_DIM {
@@ -103,7 +131,7 @@ struct FacePointGradients {
 
     KOKKOS_INLINE_FUNCTION
     void store(const uint32_t f, const uint8_t q, const uint8_t side, const rtype v[NQ], const rtype g[NQ][N_DIM]) const {
-        const uint32_t j0 = uint32_t(q) * PER_POINT;
+        const uint32_t j0 = uint32_t(q) * per_point();
         for (uint8_t k = 0; k < NQ; k++) {
             values(f, (j0 + k) / N_CONSERVATIVE, side, (j0 + k) % N_CONSERVATIVE) = v[k];
             FOR_I_DIM {
@@ -132,6 +160,24 @@ struct FacePointGradients {
         [&]<uint32_t... L>(std::integer_sequence<uint32_t, L...>) {
             (add_monomial<DEG, L>(p, b, dU), ...);
         }(std::make_integer_sequence<uint32_t, NK>{});
+    }
+
+    /**
+     * @brief Mixtures: face state W = [rho, u, p] at point q and its
+     *        gradients dW, with u and p in the places of u and T and the
+     *        density's after them.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void store_primitive(const uint32_t f, const uint8_t q, const uint8_t side, const rtype * W,
+                         const rtype dW[N_CONSERVATIVE][N_DIM]) const {
+        rtype v[NQ], g[NQ][N_DIM];
+        for (uint8_t k = 0; k < NQ; k++) {
+            v[k] = W[1 + k];
+            FOR_I_DIM g[k][i] = dW[1 + k][i];
+        }
+        store(f, q, side, v, g);
+        at(f, q, side, DENSITY) = W[0];
+        FOR_I_DIM at(f, q, side, DENSITY + 1 + i) = dW[0][i];
     }
 
     /** @brief Values v = [u, T] at face state W = [rho, u, p]. */
