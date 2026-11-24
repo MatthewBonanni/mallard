@@ -763,7 +763,6 @@ TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason
         {box_input("cartesian", 8, 5, "euler", "reconstruction"), "without viscosity"},
         {replaced(base, teno5, "type = \"MUSCL\"\n"), "needs the TENO reconstruction"},
         {replaced(base, teno5, "type = \"TENO\"\norder = 3\n"), "order 3"},
-        {base + "[les]\n", "LES"},
     };
     for (const auto & [text, reason] : cases) {
         const std::string e = error_of(text);

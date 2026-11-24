@@ -193,20 +193,29 @@ struct PressureWorkFunctor {
     }
 };
 
-/** @brief Vorticity of each cell from the mixture transport gradients (2D: its z component only). */
+/**
+ * @brief Vorticity of each cell from the mixture transport gradients, or the models' velocity gradients
+ *        (les.reconstruction_gradients) (2D: its z component only).
+ */
 struct VorticityFunctor {
     Kokkos::View<rtype ***, Kokkos::LayoutRight> gradients;  // (cell, [u, T, X], dimension)
+    Kokkos::View<rtype *[N_DIM][N_DIM]> velocity;            // the models' own, else empty
     Kokkos::View<rtype *[3]> vorticity;
+
+    KOKKOS_INLINE_FUNCTION
+    rtype du(const uint32_t c, const uint8_t i, const uint8_t j) const {
+        return velocity.is_allocated() ? velocity(c, i, j) : gradients(c, i, j);
+    }
 
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t c) const {
         if constexpr (N_DIM == 2) {
             vorticity(c, 0) = vorticity(c, 1) = 0.0_r;
-            vorticity(c, 2) = gradients(c, 1, 0) - gradients(c, 0, 1);
+            vorticity(c, 2) = du(c, 1, 0) - du(c, 0, 1);
         } else {
             for (uint8_t k = 0; k < 3; k++) {
                 const uint8_t a = static_cast<uint8_t>((k + 1) % 3), b = static_cast<uint8_t>((k + 2) % 3);
-                vorticity(c, k) = gradients(c, b, a) - gradients(c, a, b);
+                vorticity(c, k) = du(c, b, a) - du(c, a, b);
             }
         }
     }
@@ -800,7 +809,7 @@ void Solver::update_thickened_flame() {
     if (thickened_flame.efficiency == ThickenedFlame::Efficiency::DYNAMIC) {
         update_dynamic_efficiency();
     } else {
-        gated::parallel_for("tfles_vorticity", mesh->n_cells, VorticityFunctor{transport_gradients, tfles_vorticity});
+        gated::parallel_for("tfles_vorticity", mesh->n_cells, VorticityFunctor{transport_gradients, les_velocity_gradients, tfles_vorticity});
         // The vorticity of outer halo cells misses neighbors: take the owners' before differentiating it again
         exchange_cell_vectors(tfles_vorticity);
         gated::parallel_for("tfles_vorticity_gradient", mesh->n_cells,
@@ -972,7 +981,15 @@ void Solver::update_dynamic_constant() {
     StateView flow = dynamic_halo.flow;
     SpeciesView g = dynamic_halo.species;
     Kokkos::View<rtype *[N_CONSERVATIVE]> W = W_cells;
-    if (is_mixture()) {
+    if (les.reconstruction_gradients) {
+        Kokkos::View<rtype *[N_DIM][N_DIM]> lg = les_velocity_gradients;
+        gated::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
+            for (uint8_t i = 0; i < N_DIM; i++) {
+                for (uint8_t j = 0; j < N_DIM; j++) g(c, 3 * i + j) = lg(c, i, j);
+            }
+        });
+    } else if (is_mixture()) {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> tg = transport_gradients;
         gated::parallel_for("dynamic_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
             FOR_I_CONSERVATIVE flow(c, i) = W(c, i);
@@ -1082,6 +1099,17 @@ void Solver::init_les() {
     les_state = Kokkos::View<double *>("les_state", 3);
     Kokkos::deep_copy(Kokkos::subview(les_state, 0), static_cast<double>(les.C));
     h_les_coefficients = pinned_mirrors(les_coefficients);
+    if (find_value_or<std::string>(input, "numerics", "viscous_gradients", "least_squares") == "reconstruction") {
+        if (!les.reconstruction_gradients && input.at("les").contains("gradients")) {
+            throw InputError({.key = "les.gradients",
+                              .line = line_of(input.at("les"), "gradients"),
+                              .message = "\"least_squares\" contradicts numerics.viscous_gradients = "
+                                         "\"reconstruction\": the models take the gradients the viscous fluxes take",
+                              .fix = "Remove les.gradients",
+                              .docs = "docs/guide/les.md#gradients-of-the-reconstruction"});
+        }
+        les.reconstruction_gradients = true;
+    }
     if (les.reconstruction_gradients) {
         if (dynamic_cast<const TENO *>(face_reconstruction.get()) == nullptr) {
             throw InputError("les.gradients = \"reconstruction\" takes the models' velocity gradients from the "

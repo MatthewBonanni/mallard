@@ -1787,7 +1787,6 @@ void Solver::init_viscous_gradients(const TENO * teno) {
                           "least-squares ones",
                           "Set order = 4 or more in [numerics.face_reconstruction]");
     }
-    if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
     if (mesh->curved_geometry) {
         throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
     }
