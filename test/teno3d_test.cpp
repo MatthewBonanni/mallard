@@ -1130,16 +1130,18 @@ TEST(TENO3DSetup, BlockCellsReadTheirStencilsByOffsetsAndGiveTheUnstructuredPath
                 teno->block_path = block_path;
                 teno->init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
                 teno->smooth_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("gradients", mesh->n_cells);
-                teno->polynomials =
-                    Kokkos::View<rtype **[2][N_CONSERVATIVE]>("polynomials", (mesh->n_cells + 1) / 2, teno->n_dof_large);
+                teno->point_gradients = {Kokkos::View<rtype **[2][N_CONSERVATIVE]>(
+                                             "point_gradients", mesh->n_faces,
+                                             FacePointGradients::n_slots(teno->n_face_quadrature_points())),
+                                         1.0_r, 1.4_r};
                 Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
                 teno->calc_face_values(W, face_W);
                 auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
                 auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->smooth_gradients);
-                auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->polynomials);
+                auto p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->point_gradients.values);
                 std::vector<rtype> out(h.data(), h.data() + h.span());
                 out.insert(out.end(), g.data(), g.data() + g.span());
-                // NaN marks troubled cells' polynomials, so compare their bits
+                // NaN marks troubled cells' sides, so compare their bits
                 std::vector<uint8_t> polynomial_bits(reinterpret_cast<const uint8_t *>(p.data()),
                                                      reinterpret_cast<const uint8_t *>(p.data() + p.span()));
                 return std::make_tuple(out, polynomial_bits, teno->n_block_cells);

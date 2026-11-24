@@ -292,12 +292,14 @@ TEST(TENOTest, CellsWhoseFaceValuesFallBackToTheMeanHaveNoPolynomial) {
     }
     Kokkos::deep_copy(W, h_W);
     auto teno = make_teno(mesh, bd, 5, "troubled_threshold = 1e9\nbound_preserving = false\n");
-    teno->polynomials = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("polynomials", (mesh->n_cells + 1) / 2, teno->n_dof_large);
     const uint8_t n_quad = teno->n_face_quadrature_points();
+    teno->point_gradients = {decltype(teno->point_gradients.values)("point_gradients", mesh->n_faces,
+                                                                    FacePointGradients::n_slots(n_quad)),
+                             euler.R, euler.gamma};
     Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
     teno->calc_face_values(W, face_W);
     auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
-    auto h_p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->polynomials);
+    auto h_p = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->point_gradients.values);
     uint32_t n_mean = 0;
     for (uint32_t c = 0; c < mesh->n_cells; c++) {
         bool mean = true;
@@ -309,7 +311,11 @@ TEST(TENOTest, CellsWhoseFaceValuesFallBackToTheMeanHaveNoPolynomial) {
             }
         }
         n_mean += mean;
-        EXPECT_EQ(std::isnan(h_p(c / 2, 0, c % 2, 0)), mean) << "cell " << c;
+        for (uint32_t k = mesh->h_offsets_faces_of_cell(c); k < mesh->h_offsets_faces_of_cell(c + 1); k++) {
+            const uint32_t f = mesh->h_faces_of_cell(k);
+            const uint8_t side = mesh->h_cells_of_face(f, 0) == int32_t(c) ? 0 : 1;
+            EXPECT_EQ(std::isnan(h_p(f, 0, side, 0)), mean) << "cell " << c << ", face " << f;
+        }
     }
     EXPECT_GT(n_mean, 0u);
 }

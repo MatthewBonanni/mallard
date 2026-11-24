@@ -942,10 +942,8 @@ class Solver {
         void init_viscous_gradients(const TENO * teno);
         /** @brief The functor's polynomial face gradients (viscous_gradients = "reconstruction"). */
         void set_polynomial_flux(ViscousFluxFunctor & functor) const;
-        /** @brief TENO::polynomials for cells [0, n_cells). */
-        void allocate_polynomials(uint32_t n_cells);
-        /** @brief The polynomials and their exchange for the halo sides of `faces` (the plan of `needed`). */
-        void init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed);
+        /** @brief TENO::point_gradients for the state faces. */
+        void allocate_point_gradients();
         void init_boundaries();
         std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
         std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
@@ -1284,8 +1282,8 @@ class Solver {
         // With exchanges_partition_faces(): the faces of owned cells whose fluxes read no face state of
         // another rank, and those that do (partition faces, transmissive faces with a remote image)
         FaceExchange face_exchange;
-        // viscous_gradients = "reconstruction": the polynomials of halo cells next to those faces, from their owners
-        FaceExchange polynomial_exchange;
+        // viscous_gradients = "reconstruction": the halo sides' polynomial gradients at those faces' points
+        FaceExchange point_gradient_exchange;
         IndexSet local_faces, partition_faces;
         Kokkos::DefaultExecutionSpace overlap_space;  // runs the early cells while the halo is exchanged
         bool halo_current = false;                     // halo of conservatives filled since its last update
