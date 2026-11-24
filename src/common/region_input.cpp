@@ -25,6 +25,7 @@
 
 #include "comm.h"
 #include "distribution.h"
+#include "expression.h"
 #include "log.h"
 #include "mesh.h"
 #include "region_surface.h"
@@ -126,6 +127,7 @@ struct Parsed {
     std::vector<Piece> pieces;
     bool closed = false;
     bool flat = false;        // a flat surface (3D), which filled = false turns into its edge
+    bool sheet = false;       // an open surface from a file, which filled = false leaves as it is
     int32_t bounds = -1;      // the boundary of this filled region, which interior gives back
     std::string text;
     std::vector<Motion> motions;  // of nodes, by their index in nodes
@@ -304,7 +306,12 @@ class Parser {
         std::vector<Condition> conditions;
         bool bounded = true;
         int max_depth = 0;
-        std::map<std::string, std::pair<Node, std::string>> surfaces;  // read from files, by type, file and units
+        struct Surface {
+            Node node;
+            std::string text;
+            ::region::surface::Packed packed;  // without its data
+        };
+        std::map<std::string, Surface> surfaces;  // read from files, by type, file and units
 
         Parsed parse(const Input & value, const std::string & where, const Frame & parent, const bool top = false) {
             if (value.is_string()) return named(value, where, parent, top);
@@ -454,7 +461,7 @@ class Parser {
             } else {
                 p = primitive(t, where, type, frame);
             }
-            if (t.contains("filled") && !find_value<bool>(t, "filled")) {
+            if (t.contains("filled") && !find_value<bool>(t, "filled") && !p.sheet) {
                 if (p.dimension < N_DIM && !p.flat) {
                     fail(where + ".filled", line_of(t, "filled"),
                          "applies to " + dimension_name(N_DIM).substr(dimension_name(N_DIM)[1] == 'n' ? 3 : 2) +
@@ -530,7 +537,7 @@ class Parser {
         double scalar(const Input & v, const std::string & key, const Dimension & dimension, int32_t & program) {
             program = -1;
             if (!v.is_string() || has_unit(v.as_string())) return as_double(v, key, dimension);
-            kexpr::Program p(key, quantity_or_expression(v, key, dimension), {"t"}, expression_unit_hint);
+            kexpr::Program p = compile_expression(key, line_of(v), quantity_or_expression(v, key, dimension), {"t"});
             const double t0 = 0.0;
             const double value = p(&t0);
             if (p.uses(0)) {
@@ -688,7 +695,8 @@ class Parser {
                 }
                 c.text = find_value<std::string>(t, "condition");
                 c.key = where + ".condition";
-                c.level = condition_level(c.text, c.key, line_of(t, "condition"));
+                c.line = line_of(t, "condition");
+                c.level = condition_level(c.text, c.key, c.line);
             } else {
                 for (const char * key : {"field", "value"}) {
                     if (!t.contains(key)) {
@@ -699,6 +707,7 @@ class Parser {
                 const std::string field = find_value<std::string>(t, "field");
                 const double value = as_double(t.at("value"), where + ".value", field_dimension(field));
                 c.key = where + ".field";
+                c.line = line_of(t, "field");
                 c.text = field + " = " + logging::real(value);
                 std::ostringstream exact;
                 exact << std::setprecision(17) << value;
@@ -744,6 +753,22 @@ class Parser {
 
         std::vector<Piece> boundary_of(const uint32_t i, const bool flip) const { return boundary_pieces(filled, i, flip); }
 
+        /** @brief Whether a piece lies on an open surface from a file. */
+        bool sheet(const Piece & piece) const {
+            return std::any_of(piece.carriers.begin(), piece.carriers.end(), [&](const uint32_t i) {
+                const Filled & f = filled[i];
+                return f.kind == Filled::Kind::SHAPES && f.count == 1 && nodes[f.first].kind == Kind::TRIANGLES &&
+                       nodes[f.first].p[0] != 0.0;
+            });
+        }
+
+        /** @brief Whether filled region i depends on the solution. */
+        bool of_solution(const uint32_t i) const {
+            const Filled & f = filled[i];
+            return f.kind == Filled::Kind::CONDITION ||
+                   std::any_of(f.parts.begin(), f.parts.end(), [&](const uint32_t k) { return of_solution(k); });
+        }
+
         Parsed boundary(Parsed p, const std::string & where, const std::size_t line) {
             const std::string what = "boundary(" + p.text + ")";
             if (p.dimension == 0) fail(where, line, "points have no boundary");
@@ -760,6 +785,10 @@ class Parser {
             if (closed(p)) {
                 fail(where, line, "is a closed " + std::string(p.dimension == 1 ? "curve" : "surface") +
                                       ", which has no boundary");
+            }
+            if (std::any_of(p.pieces.begin(), p.pieces.end(), [&](const Piece & q) { return sheet(q); })) {
+                fail(where, line, "the boundary of an open surface from a file (its rim) is not supported yet", "",
+                     "docs/guide/geometry.md#open-surfaces-from-cad");
             }
             if (const auto zones = zones_of(p)) {
                 Piece edges;
@@ -1025,6 +1054,11 @@ class Parser {
                 for (Piece & piece : out.pieces) {
                     auto & to = type == "intersection" ? piece.inside : piece.outside;
                     to.insert(to.end(), masks.begin(), masks.end());
+                    if (sheet(piece) && std::any_of(masks.begin(), masks.end(), [&](const uint32_t i) { return of_solution(i); })) {
+                        fail(where, line_of(t, "type"),
+                             "clips an open surface from a file with a region of the solution, which is not supported yet",
+                             "Clip it with primitives or regions of the mesh", "docs/guide/geometry.md#open-surfaces-from-cad");
+                    }
                 }
                 out.closed = false;
                 out.bounds = -1;
@@ -1236,7 +1270,10 @@ class Parser {
             return p;
         }
 
-        /** @brief A filled region inside the closed surface of an STL or OBJ file, read once per file and units. */
+        /**
+         * @brief The region of an STL or OBJ file, read once per file and units: the filled region inside its closed
+         *        surface, or with filled = false an open surface itself.
+         */
         Parsed cad(const Input & t, const std::string & where, const std::string & type, const Frame & frame) {
             const char * const docs = "docs/guide/geometry.md#regions-from-cad-surfaces";
             const std::string example = "e.g. {type = \"" + type + "\", file = \"body." + type + "\", units = \"mm\"}";
@@ -1261,23 +1298,34 @@ class Parser {
             uint64_t bits = 0;
             std::memcpy(&bits, &factor, sizeof bits);
             const std::string id = type + "\n" + file + "\n" + std::to_string(bits);
+            const ::region::surface::Where at{where, line_of(t, "file")};
             auto it = surfaces.find(id);
             if (it == surfaces.end()) {
-                const ::region::surface::Where at{where, line_of(t, "file")};
-                const ::region::surface::Packed packed = ::region::surface::pack(::region::surface::read(file, type, factor, at), file, at);
+                ::region::surface::Packed packed = ::region::surface::pack(::region::surface::read(file, type, factor, at), file, at);
                 Node n;
                 n.kind = Kind::TRIANGLES;
                 n.first = static_cast<uint32_t>(vertices.size() / 2);
                 n.count = static_cast<uint32_t>(packed.data.size() / 2);
+                n.p[0] = packed.n_open > 0 ? 1.0 : 0.0;
                 vertices.insert(vertices.end(), packed.data.begin(), packed.data.end());
+                packed.data.clear();
                 std::string text = type + "(" + file + ", " + units + ", " + logging::count(packed.n_triangles, "triangle");
-                if (packed.n_bodies > 1) text += ", " + logging::count(packed.n_bodies) + " bodies";
+                if (packed.n_open > 0) {
+                    text += ", open";
+                    if (packed.n_bodies > 1) text += ", " + logging::count(packed.n_bodies) + " pieces";
+                } else if (packed.n_bodies > 1) {
+                    text += ", " + logging::count(packed.n_bodies) + " bodies";
+                }
                 if (packed.n_cavities > 0) {
                     text += ", " + logging::count(packed.n_cavities) + (packed.n_cavities == 1 ? " cavity" : " cavities");
                 }
-                it = surfaces.emplace(id, std::make_pair(n, text + ")")).first;
+                it = surfaces.emplace(id, Surface{n, text + ")", std::move(packed)}).first;
             }
-            const Node & n = it->second.first;
+            const Node & n = it->second.node;
+            const bool open = it->second.packed.n_open > 0;
+            if (open && !(t.contains("filled") && !find_value<bool>(t, "filled"))) {
+                ::region::surface::not_closed(it->second.packed, file, at);
+            }
             if (N_DIM == 2) {
                 // The z = 0 slice: it must cut the surface, and not lie along any of its faces
                 const double * s = vertices.data() + 2 * n.first;
@@ -1316,8 +1364,16 @@ class Parser {
                 }
             }
             Parsed p = node_of(n, frame);
-            p.text = it->second.second;
-            return p;
+            p.text = it->second.text;
+            if (!open) return p;
+            Piece piece;
+            piece.carriers = {place(p, where)};
+            Parsed q;
+            q.dimension = N_DIM - 1;
+            q.sheet = true;
+            q.pieces = {piece};
+            q.text = it->second.text;
+            return q;
         }
 
         Parsed primitive(const Input & t, const std::string & where, const std::string & type, Frame frame) {
@@ -1426,8 +1482,8 @@ class Parser {
                 n.kind = Kind::IMPLICIT;
                 if (!t.contains("f")) throw InputError(where + " needs f, an expression in x, y, z, t (inside: f < 0).");
                 n.first = static_cast<uint32_t>(programs.size());
-                programs.emplace_back(where + ".f", find_value<std::string>(t, "f"),
-                                      std::vector<std::string>{"x", "y", "z", "t"}, expression_unit_hint);
+                programs.push_back(compile_expression(where + ".f", line_of(t, "f"), find_value<std::string>(t, "f"),
+                                                      {"x", "y", "z", "t"}));
                 bounded = false;
             } else {
                 throw InputError(where + ".type = \"" + type + "\" is not one of: " + join(types()) + ".");
@@ -1850,12 +1906,20 @@ Region boundary(const Region & filled) {
     return Region(std::move(d));
 }
 
+bool open_surface(const Region & region) {
+    return std::any_of(region.nodes().begin(), region.nodes().end(),
+                       [](const Node & n) { return n.kind == Kind::TRIANGLES && n.p[0] != 0.0; });
+}
+
 void require_full_dimension(const Region & region, const Input & value, const std::string & where) {
     if (region.dimension() == N_DIM) return;
     const std::string what = region.name().empty() ? "this region" : "\"" + region.name() + "\"";
     std::string fix;
     if (region.dimension() == N_DIM - 1 && region.closed()) {
         fix = "The " + dimension_name(N_DIM).substr(N_DIM == 2 ? 3 : 2) + " it encloses is {type = \"interior\", of = ...}";
+    } else if (open_surface(region)) {
+        fix = "It holds an open surface from an STL or OBJ file, which encloses nothing: give a closed (watertight) "
+              "surface, without filled = false, for the solid inside it";
     }
     fail(where, line_of(value), "needs " + dimension_name(N_DIM) + ", but " + what + " is " +
                                     dimension_name(region.dimension()),

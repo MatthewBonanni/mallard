@@ -650,7 +650,13 @@ derived fields the due probes read are updated (the cell states, transport and g
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
 from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
-takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
+takes the record. A probe whose writes need its reductions alone (no samples written, no time averages, spectra,
+motion or isosurface) is reduced in the graph instead, as the probes triggers read are, and only its measure and
+reduced values go to the record slot: copying a cut plane's 1.5M samples into pinned memory at each write made
+the perf set's `probes_3d` two to five times slower than `teno5_3d` on an A100 (#1402). Point values come from
+`FaceReconstruction::point_values` with `by_cell`: the probes' points come by cell, and TENO fits each run of
+one cell once, a team of threads sharing out its coefficients, each summed in the per-point fit's order, so the
+values are those of a fit per point bit for bit. The intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
 A moving region's fractions, and a `where` region's (from the levels of its conditions on the cell states, which
@@ -921,6 +927,46 @@ axisymmetric, GRI-Mech, Soret, PaSR, dynamic LES, double flux, MPI on 3 ranks an
 of alternating runs) the time per step does not change: `flame_3d` 39.1 / 39.3 ms, with TENO5 217 / 217 ms,
 with GRI-Mech at TENO5 1,567 / 1,558 ms, `teno5_3d` 105 / 104 ms; the device's peak falls by 82 MiB, 86 MiB and
 482 MiB on the three flames (221,184 cells).
+
+#### Planar face points from the face nodes (#978)
+
+3D TENO stored every face's quadrature points (face, q, dim), read by the face evaluation of every pass. On meshes
+without curved faces the kernels now place them from the faces' nodes, and the stored points are freed after the
+setup. A table holds each face's four node indices (a triangle's third repeated, which marks it), next to a copy of
+the node coordinates in `LayoutRight`, so a face's nodes take one 16-byte load and four coordinate rows; both replace
+the mesh's node lists and coordinates, which TENO kept in 2D anyway. `planar_face_point` evaluates
+$v_0 + a (v_1 - v_0) + b (v_2 - v_0)$ on triangles and $\sum_k N_k v_k$ on quadrilaterals with every product
+rounded on its own (`rounded_product`), as the setup did on the host, so the points and the results are bitwise
+those of the stored points; the rule's padding rows repeat the last point, as the stored padding did. A thread loads
+a face's nodes once for the points it evaluates on that face: `SmoothTeamPass` gives each of a cell's threads a run
+of consecutive points rather than every fifth one, and the troubled passes load them per face. The image points of
+transmissive faces are placed on the host for those faces alone.
+
+`mallard check --memory a100-80 --steps 1` (CUDA 13.5 build on an A100) of the 3D TENO5 Taylor-Green vortex on
+$32^3$ hexahedra and $16^3 \times 6$ tetrahedra, `main` at a7a5432e:
+
+| | hexahedra: `main` | change | tetrahedra: `main` | change |
+|---|---|---|---|---|
+| bytes per cell (setup's peak) | 6.47 kB | 5.87 kB (-600 B) | 6.51 kB | 6.20 kB (-310 B) |
+| most cells per A100-80GB | 12,103,636 | 13,324,340 (+10.1%) | 12,018,308 | 12,616,797 (+5.0%) |
+
+On one A100 (CUDA 13.5, TENO5, 300 steps, median wall time per step of the progress rows from step 100, five runs
+each alternated with `main`'s on the same GPU; spread = (max - min) / median):
+
+| case | `main` | change |
+|---|---|---|
+| Taylor-Green, $96^3$ hexahedra | 101.49 ms (spread 0.1%) | 100.69 ms (-0.8%, spread 0.1%) |
+| explosion, $96^3$ hexahedra | 233.75 ms (1.3%) | 183.94 ms (-21.3%, 2.6%) |
+| Taylor-Green, $48^3 \times 6$ tetrahedra | 87.38 ms (0.4%) | 86.81 ms (-0.7%, 0.1%) |
+
+Restart files after 100 steps are bitwise those of `main` (`mallard diff`) in the three cases and in the hexahedral
+Taylor-Green vortex at $48^3$ with `viscous_gradients = "reconstruction"`, whose viscous flux places the points as
+the TENO kernels do. An earlier measurement (100 steps, three runs) gave the same picture.
+
+Nsight Systems over the 100 steps: `SmoothTeamPass` 8.33 s / 8.23 s (Taylor-Green, hexahedra), 7.08 s / 7.00 s
+(tetrahedra), and `TroubledSelectTeamPass` 6.40 s / 3.53 s in the explosion, whose threads (one per face and
+variable) each read the stored points of their face again for every point. A first version that read the nodes
+through the mesh's offsets per point was 4-10% slower than `main`.
 
 ### 16. Cost of bitwise reproducibility (#429)
 

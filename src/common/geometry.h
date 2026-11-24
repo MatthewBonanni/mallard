@@ -49,7 +49,7 @@ struct Node {
     double m[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double d[3] = {0.0, 0.0, 0.0};
     double scale = 1.0;
-    double p[4] = {0.0, 0.0, 0.0, 0.0};  // primitive parameters (see region.cpp)
+    double p[4] = {0.0, 0.0, 0.0, 0.0};  // primitive parameters (see region.cpp); TRIANGLES: p[0] = 1 if open
 };
 
 /**
@@ -155,11 +155,12 @@ KOKKOS_INLINE_FUNCTION void move(const Motion & motion, const Step * steps, cons
 }
 
 /**
- * @brief The layout of a closed triangulated surface (Kind::TRIANGLES) in a region's vertices, from
+ * @brief The layout of a triangulated surface (Kind::TRIANGLES) in a region's vertices, from
  *        vertices + 2 first: the counts of triangles and of nodes of its bounding volume hierarchy, the nodes
  *        (each its box lo, hi, then a leaf's first triangle and -count, or an inner node's two children), and
  *        the triangles in the leaves' order (corners a, b, c counterclockwise seen from outside, then the
- *        pseudonormals of the edges ab, bc, ca and of the corners a, b, c, angle weighted).
+ *        pseudonormals of the edges ab, bc, ca and of the corners a, b, c, angle weighted). An open surface
+ *        (Node::p[0] = 1) bounds no solid: its sign is not an inside, and it is only ever a surface region.
  */
 namespace triangles {
 constexpr uint32_t HEADER = 2;
