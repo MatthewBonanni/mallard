@@ -483,8 +483,12 @@ Pitfalls:
   Near shocks the flux is then second order, as before.
 - **LES.** The SGS models take the same polynomial gradients, wall fits
   included ([LES guide](les.md#gradients-of-the-reconstruction)).
-- **Not yet available** for flamelet gases, curved meshes and rotational
-  periodicity, where Mallard reports an error.
+- **Rotational periodicity.** Faces on the periodic seam are interior faces:
+  each side's polynomial and gradients turn into the other's frame, and wall
+  fits take cells across the seam turned into the fitted cell's frame, so a
+  sector gives the full annulus's solution.
+- **Not yet available** for flamelet gases and curved meshes, where Mallard
+  reports an error.
 - **Probes.** Surface probes of the diffusive fluxes (`ENERGY_DIFFUSIVE_FLUX`,
   `SPECIES_DIFFUSIVE_FLUX_*`) report the polynomial fluxes the scheme applies,
   at the probe's state: writing them reconstructs that state once more.

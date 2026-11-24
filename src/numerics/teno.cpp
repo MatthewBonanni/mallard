@@ -2202,6 +2202,7 @@ struct TENOFunctor {
         for (uint16_t s = 0; s < wall_fits.size(k); s++) {
             rtype dV[N_CONSERVATIVE];
             conservatives(wall_fits.entries(k, s), dV);
+            if (wall_fits.turns.extent(0) > 0 && wall_fits.turns(k, s) >= 0) turn(wall_fits.turns(k, s), dV);
             FOR_I_CONSERVATIVE dV[i] -= U0[i];
             to_V(dV);
             for (uint8_t l = 0; l < NK; l++) {
@@ -4472,6 +4473,7 @@ void TENO::init_wall_fits() {
         const int32_t b = h_face_bc(static_cast<size_t>(f));
         return b >= 0 && h_bcs(static_cast<size_t>(b)).is_wall();
     };
+    const auto h_boundary_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_faces);
     const auto h_scale = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), scale);
     const auto h_shape = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cell_shape);
     const auto h_mean = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), basis_mean);
@@ -4512,6 +4514,37 @@ void TENO::init_wall_fits() {
             }
         }
     };
+    // x turned by row `row` of entry_rotations about the periodic rotation's center (row < 0: x)
+    auto turned = [&](const double * x, const int row, double * out) {
+        FOR_I_DIM out[i] = x[i];
+        if (row < 0) return;
+        const PeriodicRotation & rotation = m.periodic_rotation;
+        const auto Q = rotation_matrix(rotation.axis, (row - teno::TURN_BIAS) * rotation.angle);
+        FOR_I_DIM {
+            out[i] = double(rotation.center[i]);
+            for (uint8_t j = 0; j < N_DIM; j++) out[i] += double(Q[i][j]) * (x[j] - double(rotation.center[j]));
+        }
+    };
+    // The image of x nearest to ref turned by row `row` or one turn more or less: the nodes of seam faces are
+    // those of one side's frame
+    auto nearest_turned = [&](const double * x, const int row, const double * ref, double * out) {
+        if (!m.is_rotational()) {
+            nearest(x, ref, out);
+            return;
+        }
+        double best = std::numeric_limits<double>::max();
+        for (const int dk : {0, -1, 1}) {
+            const int r = (row < 0 ? teno::TURN_BIAS : row) + dk;
+            double xt[N_DIM], y[N_DIM], d2 = 0.0;
+            turned(x, r == teno::TURN_BIAS ? -1 : r, xt);
+            nearest(xt, ref, y);
+            FOR_I_DIM d2 += (y[i] - ref[i]) * (y[i] - ref[i]);
+            if (d2 < best) {
+                best = d2;
+                FOR_I_DIM out[i] = y[i];
+            }
+        }
+    };
     auto cell_center = [&](const uint32_t c, double * x) { FOR_I_DIM x[i] = double(m.h_cell_coords(c, i)); };
     auto node = [&](const uint32_t n, double * x) { FOR_I_DIM x[i] = double(m.h_node_coords(n, i)); };
 
@@ -4520,10 +4553,11 @@ void TENO::init_wall_fits() {
     const int n_rule = degree / 2 + 3;
     const TriangleRule tri(n_rule);
     const TetrahedronRule tet(n_rule);
-    auto cell_means = [&](const uint32_t j, const double * x0, const double h, double * means) {
-        double xj[N_DIM], raw[N_DIM];
+    auto cell_means = [&](const uint32_t j, const int row, const double * x0, const double h, double * means) {
+        double xj[N_DIM], raw[N_DIM], xt[N_DIM];
         cell_center(j, raw);
-        nearest(raw, x0, xj);
+        turned(raw, row, xt);
+        nearest(xt, x0, xj);
         for (int l = 0; l < nk; l++) means[l] = 0.0;
         double volume = 0.0;
         auto add = [&](const double * p, double w) {
@@ -4541,7 +4575,7 @@ void TENO::init_wall_fits() {
             for (uint32_t a = 0; a < n_nodes; a++) {
                 double x[N_DIM];
                 node(m.h_node_of_face(f, a), x);
-                nearest(x, xj, v[a].data());
+                nearest_turned(x, row, xj, v[a].data());
             }
             if constexpr (N_DIM == 2) {
                 const double e1[2] = {v[0][0] - xj[0], v[0][1] - xj[1]}, e2[2] = {v[1][0] - xj[0], v[1][1] - xj[1]};
@@ -4604,6 +4638,7 @@ void TENO::init_wall_fits() {
     };
 
     std::vector<uint32_t> cells, entries;
+    std::vector<int8_t> turns;
     std::vector<int32_t> bcs;
     std::vector<uint16_t> sizes;
     std::vector<rtype> scales, means, free_pinv, wall_pinv, wall_sum;
@@ -4612,21 +4647,40 @@ void TENO::init_wall_fits() {
     std::vector<double> A, X;
     for_each_stencil([&](const uint32_t c, const CellStencils & st) {
         if (c >= n_direct_rows) return;
-        std::vector<int32_t> walls;
+        std::vector<std::pair<int32_t, int8_t>> walls;  // (face, its entry_rotations row or -1)
         std::vector<uint32_t> own;
+        std::vector<int8_t> own_turns;
         bool usable = true;
+        auto add_wall = [&](const int32_t f, const int8_t row) {
+            if (is_wall(f) && std::find(walls.begin(), walls.end(), std::make_pair(f, row)) == walls.end()) {
+                walls.emplace_back(f, row);
+            }
+        };
         for (uint16_t s = 0; s < st.central; s++) {
             const int32_t j = st.cells[s], code = st.faces[s];
-            if (code < -1) usable = false;
-            if (code >= 0 && is_wall(code) && std::find(walls.begin(), walls.end(), code) == walls.end()) {
-                walls.push_back(code);
+            if (code < -1) {
+                // Reached across the periodic rotation: cells and mirror faces turned into c's frame
+                const int32_t x = -2 - code, b = x / teno::ROTATION_SPAN - 1;
+                const auto row = static_cast<int8_t>(x % teno::TURN_SPAN);
+                if (b >= 0) {
+                    add_wall(h_boundary_faces(static_cast<size_t>(b)), row);
+                } else {
+                    own.push_back(static_cast<uint32_t>(j));
+                    own_turns.push_back(row);
+                }
             }
-            if (code == -1 && j != static_cast<int32_t>(c)) own.push_back(static_cast<uint32_t>(j));
+            if (code >= 0) add_wall(code, -1);
+            if (code == -1 && j != static_cast<int32_t>(c)) {
+                own.push_back(static_cast<uint32_t>(j));
+                own_turns.push_back(-1);
+            }
         }
-        if (walls.empty() || !usable) return;
-        const int32_t bc = h_face_bc(static_cast<size_t>(walls[0]));
-        for (const int32_t f : walls) {
-            usable = usable && h_face_bc(static_cast<size_t>(f)) == bc &&
+        if (walls.empty()) return;
+        const int32_t bc = h_face_bc(static_cast<size_t>(walls[0].first));
+        bool resting = true;
+        FOR_I_DIM resting = resting && h_bcs(static_cast<size_t>(bc)).data[1 + i] == 0.0_r;
+        for (const auto & [f, row] : walls) {
+            usable = usable && h_face_bc(static_cast<size_t>(f)) == bc && (row < 0 || resting) &&
                      (h_state_index.extent(0) == 0 || h_state_index(static_cast<size_t>(f)) < 0);
         }
         if (!usable) return;
@@ -4639,15 +4693,16 @@ void TENO::init_wall_fits() {
         std::vector<double> rows(size_t(n_own) * nk);
         for (int s = 0; s < n_own; s++) {
             double mj[teno::MAX_NK];
-            cell_means(own[size_t(s)], x0, h, mj);
+            cell_means(own[size_t(s)], own_turns[size_t(s)], x0, h, mj);
             for (int l = 0; l < nk; l++) rows[size_t(s) * nk + size_t(l)] = mj[l] - mean0[l];
         }
         int n_points = 0;
-        for (const int32_t f : walls) {
+        for (const auto & [f, row] : walls) {
             for (uint8_t q = 0; q < n_quad; q++) {
-                double raw[N_DIM], x[N_DIM], xi[N_DIM], phi[teno::MAX_NK];
+                double raw[N_DIM], xt[N_DIM], x[N_DIM], xi[N_DIM], phi[teno::MAX_NK];
                 if (!wall_point(static_cast<uint32_t>(f), q, raw)) continue;
-                nearest(raw, x0, x);
+                turned(raw, row, xt);
+                nearest(xt, x0, x);
                 FOR_I_DIM xi[i] = (x[i] - x0[i]) / h;
                 teno::monomials(degree, xi, phi);
                 for (int l = 0; l < nk; l++) rows.push_back(phi[l] - mean0[l]);
@@ -4685,6 +4740,7 @@ void TENO::init_wall_fits() {
         sizes.push_back(static_cast<uint16_t>(n_own));
         max_size = std::max(max_size, static_cast<uint16_t>(n_own));
         entries.insert(entries.end(), own.begin(), own.end());
+        turns.insert(turns.end(), own_turns.begin(), own_turns.end());
         for (int l = 0; l < nk; l++) {
             means.push_back(rtype(mean0[l]));
             double sum = 0.0;
@@ -4710,6 +4766,7 @@ void TENO::init_wall_fits() {
         wall_fits.scale = Kokkos::View<rtype *>("wall_fit_scale", n);
         wall_fits.size = Kokkos::View<uint16_t *>("wall_fit_size", n);
         wall_fits.entries = Kokkos::View<uint32_t **>("wall_fit_entries", n, max_size);
+        wall_fits.turns = Kokkos::View<int8_t **>("wall_fit_turns", m.is_rotational() ? n : 0, max_size);
         wall_fits.mean = Kokkos::View<rtype **>("wall_fit_mean", n, nk);
         wall_fits.free_pinv = Kokkos::View<rtype ***>("wall_fit_free_pinv", n, nk, max_size);
         wall_fits.wall_pinv = Kokkos::View<rtype ***>("wall_fit_wall_pinv", n, nk, max_size);
@@ -4719,6 +4776,7 @@ void TENO::init_wall_fits() {
         auto h_fit_scale = Kokkos::create_mirror_view(wall_fits.scale);
         auto h_size = Kokkos::create_mirror_view(wall_fits.size);
         auto h_entries = Kokkos::create_mirror_view(wall_fits.entries);
+        auto h_turns = Kokkos::create_mirror_view(wall_fits.turns);
         auto h_fit_mean = Kokkos::create_mirror_view(wall_fits.mean);
         auto h_free = Kokkos::create_mirror_view(wall_fits.free_pinv);
         auto h_wall = Kokkos::create_mirror_view(wall_fits.wall_pinv);
@@ -4731,6 +4789,7 @@ void TENO::init_wall_fits() {
             h_size(k) = sizes[k];
             for (uint16_t s = 0; s < sizes[k]; s++) {
                 h_entries(k, s) = entries[e + s];
+                if (h_turns.extent(0) > 0) h_turns(k, s) = turns[e + s];
                 for (uint8_t l = 0; l < nk; l++) {
                     h_free(k, l, s) = free_pinv[(e + s) * nk + l];
                     h_wall(k, l, s) = wall_pinv[(e + s) * nk + l];
@@ -4747,6 +4806,7 @@ void TENO::init_wall_fits() {
         Kokkos::deep_copy(wall_fits.scale, h_fit_scale);
         Kokkos::deep_copy(wall_fits.size, h_size);
         Kokkos::deep_copy(wall_fits.entries, h_entries);
+        Kokkos::deep_copy(wall_fits.turns, h_turns);
         Kokkos::deep_copy(wall_fits.mean, h_fit_mean);
         Kokkos::deep_copy(wall_fits.free_pinv, h_free);
         Kokkos::deep_copy(wall_fits.wall_pinv, h_wall);
