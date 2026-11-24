@@ -42,6 +42,7 @@ import python
 import regions
 import run_report
 import runs
+import scaling
 import schematics
 import structured_blocks
 import teno
@@ -76,6 +77,7 @@ def main():
     particles.figures(args.mallard)
     post_flame.figures()
     post_signal.figures()
+    scaling.figures()
     schematics.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()

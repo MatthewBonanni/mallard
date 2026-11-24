@@ -73,7 +73,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 **Performance** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/performance/))
 
 - CPUs (OpenMP, threads), NVIDIA and AMD GPUs; single or double precision
-- MPI: GPU-aware or NCCL halo exchange overlapped with computation; multi-jagged, Hilbert-curve or graph partitioning
+- MPI: GPU-aware or NCCL halo exchange overlapped with computation; multi-jagged, Hilbert-curve or graph partitioning; 98.5% weak-scaling efficiency on 14 A100s over two nodes (3D TENO-E, [scaling](https://matthewbonanni.github.io/mallard/docs/guide/parallel/#scaling-3d-taylor-green))
 - Whole time step as one CUDA graph
 - Bitwise identical on any rank count; bitwise restarts
 
