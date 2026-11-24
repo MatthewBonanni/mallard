@@ -1,0 +1,1 @@
+- `tools/dev/gpu_runtime_tests.sh` runs compute-sanitizer with the step graphs off (`MALLARD_TEST_CUDA_GRAPHS=off` for the test suite), since compute-sanitizer misreports the step graph's kernels (#1076); it also runs the step graph and stream ordering tests without the sanitizer, and with `--full` memcheck on the whole suite (#433).

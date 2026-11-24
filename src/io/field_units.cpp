@@ -73,11 +73,16 @@ const Entry NAMED[] = {
     {"LAMBDA", thermal_conductivity, "thermal conductivity", TRANSPORT,
      "a mixture with navier_stokes"},
     {"T_SEED", dim::temperature, "temperature guess of the thermodynamic state", MIXTURE, "a mixture"},
-    {"HRR", dim::power_density, "heat release rate", CHEMISTRY, "a mixture with [chemistry]"},
-    {"CHEM_H", dim::time, "last chemistry sub-step", CHEMISTRY, "a mixture with [chemistry]"},
+    {"T_TABLE", dim::temperature, "temperature of the flamelet table at the cell's Z and C", MIXTURE,
+     "gas = \"flamelet\""},
+    {"HRR", dim::power_density, "heat release rate", CHEMISTRY,
+     "a mixture with [chemistry], or gas = \"flamelet\" with a table that has HRR"},
+    {"CHEM_H", dim::time, "last chemistry sub-step, negated after a failed explicit step", CHEMISTRY, "a mixture with [chemistry]"},
     {"CHEM_COST", dim::none, "chemistry sub-steps in the last step", CHEMISTRY, "a mixture with [chemistry]"},
     {"QRAD", dim::power_density, "radiative heat source", CHEMISTRY, "[radiation]"},
     {"MU_T", dim::dynamic_viscosity, "eddy viscosity", LES, "[les]"},
+    {"MIXTURE_FRACTION_VARIANCE", dim::none, "subgrid variance of the mixture fraction", LES,
+     "gas = \"flamelet\" with [les]"},
     {"TF_F", dim::none, "flame thickening factor", LES, "[les.combustion] (TFLES)"},
     {"TF_E", dim::none, "flame wrinkling efficiency", LES, "[les.combustion] (TFLES)"},
     {"TF_OMEGA", dim::none, "flame sensor", LES, "[les.combustion] (TFLES)"},
@@ -346,7 +351,7 @@ FieldDescription describe(const std::string & name) {
 
 std::string csv_line(const std::vector<Dimension> & columns) {
     std::string line = "# units: ";
-    for (size_t i = 0; i < columns.size(); i++) line += (i ? "," : "") + columns[i].udunits();
+    for (size_t i = 0; i < columns.size(); i++) line += (i ? "," : "") + units::of(columns[i]);
     return line;
 }
 

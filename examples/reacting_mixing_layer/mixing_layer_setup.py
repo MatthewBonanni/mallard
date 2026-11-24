@@ -1,18 +1,22 @@
 """A laminar reacting mixing layer run for Mallard (V11, 2D build).
 
     python examples/reacting_mixing_layer/mixing_layer_setup.py FIELD.npz RUN_DIR [--dx 100e-6] [--dy 30e-6]
-        [--length 0.03] [--y-min -8e-3] [--y-max 12e-3] [--growth 1.08]
-        [--flow-throughs 2] [--outputs 24] [--cfl 0.8]
+        [--length 0.03] [--buffer 0.01] [--buffer-growth 1.1] [--y-min -8e-3] [--y-max 12e-3]
+        [--growth 1.08] [--flow-throughs 2] [--outputs 24] [--cfl 0.8]
 
 FIELD.npz is the boundary-layer solution from mixing_layer_reference.py
 --field, which also gives the streams. Fuel enters through the inlet (x = 0)
 below y = 0, hot air above it (two inlet_state conditions, a step at the
-trailing edge of a splitter plate of zero thickness); the outlet (x = --length) and the sides (y = --y-min, --y-max)
-are pressure outlets at the streams' pressure, through which the free streams
-also entrain.
+trailing edge of a splitter plate of zero thickness); the outlet (x = --length
++ --buffer) and the sides (y = --y-min, --y-max) are characteristic pressure
+outlets at the streams' pressure (`nscbc`), so that acoustic waves leave
+instead of returning to the plate, where the unstable layer would amplify
+them. Beyond --length, the buffer's cells grow by --buffer-growth per cell
+along x, so that disturbances of the layer fade before they reach the outlet,
+where they would make sound.
 
 The mesh is a tensor product of quadrilaterals written as a Gmsh file:
-uniform cells of --dx along x; across, cells of --dy through the layer (where
+uniform cells of --dx along x up to --length, then the buffer; across, cells of --dy through the layer (where
 it differs from the free streams at x = --length, plus 0.5 mm on each side),
 growing by --growth per cell outside it (up to 20 --dy). Each cell starts
 from the boundary-layer solution at its center (v = 0). The run lasts
@@ -99,6 +103,8 @@ def main():
     ap.add_argument("--dx", type=float, default=100e-6)
     ap.add_argument("--dy", type=float, default=30e-6)
     ap.add_argument("--length", type=float, default=0.03)
+    ap.add_argument("--buffer", type=float, default=0.01)
+    ap.add_argument("--buffer-growth", type=float, default=1.1)
     ap.add_argument("--y-min", type=float, default=-8e-3)
     ap.add_argument("--y-max", type=float, default=12e-3)
     ap.add_argument("--growth", type=float, default=1.08)
@@ -125,8 +131,11 @@ def main():
     core = np.arange(-na, nb + 1) * a.dy
     ys = np.concatenate([graded(core[0], a.y_min, a.dy * a.growth, a.growth, 20 * a.dy)[::-1][:-1], core,
                          graded(core[-1], a.y_max, a.dy * a.growth, a.growth, 20 * a.dy)[1:]])
-    nx = int(round(a.length / a.dx))
-    xs = np.linspace(0.0, a.length, nx + 1)
+    xs = np.linspace(0.0, a.length, int(round(a.length / a.dx)) + 1)
+    if a.buffer > 0:
+        xs = np.concatenate([xs, graded(a.length, a.length + a.buffer, a.dx * a.buffer_growth, a.buffer_growth,
+                                        np.inf)[1:]])
+    nx = xs.size - 1
     ny = ys.size - 1
     n = nx * ny
     os.makedirs(a.run_dir, exist_ok=True)
@@ -160,7 +169,7 @@ def main():
         f.write(f"""# Laminar reacting mixing layer (V11) from {os.path.basename(a.field)}: fuel {fuel} at {t_f:g} K and
 # {u_f:g} m/s (y < 0), air at {t_a:g} K and {u_a:g} m/s (y > 0), p = {p:g} Pa; {nx} x {ny} = {n} quadrilaterals,
 # dx = {a.dx * 1e6:g} um, dy = {a.dy * 1e6:g} um over y = [{core[0] * 1e3:.3f}, {core[-1] * 1e3:.3f}] mm, growing by
-# {a.growth:g} to [{a.y_min * 1e3:g}, {a.y_max * 1e3:g}] mm; length {a.length * 1e3:g} mm; t_stop = {a.flow_throughs:g} flow-through(s)
+# {a.growth:g} to [{a.y_min * 1e3:g}, {a.y_max * 1e3:g}] mm; length {a.length * 1e3:g} mm and a buffer of {a.buffer * 1e3:g} mm; t_stop = {a.flow_throughs:g} flow-through(s)
 # of the slower stream
 
 [run]
@@ -197,16 +206,19 @@ X = {{ "O2" = 0.21, "N2" = 0.79 }}
 name = "outlet"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length + a.buffer:g} }}
 
 [[boundaries]]
 name = "bottom"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length + a.buffer:g} }}
 
 [[boundaries]]
 name = "top"
 type = "outlet_pressure"
 p = {p:.10g}
+nscbc = {{ L = {a.length + a.buffer:g} }}
 
 [numerics]
 riemann_solver = "HLLC"
@@ -225,6 +237,7 @@ transport = "mixture_averaged"
 [chemistry]
 rtol = 1.0e-6
 atol = 1.0e-10
+explicit_step = true
 
 [output]
 check_interval = 2000

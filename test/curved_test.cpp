@@ -840,6 +840,44 @@ TEST(CurvedTENO, WallStencilsAreStableOnRadiallyGradedMeshes) {
     EXPECT_LT(comm::allreduce(u_max, comm::Op::MAX), 1e-3);
 }
 
+TEST(CurvedTENO, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
+    // The Lebesgue search grows stencils past their first entries: in the
+    // corner of a 6 x 6 box, order 6 stencils reach the curved walls only there
+    auto mesh = make_mesh("cartesian", 6, 6);
+    std::string input = "[mesh]\n";
+    for (const char * zone : {"left", "bottom"}) {
+        input += std::string("[[mesh.curved]]\nzone = \"") + zone +
+                  "\"\ntype = \"rectangle\"\nfilled = false\ncenter = [0.5, 0.5]\nsize = [1.0, 1.0]\n";
+    }
+    mesh->apply_curved(curved::surfaces_of_mesh(*mesh, parse_toml(input)));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    std::vector<uint8_t> at_wall(mesh->n_cells, 0);
+    for (uint32_t f = 0; f < mesh->n_faces; f++) {
+        if (mesh->h_cells_of_face(f, 1) < 0 && mesh->curved_geometry->face_is_curved(f)) at_wall[uint32_t(mesh->h_cells_of_face(f, 0))] = 1;
+    }
+    const size_t wall_nk = teno::n_dof(3);
+    for (const int order : {5, 6}) {
+        const size_t nk = teno::n_dof(uint8_t(order - 1));
+        TENO teno;
+        teno.set_mesh(mesh);
+        teno.set_boundaries(bd);
+        teno.init(parse_toml("type = \"TENO\"\norder = " + std::to_string(order) + "\n"));
+        uint32_t reaching = 0;
+        teno.for_each_stencil([&](const uint32_t c, const TENO::CellStencils & st) {
+            bool reaches = false, full = false;
+            for (size_t s = 0; s < st.central; s++) reaches |= st.cells[s] >= 0 && at_wall[uint32_t(st.cells[s])] != 0;
+            for (size_t s = 0; s < st.central; s++) {
+                for (size_t l = wall_nk; l < nk; l++) full |= st.pinv[s * nk + l] != 0.0_r;
+            }
+            reaching += reaches;
+            EXPECT_FALSE(reaches && full) << "order " << order << ": cell " << c << " fits degree " << order - 1
+                                          << " with a curved-wall cell among its " << st.central << " entries";
+        }, true);
+        EXPECT_GT(reaching, 0u) << "order " << order;
+    }
+}
+
 #ifdef Mallard_HAS_HDF5
 TEST(CurvedTENO, StencilDegreeFieldShowsTheWallDegree) {
     // STENCIL_DEGREE of mallard check --mesh-fields: the wall degree where the

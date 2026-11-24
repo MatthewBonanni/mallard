@@ -11,10 +11,12 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <sstream>
@@ -23,6 +25,7 @@
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "json.h"
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
@@ -60,8 +63,43 @@ bool parse_time(const std::string & text, double & seconds) {
     }
 }
 
+std::string trim(const std::string & text) {
+    const size_t begin = text.find_first_not_of(" \t\r");
+    if (begin == std::string::npos) return "";
+    return text.substr(begin, text.find_last_not_of(" \t\r") - begin + 1);
+}
+
+std::string without_spaces(std::string text) {
+    std::erase_if(text, [](char c) { return c == ' ' || c == '\t'; });
+    return text;
+}
+
+/**
+ * @brief The lines "key = value" of a SET file as the words "key=value ..." of mallard ctl set: comments (#) and
+ *        blank lines dropped, quotes around a value and spaces in it ("2 h") removed, as every settable value is a
+ *        number or a time. A line without "=" stays a word of its own, for the reply to name.
+ */
+std::string set_file_assignments(const std::string & text) {
+    std::string words;
+    for (std::string line : split(text, '\n')) {
+        line = trim(line.substr(0, line.find('#')));
+        if (line.empty()) continue;
+        const size_t eq = line.find('=');
+        std::string word = without_spaces(line);
+        if (eq != std::string::npos) {
+            std::string value = trim(line.substr(eq + 1));
+            if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front()) {
+                value = value.substr(1, value.size() - 2);
+            }
+            word = without_spaces(trim(line.substr(0, eq))) + "=" + without_spaces(value);
+        }
+        words += (words.empty() ? "" : " ") + word;
+    }
+    return words;
+}
+
 const char * SETTABLE =
-    "n_steps, t_stop, t_wall_stop, check_interval, write_data.<prefix or index>.interval, "
+    "n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, write_data.<prefix or index>.interval, "
     "write_data.<prefix or index>.time_interval, probes.<name>.interval, probes.<name>.time_interval, forces.<zone>.interval, integrals.interval";
 
 } // namespace
@@ -78,7 +116,7 @@ void Solver::save_last_good() {
 
 void Solver::save_last_good_if_valid(const Kokkos::View<rtype *> & reduced) {
     const StateView from = conservatives, to = last_good.flow;
-    Kokkos::parallel_for("save_last_good", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
+    gated::parallel_for("save_last_good", mesh->n_cells, KOKKOS_LAMBDA(const uint32_t c) {
         if (reduced(0) > 0.0_r) {
             FOR_I_CONSERVATIVE to(c, i) = from(c, i);
         }
@@ -242,23 +280,36 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            std::string reply;
-            bool ok = true;
-            for (const std::string & assignment : split(line.substr(4), ' ')) {
-                const size_t eq = assignment.find('=');
-                const auto [accepted, what] = eq == std::string::npos
-                                                  ? std::make_pair(false, "expected key=value, got '" + assignment + "'")
-                                                  : apply_setting(assignment.substr(0, eq), assignment.substr(eq + 1));
-                ok = ok && accepted;
-                reply += (accepted ? "" : "error: ") + what + "\n";
-                if (accepted) logging::event(step, double(t), "set", what);
+            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), command.source);
+            // Without a connection to reply to (the SET file), the run log is the reply
+            if (!ok && command.fd < 0 && comm::is_root()) {
+                logging::warning(diagnostic_code::SET_REFUSED, command.source + ": not all settings were applied\n" + reply);
             }
             run_control::reply(command, ok ? reply : "error: not all settings were applied\n" + reply);
         }
     }
 }
 
-std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value) {
+std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::string> & assignments,
+                                                    const std::string & source) {
+    std::string reply;
+    bool ok = true;
+    for (const std::string & assignment : assignments) {
+        const size_t eq = assignment.find('=');
+        const auto [accepted, what] = eq == std::string::npos
+                                          ? std::make_pair(false, "expected key=value, got '" + assignment + "'")
+                                          : apply_setting(assignment.substr(0, eq), assignment.substr(eq + 1));
+        ok = ok && accepted;
+        reply += (accepted ? "" : "error: ") + what + "\n";
+        if (accepted) {
+            logging::event(step, double(t), "set", what,
+                           {{"source", json::quote(source)}, {"setting", json::quote(assignment)}});
+        }
+    }
+    return {ok, reply};
+}
+
+std::pair<bool, std::string> Solver::apply_setting(const std::string & key, const std::string & value, const bool apply) {
     const comm::SelfScope scope = communication_scope();
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
@@ -278,18 +329,29 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
             old = logging::real(double(target));
             target = x > 0.0 ? static_cast<rtype>(x) : rtype(-1);
         }
-        if (n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0)) {
+        const bool none = n_steps == 0 && !(t_stop > 0) && !(t_wall_stop > 0);
+        if (none || !apply) {
             n_steps = old_n_steps;
             t_stop = old_t_stop;
             t_wall_stop = old_t_wall_stop;
-            return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
+        }
+        // Checked at the time it applies, as another setting may have added a limit by then
+        if (none && apply) return rejected("at least one of n_steps, t_stop and t_wall_stop must remain");
+        return {true, key + " = " + value + " (was " + old + ")"};
+    }
+    if (key == "control_file_interval") {
+        if (!is_uint) return rejected("expected a non-negative integer (0: never)");
+        const std::string old = std::to_string(control_file_interval);
+        if (apply) {
+            control_file_interval = n;
+            if (n > 0) control_files_polled = step / n;
         }
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     if (key == "check_interval") {
         if (!is_uint || n == 0 || n > std::numeric_limits<uint32_t>::max()) return rejected("expected a positive integer");
         const std::string old = std::to_string(check_interval);
-        check_interval = static_cast<uint32_t>(n);
+        if (apply) check_interval = static_cast<uint32_t>(n);
         return {true, key + " = " + value + " (was " + old + ")"};
     }
     const size_t dot = key.rfind('.');
@@ -306,18 +368,18 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
         // Surfaces, curves and points of a [[write_data]] are written as probes, by their prefix
-        const std::string error = writer ? (field == "interval" ? writer->set_interval(n)
-                                                                : writer->set_time_interval(static_cast<rtype>(x), t))
-                                         : field == "interval" ? probes.set_interval(name, n, true)
-                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true);
+        const std::string error = writer ? (field == "interval" ? writer->set_interval(n, apply)
+                                                                : writer->set_time_interval(static_cast<rtype>(x), t, apply))
+                                         : field == "interval" ? probes.set_interval(name, n, true, apply)
+                                                               : probes.set_time_interval(name, static_cast<rtype>(x), t, true, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
     if (table == "probes" && !name.empty() && (field == "interval" || field == "time_interval")) {
         if (field == "interval" && !is_uint) return rejected("expected a positive integer");
         if (field == "time_interval" && !is_time) return rejected("expected a positive time in seconds or with a unit");
-        const std::string error = field == "interval" ? probes.set_interval(name, n)
-                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t);
+        const std::string error = field == "interval" ? probes.set_interval(name, n, false, apply)
+                                                      : probes.set_time_interval(name, static_cast<rtype>(x), t, false, apply);
         if (!error.empty()) return rejected(error);
         return {true, key + " = " + value};
     }
@@ -326,13 +388,13 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         auto monitor = std::find_if(force_monitors.begin(), force_monitors.end(),
                                     [&](const ForceMonitor & m) { return m.zone == name; });
         if (monitor == force_monitors.end()) return rejected("no [[forces]] on zone " + name);
-        monitor->interval = n;
+        if (apply) monitor->interval = n;
         return {true, key + " = " + value};
     }
     if (key == "integrals.interval") {
         if (integral_monitor.interval == 0) return rejected("the run has no [integrals]");
         if (!is_uint || n == 0) return rejected("expected a positive integer");
-        integral_monitor.interval = n;
+        if (apply) integral_monitor.interval = n;
         return {true, key + " = " + value};
     }
     return rejected(std::string("cannot be changed while the run goes on; settable: ") + SETTABLE);
@@ -377,6 +439,15 @@ void Solver::poll_control_files() {
     if (control_file_interval == 0 || step / control_file_interval == control_files_polled || !comm::is_root()) return;
     control_files_polled = step / control_file_interval;
     std::error_code error;
+    if (std::filesystem::is_regular_file("SET", error)) {
+        std::ifstream in("SET");
+        std::ostringstream text;
+        text << in.rdbuf();
+        in.close();
+        std::filesystem::remove("SET", error);
+        const std::string assignments = set_file_assignments(text.str());
+        if (!assignments.empty()) run_control::submit("set " + assignments, "SET file");
+    }
     if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
     if (std::filesystem::remove("STOP", error)) {
         stop_file_note = "STOP file found";
@@ -411,5 +482,6 @@ void Solver::publish_status() {
 #endif
     s.stop_conditions = stop_conditions();
     s.monitors = monitor_values;
+    for (const auto & [name, state] : triggers.states()) s.triggers.emplace_back("trigger " + name, state);
     run_control::publish(s);
 }

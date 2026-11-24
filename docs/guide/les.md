@@ -41,7 +41,8 @@ budget = true              # model vs numerical dissipation in integrals.csv
 [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
 [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
-[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence)
+and 1 more.
 
 The `les` [preset](numerics.md#presets), second order (MUSCL), is the setup of the `channel_les`
 and `cbc_les` examples: the channel at
@@ -62,7 +63,8 @@ model = "wale"     # sigma (default in 3D), wale, vreman or smagorinsky
 [`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les),
 [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
-[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence)
+and 1 more.
 
 | `model` | Eddy viscosity vanishes for | Use |
 |---|---|---|
@@ -149,6 +151,7 @@ shock sensor (restricted to compressions) fires:
 |---|---|---|
 | `sensor_threshold` | 0.65 | Sensor value above which a compressing cell is a shock (1 disables the Riemann solver) |
 | `upwind_floor` | 0 | Upwind fraction everywhere else; 0.05 damps grid-scale noise on very irregular meshes |
+| `dilatation_scale` | 1e-5 | `kappa` in the sensor's `eps = (kappa c / h)^2` (sound speed `c`, cell size `h`): round-off compressions of uniform flow are not shocks. 0.01 also keeps a freestream's acoustic noise central, but the noise is then no longer damped (Sod's problem: 25% larger error) ([design](../design/les.md#43-low-dissipation-convective-flux-decision-7)) |
 | `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy, and so do MUSCL's with no viscosity or model to remove it (Euler: set `cell_averages`) ([design](../design/les.md#44-central-flux-for-teno-689)) |
 
 `[integrals] budget = true` adds the kinetic-energy budget to
@@ -175,7 +178,8 @@ T_burnt = 2384.28
 
 *Used in:*
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body),
-[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence).
+[`flame_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#flame-turbulence),
+[`triple_flame`](https://matthewbonanni.github.io/mallard/docs/examples/#triple-flame).
 
 Premixed flames are thinner than LES cells. The dynamically thickened flame
 model (TFLES; Colin et al. 2000, Légier et al. 2002) multiplies diffusivities
@@ -183,7 +187,10 @@ by `E F` and reaction rates by `E / F` inside the flame, so it spans `n_res`
 cells at the right speed; the efficiency `E` restores the subgrid wrinkling:
 by default `E = F^beta` (Charlette et al. 2002) with `beta` computed each step
 by a dynamic procedure (Wang et al. 2011) from how much resolved flame surface
-a test filter removes, so there is no model constant. A sensor `Ω` confines it to the flame:
+a test filter removes, so there is no model constant. A sensor `Ω` confines it to the flame.
+With tabulated chemistry (`gas = "flamelet"`) the same model thickens the
+equations of `Z` and `C`, its sensor on the table's progress variable and the
+table read at zero subgrid variance: [thickened flamelets](flamelet.md#thickened-flames).
 
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-light.svg#gh-light-mode-only)
 ![Progress variable of a laminar flame and of the same flame thickened by F = 3, and the flame sensor](../images/guide/tfles-dark.svg#gh-dark-mode-only)
@@ -192,7 +199,7 @@ a test filter removes, so there is no model constant. A sensor `Ω` confines it 
 |---|---|---|
 | `model` | required | `tfles` (or the experimental `pasr`, below) |
 | `delta_L`, `s_L` | required | Laminar thermal thickness [m] and speed [m/s] |
-| `T_unburnt`, `T_burnt` | required | Temperatures of fresh and burnt gas [K], for the progress variable |
+| `T_unburnt`, `T_burnt` | required | Temperatures of fresh and burnt gas [K], for the progress variable (not with `gas = "flamelet"`) |
 | `n_res` | 5 | Cells across the thickened flame |
 | `efficiency` | `dynamic` | `dynamic` (`E = F^beta`, `beta` from the flow), `charlette` (efficiency function of a subgrid velocity `u'`) or `none` (`E = 1`) |
 | `beta` | 0.5 | `charlette` only: exponent of the efficiency |
@@ -207,6 +214,102 @@ at cells of 0.4–1.6 `delta_L`. Pitfalls: `beta`, `subgrid_velocity` and `C_u`
 are input errors with `dynamic` (they belong to `charlette`); with
 `charlette`, Colin's subgrid velocity doubles the flame speed at 1.6
 `delta_L`; on a nearly flat flame at `F = 8` the dynamic `E` still adds 5–10%.
+
+### Non-premixed and partially premixed flames
+
+```toml
+[les.combustion]
+model = "tfles"
+sensor = "reaction"              # the default "temperature" is the sensor above
+flame_table = "h2n2_air.csv"     # s_L, delta_L, omega_max against the mixture fraction Z
+fuel = "fuel_inlet"              # the streams of Z: [[boundaries]] names or compositions
+oxidizer = {X = {O2 = 1, N2 = 3.76}}
+# sensor_species = "H2"          # default: the fuel stream's most abundant species with C or H
+efficiency = "charlette"         # the default with sensor = "reaction"
+efficiency_max = 2.5
+```
+
+*Used in:*
+[`triple_flame`](https://matthewbonanni.github.io/mallard/docs/examples/#triple-flame).
+
+The temperature sensor assumes one fresh gas between `T_unburnt` and
+`T_burnt`. Where fuel and oxidizer mix, or the gas is hot before it burns,
+it fires in mixing layers and diffusion zones that do not react. With
+`sensor = "reaction"` (Légier et al. 2002) the sensor is the consumption rate
+of `sensor_species` over the largest rate in the premixed flame of the cell's
+Bilger mixture fraction `Z`: 0 below 1% of it, 1 above 5%, filtered over two
+passes of the vertex-neighbor average and doubled (clipped at 1) so that it
+covers the reaction zone with two cells to spare. It only counts premixed
+burning, where the gradients of `sensor_species` and of the oxidizer stream's
+main species point the same way (Takeno's flame index,
+[Yamashita, Shimada & Takeno 1996](../references.md#yamashita-shimada-takeno-1996)):
+a diffusion flame has no thickness of its own to resolve (the resolved mixing
+sets it), and thickening its diffusion speeds up the mixing that feeds it.
+`s_L` and `delta_L` of the thickening and the efficiency are those of the
+flame at `Z`. Outside the table's range of `Z` (the flammability limits)
+nothing is thickened.
+
+`tools/setup/flame_table.py` builds the table from Cantera flames of the
+run's mechanism, transport and fresh-gas state, stepping from the
+stoichiometric mixture fraction to each limit:
+
+```sh
+python tools/setup/flame_table.py mechanisms/h2o2.yaml ohmech h2n2_air.csv \
+    --fuel H2:0.5,N2:0.5 --oxidizer O2:1,N2:3.76 --T 300 --dz 0.01
+```
+
+The table of `examples/triple_flame/tfles` (gray: outside its range, where
+nothing is thickened), and the largest thickening `F = max(1, n_res Delta /
+delta_L)` it gives on that example's cells of 0.128 mm with `n_res = 5`:
+
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-light.svg#gh-light-mode-only)
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-dark.svg#gh-dark-mode-only)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `sensor` | `temperature` | `temperature` (the progress variable of `T_unburnt`, `T_burnt`) or `reaction` |
+| `flame_table` | required by `reaction` | CSV with columns `Z`, `s_L` [m/s], `delta_L` [m], `omega_max` [kg/m³/s] (others ignored), `Z` increasing |
+| `fuel`, `oxidizer` | required by `reaction` | The streams of `Z`, as in [`[output.mixture]`](../input.md#outputmixture); the table's streams |
+| `sensor_species` | the fuel's | The species whose consumption rate the sensor reads; the table's `omega_max` is its rate |
+| `efficiency_max` | none | Cap of the efficiency `E` (any sensor) |
+
+Validation (`efficiency = "none"`, H2:N2 = 1:1 against air, the
+`examples/triple_flame` mixtures; [design note](../design/les.md#67-non-premixed-and-partially-premixed-flames-754)):
+
+- Planar premixed flames from `Z` = 0.18 to 0.58 (equivalence ratio 0.52 to
+  3.2) at one cell per `delta_L` (`F` = 5): the consumption speed is 3.7–7%
+  below Cantera's (the temperature sensor: 3.2% at `Z_st`), where the flame
+  without the model is up to 41% slow and unsteady. The error is the `n_res` =
+  5 cells across the thickened flame: at `n_res` = 10 it is 0.1–2.1% from `Z` =
+  0.18 to 0.50 and 4% at 0.58.
+- Counterflow diffusion flame (strain 960 1/s): the integrated heat release
+  is 1.3% and 2.4% above a resolved run's on meshes 3 and 4 times coarser, as
+  without the model, and nothing is thickened. Without the flame index the
+  sensor thickened the whole mixing layer and the heat release rose by 10% and
+  21%.
+- Triple flame (`examples/triple_flame/tfles`,
+  3 cells per `delta_L`): the tip burns at the resolved speed (1.28 `s_L`
+  against 1.30) and `U_F` matches the run without the model on the same mesh
+  (2.10 and 2.11 `s_L`); both miss the resolved 2.45 by the coarse mesh's flow
+  divergence ahead of the tip, which converges at second order (2.24 and 2.25 at 4
+  cells).
+
+The triple flame of `examples/triple_flame/tfles` (its mixtures, inflow and
+cells of 0.128 mm, on a channel 40 `delta_L` wide and 24 long) 0.96 ms, about 3
+flame times, after its planar start. The flame index is positive on the
+premixed tip and wings and negative on the diffusion flame that trails between
+them along `Z_st`; the sensor, filtered and doubled, covers the premixed
+branches with a cell or two to spare and so reaches into the diffusion flame
+just behind the tip, which `TF_F` thickens up to 1.88 there and not at all from
+about 4 mm behind the tip on:
+
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-light.svg#gh-light-mode-only)
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-dark.svg#gh-dark-mode-only)
+
+Pitfalls: `efficiency = "dynamic"` needs the temperature sensor (an input
+error with `reaction`). Build the table with the streams, temperature and
+pressure of the run: a hot oxidizer has another table. The sensor costs one
+evaluation of the reaction rates per step and two halo exchanges.
 
 ### PaSR (experimental)
 

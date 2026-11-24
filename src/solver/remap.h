@@ -97,6 +97,7 @@ class Source {
         void monomials(uint32_t c, const overlap::Point & x, double * phi) const;
 
         std::shared_ptr<const Mesh> mesh;
+        VertexNeighbors neighbors;  // fit and limit read them from threads
         Options options;
         uint32_t n_owned = 0, n_vars = 0, n_max = 0;  // n_max: monomials of options.degree, constant included
         std::vector<std::array<uint8_t, 3>> exponents;  // monomial l, constant first, by total degree

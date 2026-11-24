@@ -1,11 +1,14 @@
 {
  "dimension": "velocity (m s^-1)",
  "dims": [
+  2,
   3
  ],
  "required": true,
  "set_in": [
-  "examples/flame_turbulence/les.toml"
+  "examples/flame_turbulence/les.toml",
+  "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
+  "tools/dev/catalog_inputs/3d/flamelet_tfles.toml"
  ],
  "type": "number"
 }

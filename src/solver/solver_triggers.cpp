@@ -10,8 +10,10 @@
  */
 
 #include "solver.h"
+#include "gated.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "comm.h"
@@ -75,6 +77,20 @@ void Solver::init_triggers() {
     }
     for (const auto & writer : data_writers) writers.push_back(writer->get_prefix());
     triggers.init(input, monitored_names, writers, statistics.enabled());
+    for (size_t i = 0; i < triggers.size(); i++) {
+        for (const auto & act : triggers[i].actions) {
+            for (const auto & [key, value] : act.settings) {
+                const auto [accepted, what] = apply_setting(key, value, false);
+                if (accepted) continue;
+                const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
+                throw InputError({.key = "triggers[" + std::to_string(i) + "].do",
+                                  .line = line_of(entries[i], "do"),
+                                  .message = "\"set " + key + "=" + value + "\": " + what,
+                                  .fix = "Set what mallard ctl set can, with a value it takes",
+                                  .docs = "docs/guide/running.md#triggers"});
+            }
+        }
+    }
     if (!triggers.starts_statistics()) return;
     const Input & table = input.at("statistics");
     for (const std::string section : {"", "spectra", "phase"}) {
@@ -109,6 +125,19 @@ std::vector<double> Solver::trigger_values() const {
     return values;
 }
 
+rtype Solver::next_landing_time() const {
+    rtype next = std::numeric_limits<rtype>::infinity();
+    const double tol = precision_tol<double>(1e-9, 1e-5);
+    for (const double c : triggers.landing_times()) {
+        // Within round-off of a step that landed there; in rtype, at c or just after, where t >= c holds
+        if (!(static_cast<double>(t) < c - tol * std::fabs(c))) continue;
+        rtype at = static_cast<rtype>(c);
+        if (static_cast<double>(at) < c) at = std::nextafter(at, std::numeric_limits<rtype>::infinity());
+        next = std::min(next, at);
+    }
+    return next;
+}
+
 bool Solver::triggers_on_device() const {
     return !triggers.empty() && triggers.fit_device() && triggers.size() <= 64;
 }
@@ -139,20 +168,6 @@ bool Solver::convergence_on_device() const {
     return false;
 }
 
-void Solver::convergence_due_limits(step_queue::Horizon & h) const {
-    if (!convergence_on_device()) return;
-    const size_t n_integrals = integral_monitor.interval > 0 ? integral_columns().size() : 0;
-    for (const size_t source : convergence.sources()) {
-        if (source < n_integrals) h.at_multiple(step, integral_monitor.interval);
-        size_t first = n_integrals;
-        for (const auto & monitor : force_monitors) {
-            const size_t n = 2 * N_DIM + (monitor.modeled ? 1 : 0);
-            if (source >= first && source < first + n) h.at_multiple(step, monitor.interval);
-            first += n;
-        }
-    }
-}
-
 bool Solver::convergence_reads_probe(const size_t k) const {
     if (!convergence_on_device()) return false;
     const std::vector<size_t> from = probes.value_probes();
@@ -161,27 +176,23 @@ bool Solver::convergence_reads_probe(const size_t k) const {
                        [&](size_t source) { return source >= first && from[source - first] == k; });
 }
 
-void Solver::evaluate_triggers() {
+void Solver::load_trigger_values() {
     const Kokkos::View<step_queue::Loop> loop = step_loop;
     const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
     const uint64_t n_records = step_records.extent(0);
     const Kokkos::View<double *> vars = trigger_vars;
-    const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
     const Kokkos::View<TriggerSource *> sources = trigger_sources;
     const Kokkos::View<double *> results = monitor_results;
-    const kexpr::ProgramTable<> table = trigger_conditions;
     const rtype * const scalars = step_time_device();
     const rtype * const step_dt = step_dt_device();
     const rtype * const wall = step_wall_device();
-    const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
     const uint32_t n_sources = static_cast<uint32_t>(trigger_sources.extent(0));
-    Kokkos::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
-        step_queue::Loop & L = loop();
+    gated::parallel_for("step_trigger_values", 1, KOKKOS_LAMBDA(const int) {
+        const step_queue::Loop & L = loop();
         if (!(L.active && L.advanced)) return;
-        step_queue::Record & record = records((L.seq - 1) % n_records);
+        const step_queue::Record & record = records((L.seq - 1) % n_records);
         // trigger_values at the step: t, step, dt, wall, and the rows the monitors wrote
-        const double t_now = static_cast<double>(*scalars);
-        vars(0) = t_now;
+        vars(0) = static_cast<double>(*scalars);
         vars(1) = static_cast<double>(L.step);
         vars(2) = static_cast<double>(*step_dt);
         vars(3) = -static_cast<double>(*wall);
@@ -191,6 +202,22 @@ void Solver::evaluate_triggers() {
             const double v = results(src.column);
             vars(src.variable) = src.rounded ? static_cast<double>(static_cast<rtype>(v)) : v;
         }
+    });
+}
+
+void Solver::evaluate_triggers() {
+    const Kokkos::View<step_queue::Loop> loop = step_loop;
+    const Kokkos::View<step_queue::Record *, Kokkos::SharedHostPinnedSpace> records = step_records;
+    const uint64_t n_records = step_records.extent(0);
+    const Kokkos::View<double *> vars = trigger_vars;
+    const Kokkos::View<Triggers::DeviceState *> states = trigger_states;
+    const kexpr::ProgramTable<> table = trigger_conditions;
+    const uint32_t n_triggers = static_cast<uint32_t>(trigger_states.extent(0));
+    gated::parallel_for("step_triggers", 1, KOKKOS_LAMBDA(const int) {
+        step_queue::Loop & L = loop();
+        if (!(L.active && L.advanced)) return;
+        step_queue::Record & record = records((L.seq - 1) % n_records);
+        const double t_now = vars(0);
         // Triggers::evaluate and advance, kept only if none fires: the host then takes that step itself
         bool fires = false;
         Triggers::DeviceState next[64];
@@ -230,7 +257,7 @@ double Solver::averages_start() const {
     return statistics.samples() > 0 ? statistics.average_start() : -std::numeric_limits<double>::infinity();
 }
 
-void Solver::update_convergence() {
+void Solver::update_convergence(const step_queue::Record * record) {
     if (!convergence.enabled()) return;
     bool written = (integral_monitor.interval > 0 && step % integral_monitor.interval == 0) || probes.wrote_values(step);
     for (const auto & monitor : force_monitors) written = written || step % monitor.interval == 0;
@@ -254,7 +281,8 @@ void Solver::update_convergence() {
     }
     if (is_distributed() && from_probes) fresh = comm::allgatherv(comm::is_root() ? fresh : std::vector<double>{});
     for (size_t k = 0; k < samples.size(); k++) samples[k].second = fresh[k];
-    convergence.add(step, double(t), samples, averages_start());
+    // The device holds the statistics' clock, which the record read at the step
+    convergence.add(step, double(t), samples, record ? record->window_start : averages_start());
 }
 
 void Solver::act_on_triggers() {
@@ -268,7 +296,7 @@ void Solver::act_on_triggers() {
         conditions = triggers.evaluate(values);
     }
     if (is_distributed()) conditions = comm::broadcast(conditions);
-    for (const size_t i : triggers.advance(conditions, static_cast<double>(t))) {
+    for (const size_t i : triggers.advance(conditions, step, static_cast<double>(t))) {
         const Triggers::Trigger & trigger = triggers[i];
         json::Object read;
         if (!values.empty()) {
@@ -287,6 +315,21 @@ void Solver::act_on_triggers() {
                 case Triggers::Action::START_STATISTICS:
                     statistics.set_start(t);
                     statistics.start(t);
+                    break;
+                case Triggers::Action::STOP_STATISTICS: statistics.set_start(std::numeric_limits<rtype>::infinity()); break;
+                case Triggers::Action::LOG:
+                    // Rank 0 logs, and holds the values
+                    if (!values.empty()) {
+                        logging::event(step, double(t), "log", triggers.message(act, values),
+                                       {{"trigger", json::quote(trigger.name)}});
+                    }
+                    break;
+                case Triggers::Action::SET:
+                    for (const auto & [key, value] : act.settings) {
+                        const auto [accepted, what] = apply_setting(key, value);
+                        logging::event(step, double(t), "set", accepted ? what : "refused: " + what,
+                                       {{"trigger", json::quote(trigger.name)}});
+                    }
                     break;
                 case Triggers::Action::WRITE: {
                     const auto writer = std::find_if(data_writers.begin(), data_writers.end(),

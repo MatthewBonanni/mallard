@@ -19,6 +19,7 @@
 #include "common.h"
 #include "face_reconstruction.h"
 #include "mesh.h"
+#include "scalar_reconstruction.h"
 #include "teno.h"
 
 /**
@@ -41,16 +42,16 @@ struct TENOScalarValues {
     Kokkos::View<uint32_t *> offsets_faces_of_cell;
     Kokkos::View<uint32_t *> faces_of_cell;
     Kokkos::View<int32_t *[2]> cells_of_face;
-    Kokkos::View<uint32_t *> offsets_nodes_of_face;
-    Kokkos::View<uint32_t *> nodes_of_face;
-    Kokkos::View<rtype *[N_DIM]> node_coords;
+    FaceNodes face_nodes;
+    NodeCoords node_coords;
     Kokkos::View<rtype *[N_DIM]> cell_coords;
     Kokkos::View<rtype *[N_DIM]> face_coords;
     PeriodicMaps periodic;
     Kokkos::View<uint8_t *> face_shift;
     Kokkos::View<rtype **> quad_points;
     Kokkos::View<rtype ***> face_quad_points;
-    Kokkos::View<rtype **> face_quad_weights;
+    FaceWeights<> face_quad_weights;
+    Kokkos::View<rtype *[4]> face_rule;
     Kokkos::View<rtype *> scale;
     Kokkos::View<uint32_t *> cell_shape;
     Kokkos::View<rtype **> basis_mean;
@@ -93,9 +94,20 @@ struct TENOScalarValues {
         return scalars(c, j);
     }
 
-    /** @brief Monomials minus their cell means at point q of face f, in cell c's frame. */
+    /** @brief 3D meshes without curved faces: the nodes of face f, which face_point_basis places its points from. */
     KOKKOS_INLINE_FUNCTION
-    bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, rtype * psi) const {
+    PlanarFace planar_nodes(const uint32_t f) const {
+        if constexpr (N_DIM == 2) {
+            return {};
+        } else {
+            return face_quad_points.extent(0) > 0 ? PlanarFace() : planar_face(face_nodes, node_coords, f);
+        }
+    }
+
+    /** @brief Monomials minus their cell means at point q of face f (nodes: planar_nodes(f)), in cell c's frame. */
+    KOKKOS_INLINE_FUNCTION
+    bool face_point_basis(const uint32_t f, const uint8_t q, const uint32_t c, const PlanarFace & nodes,
+                          rtype * psi) const {
         const rtype h = scale(c);
         const uint32_t row = cell_shape(c);
         const uint8_t s = (cells_of_face(f, 1) == static_cast<int32_t>(c)) ? face_shift(f) : 0;
@@ -109,8 +121,8 @@ struct TENOScalarValues {
                 for (uint8_t l = 0; l < NK; l++) psi[l] -= basis_mean(row, l);
                 return true;
             }
-            const uint32_t node_0 = nodes_of_face(offsets_nodes_of_face(f));
-            const uint32_t node_1 = nodes_of_face(offsets_nodes_of_face(f) + 1);
+            const uint32_t node_0 = face_nodes(f, 0);
+            const uint32_t node_1 = face_nodes(f, 1);
             const rtype s_q = 0.5_r * quad_points(q, 0);
             x[0] = face_coords(f, 0) + s_q * (node_coords(node_1, 0) - node_coords(node_0, 0));
             x[1] = face_coords(f, 1) + s_q * (node_coords(node_1, 1) - node_coords(node_0, 1));
@@ -118,7 +130,11 @@ struct TENOScalarValues {
             teno::monomials(DEG, (p[0] - cell_coords(c, 0)) / h, (p[1] - cell_coords(c, 1)) / h, psi);
         } else {
             if (face_quad_weights(f, q) == 0.0_r) return false;
-            FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            if (face_quad_points.extent(0) > 0) {
+                FOR_I_DIM x[i] = face_quad_points(f, q, i);
+            } else {
+                planar_face_point(nodes, face_rule, q, x);
+            }
             periodic.backward(s, x, p);
             rtype xi[N_DIM];
             FOR_I_DIM xi[i] = (p[i] - cell_coords(c, i)) / h;
@@ -133,9 +149,14 @@ struct TENOScalarValues {
         const rtype S_c = scalars(c, j);
         for (uint8_t l = 0; l < NK; l++) a[l] = 0.0_r;
         const teno::PackedStencils::Row stencil = stencil_large.row(c);
+        rtype spread = 0.0_r;
         for (uint16_t s = 0; s < stencil_large_size(c); s++) {
             const rtype d = entry_value(stencil.cell(s), stencil.face(s), j) - S_c;
+            spread = Kokkos::fmax(spread, Kokkos::fabs(d));
             for (uint8_t l = 0; l < NK; l++) a[l] += stencil.pinv<NK>(s, l) * d;
+        }
+        if (j < n_species && spread <= SPECIES_NOISE) {
+            for (uint8_t l = 0; l < NK; l++) a[l] = 0.0_r;
         }
     }
 
@@ -147,9 +168,14 @@ struct TENOScalarValues {
         uint16_t start = 0;
         for (uint8_t t = 0; t < s; t++) start += stencil_small_size(c, t);
         const teno::PackedStencils::Row stencil = stencil_small.row(c);
+        rtype spread = 0.0_r;
         for (uint16_t e = 0; e < stencil_small_size(c, s); e++) {
             const rtype d = entry_value(stencil.cell(start + e), stencil.face(start + e), j) - S_c;
+            spread = Kokkos::fmax(spread, Kokkos::fabs(d));
             for (uint8_t l = 0; l < teno::NK_SMALL; l++) a[l] += stencil.pinv<teno::NK_SMALL>(start + e, l) * d;
+        }
+        if (j < n_species && spread <= SPECIES_NOISE) {
+            for (uint8_t l = 0; l < teno::NK_SMALL; l++) a[l] = 0.0_r;
         }
     }
 
@@ -168,9 +194,10 @@ struct TENOScalarValues {
         for (uint8_t s = 0; s < teno::MAX_FACES; s++) n_kept += (mask != TENO::SELECT_LARGE && ((mask >> s) & 1u));
         const rtype S_c = scalars(c, j);
         const rtype t = theta.extent(0) ? theta(c) : 1.0_r;
+        const PlanarFace nodes = planar_nodes(f);
         for (uint8_t q = 0; q < n_quad(); q++) {
             rtype psi[NK];
-            if (!face_point_basis(f, q, c, psi)) {
+            if (!face_point_basis(f, q, c, nodes, psi)) {
                 out[q] = S_c;
                 continue;
             }
@@ -231,9 +258,9 @@ TENOScalarValues<DEG> make_teno_scalar_values(const TENO & teno, const Mesh & me
                                               Kokkos::View<rtype **, Kokkos::LayoutRight> scalars,
                                               Kokkos::View<rtype *> theta, uint32_t n_species) {
     return TENOScalarValues<DEG>{mesh.offsets_faces_of_cell, mesh.faces_of_cell, mesh.cells_of_face,
-                                 teno.offsets_nodes_of_face, teno.nodes_of_face, teno.node_coords,
+                                 teno.face_nodes, teno.node_coords,
                                  mesh.cell_coords, mesh.face_coords, mesh.periodic_maps(), mesh.face_shift,
-                                 teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights,
+                                 teno.quadrature_face.points, teno.face_quad_points, teno.face_quad_weights, teno.face_rule,
                                  teno.scale, teno.cell_shape, teno.basis_mean, teno.stencil_large_size, teno.stencil_large,
                                  teno.stencil_small_size, teno.stencil_small, teno.troubled,
                                  teno.selection, teno.sigma_threshold, boundaries, scalars, theta, n_species,

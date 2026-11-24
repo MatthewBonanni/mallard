@@ -22,10 +22,10 @@
 #include "cli.h"
 #include "comm.h"
 #include "commands.h"
-#include "derived_catalog.h"
 #include "diagnostic_code.h"
 #include "field_units.h"
 #include "input.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh_quality.h"
@@ -139,7 +139,7 @@ std::vector<std::string> available(const std::string & pattern, const std::strin
         })) {
         out.emplace_back("statistics");
     }
-    if (derived::find(name.c_str()) != derived::N_FIELDS) out.emplace_back("post derive");
+    if (field_units::post_derive(name)) out.emplace_back("post derive");
     return out;
 }
 
@@ -163,12 +163,11 @@ int format_error(const cli::Args & args, const char * command) {
 std::string count_text(size_t n) { return logging::count(n, "field"); }
 
 std::string field_json(const std::string & name, const std::string & units, const std::string & long_name,
-                       const std::string & group, const std::string & needs, bool post_derive,
+                       const std::string & group, const std::string & needs,
                        const std::vector<std::string> & species) {
     json::Object o;
     o.add("name", name).add("units", units).add("long_name", long_name).add("group", group);
     if (!needs.empty()) o.add("needs", needs);
-    if (post_derive) o.add("post_derive", true);
     std::string where = "[";
     for (const std::string & w : available(name, group, species)) where += (where.size() > 1 ? "," : "") + json::quote(w);
     o.raw("available", where + "]");
@@ -197,7 +196,7 @@ int list_catalog(const cli::Args & args) {
         std::cout << json::Object()
                          .raw("input", "null")
                          .raw("fields", json_array(catalog, [](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive, {});
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, {});
                               }))
                          .str()
                   << "\n";
@@ -239,11 +238,10 @@ int list_fields_main(const cli::Args & args) {
                          .raw("fields", json_array(c.fields, [&](const std::string & name) {
                                   const FieldDescription d = field_units::describe(name);
                                   return field_json(name, d.units(), d.long_name, field_units::group(name), "",
-                                                    field_units::post_derive(name), c.species);
+                                                    c.species);
                               }))
                          .raw("missing", json_array(absent, [&](const CatalogField & f) {
-                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, f.post_derive,
-                                                    c.species);
+                                  return field_json(f.name, f.units, f.long_name, f.group, f.needs, c.species);
                               }))
                          .str()
                   << "\n";
@@ -457,6 +455,8 @@ int list_keys_main(const cli::Args & args) {
         json::Object selected;
         for (const std::string & key : keys) selected.raw(key, value_text(catalog[key]));
         std::cout << json::Object()
+                         .add("schema", interfaces::KEY_CATALOG.name)
+                         .add("version", interfaces::KEY_CATALOG.version)
                          .raw("input", null_or(input_file))
                          .raw("section", null_or(section))
                          .raw("keys", selected.str())

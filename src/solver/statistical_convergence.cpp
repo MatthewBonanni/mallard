@@ -11,8 +11,10 @@
  */
 
 #include "statistical_convergence.h"
+#include "gated.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
@@ -22,6 +24,7 @@
 #include "batch_means.h"
 #include "comm.h"
 #include "common_io.h"
+#include "diagnostic_code.h"
 #include "field_units.h"
 #include "log.h"
 
@@ -222,7 +225,7 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                           .docs = DOCS});
     }
     tolerance = table.contains("tolerance") ? find_value<double>(table, "tolerance") : 0.0;
-    variance_tolerance = table.contains("variance_tolerance") ? find_value<double>(table, "variance_tolerance") : 0.0;
+    variance_tolerance = find_value_or<double>(table, "variance_tolerance", 0.0);
     for (const auto & [name, value] : {std::pair{"tolerance", tolerance}, {"variance_tolerance", variance_tolerance}}) {
         if (table.contains(name) && !(value > 0.0)) {
             throw InputError({.key = key + "." + name,
@@ -274,24 +277,40 @@ std::vector<Convergence::Monitored> Convergence::columns() const {
                                {s.name + "_variance_ci", squared},
                                {s.name + "_tau", dim::none},
                                {s.name + "_n_eff", dim::none},
-                               {s.name + "_samples", dim::none}});
+                               {s.name + "_samples", dim::none},
+                               {s.name + "_nonfinite", dim::none}});
     }
     return all;
 }
 
-void Convergence::Signal::push(double time, double value) {
+bool Convergence::Signal::push(double time, double value) {
+    // Sums of the values less the first, against cancellation in signals with a large mean
+    const double v = value - (x.empty() ? value : x.front());
+    const double next1 = s1.back() + v, next2 = s2.back() + v * v;
+    // Every later window is a difference of these sums: one that is not finite would be in all of them
+    if (!std::isfinite(next1) || !std::isfinite(next2)) {
+        nonfinite++;
+        return false;
+    }
     t.push_back(time);
     x.push_back(value);
-    // Sums of the values less the first, against cancellation in signals with a large mean
-    const double v = value - x.front();
-    s1.push_back(s1.back() + v);
-    s2.push_back(s2.back() + v * v);
+    s1.push_back(next1);
+    s2.push_back(next2);
+    return true;
 }
 
 void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_t, double>> & samples,
                       double window_start) {
     if (samples.empty()) return;
-    for (const auto & [i, value] : samples) signals[i].push(t, value);
+    staged_current = false;
+    for (const auto & [i, value] : samples) {
+        Signal & s = signals[i];
+        if (s.push(t, value) || s.nonfinite > 1) continue;
+        logging::warning(diagnostic_code::CONVERGENCE_NONFINITE,
+                         "statistics.convergence: " + s.name + " = " + logging::format("%g", value) + " at t = " +
+                             logging::real(t) + " is not finite: the run diverged, so the convergence estimate cannot converge; " +
+                             s.name + "_nonfinite in " + file + " counts such samples, left out of the statistics.");
+    }
     // A longer series can move the end of the transient later: each check's accepted start replaces the last
     bool checked = false, all = true;
     for (auto & s : signals) {
@@ -343,7 +362,7 @@ void Convergence::update(double window_start) {
             begin = std::max(begin, std::upper_bound(s.t.begin(), s.t.end(), window_start));
             const uint64_t i0 = static_cast<uint64_t>(begin - s.t.begin()), end = s.x.size();
             n = end - i0;
-            converged = converged && n > 0;
+            converged = converged && n > 0 && s.nonfinite == 0;
             if (n > 0) {
                 if (s.n_tau == 0 || s.t[i0] != s.window_tau ||
                     static_cast<double>(n) >= 1.05 * static_cast<double>(s.n_tau) + 1.0) {
@@ -382,6 +401,7 @@ void Convergence::update(double window_start) {
         values.values.emplace_back(s.name + "_tau", n > 0 ? s.tau : NaN);
         values.values.emplace_back(s.name + "_n_eff", n_eff);
         values.values.emplace_back(s.name + "_samples", static_cast<double>(n));
+        values.values.emplace_back(s.name + "_nonfinite", static_cast<double>(s.nonfinite));
     }
     if (tolerance > 0.0) values.values[converged_at].second = converged ? 1.0 : 0.0;
 }
@@ -402,6 +422,7 @@ RestartAttributes Convergence::attributes() const {
         all.emplace_back(p + "N_TAU", static_cast<double>(s.n_tau));
         all.emplace_back(p + "WINDOW_TAU", s.window_tau);
         all.emplace_back(p + "TAU", s.tau);
+        all.emplace_back(p + "NONFINITE", static_cast<double>(s.nonfinite));
     }
     return all;
 }
@@ -430,13 +451,17 @@ void Convergence::restore(const RestartData & restart, const std::string & resta
     };
     stationary = get(PREFIX + "STATIONARY") != 0.0;
     t_stationary = get(PREFIX + "T_STATIONARY");
+    staged_current = false;
     for (auto & s : signals) {
+        s.n_staged = 0;
         const std::string p = PREFIX + s.name + "_";
         s.next_check = static_cast<uint64_t>(get(p + "NEXT_CHECK"));
         s.truncation = {static_cast<uint64_t>(get(p + "TRUNCATION")), get(p + "ACCEPTED") != 0.0};
         s.n_tau = static_cast<uint64_t>(get(p + "N_TAU"));
         s.window_tau = get(p + "WINDOW_TAU");
         s.tau = get(p + "TAU");
+        const double * nonfinite = restart.attribute(p + "NONFINITE");
+        s.nonfinite = nonfinite ? static_cast<uint64_t>(*nonfinite) : 0;
         const std::vector<double> * t = restart.array(p + "T");
         const std::vector<double> * x = restart.array(p + "X");
         if (!t != !x || (t && t->size() != x->size())) {
@@ -469,4 +494,305 @@ std::vector<OutputSummary> Convergence::summary() const {
         if (variance_tolerance > 0.0) text += logging::format(" and +-%g of the variances", variance_tolerance);
     }
     return {{.kind = "convergence", .file = file, .contents = text}};
+}
+
+namespace {
+
+/** @brief Lags whose autocorrelations add_staged computes at once. */
+constexpr uint32_t LAG_CHUNK = 256;
+
+/** @brief The autocorrelation time's sum over lags so far, and whether Sokal's window closed. */
+struct LagSum {
+    double tau;
+    uint32_t done;
+};
+
+} // namespace
+
+void Convergence::stage() {
+    uint64_t longest = 0;
+    for (const auto & s : signals) longest = std::max<uint64_t>(longest, s.x.size());
+    const uint64_t room = std::bit_ceil(std::max<uint64_t>(4096, 2 * (longest + 1)));
+    const size_t n = signals.size();
+    if (room > capacity || d_signals.extent(0) != n) {
+        capacity = room;
+        d_history = Kokkos::View<double ***, Kokkos::LayoutRight>("convergence_history", n, 4, capacity + 1);
+        d_batches = Kokkos::View<double *>("convergence_batches", capacity / time_series::MSER_BATCH + 1);
+        for (auto & s : signals) s.n_staged = 0;
+        staged_current = false;
+    }
+    if (d_signals.extent(0) != n) {
+        d_signals = Kokkos::View<DeviceSignal *>("convergence_signals", n);
+        d_global = Kokkos::View<double *>("convergence_global", 2);
+        d_lags = Kokkos::View<double *>("convergence_lags", LAG_CHUNK);
+        d_written = Kokkos::View<uint32_t *>("convergence_written", n);
+        d_input = Kokkos::View<double *>("convergence_input", n + 2);
+    }
+}
+
+bool Convergence::staged_room_low() const {
+    return std::any_of(signals.begin(), signals.end(), [&](const Signal & s) { return 2 * s.x.size() > capacity; });
+}
+
+void Convergence::resume_staged() {
+    const auto h_signals = Kokkos::create_mirror_view(d_signals);
+    for (size_t i = 0; i < signals.size(); i++) {
+        Signal & s = signals[i];
+        const uint64_t n = s.x.size(), from = std::min(s.n_staged, n);
+        h_signals(i) = {static_cast<const SignalState &>(s), n};
+        if (staged_current) continue;
+        // The samples since the last copy (with those the device added itself, the same), and s1, s2 from entry 0
+        const auto copy = [&](size_t row, const std::vector<double> & host, uint64_t begin, uint64_t end) {
+            if (end <= begin) return;
+            Kokkos::deep_copy(Kokkos::subview(d_history, i, row, Kokkos::make_pair(begin, end)),
+                              Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(host.data() + begin,
+                                                                                                     end - begin));
+        };
+        copy(0, s.t, from, n);
+        copy(1, s.x, from, n);
+        copy(2, s.s1, from, n + 1);
+        copy(3, s.s2, from, n + 1);
+        s.n_staged = n;
+    }
+    staged_current = true;
+    Kokkos::deep_copy(d_signals, h_signals);
+    const double global[2] = {stationary ? 1.0 : 0.0, t_stationary};
+    Kokkos::deep_copy(d_global, Kokkos::View<const double *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(global, 2));
+}
+
+void Convergence::add_staged(const uint32_t * due, double * result) {
+    using Team = Kokkos::TeamPolicy<>::member_type;
+    const auto history = d_history;
+    const auto states = d_signals;
+    const auto global = d_global;
+    const auto z = d_batches;
+    const auto ck = d_lags;
+    const auto written = d_written;
+    const auto input = d_input;
+    const uint32_t n_signals = static_cast<uint32_t>(signals.size());
+    const uint64_t min_batches = min_samples / time_series::MSER_BATCH;
+    const uint32_t b = batches;
+    const double t_q = t_quantile, tol = tolerance, variance_tol = variance_tolerance;
+    // add and update in the host's order of operations; mser's batch means and the autocorrelation of each lag are
+    // each summed by one thread
+    gated::parallel_for("convergence_add", Kokkos::TeamPolicy<>(1, Kokkos::AUTO), KOKKOS_LAMBDA(const Team & team) {
+        if (*due == 0) return;
+        constexpr uint32_t m = time_series::MSER_BATCH;
+        const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
+        const double t = input(n_signals);
+        const double window_start = input(n_signals + 1);
+        Kokkos::single(Kokkos::PerTeam(team), [&] {
+            for (uint32_t i = 0; i < n_signals; i++) {
+                if (!written(i)) continue;
+                const uint64_t n = states(i).n;
+                const double x = input(i);
+                // Signal::push
+                const double v = x - (n > 0 ? history(i, 1, 0) : x);
+                const double next1 = history(i, 2, n) + v, next2 = history(i, 3, n) + v * v;
+                if (!Kokkos::isfinite(next1) || !Kokkos::isfinite(next2)) {
+                    states(i).state.nonfinite++;
+                    continue;
+                }
+                history(i, 0, n) = t;
+                history(i, 1, n) = x;
+                history(i, 2, n + 1) = next1;
+                history(i, 3, n + 1) = next2;
+                states(i).n = n + 1;
+            }
+        });
+        team.team_barrier();
+        bool checked = false, all = true;
+        for (uint32_t i = 0; i < n_signals; i++) {
+            const uint64_t n = states(i).n;
+            const bool check = n >= states(i).state.next_check;
+            team.team_barrier();
+            if (check) {
+                const double * const x = &history(i, 1, 0);
+                const uint64_t k = n / m;
+                const bool enough = k >= Kokkos::max<uint64_t>(min_batches, 2);
+                if (enough) {
+                    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, k), [&](const uint64_t j) {
+                        double s = 0.0;
+                        for (uint32_t l = 0; l < m; l++) s += x[j * m + l];
+                        z(j) = s / m;
+                    });
+                    team.team_barrier();
+                }
+                Kokkos::single(Kokkos::PerTeam(team), [&] {
+                    time_series::Truncation cut{0, false};
+                    if (enough) {
+                        // Sums about the mean, against cancellation in signals with a large mean
+                        double reference = 0.0;
+                        for (uint64_t j = 0; j < k; j++) reference += z(j);
+                        reference /= static_cast<double>(k);
+                        const uint64_t last = k / 2;
+                        double s1 = 0.0, s2 = 0.0;
+                        for (uint64_t j = k; j-- > last;) {
+                            s1 += z(j) - reference;
+                            s2 += (z(j) - reference) * (z(j) - reference);
+                        }
+                        uint64_t best = last;
+                        double best_value = Kokkos::Experimental::infinity_v<double>;
+                        for (uint64_t d = last + 1; d-- > 0;) {
+                            if (d < last) {
+                                s1 += z(d) - reference;
+                                s2 += (z(d) - reference) * (z(d) - reference);
+                            }
+                            const double remaining = static_cast<double>(k - d);
+                            const double value = Kokkos::max(s2 - s1 * s1 / remaining, 0.0) / (remaining * remaining);
+                            if (value <= best_value) {
+                                best_value = value;
+                                best = d;
+                            }
+                        }
+                        cut = {best * m, best < last};
+                    }
+                    SignalState & st = states(i).state;
+                    if (cut.accepted) st.truncation = cut;
+                    st.next_check = n + Kokkos::max<uint64_t>(m, n / 20);
+                });
+                team.team_barrier();
+                checked = true;
+            }
+            all = all && states(i).state.truncation.accepted;
+        }
+        Kokkos::single(Kokkos::PerTeam(team), [&] {
+            if (!(checked && all)) return;
+            double start = -Kokkos::Experimental::infinity_v<double>;
+            for (uint32_t i = 0; i < n_signals; i++) {
+                start = Kokkos::max(start, history(i, 0, states(i).state.truncation.samples));
+            }
+            global(0) = 1.0;
+            global(1) = start;
+        });
+        team.team_barrier();
+        const bool is_stationary = global(0) != 0.0;
+        const double t_window = global(1);
+        const uint32_t first = tol > 0.0 ? 3 : 2;
+        bool converged = is_stationary;
+        for (uint32_t i = 0; i < n_signals; i++) {
+            const double * const ts = &history(i, 0, 0);
+            const double * const x = &history(i, 1, 0);
+            const uint64_t end = states(i).n;
+            SignalState & st = states(i).state;
+            // From the first sample after the transient (lower_bound), and after the start of the averages (upper_bound)
+            uint64_t i0 = end;
+            if (is_stationary) {
+                uint64_t lo = 0, hi = end;
+                while (lo < hi) {
+                    const uint64_t mid = lo + (hi - lo) / 2;
+                    if (ts[mid] < t_window) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                i0 = lo;
+                lo = 0;
+                hi = end;
+                while (lo < hi) {
+                    const uint64_t mid = lo + (hi - lo) / 2;
+                    if (ts[mid] <= window_start) {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                i0 = Kokkos::max(i0, lo);
+            }
+            const uint64_t n = end - i0;
+            const bool tau_due = n > 0 && (st.n_tau == 0 || ts[i0] != st.window_tau ||
+                                           static_cast<double>(n) >= 1.05 * static_cast<double>(st.n_tau) + 1.0);
+            team.team_barrier();
+            if (tau_due) {
+                // time_series::autocorrelation_time of the window
+                const double * const y = x + i0;
+                double mean = 0.0, c0 = 0.0;
+                Kokkos::single(Kokkos::PerTeam(team), [&](double & sum) {
+                    sum = 0.0;
+                    for (uint64_t j = 0; j < n; j++) sum += y[j];
+                    sum /= static_cast<double>(n);
+                }, mean);
+                Kokkos::single(Kokkos::PerTeam(team), [&](double & sum) {
+                    sum = 0.0;
+                    for (uint64_t j = 0; j < n; j++) sum += (y[j] - mean) * (y[j] - mean);
+                }, c0);
+                LagSum lags{1.0, 0};
+                if (n >= 2 && c0 != 0.0) {
+                    for (uint64_t lag0 = 1; !lags.done && lag0 <= n / 2; lag0 += LAG_CHUNK) {
+                        const uint64_t chunk = Kokkos::min<uint64_t>(LAG_CHUNK, n / 2 - lag0 + 1);
+                        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, chunk), [&](const uint64_t l) {
+                            const uint64_t lag = lag0 + l;
+                            double c = 0.0;
+                            for (uint64_t j = 0; j + lag < n; j++) c += (y[j] - mean) * (y[j + lag] - mean);
+                            ck(l) = c;
+                        });
+                        team.team_barrier();
+                        Kokkos::single(Kokkos::PerTeam(team), [&](LagSum & sum) {
+                            for (uint64_t l = 0; l < chunk; l++) {
+                                sum.tau += 2.0 * ck(l) / c0;
+                                if (static_cast<double>(lag0 + l) >= 5.0 * sum.tau) {
+                                    sum.done = 1;
+                                    break;
+                                }
+                            }
+                        }, lags);
+                        team.team_barrier();
+                    }
+                }
+                Kokkos::single(Kokkos::PerTeam(team), [&] {
+                    st.tau = lags.tau;
+                    st.n_tau = n;
+                    st.window_tau = ts[i0];
+                });
+                team.team_barrier();
+            }
+            bool meets = false;
+            Kokkos::single(Kokkos::PerTeam(team), [&](bool & ok) {
+                double mean = nan, ci = nan, variance = nan, variance_ci = nan, n_eff = nan;
+                ok = n > 0 && st.nonfinite == 0;
+                if (n > 0) {
+                    const double * const s1 = &history(i, 2, 0);
+                    const double * const s2 = &history(i, 3, 0);
+                    const double dn = static_cast<double>(n);
+                    const double shifted = (s1[end] - s1[i0]) / dn;
+                    mean = x[0] + shifted;
+                    variance = Kokkos::max((s2[end] - s2[i0]) / dn - shifted * shifted, 0.0);
+                    n_eff = dn / st.tau;
+                    const uint64_t mb = n / b;
+                    if (mb > 0) {
+                        // time_series::batch_interval of the batches' means and of their means of (x - mean)^2
+                        const double dm = static_cast<double>(mb);
+                        double mean_b = 0.0, m2_b = 0.0, mean_v = 0.0, m2_v = 0.0;
+                        uint64_t a = end - b * mb;
+                        for (uint32_t j = 0; j < b; j++, a += mb) {
+                            const double b1 = s1[a + mb] - s1[a], b2 = s2[a + mb] - s2[a];
+                            batch_means::add(mean_b, m2_b, static_cast<double>(j + 1), b1 / dm);
+                            batch_means::add(mean_v, m2_v, static_cast<double>(j + 1),
+                                             (b2 - 2.0 * shifted * b1) / dm + shifted * shifted);
+                        }
+                        ci = batch_means::half_width(m2_b, b, t_q);
+                        variance_ci = batch_means::half_width(m2_v, b, t_q);
+                    }
+                    ok = ok && mb > 0 && static_cast<double>(mb) >= BATCH_TAUS * st.tau && ci <= tol * Kokkos::fabs(mean) &&
+                         (variance_tol == 0.0 || variance_ci <= variance_tol * variance);
+                }
+                double * const o = result + first + 8 * i;
+                o[0] = mean;
+                o[1] = ci;
+                o[2] = variance;
+                o[3] = variance_ci;
+                o[4] = n > 0 ? st.tau : nan;
+                o[5] = n_eff;
+                o[6] = static_cast<double>(n);
+                o[7] = static_cast<double>(st.nonfinite);
+            }, meets);
+            converged = converged && meets;
+        }
+        Kokkos::single(Kokkos::PerTeam(team), [&] {
+            result[0] = is_stationary ? 1.0 : 0.0;
+            result[1] = is_stationary ? t_window : nan;
+            if (tol > 0.0) result[2] = converged ? 1.0 : 0.0;
+        });
+    });
 }

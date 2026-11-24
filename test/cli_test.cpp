@@ -33,6 +33,7 @@
 #include "comm.h"
 #include "common_typedef.h"
 #include "data_paths.h"
+#include "interfaces.h"
 #include "json.h"
 #include "output_reader.h"
 
@@ -292,6 +293,46 @@ TEST(CliTest, UserDocsShowEveryHelpPage) {
     for (const cli::Family & f : cli::families()) {
         EXPECT_TRUE(contains(text, "```text\n" + docs_page(f) + "```\n")) << f.name << ": docs/guide/cli.md is out of date";
     }
+}
+
+TEST(CliTest, InstallVerifyRunsEachSolverAgainstTheExactSolution) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"install", "verify", "--format", "json", "--kokkos-num-threads=2"});
+    ASSERT_EQ(r.status, 0) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_EQ(v["schema"].string, "mallard-install-verify");
+    EXPECT_EQ(v["version"].number, 1);
+    EXPECT_TRUE(v["passed"].boolean);
+    EXPECT_EQ(v["mallard"].string, mallard_version());
+    std::vector<std::string> names;
+    for (const json::Value & c : v["checks"].array) {
+        SCOPED_TRACE(c["name"].string + " " + c["detail"].string);
+        EXPECT_TRUE(c["passed"].boolean);
+        if (c["dim"].number != Mallard_DIM) continue;
+        names.push_back(c["name"].string);
+        if (c["name"].string == "run") {
+            EXPECT_NEAR(c["monitors"]["min_rho"].number, 0.125, 0.0025);
+            EXPECT_NEAR(c["monitors"]["max_mach"].number, 0.929, 0.05);
+            EXPECT_GT(c["steps"].number, 0);
+        }
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"environment", "run"}));
+}
+
+TEST(CliTest, InstallVerifyFailsTheChecksALauncherCannotRun) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"install", "verify", "--format", "json", "--launcher", "false"});
+    EXPECT_EQ(r.status, 1) << r.out << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_FALSE(v["passed"].boolean);
+    ASSERT_FALSE(v["checks"].array.empty());
+    for (const json::Value & c : v["checks"].array) {
+        EXPECT_FALSE(c["passed"].boolean) << c["name"].string;
+        EXPECT_EQ(c["detail"].string.rfind("exit 1", 0), 0u) << c["detail"].string;
+    }
+    const Result text = run({"install", "verify", "--launcher", "false"});
+    EXPECT_EQ(text.status, 1);
+    EXPECT_TRUE(contains(text.out, "The install does not work")) << text.out;
 }
 
 TEST(CliTest, TestOptionsOnItsPageReachGoogleTest) {
@@ -605,6 +646,33 @@ TEST(CliTest, InfoOfAMeshFileReportsItsQualityAndWritesIt) {
     EXPECT_TRUE(contains(not_a_mesh.err, "--mesh-fields takes a mesh file")) << not_a_mesh.err;
 }
 
+TEST(CliTest, InfoOfAMeshFileListsItsCaseViewBlocksWithTheirZones) {
+    SKIP_UNDER_MPI();
+    const std::string mesh =
+        source_dir() + (Mallard_DIM == 3 ? "/test/data/meshes/cyl3d.msh" : "/test/data/meshes/cyl2d.msh");
+    const Result r = run({"info", "--view", "view", "--format", "json", mesh}, true);
+    ASSERT_EQ(r.status, 0) << r.err;
+    const json::Value view = json::parse(r.out)["view"];
+    EXPECT_EQ(view["schema"].string, interfaces::CASE_VIEW.name);
+    EXPECT_TRUE(view["geometry_only"].boolean);
+    size_t zones = 0;
+    for (const json::Value & b : view["blocks"].array) {
+        if (b["kind"].string != "boundary") continue;
+        zones++;
+        EXPECT_EQ(b["zone"].string, b["name"].string);
+        EXPECT_TRUE(b["key"].is_null());
+        EXPECT_GT(b["cells"].number, 0.0);
+    }
+    EXPECT_GT(zones, 0u);
+}
+
+TEST(CliTest, GeometryOnlyChecksRefuseTheOptionsOfTheWholeCheck) {
+    SKIP_UNDER_MPI();
+    const Result r = run({"check", "input.toml", "--geometry-only", "--initial", "state"});
+    EXPECT_EQ(r.status, 2);
+    EXPECT_TRUE(contains(r.err, "--initial needs the whole check, not --geometry-only")) << r.err;
+}
+
 namespace {
 
 /** @brief The working directory moved to dir while it lives. */
@@ -639,8 +707,8 @@ void write_pack_case() {
     }
     input << "[[forces]]\nzone = \"cylinder\"\ninterval = 1\nfile = \"solut/forces.csv\"\n"
           << "[[probes]]\nname = \"pts\"\ntype = \"points\"\npoints_file = \"points.txt\"\ninterval = 1\n"
-          << "variables = [\"RHO\"]\n"
-          << "[[write_data]]\nprefix = \"solut/flow\"\nformat = \"vtu\"\ninterval = 2\nvariables = [\"RHO\"]\n"
+          << "fields = [\"RHO\"]\n"
+          << "[[write_data]]\nprefix = \"solut/flow\"\nformat = \"vtu\"\ninterval = 2\nfields = [\"RHO\"]\n"
           << "[[write_data]]\nprefix = \"solut/restart\"\nformat = \"restart\"\ninterval = 2\n";
 }
 
@@ -725,12 +793,56 @@ TEST(CliTest, PackReproducesARunBitForBit) {
     EXPECT_TRUE(has_row(tampered.out, {"case/run/points.txt", "differs from what the run read (its run block's SHA-256)"}))
         << tampered.out;
     EXPECT_TRUE(has_row(tampered.out, {"case/run/mallard.jsonl", "not in the manifest"})) << tampered.out;
+    const Result tampered_json = run({"pack", "--verify", "tampered.tar", "--format", "json"}, true);
+    EXPECT_EQ(tampered_json.status, 1);
+    const json::Value report = json::parse(tampered_json.out);
+    EXPECT_EQ(report["result"].string, "differs");
+    EXPECT_FALSE(report["problems"].array.empty()) << tampered_json.out;
     std::ofstream("study/run/points.txt", std::ios::app) << "\n";
     const Result changed = run({"pack", "study/run", "-o", "changed.tar"}, true);
     EXPECT_EQ(changed.status, 1);
     EXPECT_TRUE(contains(changed.err, "changed since the run read it")) << changed.err;
     EXPECT_FALSE(fs::exists("changed.tar"));
     EXPECT_FALSE(fs::exists("changed.tar.partial"));
+}
+
+TEST(CliTest, RunSetChangesSettingsAsCtlSetDoesAndPackRepeatsThem) {
+    SKIP_UNDER_MPI();
+    fs::create_directories("set_run");
+    {
+        const InDirectory in("set_run");
+        ASSERT_EQ(small_run().status, 0);
+        const Result r =
+            run({"-i", "small.toml", "--set", "n_steps=4", "--set=write_data.1.interval=1", "--kokkos-num-threads=1"}, true);
+        ASSERT_EQ(r.status, 0) << r.err;
+        for (const char * file : {"case/restart_000001.restart", "case/restart_000003.restart", "case/restart_000004.restart"}) {
+            EXPECT_TRUE(fs::exists(file)) << file;
+        }
+        EXPECT_FALSE(fs::exists("case/restart_000005.restart"));
+        std::vector<std::string> settings;
+        std::ifstream log("mallard.jsonl");
+        for (std::string line; std::getline(log, line);) {
+            const json::Value v = json::parse(line);
+            if (v["type"].string != "event" || v["kind"].string != "set") continue;
+            EXPECT_EQ(v["source"].string, "--set");
+            settings.push_back(v["setting"].string);
+        }
+        EXPECT_EQ(settings, (std::vector<std::string>{"n_steps=4", "write_data.1.interval=1"}));
+    }
+    if (std::system("tar --version > /dev/null 2>&1") == 0) {
+        const Result packed = run({"pack", "set_run", "-o", "set_run.tar", "--format", "json"}, true);
+        ASSERT_EQ(packed.status, 0) << packed.err;
+        EXPECT_EQ(json::parse(packed.out)["rerun"]["command"].string,
+                  "mallard -i small.toml --set n_steps=4 --set write_data.1.interval=1");
+    }
+    const InDirectory in("set_run");
+    // The checks of mallard ctl set: a key it does not change, or a setting without a value, is an input error
+    const Result refused = run({"-i", "small.toml", "--set", "n_steps=3", "--set", "cfl=0.5", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(refused.status, 1);
+    EXPECT_TRUE(contains(refused.err, "error E-INPUT: --set cfl: cannot be changed while the run goes on")) << refused.err;
+    const Result bare = run({"-i", "small.toml", "--set", "n_steps", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(bare.status, 1);
+    EXPECT_TRUE(contains(bare.err, "--set expected key=value, got 'n_steps'")) << bare.err;
 }
 
 TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
@@ -745,6 +857,7 @@ TEST(CliTest, ListFieldsGivesTheCatalogOrOneCasesFields) {
         {"MU_T", "kg m-1 s-1", "eddy viscosity", "[les]", "write_data"},
         {"MACH", "dimensionless", "Mach number", "every case", "write_data, post derive"},
         {"U", "m s-1", "velocity (vector)", "every case", "write_data, probes, statistics"},
+        {"VORTICITY", "s-1", "vorticity (vector)", "every case", "write_data, post derive"},
         {"Y_<s>", "dimensionless", "mass fraction of species s", "a mixture", "write_data, probes, statistics"},
         {"MASS_FLUX", "kg m-2 s-1", "normal mass flux", "[[probes]] on a surface or boundary zone", "probes"},
         {"MEAN_<A>", "A's", "time average of A", "[statistics] fields with A, or [[probes]] averaging A",
@@ -899,6 +1012,103 @@ TEST(CliTest, ListFieldsAndSpeciesNeedNoMesh) {
     EXPECT_EQ(names, (std::vector<std::string>{"H2", "H", "O", "O2", "OH", "H2O", "HO2", "H2O2", "AR", "N2"}));
 }
 
+namespace {
+
+/**
+ * @brief A reactor input of the repository, run from anywhere and cut short:
+ *        its mechanism by absolute path, fewer cells and a shorter time (the same keys).
+ */
+std::string short_reactor_input(const fs::path & file) {
+    const std::map<std::string, std::string> shorter = {
+        {"end_time", "2.0e-6"}, {"output_interval", "1.0e-6"}, {"cells", "16"}, {"samples", "4"}, {"repeats", "1"}};
+    std::istringstream in(read_file(file));
+    std::string out;
+    for (std::string line; std::getline(in, line);) {
+        const std::string key = line.substr(0, line.find_first_of(" ="));
+        if (key == "mechanism") {
+            const size_t open = line.find('"');
+            const fs::path mechanism = line.substr(open + 1, line.rfind('"') - open - 1);
+            line = "mechanism = \"" + (file.parent_path() / mechanism).lexically_normal().string() + "\"";
+        } else if (shorter.count(key)) {
+            line = key + " = " + shorter.at(key);
+        }
+        out += line + "\n";
+    }
+    return out;
+}
+
+/** @brief The line of the input's text that starts with this text, from 1. */
+size_t line_starting(const std::string & text, const std::string & start) {
+    std::istringstream in(text);
+    size_t n = 1;
+    for (std::string line; std::getline(in, line); n++) {
+        if (line.rfind(start, 0) == 0) return n;
+    }
+    return 0;
+}
+
+} // namespace
+
+TEST(CliTest, ReactorRejectsUnusedKeysAsARunDoes) {
+    SKIP_UNDER_MPI();
+    const std::string input = short_reactor_input(source_dir() + "/examples/h2_ignition/input.toml");
+    const auto with = [&](const std::string & after, const std::string & line) {
+        std::string text = input;
+        text.insert(text.find(after) + after.size(), line);
+        std::ofstream("reactor_keys.toml") << text;
+        return text;
+    };
+    fs::remove("reactor.csv");
+    const std::string misspelled = with("[chemistry]\n", "max_step = 1000\n");
+    const Result unused = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(unused.status, 1);
+    EXPECT_TRUE(contains(unused.err, "E-KEY-UNUSED")) << unused.err;
+    EXPECT_TRUE(contains(unused.err, "reactor_keys.toml: keys that are unknown or unused with these settings "
+                                     "(mallard check lists them all):\n  line " +
+                                         std::to_string(line_starting(misspelled, "max_step")) +
+                                         ": chemistry.max_step (did you mean chemistry.max_steps?)"))
+        << unused.err;
+    EXPECT_FALSE(fs::exists("reactor.csv"));
+
+    const std::string benchmark = with("atol = 1.0e-10\n", "[benchmark]\ncells = 16\nsamples = 4\nrepeats = 1\n"
+                                                           "dt = [1.0e-8]\nlane = 4\noutput = \"keys.csv\"\n");
+    const Result bench = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(bench.status, 1);
+    EXPECT_TRUE(contains(bench.err, "line " + std::to_string(line_starting(benchmark, "lane =")) +
+                                        ": benchmark.lane (did you mean benchmark.lanes?)"))
+        << bench.err;
+
+    std::string missing = input;
+    missing.replace(missing.find("\nend_time = "), 12, "\nend_tim = ");
+    std::ofstream("reactor_keys.toml") << missing;
+    const Result stopped = run({"reactor", "-i", "reactor_keys.toml", "--kokkos-num-threads=1"}, true);
+    EXPECT_EQ(stopped.status, 1);
+    EXPECT_TRUE(contains(stopped.err, "possibly misspelled:\n  line " +
+                                          std::to_string(line_starting(missing, "end_tim =")) +
+                                          ": reactor.end_tim (did you mean reactor.end_time?)"))
+        << stopped.err;
+}
+
+TEST(CliTest, EveryReactorInputOfTheRepositoryRunsClean) {
+    SKIP_UNDER_MPI();
+    if (!fs::exists(source_dir() + "/benchmarks")) GTEST_SKIP() << "no benchmarks in an install tree";
+    size_t ran = 0;
+    for (const char * dir : {"/examples", "/benchmarks"}) {
+        for (const auto & entry : fs::recursive_directory_iterator(source_dir() + dir)) {
+            if (entry.path().extension() != ".toml" || line_starting(read_file(entry.path()), "[reactor]") == 0) continue;
+            const std::string text = short_reactor_input(entry.path());
+            const size_t open = text.find("mechanism = \"") + 13;
+            if (!fs::exists(text.substr(open, text.find('"', open) - open))) continue;  // a mechanism fetched apart
+            std::ofstream("reactor_input.toml") << text;
+            const Result r = run({"reactor", "-i", "reactor_input.toml", "--kokkos-num-threads=1"}, true);
+            EXPECT_EQ(r.status, 0) << entry.path() << "\n" << r.err;
+            EXPECT_FALSE(contains(r.err, "E-")) << entry.path() << "\n" << r.err;
+            ran++;
+        }
+    }
+    EXPECT_GE(ran, 5u);
+}
+
 TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
     SKIP_UNDER_MPI();
     const Result text = run({"check", "--kokkos-num-threads=1"}, true);
@@ -923,6 +1133,59 @@ TEST(CliTest, CheckWithoutAnInputChecksTheEnvironment) {
     EXPECT_EQ(environment["dependencies"]["mpi"].string, file["run"]["dependencies"]["mpi"].string);
     EXPECT_EQ(environment["placement"].array.size(), 1u);
     EXPECT_EQ(environment["placement"].array[0]["threads"].number, 1);
+}
+
+TEST(CliTest, VersionJsonGivesTheBuildAndTheSchemaOfEveryInterface) {
+    SKIP_UNDER_MPI();
+    const Result plain = run({"--version"});
+    EXPECT_EQ(plain.status, 0) << plain.err;
+    EXPECT_EQ(plain.out, "Mallard " + mallard_version() + "\n");
+    EXPECT_EQ(run({"version"}).out, plain.out);
+    EXPECT_EQ(run({"version", "--format", "xml"}).status, 2);
+
+    const Result r = run({"version", "--format", "json"});
+    ASSERT_EQ(r.status, 0) << r.err;
+    const json::Value v = json::parse(r.out);
+    EXPECT_EQ(v["schema"].string, "mallard-capabilities");
+    EXPECT_EQ(v["mallard"]["version"].string, mallard_version());
+    EXPECT_EQ(v["build"]["dim"].number, Mallard_DIM);
+    for (const char * key : {"precision", "backend", "host_backend", "mpi", "gpu_aware_mpi", "nccl", "hdf5", "cgns", "zlib"}) {
+        EXPECT_TRUE(v["build"].has(key)) << key;
+    }
+    const auto & dims = v["dimensions"].array;
+    EXPECT_TRUE(std::any_of(dims.begin(), dims.end(), [](const json::Value & d) { return d.number == Mallard_DIM; }));
+    const json::Value & interfaces = v["interfaces"];
+    EXPECT_EQ(interfaces["capabilities"]["schema"].string, v["schema"].string);
+    EXPECT_EQ(interfaces["capabilities"]["version"].number, v["version"].number);
+    for (const std::string & name : interfaces.keys()) {
+        EXPECT_FALSE(interfaces[name]["schema"].string.empty()) << name;
+        EXPECT_GE(interfaces[name]["version"].number, 1.0) << name;
+    }
+    const auto commands = interfaces["run_control"]["commands"].array;
+    EXPECT_TRUE(std::any_of(commands.begin(), commands.end(), [](const json::Value & c) { return c.string == "set"; }));
+
+    // Each interface's own output carries the schema and version listed
+    const auto expect_listed = [&](const std::string & name, const json::Value & out) {
+        EXPECT_EQ(out["schema"].string, interfaces[name]["schema"].string) << name;
+        EXPECT_EQ(out["version"].number, interfaces[name]["version"].number) << name;
+    };
+    const Result check = run({"check", "--format", "json", "--kokkos-num-threads=1"}, true);
+    ASSERT_EQ(check.status, 0) << check.err;
+    const json::Value report = json::parse(check.out);
+    expect_listed("check_report", report);
+    EXPECT_EQ(v["build"].keys(), report["environment"]["build"].keys());
+    const Result keys = run({"list", "keys", "--format", "json"}, true);
+    ASSERT_EQ(keys.status, 0) << keys.err;
+    expect_listed("key_catalog", json::parse(keys.out));
+    ASSERT_EQ(small_run().status, 0);
+    std::ifstream log("mallard.jsonl");
+    std::string first;
+    std::getline(log, first);
+    const json::Value start = json::parse(first);
+    expect_listed("run_log", start);
+    expect_listed("run_block", start["provenance"]);
+    const Result directory = run({"info", ".", "--format", "json"}, true);
+    expect_listed("run_directory", json::parse(directory.out));
 }
 
 TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
@@ -1312,4 +1575,76 @@ TEST(CliTest, CompletionOffersTheKeyAndFieldCatalogs) {
         for (const std::string & w : keys) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
         for (const std::string & w : fields) EXPECT_TRUE(contains(script.out, "'" + w + "'")) << w;
     }
+}
+
+TEST(CliTest, CompletionOffersPostDeriveOnlyTheFieldsItWrites) {
+    SKIP_UNDER_MPI();
+    const Result listed = run({"list", "fields", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    std::vector<std::string> derived;
+    const json::Value catalog = json::parse(listed.out);
+    for (const json::Value & f : catalog["fields"].array) {
+        const std::vector<json::Value> & where = f["available"].array;
+        const bool writes =
+            std::any_of(where.begin(), where.end(), [](const json::Value & w) { return w.string == "post derive"; });
+        if (writes && f["name"].string.find('<') == std::string::npos) derived.push_back(f["name"].string);
+    }
+    std::sort(derived.begin(), derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "MACH") != derived.end());
+    ASSERT_TRUE(std::find(derived.begin(), derived.end(), "RHO") == derived.end());
+    auto expected = [&](const std::string & head) {
+        std::string out = " ";
+        for (const std::string & w : derived) out += head + w + " ";
+        return out;
+    };
+
+    const fs::path dir = fs::absolute("completion_derive");
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::vector<std::vector<std::string>> lines = {
+        {"post", "derive", "flow.vtkhdf", "--fields", ""},
+        {"post", "derive", "flow.vtkhdf", "--fields", "MACH,P0,"},
+        {"post", "derive", "flow.vtkhdf", "--fields", "=", "MACH,"},
+    };
+    std::vector<std::string> got;
+    const int status = bash_complete(dir, lines, got);
+    if (status != -1) {
+        ASSERT_EQ(status, 0);
+        EXPECT_EQ(got[0], expected(""));
+        EXPECT_EQ(got[1], expected("MACH,P0,"));
+        EXPECT_EQ(got[2], expected("MACH,"));
+    }
+
+    // zsh: the catalog the value of post derive --fields completes from, and its words
+    const Result zsh = run({"completion", "zsh"});
+    ASSERT_EQ(zsh.status, 0) << zsh.err;
+    std::ofstream(dir / "mallard.zsh") << zsh.out;
+    std::ofstream(dir / "driver.zsh") << "export LC_ALL=C\ncompdef() { :; }\nsource '" << (dir / "mallard.zsh").string() << "' || exit 1\n"
+                                      << "_mallard_value 'post derive' --fields || exit 1\n"
+                                      << "[[ $reply == @* ]] || exit 1\n_mallard_catalog ${reply#@}\n"
+                                      << "print -l -- ${(o)reply} | tr '\\n' ' '\n";
+    std::string zsh_out;
+    const int zsh_status = run_shell("zsh", "-f", dir / "driver.zsh", zsh_out);
+    if (zsh_status != -1) {
+        EXPECT_EQ(zsh_status, 0) << zsh_out;
+        EXPECT_EQ(" " + zsh_out, expected("")) << zsh_out;
+    }
+
+    // fish: the same, read from the script
+    const Result fish = run({"completion", "fish"});
+    ASSERT_EQ(fish.status, 0) << fish.err;
+    std::smatch option;
+    ASSERT_TRUE(std::regex_search(fish.out, option,
+                                  std::regex("__mallard_is \\\\'post derive\\\\'' -l fields "
+                                             "-a '\\(__mallard_list ([a-z_]+)\\)'")))
+        << fish.out;
+    std::smatch words;
+    ASSERT_TRUE(std::regex_search(fish.out, words,
+                                  std::regex("\n        case " + option[1].str() + "\n            printf '%s\\\\n' ([^\n]*)")))
+        << fish.out;
+    std::vector<std::string> fish_words;
+    std::istringstream in(words[1].str());
+    for (std::string w; in >> w;) fish_words.push_back(w.substr(1, w.size() - 2));
+    std::sort(fish_words.begin(), fish_words.end());
+    EXPECT_EQ(fish_words, derived);
 }

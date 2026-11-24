@@ -178,11 +178,16 @@ std::string Args::value_or(std::string_view name, const std::string & fallback) 
     return it == values.end() ? fallback : it->second;
 }
 
+std::vector<std::string> Args::every(std::string_view name) const {
+    const auto it = repeated.find(name);
+    return it == repeated.end() ? std::vector<std::string>{} : it->second;
+}
+
 const Command * find(const std::vector<std::string> & args, size_t & words_used) {
     const Command * best = nullptr;
     words_used = 0;
     for (const Command & c : commands()) {
-        const size_t n = matches(c.name, args);
+        const size_t n = std::max(matches(c.name, args), matches(c.alias, args));
         if (n > words_used) {
             best = &c;
             words_used = n;
@@ -224,10 +229,10 @@ bool parse(const Command & command, const std::vector<std::string> & args, Args 
                 return false;
             }
             out.values[std::string(option->name)] = "";
-        } else if (eq != std::string::npos) {
-            out.values[std::string(option->name)] = arg.substr(eq + 1);
-        } else if (i + 1 < args.size()) {
-            out.values[std::string(option->name)] = args[++i];
+        } else if (eq != std::string::npos || i + 1 < args.size()) {
+            const std::string value = eq != std::string::npos ? arg.substr(eq + 1) : args[++i];
+            out.values[std::string(option->name)] = value;
+            out.repeated[std::string(option->name)].push_back(value);
         } else {
             error = "option " + std::string(option->name) + " needs a value, " + std::string(option->value);
             return false;

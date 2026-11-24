@@ -13,16 +13,21 @@
 #include <Kokkos_Core.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #include "comm.h"
 #include "device_comm.h"
 #include "exact_sums.h"
+#include "scratch.h"
 
 TEST(CommTest, RanksAreNumberedFromZero) {
     EXPECT_GE(comm::rank(), 0);
@@ -68,6 +73,50 @@ void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & colum
     });
 }
 
+/** @brief terms, then `extra` rows of terms no sum may read: NaN, and too large for the fixed point of the others. */
+Kokkos::View<double *[2]> padded(const Kokkos::View<double *[2]> & terms, const uint32_t extra) {
+    const uint32_t n = static_cast<uint32_t>(terms.extent(0));
+    Kokkos::View<double *[2]> out("padded", n + extra);
+    Kokkos::parallel_for("pad", n + extra, KOKKOS_LAMBDA(const uint32_t i) {
+        for (int k = 0; k < 2; k++) out(i, k) = i < n ? terms(i, k) : (i % 2 ? Kokkos::Experimental::quiet_NaN_v<double> : 1e300);
+    });
+    return out;
+}
+
+}
+
+TEST(ExactSumsTest, UnitLeavesRoomForEveryRow) {
+    // 2^(62 - ceil(log2(n + 1))), as the host computed it in floating point before it was computed on the device
+    // (exact for these counts; near 2^49 rows, log2 of 2^b + 1 rounds to b)
+    for (uint64_t n = 0; n < 4100; n++) {
+        const double reference = std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n) + 1.0))));
+        ASSERT_EQ(exact_sums_unit(n), reference) << n;
+    }
+    for (int b = 12; b <= 40; b++) {
+        for (const int64_t d : {-1, 0, 1}) {
+            const uint64_t n = static_cast<uint64_t>(static_cast<int64_t>(uint64_t(1) << b) + d);
+            const double reference =
+                std::ldexp(1.0, 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n) + 1.0))));
+            EXPECT_EQ(exact_sums_unit(n), reference) << n;
+        }
+    }
+}
+
+TEST(ExactSumsTest, SumsOfRowsCountedOnTheDeviceAreThoseOfTheRowsAlone) {
+    // The rows past the count would make every sum NaN, and counting them would make the unit that of more rows
+    const std::array<double, 2> expected = {0x1.df11f45f4e617p+2, 0x1.8f5a74b891b44p+26};
+    const bool distributed = comm::size() > 1;
+    const auto terms = global_terms<Kokkos::View<double *[2]>>("terms");
+    const uint32_t n = static_cast<uint32_t>(terms.extent(0));
+    const auto rows = padded(terms, 1100);
+    Kokkos::View<uint32_t> count("count");
+    Kokkos::deep_copy(count, n);
+    for (const bool nccl : {false, comm::nccl_available() && distributed}) {
+        const ExactSums sums(2, static_cast<uint32_t>(rows.extent(0)), distributed, nccl);
+        sums.sum(rows, count);
+        const auto a = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.sums());
+        for (size_t k = 0; k < 2; k++) EXPECT_EQ(a(k), expected[k]) << "column " << k << (nccl ? ", NCCL" : "");
+    }
 }
 
 TEST(ExactSumsTest, SumsAreTheSameBitForBitOnAnyNumberOfRanks) {
@@ -154,9 +203,7 @@ TEST(CommTest, FileWritesGoInPieces) {
         displacements[i] = MPI_Aint(2 * (first + i) * sizeof(double));
     }
     const std::string header = "head!";
-    const std::string filename =
-        (std::filesystem::temp_directory_path() / ("mallard_comm_test_" + comm::broadcast(std::to_string(getpid()))))
-            .string();
+    const std::string filename = (scratch_dir() / "pieces.bin").string();
     MPI_File fh;
     ASSERT_EQ(MPI_File_open(comm::communicator(), filename.c_str(), MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh),
               MPI_SUCCESS);
@@ -182,8 +229,50 @@ TEST(CommTest, FileWritesGoInPieces) {
             EXPECT_EQ(read_keys[g], 10 * g + 1);
             EXPECT_EQ(read_values[2 * g], 0.5 * double(g));
         }
-        std::filesystem::remove(filename);
     }
-    comm::barrier();
 }
 #endif
+
+TEST(CommTest, SharedDirectoriesAreRemovedOrFailAlikeOnEveryRank) {
+    const std::filesystem::path dir = scratch_dir() / "shared";
+    if (comm::is_root()) {
+        std::filesystem::create_directories(dir / "sub");
+        std::ofstream(dir / "sub" / "file") << "x";
+    }
+    EXPECT_EQ(remove_shared_directory(dir), "");
+    if (comm::is_root()) {
+        EXPECT_FALSE(std::filesystem::exists(dir));
+    }
+    // A name no file system takes: rank 0's failure reaches every rank, and nothing throws
+    std::string failure;
+    EXPECT_NO_THROW(failure = remove_shared_directory(scratch_dir() / std::string(300, 'x')));
+    EXPECT_NE(failure, "");
+    EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
+}
+
+TEST(CommTest, SharedDirectoryWithAFileStillOpenIsKeptOnEveryRank) {
+    // Shared storage cannot remove a file a process has open, so no file system does
+    const std::filesystem::path dir = scratch_dir() / "open";
+    if (comm::is_root()) std::filesystem::create_directories(dir);
+    comm::barrier();
+    const std::string name = "held" + std::to_string(comm::rank());
+    auto kept = [&](const std::string & failure) {
+        EXPECT_NE(failure.find(name), std::string::npos) << failure;
+        EXPECT_EQ(comm::allgather(failure), std::vector<std::string>(size_t(comm::size()), failure));
+        EXPECT_TRUE(std::filesystem::exists(dir / name));
+    };
+    {
+        std::ofstream out(dir / name);
+        out << "x" << std::flush;
+        kept(remove_shared_directory(dir));
+    }
+    // A mapping outlives its descriptor
+    const int fd = ::open((dir / name).c_str(), O_RDONLY);
+    ASSERT_GE(fd, 0);
+    void * mapped = mmap(nullptr, 1, PROT_READ, MAP_PRIVATE, fd, 0);
+    ::close(fd);
+    ASSERT_NE(mapped, MAP_FAILED);
+    kept(remove_shared_directory(dir));
+    munmap(mapped, 1);
+    EXPECT_EQ(remove_shared_directory(dir), "");
+}

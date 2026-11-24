@@ -29,6 +29,7 @@
 #include "snapshot_block.h"
 #include "solver.h"
 #include "test_fixtures.h"
+#include "vtkhdf_series.h"
 
 /** @brief The bytes, as stored, of every dataset of an HDF5 output file (mesh or snapshot), by path. */
 inline std::map<std::string, std::vector<char>> h5_datasets(const std::string & filename) {
@@ -114,7 +115,10 @@ inline std::map<std::string, std::vector<char>> h5_all_datasets(const std::strin
     std::map<std::string, std::vector<char>> datasets;
     for (const auto & path : paths) {
         Handle object(H5Oopen(file, path.c_str(), H5P_DEFAULT), H5Oclose, path);
-        if (H5Iget_type(object) != H5I_DATASET || path == snapshot_block::DATASET) continue;
+        // The series' files are named after their prefix
+        if (H5Iget_type(object) != H5I_DATASET || path == snapshot_block::DATASET || path == vtkhdf_series::FILES_DATASET) {
+            continue;
+        }
         Handle dset(H5Dopen2(file, path.c_str(), H5P_DEFAULT), H5Dclose, path);
         Handle type(H5Dget_type(dset), H5Tclose, "H5Dget_type");
         Handle space(H5Dget_space(dset), H5Sclose, "H5Dget_space");

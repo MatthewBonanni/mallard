@@ -16,6 +16,7 @@
 #ifndef RUN_CONTROL_H
 #define RUN_CONTROL_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <thread>
@@ -33,6 +34,10 @@ enum Request : int { CHECKPOINT = 1, STOP = 2, COMMAND = 4, WALL_TIME = 8 };
 
 /** @brief Number of request bits, each carried by one value of the time-step reduction. */
 constexpr int N_REQUESTS = 4;
+
+/** @brief The commands the control socket takes, and the control files the run looks for. */
+inline constexpr std::array<const char *, 4> COMMANDS = {"status", "checkpoint", "stop", "set"};
+inline constexpr std::array<const char *, 2> FILES = {"STOP", "CHECKPOINT"};
 
 /** @brief Name of the control socket in the run directory. */
 inline constexpr const char * SOCKET_NAME = "mallard.sock";
@@ -65,17 +70,18 @@ int stop_signal();
 /** @brief "SIGTERM" etc. */
 std::string signal_name(int signal);
 
-/** @brief A command received on the control socket. */
+/** @brief A command received on the control socket, or read from the SET file. */
 struct Command {
-    std::string text;  // "checkpoint", "stop" or "set key=value ..."
-    int fd = -1;       // connection to answer, closed by reply()
+    std::string text;                     // "checkpoint", "stop" or "set key=value ..."
+    int fd = -1;                          // connection to answer, closed by reply(); -1: none
+    std::string source = "mallard ctl";   // in the run log's records of it
 };
 
 /** @brief Commands received since the last call; clears the COMMAND request. */
 std::vector<Command> take_commands();
 
-/** @brief Queues a command as the socket would, without a connection (tests). */
-void submit(const std::string & text);
+/** @brief Queues a command as the socket would, without a connection to reply to. */
+void submit(const std::string & text, const std::string & source = "mallard ctl");
 
 /** @brief Sends the reply and closes the connection. */
 void reply(Command & command, const std::string & text);
@@ -88,6 +94,7 @@ struct Status {
     int device = -1;               // CUDA or HIP device of rank 0, -1 for other backends
     std::string stop_conditions;
     std::vector<std::pair<std::string, std::string>> monitors;  // last progress row's diagnostics
+    std::vector<std::pair<std::string, std::string>> triggers;  // "trigger <name>" and its state
 };
 
 void publish(const Status & status);

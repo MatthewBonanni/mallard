@@ -3,12 +3,13 @@
 Observed orders of accuracy of Mallard's discretizations, measured against
 exact and manufactured solutions: every reconstruction on every cell type,
 the Euler and Navier-Stokes operators, the time integrators, boundary
-conditions, curved boundaries, remapping and gas mixtures. The methods are
+conditions, curved boundaries, remapping, gas mixtures and Lagrangian
+particles. The methods are
 described in the [theory manual](../theory/index.md); stability limits and
 other measurements are in [Numerical methods](../numerics/overview.md).
 
 <!-- BEGIN GENERATED summary -->
-165 convergence studies from commit `e70d2ca7-dirty` (2026-11-15): all within their tests' bounds.
+232 convergence studies from commit `3765aa8` (2026-11-13): all within their tests' bounds.
 <!-- END GENERATED summary -->
 
 ## How the tables are made
@@ -283,6 +284,8 @@ the reconstruction's), and the viscous residual of Poiseuille pipe flow.
 | TENO3 | triangles | mean residual error, manufactured solution | 16 → 32 | 2.33e-02 → 4.83e-03 | 2 | 2.27 | > 1.7 | pass |
 | TENO4 | triangles | mean residual error, manufactured solution | 16 → 32 | 7.91e-03 → 7.38e-04 | 3 | 3.42 | > 2.7 | pass |
 | TENO5 | triangles | mean residual error, manufactured solution | 16 → 32 | 8.73e-03 → 5.94e-05 | 4 | 7.20 | > 3.7 | pass |
+| TENO3 | quadrilaterals, curved walls | mean residual error, spherical shell | 8 → 16 | 2.70e-03 → 4.25e-04 | 2 | 2.67 | > 1.7 | pass |
+| TENO4 | quadrilaterals, curved walls | mean residual error, spherical shell | 8 → 16 | 7.15e-04 → 8.14e-05 | 3 | 3.14 | > 2.7 | pass |
 <!-- END GENERATED table-axisymmetric -->
 
 ## Curved boundaries
@@ -302,40 +305,40 @@ in the cells whose stencils reach a curved wall.
 | P2 walls | quadrilaterals | annulus area error | 16 → 32 | 1.42e-04 → 8.90e-06 | 4 | 4.00 | > 3.8 | pass |
 | P3 walls | quadrilaterals | annulus area error | 16 → 32 | 2.09e-05 → 1.32e-06 | 4 | 3.99 | > 3.8 | pass |
 | straight walls | quadrilaterals | annulus area error | 32 → 64 | 1.84e-02 → 4.62e-03 | 2 | 2.00 | 1.95 to 2.05 | pass |
-| TENO3, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.69e-03 → 3.69e-04 | 3 | 2.87 | > 2.5 | pass |
-| TENO3, curved walls (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 7.29e-05 → 9.15e-06 | 3 | 2.99 | > 2.5 | pass |
+| TENO3, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 3.27e-03 → 4.34e-04 | 3 | 2.91 | > 2.5 | pass |
+| TENO3, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 5.89e-04 → 8.01e-05 | 3 | 2.88 | > 2.5 | pass |
 | TENO3, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.21e-02 → 1.08e-02 | 2 | 1.03 | < 2.3 | pass |
-| TENO3, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 5.79e-03 → 2.88e-03 | 2 | 1.01 | < 2.3 | pass |
-| TENO4, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 8.98e-04 → 4.82e-05 | 4 | 4.22 | > 3.5 | pass |
-| TENO4, curved walls (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 9.14e-06 → 5.66e-07 | 4 | 4.01 | > 3.5 | pass |
+| TENO3, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.17e-02 → 5.79e-03 | 2 | 1.01 | < 2.3 | pass |
+| TENO4, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.37e-03 → 7.22e-05 | 4 | 4.24 | > 3.5 | pass |
+| TENO4, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 2.51e-04 → 1.06e-05 | 4 | 4.56 | > 3.5 | pass |
 | TENO4, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.53e-02 → 7.50e-03 | 2 | 1.03 | < 2.3 | pass |
-| TENO4, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 4.24e-03 → 2.08e-03 | 2 | 1.03 | < 2.3 | pass |
-| TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 1.67e-03 → 9.39e-06 | 5 | 7.48 | > 4.5 | pass |
-| TENO5, curved walls (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 8.16e-07 → 2.82e-08 | 5 | 4.85 | > 4.5 | pass |
-| TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 8 → 16 | 8.98e-05 → 5.19e-06 | 4 | 4.11 | 3.5 to 4.5 | pass |
-| TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 8 → 16 | 9.39e-06 → 3.41e-07 | 5 | 4.78 | > 4.5 | pass |
+| TENO4, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 8.91e-03 → 4.24e-03 | 2 | 1.07 | < 2.3 | pass |
+| TENO5, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
+| TENO5, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 3.47e-05 → 1.05e-06 | 5 | 5.05 | > 4.5 | pass |
+| TENO5, curved walls, wall degree 3 | quadrilaterals | max wall-value error | 4 → 8 | 1.42e-03 → 7.52e-05 | 4 | 4.23 | 3.5 to 4.5 | pass |
+| TENO5, curved walls, wall degree 4 | quadrilaterals | max wall-value error | 4 → 8 | 7.00e-04 → 9.72e-06 | 5 | 6.17 | > 4.5 | pass |
 | TENO5, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 2.16e-02 → 1.06e-02 | 2 | 1.03 | < 2.3 | pass |
-| TENO5, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 5.76e-03 → 2.76e-03 | 2 | 1.06 | < 2.3 | pass |
-| TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.35e-03 → 3.19e-06 | 6 | 9.53 | > 5.5 | pass |
-| TENO6, curved walls (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 3.55e-07 → 5.03e-09 | 6 | 6.14 | > 5.5 | pass |
+| TENO5, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.18e-02 → 5.76e-03 | 2 | 1.03 | < 2.3 | pass |
+| TENO6, curved walls | quadrilaterals | max wall-value error | 4 → 8 | 2.13e-03 → 1.43e-05 | 6 | 7.22 | > 5.5 | pass |
+| TENO6, curved walls (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 5.51e-05 → 8.21e-07 | 6 | 6.07 | > 5.5 | pass |
 | TENO6, straight-sided cells | quadrilaterals | max wall-value error | 4 → 8 | 1.93e-02 → 8.96e-03 | 2 | 1.11 | < 2.3 | pass |
-| TENO6, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 12 → 24 | 4.53e-03 → 2.26e-03 | 2 | 1.00 | < 2.3 | pass |
-| TENO3, curved walls | triangles | max wall-value error | 4 → 8 | 1.68e-03 → 2.49e-04 | 3 | 2.75 | > 2.5 | pass |
-| TENO3, curved walls (ellipses) | triangles | max wall-value error | 12 → 24 | 3.46e-05 → 4.37e-06 | 3 | 2.99 | > 2.5 | pass |
+| TENO6, straight-sided cells (ellipses) | quadrilaterals | max wall-value error | 6 → 12 | 1.00e-02 → 4.53e-03 | 2 | 1.14 | < 2.3 | pass |
+| TENO3, curved walls | triangles | max wall-value error | 4 → 8 | 2.47e-03 → 3.30e-04 | 3 | 2.91 | > 2.5 | pass |
+| TENO3, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 3.48e-04 → 5.11e-05 | 3 | 2.77 | > 2.5 | pass |
 | TENO3, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.76e-02 → 8.85e-03 | 2 | 0.99 | < 2.3 | pass |
-| TENO3, straight-sided cells (ellipses) | triangles | max wall-value error | 12 → 24 | 5.23e-03 → 2.62e-03 | 2 | 0.99 | < 2.3 | pass |
-| TENO4, curved walls | triangles | max wall-value error | 4 → 8 | 5.36e-04 → 3.41e-05 | 4 | 3.97 | > 3.5 | pass |
-| TENO4, curved walls (ellipses) | triangles | max wall-value error | 12 → 24 | 4.10e-06 → 2.49e-07 | 4 | 4.04 | > 3.5 | pass |
+| TENO3, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.03e-02 → 5.23e-03 | 2 | 0.97 | < 2.3 | pass |
+| TENO4, curved walls | triangles | max wall-value error | 4 → 8 | 5.68e-04 → 4.27e-05 | 4 | 3.73 | > 3.5 | pass |
+| TENO4, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 9.56e-05 → 6.14e-06 | 4 | 3.96 | > 3.5 | pass |
 | TENO4, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.32e-02 → 1.17e-02 | 2 | 0.98 | < 2.3 | pass |
-| TENO4, straight-sided cells (ellipses) | triangles | max wall-value error | 12 → 24 | 5.51e-03 → 2.80e-03 | 2 | 0.97 | < 2.3 | pass |
-| TENO5, curved walls | triangles | max wall-value error | 4 → 8 | 1.27e-04 → 4.53e-06 | 5 | 4.81 | > 4.5 | pass |
-| TENO5, curved walls (ellipses) | triangles | max wall-value error | 12 → 24 | 5.30e-07 → 1.78e-08 | 5 | 4.89 | > 4.5 | pass |
+| TENO4, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.04e-02 → 5.51e-03 | 2 | 0.92 | < 2.3 | pass |
+| TENO5, curved walls | triangles | max wall-value error | 4 → 8 | 1.91e-04 → 7.51e-06 | 5 | 4.67 | > 4.5 | pass |
+| TENO5, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 1.60e-05 → 5.44e-07 | 5 | 4.88 | > 4.5 | pass |
 | TENO5, straight-sided cells | triangles | max wall-value error | 4 → 8 | 2.22e-02 → 1.10e-02 | 2 | 1.01 | < 2.3 | pass |
-| TENO5, straight-sided cells (ellipses) | triangles | max wall-value error | 12 → 24 | 5.67e-03 → 2.80e-03 | 2 | 1.02 | < 2.3 | pass |
-| TENO6, curved walls | triangles | max wall-value error | 4 → 8 | 1.01e-04 → 8.62e-07 | 6 | 6.87 | > 5.5 | pass |
-| TENO6, curved walls (ellipses) | triangles | max wall-value error | 12 → 24 | 7.64e-08 → 1.24e-09 | 6 | 5.94 | > 5.5 | pass |
+| TENO5, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 1.04e-02 → 5.67e-03 | 2 | 0.88 | < 2.3 | pass |
+| TENO6, curved walls | triangles | max wall-value error | 4 → 8 | 2.81e-04 → 1.40e-06 | 6 | 7.65 | > 5.5 | pass |
+| TENO6, curved walls (ellipses) | triangles | max wall-value error | 6 → 12 | 3.74e-06 → 5.56e-08 | 6 | 6.07 | > 5.5 | pass |
 | TENO6, straight-sided cells | triangles | max wall-value error | 4 → 8 | 1.71e-02 → 9.25e-03 | 2 | 0.89 | < 2.3 | pass |
-| TENO6, straight-sided cells (ellipses) | triangles | max wall-value error | 12 → 24 | 4.76e-03 → 2.32e-03 | 2 | 1.04 | < 2.3 | pass |
+| TENO6, straight-sided cells (ellipses) | triangles | max wall-value error | 6 → 12 | 9.52e-03 → 4.76e-03 | 2 | 1.00 | < 2.3 | pass |
 | quadratic walls | hexahedra | spherical shell volume error | 4 → 8 | 9.63e-03 → 6.07e-04 | 4 | 3.99 | > 3.7 | pass |
 | straight walls | hexahedra | spherical shell volume error | 4 → 8 | 6.48e-01 → 1.66e-01 | 2 | 1.96 | 1.85 to 2.15 | pass |
 | quadratic walls | prisms | spherical shell volume error | 4 → 8 | 4.63e-03 → 2.91e-04 | 4 | 3.99 | > 3.7 | pass |
@@ -382,6 +385,163 @@ and the species reach the scheme's order.
 | TENO3 | hexahedra | L1 density error | 8 → 16 | 1.50e-03 → 2.49e-04 | 3 | 2.60 | > 2.4 | pass |
 <!-- END GENERATED table-mixtures -->
 
+## Lagrangian particles
+
+The particles ([theory](../theory/particles.md)) against exact trajectories.
+In time, in flows that every reconstruction represents exactly, so that the
+error is the integrator's alone: tracers and solid particles of
+$\tau = 0.2$ (Stokes drag) in a uniform gas whose velocity turns at the rate
+$2\pi$ by a body force, after one turn, against the closed-form pathlines and
+the lagging inertial solution; the same with $\tau = 0.02$ and
+$\Delta t / \tau = 1/2$ to $1/8$, just below the switch to exponential
+integration at $\Delta t = \tau$; Stokes settling from rest, against
+$v_t (1 - e^{-t/\tau})$; and particles started at rest in a uniform stream
+at a slip Reynolds number of 20, Schiller-Naumann drag, against the same
+equation integrated in 20,000 steps. Each with three step sizes, observed on
+the finest pair:
+
+<!-- BEGIN GENERATED matrix-particles-time -->
+| | Tracer pathlines | Drag relaxation, position | Drag relaxation, velocity | Near the stiff limit |
+|---|---|---|---|---|
+| FE (design 1) | 1.03 | 1.05 | 1.05 | 1.02 |
+| SSPRK3 (design 3) | 2.97 | 3.00 | 3.00 | 2.98 |
+| RDPK3Sp35 (design 3) | 2.98 | 3.00 | 3.00 | 2.99 |
+| RK4 (design 4) | 3.96 | 4.00 | 4.00 | 3.98 |
+| SSPRK54 (design 4) | 3.97 | 4.00 | 4.00 | 3.99 |
+| CK45 (design 4) | 3.98 | 4.00 | 4.00 | 3.99 |
+<!-- END GENERATED matrix-particles-time -->
+
+![Particle trajectories against the number of steps, by integrator](../images/verification/particles-time-light.svg#gh-light-mode-only)
+![Particle trajectories against the number of steps, by integrator](../images/verification/particles-time-dark.svg#gh-dark-mode-only)
+
+Above the switch ($\tau < \Delta t$) a particle's relaxation is integrated
+**exponentially** within the step, exactly for a gas velocity and force
+linear in time over it: particles of $\tau = 0.002$ in the turning flow, at
+$\Delta t / \tau = 12.5$ to $3.1$ where RK4 alone is unstable, converge to
+their inertial trajectories, lag behind the gas included, at orders 2.90
+(position) and 2.79 (velocity) on the finest pair. A bounce is located within the step, and is exact to round-off
+for drag in gas at rest and constant acceleration (`test/particles_test.cpp`).
+
+![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-light.svg#gh-light-mode-only)
+![Particles near the switch to exponential integration, and above it](../images/verification/particles-stiff-dark.svg#gh-dark-mode-only)
+
+In space: the gas velocity the particles read at their positions (9 x 9
+particles in 2D, 9 x 9 x 4 in 3D, at positions unrelated to the cells) in a
+smooth periodic field, which isolates the interpolation from the
+reconstruction polynomials, and the pathlines of tracers circling in a compact
+steady vortex (the exact solution of the Euler equations of the advection
+tests' kind, $\omega(r) = 4 (1 - r^2/0.45^2)^4$) for $t = 0.5$, RK4 with
+$\Delta t \propto h^{\max(1, p/4)}$, which includes the flow's own error.
+TENO of order $k$ gives the particles its central polynomial of degree
+$k - 1$, so order $k$; first order and MUSCL give them the linear
+least-squares fit of the viscous gradients, order 2:
+
+On uniform hexahedra the symmetric stencils make the linear fit and TENO4
+converge faster than designed at these resolutions.
+
+<!-- BEGIN GENERATED matrix-particles-interpolation -->
+| | Quadrilaterals | Triangles | Hexahedra | Tetrahedra |
+|---|---|---|---|---|
+| FO (design 2) | 2.21 | 2.17 | 3.07 | 1.96 |
+| MUSCL (design 2) | 2.21 | 2.17 | 3.07 | 1.96 |
+| TENO3 (design 3) | 2.95 | 2.99 | 2.97 | 3.10 |
+| TENO4 (design 4) | 4.17 | 4.12 | 5.23 | 3.98 |
+| TENO5 (design 5) | 4.92 | 4.98 | 4.99 | 5.00 |
+<!-- END GENERATED matrix-particles-interpolation -->
+
+![Gas velocity at the particles under mesh refinement, by cell type](../images/verification/particles-interpolation-light.svg#gh-light-mode-only)
+![Gas velocity at the particles under mesh refinement, by cell type](../images/verification/particles-interpolation-dark.svg#gh-dark-mode-only)
+
+A pathline is no more accurate than the flow: with first-order fluxes the
+vortex itself diffuses at first order, and so do its pathlines, although the
+particles read a second-order fit. In 3D the pathlines run on hexahedra only:
+on tetrahedra at affordable resolutions (12 to 48 cells across) the vortex
+flow's own error sets theirs (MUSCL with HLLC fluxes converges at about 1.2),
+and the interpolation study above covers the particles there.
+
+<!-- BEGIN GENERATED matrix-particles-pathlines -->
+| | Quadrilaterals | Triangles | Hexahedra | Tetrahedra |
+|---|---|---|---|---|
+| FO (design 1) | 0.94 | 0.94 | 0.92 | – |
+| MUSCL (design 2) | 2.32 | 2.28 | 3.19 | – |
+| TENO3 (design 3) | 2.94 | 3.20 | 2.99 | – |
+| TENO4 (design 4) | 3.95 | 4.57 | 3.93 | – |
+| TENO5 (design 5) | 4.84 | 5.09 | 4.85 | – |
+<!-- END GENERATED matrix-particles-pathlines -->
+
+![Tracer pathlines in a compact vortex under mesh refinement, by cell type](../images/verification/particles-pathlines-light.svg#gh-light-mode-only)
+![Tracer pathlines in a compact vortex under mesh refinement, by cell type](../images/verification/particles-pathlines-dark.svg#gh-dark-mode-only)
+
+<!-- BEGIN GENERATED table-particles -->
+| Method | Cells | Error | Resolutions | Errors | Design | Observed | Asserted | Result |
+|---|---|---|---|---|---|---|---|---|
+| FO | quadrilaterals | max gas-velocity error at the particles | 16 → 32 → 64 | 2.10e-03 → 6.69e-04 → 1.45e-04 | 2 | 2.21 | > 1.75 | pass |
+| MUSCL | quadrilaterals | max gas-velocity error at the particles | 16 → 32 → 64 | 2.10e-03 → 6.69e-04 → 1.45e-04 | 2 | 2.21 | > 1.75 | pass |
+| TENO3 | quadrilaterals | max gas-velocity error at the particles | 16 → 32 → 64 | 1.78e-03 → 2.22e-04 → 2.87e-05 | 3 | 2.95 | > 2.75 | pass |
+| TENO4 | quadrilaterals | max gas-velocity error at the particles | 16 → 32 → 64 | 1.90e-04 → 2.03e-05 → 1.13e-06 | 4 | 4.17 | > 3.75 | pass |
+| TENO5 | quadrilaterals | max gas-velocity error at the particles | 16 → 32 → 64 | 2.13e-04 → 6.84e-06 → 2.26e-07 | 5 | 4.92 | > 4.75 | pass |
+| FO | triangles | max gas-velocity error at the particles | 16 → 32 → 64 | 2.26e-03 → 5.49e-04 → 1.22e-04 | 2 | 2.17 | > 1.75 | pass |
+| MUSCL | triangles | max gas-velocity error at the particles | 16 → 32 → 64 | 2.26e-03 → 5.49e-04 → 1.22e-04 | 2 | 2.17 | > 1.75 | pass |
+| TENO3 | triangles | max gas-velocity error at the particles | 16 → 32 → 64 | 5.83e-04 → 7.51e-05 → 9.46e-06 | 3 | 2.99 | > 2.75 | pass |
+| TENO4 | triangles | max gas-velocity error at the particles | 16 → 32 → 64 | 7.62e-05 → 7.99e-06 → 4.59e-07 | 4 | 4.12 | > 3.75 | pass |
+| TENO5 | triangles | max gas-velocity error at the particles | 16 → 32 → 64 | 9.35e-05 → 3.13e-06 → 9.95e-08 | 5 | 4.98 | > 4.75 | pass |
+| FO | hexahedra | max gas-velocity error at the particles | 8 → 16 → 32 | 3.04e-02 → 5.46e-03 → 6.51e-04 | 2 | 3.07 | > 1.5 | pass |
+| MUSCL | hexahedra | max gas-velocity error at the particles | 8 → 16 → 32 | 3.04e-02 → 5.46e-03 → 6.51e-04 | 2 | 3.07 | > 1.5 | pass |
+| TENO3 | hexahedra | max gas-velocity error at the particles | 8 → 16 → 32 | 2.35e-02 → 3.53e-03 → 4.50e-04 | 3 | 2.97 | > 2.5 | pass |
+| TENO4 | hexahedra | max gas-velocity error at the particles | 8 → 16 → 32 | 1.69e-02 → 1.11e-03 → 2.95e-05 | 4 | 5.23 | > 3.5 | pass |
+| TENO5 | hexahedra | max gas-velocity error at the particles | 8 → 16 → 32 | 1.85e-02 → 9.24e-04 → 2.91e-05 | 5 | 4.99 | > 4.5 | pass |
+| FO | tetrahedra | max gas-velocity error at the particles | 6 → 12 → 24 | 5.95e-02 → 1.74e-02 → 4.45e-03 | 2 | 1.96 | > 1.5 | pass |
+| MUSCL | tetrahedra | max gas-velocity error at the particles | 6 → 12 → 24 | 5.95e-02 → 1.74e-02 → 4.45e-03 | 2 | 1.96 | > 1.5 | pass |
+| TENO3 | tetrahedra | max gas-velocity error at the particles | 6 → 12 → 24 | 2.40e-02 → 3.63e-03 → 4.24e-04 | 3 | 3.10 | > 2.5 | pass |
+| TENO4 | tetrahedra | max gas-velocity error at the particles | 6 → 12 → 24 | 2.12e-02 → 1.46e-03 → 9.23e-05 | 4 | 3.98 | > 3.5 | pass |
+| TENO5 | tetrahedra | max gas-velocity error at the particles | 6 → 12 → 24 | 1.80e-02 → 8.88e-04 → 2.78e-05 | 5 | 5.00 | > 4.5 | pass |
+| FO | quadrilaterals | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 3.08e-02 → 1.71e-02 → 8.94e-03 | 1 | 0.94 | > 0.75 | pass |
+| MUSCL | quadrilaterals | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 6.79e-03 → 1.10e-03 → 2.20e-04 | 2 | 2.32 | > 1.75 | pass |
+| TENO3 | quadrilaterals | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 1.36e-02 → 1.89e-03 → 2.46e-04 | 3 | 2.94 | > 2.75 | pass |
+| TENO4 | quadrilaterals | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 2.59e-03 → 1.46e-04 → 9.48e-06 | 4 | 3.95 | > 3.75 | pass |
+| TENO5 | quadrilaterals | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 5.77e-03 → 2.60e-04 → 9.08e-06 | 5 | 4.84 | > 4.75 | pass |
+| FO | triangles | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 2.11e-02 → 9.78e-03 → 5.11e-03 | 1 | 0.94 | > 0.75 | pass |
+| MUSCL | triangles | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 8.02e-03 → 2.65e-03 → 5.44e-04 | 2 | 2.28 | > 1.75 | pass |
+| TENO3 | triangles | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 3.86e-03 → 5.33e-04 → 5.79e-05 | 3 | 3.20 | > 2.75 | pass |
+| TENO4 | triangles | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 9.24e-04 → 1.39e-04 → 5.88e-06 | 4 | 4.57 | > 3.75 | pass |
+| TENO5 | triangles | max pathline error, tracers in a compact vortex | 16 → 32 → 64 | 1.67e-03 → 6.33e-05 → 1.86e-06 | 5 | 5.09 | > 4.75 | pass |
+| FO | hexahedra | max pathline error, tracers in a compact vortex | 12 → 24 → 48 | 3.68e-02 → 2.20e-02 → 1.16e-02 | 1 | 0.92 | > 0.5 | pass |
+| MUSCL | hexahedra | max pathline error, tracers in a compact vortex | 12 → 24 → 48 | 1.44e-02 → 2.41e-03 → 2.64e-04 | 2 | 3.19 | > 1.5 | pass |
+| TENO3 | hexahedra | max pathline error, tracers in a compact vortex | 12 → 24 → 48 | 1.55e-02 → 2.33e-03 → 2.93e-04 | 3 | 2.99 | > 2.5 | pass |
+| TENO4 | hexahedra | max pathline error, tracers in a compact vortex | 12 → 24 → 48 | 8.06e-03 → 4.10e-04 → 2.70e-05 | 4 | 3.93 | > 3.5 | pass |
+| TENO5 | hexahedra | max pathline error, tracers in a compact vortex | 12 → 24 → 48 | 6.66e-03 → 3.36e-04 → 1.16e-05 | 5 | 4.85 | > 4.5 | pass |
+| CK45 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 5.69e-07 → 3.69e-08 → 2.34e-09 | 4 | 3.98 | > 3.85 | pass |
+| FE | – | max pathline error, tracers in a turning flow | 80 → 160 → 320 | 1.28e-02 → 6.15e-03 → 3.01e-03 | 1 | 1.03 | > 0.85 | pass |
+| RDPK3Sp35 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 1.10e-05 → 1.41e-06 → 1.78e-07 | 3 | 2.98 | > 2.85 | pass |
+| RK4 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 1.38e-06 → 9.08e-08 → 5.81e-09 | 4 | 3.96 | > 3.85 | pass |
+| SSPRK3 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 4.40e-05 → 5.79e-06 → 7.41e-07 | 3 | 2.97 | > 2.85 | pass |
+| SSPRK54 | – | max pathline error, tracers in a turning flow | 40 → 80 → 160 | 6.54e-07 → 4.25e-08 → 2.70e-09 | 4 | 3.97 | > 3.85 | pass |
+| RK4 | – | max position error, Schiller-Naumann step response | 25 → 50 → 100 | 6.69e-06 → 3.09e-07 → 1.66e-08 | 4 | 4.22 | > 3.85 | pass |
+| SSPRK3 | – | max position error, Stokes settling from rest | 10 → 20 → 40 | 2.55e-06 → 2.65e-07 → 3.00e-08 | 3 | 3.14 | > 2.85 | pass |
+| CK45 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 1.36e-08 → 8.65e-10 → 5.45e-11 | 4 | 3.99 | > 3.7 | pass |
+| FE | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 9.00e-03 → 4.38e-03 → 2.16e-03 | 1 | 1.02 | > 0.7 | pass |
+| RDPK3Sp35 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 6.50e-07 → 8.23e-08 → 1.04e-08 | 3 | 2.99 | > 2.7 | pass |
+| RK4 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 3.35e-08 → 2.15e-09 → 1.36e-10 | 4 | 3.98 | > 3.7 | pass |
+| SSPRK3 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 2.67e-06 → 3.42e-07 → 4.32e-08 | 3 | 2.98 | > 2.7 | pass |
+| SSPRK54 | – | max position error, drag relaxation near the stiff limit, dt/tau = 1/2 to 1/8 | 100 → 200 → 400 | 1.57e-08 → 9.98e-10 → 6.30e-11 | 4 | 3.99 | > 3.7 | pass |
+| CK45 | – | max position error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 4.56e-07 → 2.85e-08 → 1.78e-09 | 4 | 4.00 | > 3.85 | pass |
+| FE | – | max position error, drag relaxation, tau = 0.2 | 80 → 160 → 320 | 9.92e-03 → 4.65e-03 → 2.25e-03 | 1 | 1.05 | > 0.85 | pass |
+| RDPK3Sp35 | – | max position error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 8.68e-06 → 1.08e-06 → 1.35e-07 | 3 | 3.00 | > 2.85 | pass |
+| RK4 | – | max position error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 1.14e-06 → 7.12e-08 → 4.44e-09 | 4 | 4.00 | > 3.85 | pass |
+| SSPRK3 | – | max position error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 3.64e-05 → 4.55e-06 → 5.68e-07 | 3 | 3.00 | > 2.85 | pass |
+| SSPRK54 | – | max position error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 5.27e-07 → 3.29e-08 → 2.05e-09 | 4 | 4.00 | > 3.85 | pass |
+| RK4 | – | max velocity error, Schiller-Naumann step response | 25 → 50 → 100 | 3.59e-07 → 2.02e-08 → 1.18e-09 | 4 | 4.09 | > 3.85 | pass |
+| SSPRK3 | – | max velocity error, Stokes settling from rest | 10 → 20 → 40 | 2.55e-05 → 2.65e-06 → 3.00e-07 | 3 | 3.14 | > 2.85 | pass |
+| CK45 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 2.86e-06 → 1.78e-07 → 1.11e-08 | 4 | 4.00 | > 3.85 | pass |
+| FE | – | max velocity error, drag relaxation, tau = 0.2 | 80 → 160 → 320 | 6.27e-02 → 2.94e-02 → 1.43e-02 | 1 | 1.05 | > 0.85 | pass |
+| RDPK3Sp35 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 5.43e-05 → 6.78e-06 → 8.46e-07 | 3 | 3.00 | > 2.85 | pass |
+| RK4 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 7.13e-06 → 4.46e-07 → 2.78e-08 | 4 | 4.00 | > 3.85 | pass |
+| SSPRK3 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 2.27e-04 → 2.85e-05 → 3.55e-06 | 3 | 3.00 | > 2.85 | pass |
+| SSPRK54 | – | max velocity error, drag relaxation, tau = 0.2 | 40 → 80 → 160 | 3.30e-06 → 2.06e-07 → 1.29e-08 | 4 | 4.00 | > 3.85 | pass |
+| RK4, exponential | – | max position error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 2.34e-06 → 3.52e-07 → 4.72e-08 | 3 | 2.90 | > 2.6 | pass |
+| RK4, exponential | – | max velocity error, exponential integration, tau = 0.002, dt/tau = 12.5 to 3.1 | 20 → 40 → 80 | 8.27e-04 → 1.53e-04 → 2.21e-05 | 3 | 2.79 | > 2.6 | pass |
+<!-- END GENERATED table-particles -->
+
 ## Not covered
 
 - The reacting source terms in space (chemistry is verified as an ODE
@@ -391,3 +551,9 @@ and the species reach the scheme's order.
   which are tested for exactness and consistency, not for an order.
 - Discontinuous solutions, whose errors converge at order 1 or below
   regardless of the scheme; see the validation cases.
+- The exact properties of the particles, which have no order: tracers in
+  uniform flow, Stokes, Schiller-Naumann and Singh terminal velocities,
+  settling faster than the step, Ranz-Marshall heat transfer and a bounce
+  located within the step are exact to round-off in the test suite (`test/particles_test.cpp`), and the
+  [particle examples](../../examples/README.md#particles) compare with exact
+  trajectories.

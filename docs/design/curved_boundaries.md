@@ -227,9 +227,22 @@ digits at every level. With mirror images across the curved walls
 At Re = 100 the viscous layer is resolved by many cells, so curving the wall
 moves the drag by 0.1-0.3% (toward the incompressible 1.33-1.35). On the fine
 mesh, order 5 with straight walls is unstable (drag fluctuations of ±2.9);
-with curved walls it runs, with residual drag noise of rms 7e-4 from the far
-field (the instability noted in `docs/numerics/teno_e.md`, also there with
-mirrored far fields).
+with curved walls it runs. These runs once left order 5 a residual drag noise
+of rms 7e-4 from an odd-even mode of the far field's outermost ring. The
+mode is gone on main (#427). The 2D mirror-image rules and ranking metric of
+#434, which came after those runs, are the likely cause; this was not
+bisected. Rerun at t = 0-160 (`farfield` condition, both circles curved,
+`make_cylinder_mesh.py --order 2`):
+
+| Order | St | mean Cd | Cl' | Cd minus its 1-time-unit moving mean, rms |
+|---|---|---|---|---|
+| 3 | 0.1647 | 1.3629 | 0.334 | 5.3e-5 |
+| 5 | 0.1649 | 1.3627 | 0.334 | 5.9e-5 |
+
+The far field's outermost ring is as smooth at order 5 as at order 3: the
+sign-alternating part of its pressure's second difference, averaged over 9
+faces, stays below 7e-5 of the dynamic pressure up to t = 90, at both orders.
+Both then reach 5e-4 to 1.5e-3 where the wake leaves through the outflow.
 
 ### Mach 3 sphere
 
@@ -267,7 +280,6 @@ the sphere's facets are mirror planes of their own, beyond that limit.
 ## Limitations
 
 - Orders 5 and 6 are fourth order at curved walls (degree cap, above).
-- Axisymmetric runs reject curved boundaries.
 - A face that spans a crease of a region's surface (a box's edge, where the
   members of a union meet) is curved onto one side of it; zones should meet
   at creases.
