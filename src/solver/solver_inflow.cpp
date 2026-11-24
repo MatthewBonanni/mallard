@@ -108,9 +108,10 @@ std::vector<double> Solver::mass_flow_inlet_fluxes(const Input & bound, const st
     }
     std::unique_ptr<kexpr::Program> shape;
     if (bound.contains("profile")) {
-        shape = std::make_unique<kexpr::Program>(
-            where + ".profile", quantity_or_expression(bound.at("profile"), where + ".profile", dim::none),
-            BoundaryValue::variables(bound), BoundaryValue::hint, boundary_variable::FIRST_LOCAL);
+        shape = std::make_unique<kexpr::Program>(compile_expression(
+            where + ".profile", line_of(bound, "profile"),
+            quantity_or_expression(bound.at("profile"), where + ".profile", dim::none), BoundaryValue::variables(bound),
+            BoundaryValue::hint, boundary_variable::FIRST_LOCAL));
     }
     const bool profile_of_t = shape && shape->uses(boundary_variable::T);
     // Either of t: the faces' fluxes are recomputed on the device at every stage
