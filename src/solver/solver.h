@@ -1040,6 +1040,19 @@ class Solver {
          */
         void allocate_stage_scratch();
         void register_data();
+        /** @brief viscous_gradients, for the vertex gradient or the reconstruction's cell gradients. */
+        void allocate_viscous_gradients();
+        /**
+         * @brief The vertex gradient's weights, once every writer, probe and model is set up, if one of
+         *        them reads it (they take as much memory as the mesh's connectivity).
+         */
+        void init_vertex_gradient();
+        /** @brief The vertex gradient, which fills viscous_gradients from W_cells (init_vertex_gradient). */
+        const LSQVertexGradientFunctor & viscous_gradient() const;
+        /** @brief The host staging of Y_* and X_* that a writer or probe reads, once they are set up. */
+        void init_mixture_fractions();
+        /** @brief Stages Y_* (Y) and X_* (X) from now on, besides those staged already. */
+        void stage_mixture_fractions(bool Y, bool X);
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         RunEnd stop_reason() const;       // Empty while no stop condition holds
         rtype t_stop_reached() const;     // The run has reached t_stop once t is at least this
@@ -1431,7 +1444,7 @@ class Solver {
         memory::ScratchArena stage_scratch;
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
-        LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
+        LSQVertexGradientFunctor vertex_gradient;  // viscous_gradient(); without weights if nothing reads it
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;
@@ -1514,7 +1527,7 @@ class Solver {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output, when read
 
         // Chemistry (Strang splitting around each flow step)
         bool reacting = false;
