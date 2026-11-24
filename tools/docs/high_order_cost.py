@@ -12,15 +12,14 @@ scheme runs with HLLC, SSPRK3 and cfl = 1.0 (MUSCL unlimited: the flow is
 smooth). The error is the L2 norm of the density error over the box, against
 exact cell averages (a degree-5 rule on 16 subtriangles per cell). The cost
 of a run is its CPU time (user + system, setup, TENO-E stencils and output
-included) on --threads threads, which a busy machine disturbs less than its
-wall time (also recorded); runs under 30 s are the best of three. The cell
+included) on --threads threads, the fastest of three runs (all three are recorded,
+with the wall time). The cell
 count is the cost that does not depend on the machine. The measurements go
 to high_order_cost.json, which make_figures.py draws without running anything.
 """
 import argparse
 import json
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -193,7 +192,9 @@ def run_case(binary, mesh, recon, threads, work):
 
 def measure(binary, threads, schemes, results):
     """Runs the schemes named, replacing their earlier measurements in results."""
-    results = dict(results, machine=f"{platform.machine()} {platform.system()}, {threads} threads")
+    sys.path[:0] = [str(ROOT / "tools" / "perf")]
+    from work_precision import hardware
+    results = dict(results, machine=f"{threads} threads, {re.sub(r' \d+-Core Processor', '', hardware())}")
     results["runs"] = {k: v for k, v in results.get("runs", {}).items() if k not in schemes}
     with tempfile.TemporaryDirectory() as work:
         for n in sorted({n for k in schemes for n in SCHEMES[k]["meshes"]}):
@@ -203,10 +204,10 @@ def measure(binary, threads, schemes, results):
                 if name not in schemes or n not in s["meshes"]:
                     continue
                 tries = []
-                while not tries or (sum(t["wall"] for t in tries) < 30.0 and len(tries) < 3):  # short: best of 3
+                while len(tries) < 3:
                     with tempfile.TemporaryDirectory() as case:
                         tries.append(run_case(binary, mesh, s["recon"], threads, case))
-                r = min(tries, key=lambda t: t["cpu"])
+                r = dict(min(tries, key=lambda t: t["cpu"]), tries=[t["cpu"] for t in tries])
                 r["cells"] = 2 * n * n
                 results["runs"].setdefault(name, []).append(r)
                 print(f"{name:6s} {2 * n * n:7d} cells  error {r['error']:.3e}  cpu {r['cpu']:8.2f} s  "

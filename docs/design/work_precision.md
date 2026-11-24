@@ -7,10 +7,6 @@ smooth problem with an exact solution (the isentropic vortex) on four cell
 types and for a problem with a shock (Shu-Osher). Practical guidance from it is in
 [Performance: choosing a scheme for an accuracy target](../guide/performance.md#accuracy-target).
 
-The A100 runs cover the 2D cases, and on 3D hexahedra MUSCL and TENO-E 3
-and 4 only. The rest ([#1171](https://github.com/MatthewBonanni/mallard/issues/1171))
-was not run because the GPU was needed for other work.
-
 ## Results
 
 ![Error of the isentropic vortex on 2D squares against cells and wall time](../images/guide/work_precision_vortex_2d_quad-light.svg#gh-light-mode-only)
@@ -32,25 +28,24 @@ Wall time to reach each error, interpolated in log-log between the meshes
 around it; the cheapest scheme is in bold. "≤" means the coarsest mesh is
 already below the error, and "–" that the finest mesh did not reach it.
 
-**CPU, 2 threads** (the vortex on an Apple M4 Pro, the Shu-Osher problem on
-an AMD EPYC 7763):
+**CPU, 2 threads of an AMD EPYC 7763:**
 
 | Case | Error | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
 |---|---|---:|---:|---:|---:|---:|
-| 2D squares | 10<sup>-3</sup> | 0.13 s | 0.26 s | **0.081 s** | 0.21 s | 0.19 s |
-|  | 10<sup>-4</sup> | 2.2 s | 1.6 s | **0.31 s** | 0.82 s | 0.56 s |
-|  | 10<sup>-5</sup> | 40 s | 12.4 s | **1.1 s** | 2.9 s | 1.5 s |
-|  | 10<sup>-6</sup> | – | 106 s | 5.0 s | 9.8 s | **4.1 s** |
-| 2D triangles | 10<sup>-3</sup> | 1.5 s | 0.56 s | **0.11 s** | 0.33 s | 0.38 s |
-|  | 10<sup>-4</sup> | 34 s | 3.6 s | **0.53 s** | 1.5 s | 1.2 s |
-|  | 10<sup>-5</sup> | – | 27 s | **2.4 s** | 5.5 s | 3.9 s |
-|  | 10<sup>-6</sup> | – | 285 s | 12.1 s | 19.1 s | **11.8 s** |
-| 3D hexahedra | 10<sup>-3</sup> | 3.2 s | 7.3 s | **2.6 s** | 5.6 s | 6.9 s |
-|  | 10<sup>-4</sup> | 163 s | 140 s | **22 s** | 36 s | 32 s |
-|  | 10<sup>-5</sup> | – | – | **123 s** | 207 s | 141 s |
-| 3D tetrahedra | 10<sup>-3</sup> | 7.7 s | 6.2 s | **≤ 3.9 s** | 12.5 s | ≤ 14.9 s |
-|  | 10<sup>-4</sup> | 415 s | 86 s | **14.1 s** | 62 s | 33 s |
-|  | 10<sup>-5</sup> | – | – | **84 s** | 373 s | 96 s |
+| 2D squares | 10<sup>-3</sup> | 0.39 s | 0.72 s | **0.19 s** | 0.44 s | 0.33 s |
+|  | 10<sup>-4</sup> | 7.1 s | 4.5 s | **0.77 s** | 1.8 s | 1.1 s |
+|  | 10<sup>-5</sup> | 153 s | 38 s | **2.8 s** | 6.2 s | 3.5 s |
+|  | 10<sup>-6</sup> | – | 345 s | 12.3 s | 22 s | **10.4 s** |
+| 2D triangles | 10<sup>-3</sup> | 0.94 s | 0.87 s | **0.34 s** | 0.65 s | 0.58 s |
+|  | 10<sup>-4</sup> | 40 s | 7.5 s | **1.8 s** | 3.2 s | 2.1 s |
+|  | 10<sup>-5</sup> | – | 76 s | 8.7 s | 12.6 s | **6.5 s** |
+|  | 10<sup>-6</sup> | – | 855 s | 46 s | 46 s | **19.3 s** |
+| 3D hexahedra | 10<sup>-3</sup> | 9.9 s | 14.9 s | **6.0 s** | 12.5 s | 13.8 s |
+|  | 10<sup>-4</sup> | 564 s | 232 s | **49 s** | 90 s | 61 s |
+|  | 10<sup>-5</sup> | – | – | 362 s | 547 s | **301 s** |
+| 3D tetrahedra | 10<sup>-3</sup> | 17.0 s | 15.6 s | **≤ 7.9 s** | 28 s | ≤ 33 s |
+|  | 10<sup>-4</sup> | 868 s | 208 s | **32 s** | 132 s | 72 s |
+|  | 10<sup>-5</sup> | – | – | **206 s** | 811 s | 215 s |
 | Shu-Osher ($L_1$) | 3 × 10<sup>-2</sup> | 4.1 s | 4.6 s | **3.0 s** | 4.9 s | 7.0 s |
 |  | 10<sup>-2</sup> | 22 s | 18.7 s | **9.3 s** | 17.1 s | 22 s |
 |  | 3 × 10<sup>-3</sup> | 170 s | **142 s** | 151 s | 191 s | 309 s |
@@ -67,13 +62,16 @@ an AMD EPYC 7763):
 |  | 10<sup>-4</sup> | 0.84 s | 0.56 s | **0.38 s** | 0.43 s | 0.41 s |
 |  | 10<sup>-5</sup> | 43 s | 1.6 s | **0.53 s** | 0.64 s | 0.55 s |
 |  | 10<sup>-6</sup> | – | 8.5 s | 1.0 s | 1.2 s | **0.81 s** |
-| 3D hexahedra | 10<sup>-3</sup> | 0.80 s | 0.86 s | **0.56 s** |  |  |
-|  | 10<sup>-4</sup> | 14.8 s | 5.5 s | **1.4 s** |  |  |
-|  | 10<sup>-5</sup> | – | – | **5.7 s** |  |  |
+| 3D hexahedra | 10<sup>-3</sup> | 0.80 s | 0.86 s | **0.56 s** | 0.66 s | 0.73 s |
+|  | 10<sup>-4</sup> | 14.8 s | 5.5 s | **1.4 s** | 1.7 s | 1.6 s |
+|  | 10<sup>-5</sup> | – | – | 5.7 s | 6.0 s | **4.0 s** |
+| 3D tetrahedra | 10<sup>-3</sup> | 0.99 s | 0.79 s | **≤ 0.60 s** | 0.96 s | ≤ 1.1 s |
+|  | 10<sup>-4</sup> | 17.8 s | 3.9 s | **1.0 s** | 2.3 s | 1.7 s |
+|  | 10<sup>-5</sup> | – | 44 s | 3.4 s | 9.6 s | **3.3 s** |
 
 Measured order of accuracy between the two finest meshes of each sequence (CPU;
-the A100 runs give the same errors, and carry the 2D sequences one or two
-meshes further):
+the A100 runs give the same errors to 2 × 10<sup>-7</sup> relative, and carry
+most sequences one or two meshes further):
 
 | Case | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
 |---|---:|---:|---:|---:|---:|
@@ -83,33 +81,37 @@ meshes further):
 | 3D tetrahedra | 2.16 | 3.00 | 4.02 | 4.79 | 5.86 |
 | Shu-Osher | 1.09 | 0.90 | 0.37 | 0.76 | 0.70 |
 
-- **TENO-E 4 is the cheapest scheme** from 10<sup>-3</sup> to 10<sup>-5</sup>
-  on every cell type on the CPU, and at 10<sup>-4</sup> on the A100 (and at
-  10<sup>-5</sup> on triangles). It needs about as many cells as TENO-E 5 for
-  a given error, with a smaller stencil.
-- **TENO-E 6 takes over at the smallest errors**: at 10<sup>-6</sup> in 2D
-  on the CPU (TENO-E 4 takes 1.2 times as long on squares, 1.03 times on
-  triangles), and from 10<sup>-5</sup> on squares and 10<sup>-6</sup> on
-  triangles on the A100. In 3D it stays 1.15 times dearer than TENO-E 4
-  at 10<sup>-5</sup>.
+- **TENO-E 4 is the cheapest scheme** at 10<sup>-3</sup> and
+  10<sup>-4</sup> on every cell type, on the CPU and on the A100 (apart from
+  MUSCL at 10<sup>-3</sup> in 2D on the A100), and at 10<sup>-5</sup> on
+  squares and tetrahedra on the CPU and on triangles on the A100. It needs
+  about as many cells as TENO-E 5 for a given error, with a smaller stencil.
+- **TENO-E 6 takes over at the smallest errors**: on the CPU at
+  10<sup>-5</sup> on triangles and hexahedra (TENO-E 4 takes 1.3 and 1.2
+  times as long) and at 10<sup>-6</sup> in 2D (1.2 times on squares, 2.4
+  times on triangles); on the A100 from 10<sup>-5</sup> on squares and
+  hexahedra and at 10<sup>-6</sup> on triangles. On tetrahedra TENO-E 4 and 6
+  are within 5% of each other at 10<sup>-5</sup> on both.
 - **TENO-E 5**, the order of the `high_order` preset, is never the cheapest:
-  it costs 1.6 to 3.0 times TENO-E 4 on the CPU (up to 4.4 times on tetrahedra)
-  and 1.05 to 1.2 times on the A100. Order 5 is the preset for robustness,
-  not cost ([the order of `high_order`](teno4_robustness.md)).
-- **MUSCL** is the cheapest only at 10<sup>-3</sup> on the A100, where every
-  2D run takes 0.3 to 0.4 s whatever the scheme. At 10<sup>-4</sup> it costs
-  7 to 63 times TENO-E 4 on the CPU, and it does not reach 10<sup>-5</sup> on
-  triangles or in 3D within 20 min; on the A100 it costs 48 times TENO-E 4 at
-  10<sup>-6</sup> on squares.
+  it costs 1.0 to 2.3 times TENO-E 4 on the CPU in 2D and on hexahedra (3.5
+  to 4.1 times on tetrahedra) and 1.05 to 1.2 times on the A100 (1.6 to 2.8
+  times on tetrahedra). Order 5 is the preset for robustness, not cost
+  ([the order of `high_order`](teno4_robustness.md)).
+- **MUSCL** is the cheapest only at 10<sup>-3</sup> in 2D on the A100, where
+  every run takes 0.3 to 0.4 s whatever the scheme. At 10<sup>-4</sup> it
+  costs 9 to 27 times TENO-E 4 on the CPU, and it does not reach
+  10<sup>-5</sup> on triangles or in 3D within the budget; on the A100 it
+  costs 48 times TENO-E 4 at 10<sup>-6</sup> on squares.
 - **The A100** reaches 10<sup>-6</sup> on 2D squares with TENO-E 4 in 0.68 s,
-  7.3 times faster than 2 CPU threads (5.0 s). Its cost hardly grows below
+  18 times faster than 2 CPU threads (12.3 s). Its cost hardly grows below
   about 30,000 cells, where a run is mostly fixed cost, and its errors match
-  the CPU's to the digits printed. In 2D, 23 to 61% of a TENO-E run's wall
+  the CPU's to the digits printed. In 2D, 11 to 61% of a TENO-E run's wall
   time on the A100 is setup, which runs on the host
   ([#1031](https://github.com/MatthewBonanni/mallard/issues/1031)); on the
-  CPU it is 1 to 46% on squares and 1 to 31% on triangles.
-- **In 3D on the A100** the setup sets the cost. MUSCL reaches 10<sup>-4</sup>
-  on hexahedra in 14.8 s, 11 times faster than 2 CPU threads, but 85% of its
+  CPU it is 3 to 41% on squares and 1 to 29% on triangles.
+- **In 3D on the A100** the setup sets the cost: 38 to 78% of a TENO-E run
+  on hexahedra and 30 to 67% on tetrahedra. MUSCL reaches 10<sup>-4</sup> on
+  hexahedra in 14.8 s, 38 times faster than 2 CPU threads, but 85% of its
   finest run (1.77M cells) is setup; for TENO-E 3 the setup is 78% of the run
   on 221,184 cells and 74% on 1.77M. The host-side parts of the TENO-E setup
   on lattices are [#1079](https://github.com/MatthewBonanni/mallard/issues/1079)
@@ -187,22 +189,24 @@ the defaults of `[numerics.face_reconstruction]` apart from `order`.
   Every record of the data keeps its parts (`wall_setup`, `wall_stepping`) and
   the peak host and device memory. Progress rows every 50 steps (200 for
   Shu-Osher), the run report and the run health are on, as in a production
-  run. Runs shorter than 10 s are the fastest of three.
-- **CPU**: the vortex on 2 threads (Kokkos `Threads`) of an Apple M4 Pro
-  (14 cores), one run at a time on a machine shared with other jobs (a load
-  of 2 to 3 times its cores during the runs, so the wall times are higher
-  than on an idle machine and vary by up to a factor of 2; TENO-E 3 on
-  1024 × 1024 squares, which a load spike slowed tenfold, was run again),
-  Apple Clang 21, Release, double precision.
-  The Shu-Osher problem on 2 threads of an AMD EPYC 7763, each run pinned to
-  its own 2 cores, six runs at a time on otherwise idle cores, GCC 15.
+  run. Every vortex run on the CPU is the fastest of three, and the data
+  keeps all three times (`tries`); other runs shorter than 10 s are the
+  fastest of three.
+- **CPU**: 2 threads (Kokkos `Threads`) of an AMD EPYC 7763 (2 × 64 cores),
+  GCC 15, Release, double precision, in a container with dedicated CPUs on a
+  node otherwise nearly idle. Each run is pinned to 2 cores of its own core
+  complex (its own L3 cache), eight runs at a time for the vortex and six for
+  the Shu-Osher problem. The fastest and slowest of a run's three times
+  differ by a median of 0.6% and at most 5.4% for runs over 10 s.
 - **GPU**: one NVIDIA A100-SXM4-80GB, Kokkos CUDA (CUDA 13.5,
   `Kokkos_ARCH_AMPERE80`) with an OpenMP host on 16 threads; the step runs as
   a CUDA graph (the default).
 - **Meshes**: each sequence refines until the next mesh would take longer than
-  20 min on the CPU or 2 min on the GPU (5 min for MUSCL on 2D squares; the
-  previous run's time scaled by its cells and time steps), so the finest mesh
-  of a sequence is a matter of budget, not of accuracy.
+  33 min on the CPU (58 min for TENO-E 4 on triangles, TENO-E 4 and 5 on
+  hexahedra and TENO-E 4 and 6 on tetrahedra) or 2 min on the GPU (5 min for
+  MUSCL on 2D squares), the previous run's time scaled by its cells and time
+  steps, so the finest mesh of a sequence is a matter of budget, not of
+  accuracy.
 
 Script: `tools/perf/work_precision.py` (`run`, `reference`, `collect`); data:
 `tools/docs/work_precision.json`, one record per run with its run id, the

@@ -143,38 +143,38 @@ convected 2 units across a periodic 10 × 10 box of irregular triangles
 (nodes jittered by up to a quarter cell), with HLLC, SSPRK3 and `cfl = 1.0`
 for every scheme (MUSCL unlimited). Error: the L2 norm of the density cell
 averages at t = 2 against the exact solution. Cost: the CPU time of the
-whole run, setup and output included, on 2 threads of an Apple Silicon
-laptop shared with other jobs (hence CPU rather than wall time, also
-recorded). Script and data: `tools/docs/high_order_cost.py`.*
+whole run, setup and output included, on 2 pinned threads of an AMD EPYC
+7763, the fastest of three runs (the wall time is also recorded). Script and
+data: `tools/docs/high_order_cost.py`.*
 
 Read off the curves (interpolated between the measured meshes):
 
 | Error | FO | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
 |---|---|---|---|---|---|---|
-| 10<sup>-3</sup> | not reached (1.8 × 10<sup>-3</sup> on 524,288 cells, 301 s) | 6,300 cells, 0.66 s | 3,200 cells, 0.54 s | 1,100 cells, 0.20 s | 1,300 cells, 0.49 s | 850 cells, 0.46 s |
-| 10<sup>-4</sup> | not reached | 70,000 cells, 25.7 s | 15,500 cells, 4.4 s | 3,700 cells, 1.0 s | 4,100 cells, 2.2 s | 2,200 cells, 1.5 s |
-| 10<sup>-5</sup> | not reached | not reached | 73,000 cells, 42 s | 11,300 cells, 4.6 s | 11,100 cells, 8.1 s | 4,900 cells, 4.5 s |
+| 10<sup>-3</sup> | not reached (1.8 × 10<sup>-3</sup> on 524,288 cells, 1,080 s) | 6,300 cells, 1.96 s | 3,200 cells, 1.73 s | 1,100 cells, 0.69 s | 1,300 cells, 1.29 s | 850 cells, 1.17 s |
+| 10<sup>-4</sup> | not reached | 70,000 cells, 81 s | 15,500 cells, 14.9 s | 3,700 cells, 3.6 s | 4,100 cells, 6.3 s | 2,200 cells, 4.3 s |
+| 10<sup>-5</sup> | not reached | not reached | 73,000 cells, 151 s | 11,300 cells, 17.2 s | 11,100 cells, 25.0 s | 4,900 cells, 12.9 s |
 | Measured order (two finest meshes) | 0.96 | 1.90 (1.42 from 131,072 to 524,288 cells) | 3.00 | 3.92 | 4.89 | 6.02 |
 
 - **At an error of 10<sup>-4</sup>** TENO-E 5 needs 17 times fewer cells than
-  MUSCL and 11.7 times less CPU time; FO would need, at its measured first
+  MUSCL and 12.9 times less CPU time; FO would need, at its measured first
   order, about 430 times the cells of its finest run (some 230 million).
-- **FO's finest run** (524,288 cells, 301 s) has an error of 1.8 × 10<sup>-3</sup>;
-  TENO-E 5 has 5.0 × 10<sup>-4</sup> on 2,048 cells in 0.86 s.
-- **The crossover with second order:** above an error of about 1.6 × 10<sup>-3</sup>
-  (here, meshes under about 4,000 cells, some 4 cells per core radius of the
+- **FO's finest run** (524,288 cells, 1,080 s) has an error of 1.8 × 10<sup>-3</sup>;
+  TENO-E 5 has 5.0 × 10<sup>-4</sup> on 2,048 cells in 2.3 s.
+- **The crossover with second order:** above an error of about 1.8 × 10<sup>-3</sup>
+  (here, meshes under about 3,500 cells, some 4 cells per core radius of the
   vortex) MUSCL is as cheap as TENO-E 5 or cheaper; at 10<sup>-3</sup> it
-  already costs 1.35 times TENO-E 5's time. Below it the gap widens with every
+  already costs 1.5 times TENO-E 5's time. Below it the gap widens with every
   refinement, since each halving of h divides TENO-E 5's error by about 30
   and MUSCL's by about 4.
 - **Which order is cheapest:** TENO-E 4 from 10<sup>-3</sup> to
-  10<sup>-4</sup>, and TENO-E 4 and 6 alike at 10<sup>-5</sup> (4.6 and 4.5 s).
-  TENO-E 4 needs about as many cells as TENO-E 5 for a given error, at a
-  smaller stencil, and so reaches it in 0.4 to 0.6 times TENO-E 5's CPU time.
-  TENO-E 6 is cheaper than TENO-E 5 below an error of about 1.5 × 10<sup>-3</sup>
-  (0.56 times its time at 10<sup>-5</sup>) and, at the highest order, catches
-  up with TENO-E 4 as the error falls. TENO-E 3 is cheaper than TENO-E 5 only
-  above about 2 × 10<sup>-3</sup>.
+  10<sup>-4</sup>, and TENO-E 6 at 10<sup>-5</sup> (12.9 s, against 17.2 s
+  for TENO-E 4). TENO-E 4 needs about as many cells as TENO-E 5 for a given
+  error, at a smaller stencil, and so reaches it in 0.55 to 0.7 times TENO-E 5's
+  CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error of about
+  3 × 10<sup>-3</sup> (0.52 times its time at 10<sup>-5</sup>) and, at the
+  highest order, overtakes TENO-E 4 as the error falls. TENO-E 3 is cheaper
+  than TENO-E 5 only above about 3.5 × 10<sup>-3</sup>.
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
@@ -197,7 +197,7 @@ a flow dominated by discontinuities the gain shrinks to the smooth regions
 between them; for the strongest shocks and blasts, `second_order` (no stencil
 setup, fewer ways to fail) or, as a last resort, `first_order` is the right
 tool. TENO-E also has a one-time stencil setup, included in the times above:
-for TENO-E 5 it is 17% of the run on 2,048 cells and 6% on 32,768 (it grows
+for TENO-E 5 it is 14% of the run on 2,048 cells and 5% on 32,768 (it grows
 with the cells, the time stepping with cells times steps; seconds per
 million cells on a GPU, minutes on CPUs), and it holds more memory per cell.
 

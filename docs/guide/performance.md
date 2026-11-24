@@ -26,21 +26,21 @@ v0.10.0-48):
 
 | Target ($L_2$ error of $\rho$, smooth flow) | Cheapest on CPUs (2D and 3D) | Cheapest on a GPU (2D) |
 |---|---|---|
-| 10<sup>-3</sup> (coarse) | TENO-E 4; MUSCL takes 1.2 to 14× as long | MUSCL; every scheme within 1.3× |
-| 10<sup>-4</sup> to 10<sup>-5</sup> | TENO-E 4; MUSCL takes 7 to 63× as long or never gets there | TENO-E 4 (TENO-E 6 as fast at 10<sup>-5</sup> on squares); MUSCL takes 1.4 to 82× as long |
-| 10<sup>-6</sup> and below | TENO-E 6 (TENO-E 4: 1.2× on squares, 1.03× on triangles) | TENO-E 6 (TENO-E 4: 1.1× on squares, 1.3× on triangles) |
+| 10<sup>-3</sup> (coarse) | TENO-E 4; MUSCL takes 1.7 to 2.8× as long | MUSCL; every scheme within 1.3× |
+| 10<sup>-4</sup> to 10<sup>-5</sup> | TENO-E 4 (TENO-E 6 at 10<sup>-5</sup> on triangles and hexahedra); MUSCL takes 9 to 55× as long or never gets there | TENO-E 4 (TENO-E 6 as fast at 10<sup>-5</sup> on squares); MUSCL takes 1.4 to 82× as long |
+| 10<sup>-6</sup> and below | TENO-E 6 (TENO-E 4: 1.2× on squares, 2.4× on triangles) | TENO-E 6 (TENO-E 4: 1.1× on squares, 1.3× on triangles) |
 | Flow with shocks | TENO-E 4 down to an $L_1$ error of 10<sup>-2</sup> (half MUSCL's time); below it every scheme within 2.2× | not measured yet ([#1171](https://github.com/MatthewBonanni/mallard/issues/1171)) |
 
 - **TENO-E 4** is the cheapest scheme over most of the range, on every cell
-  type. **TENO-E 5**, the order of the `high_order` preset, costs 1.6 to 3.0
-  times as much on CPUs (up to 4.4 times on tetrahedra) and 1.05 to 1.2 times
-  on a GPU; it is the preset for robustness
+  type. **TENO-E 5**, the order of the `high_order` preset, costs 1.0 to 2.3
+  times as much on CPUs (3.5 to 4.1 times on tetrahedra) and 1.05 to 1.2 times
+  on a GPU (1.6 to 2.8 times on tetrahedra); it is the preset for robustness
   ([why high order](numerics.md#why-high-order)). For smooth flow on meshes
   without pyramids, `order = 4` under `[numerics.face_reconstruction]` is the
   cheaper choice.
 - **On a GPU** a small 2D run takes 0.3 to 0.4 s whatever the scheme, so at
   coarse targets the scheme hardly matters; TENO-E 4 reaches 10<sup>-6</sup>
-  on squares in 0.68 s, 7.3 times faster than 2 CPU threads. 23 to 61% of a
+  on squares in 0.68 s, 18 times faster than 2 CPU threads. 11 to 61% of a
   2D TENO-E run's time there is its setup, which runs on the host. In 3D the
   setup dominates too: 78% of a TENO-E 3 run on 221,184 hexahedra.
 - **Below about 10<sup>-7</sup>** SSPRK3 at `cfl = 1.0` limits TENO-E 5 and 6
