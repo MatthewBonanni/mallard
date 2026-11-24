@@ -23,6 +23,7 @@ inline constexpr const char * KEY_UNUSED = "E-KEY-UNUSED";
 inline constexpr const char * KEY_DEPRECATED = "W-KEY-DEPRECATED";
 inline constexpr const char * CATALOG_WRITE = "E-CATALOG-WRITE";
 inline constexpr const char * MESH_FIELDS = "E-MESH-FIELDS";      // --mesh-fields or its stencils not written
+inline constexpr const char * INITIAL_WRITE = "E-INITIAL-WRITE";  // --initial not written
 inline constexpr const char * RANKS = "E-RANKS";                  // --ranks under mpirun on other ranks
 inline constexpr const char * MEMORY_DEVICE = "E-MEMORY-DEVICE";  // the peak exceeds the device's memory
 inline constexpr const char * VIEW_ENTRIES = "E-VIEW-ENTRIES";    // a part needs more entries than a View addresses
@@ -69,6 +70,7 @@ inline constexpr const char * SET_REFUSED = "W-SET-REFUSED";  // a setting of th
 inline constexpr const char * RUN_REPORT = "W-RUN-REPORT";
 inline constexpr const char * EXTRACT_AVERAGED = "W-EXTRACT-AVERAGED";
 inline constexpr const char * PACK_RERUN = "W-PACK-RERUN";
+inline constexpr const char * CONVERGENCE_NONFINITE = "W-CONVERGENCE-NONFINITE";  // a convergence sample not finite
 
 // The other commands
 inline constexpr const char * USAGE = "E-USAGE";            // an unknown command or option, a missing or bad argument
@@ -95,9 +97,9 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 63> ALL = {{
+inline constexpr std::array<Entry, 65> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
-    {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
+    {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {INITIAL_WRITE, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
     {REGION_OUTSIDE, CHECK_PAGE}, {REGION_PARTLY_OUTSIDE, CHECK_PAGE}, {REGION_SCALE, CHECK_PAGE},
     {PROBE_OUTSIDE, CHECK_PAGE}, {QUALITY_NON_ORTHOGONALITY, CHECK_PAGE}, {QUALITY_SKEWNESS, CHECK_PAGE},
@@ -111,7 +113,7 @@ inline constexpr std::array<Entry, 63> ALL = {{
     {MESH_DIFFERS, RUN_PAGE}, {SNAPSHOT_INDEX, RUN_PAGE}, {FORMAT_VTU, RUN_PAGE}, {KEY_IGNORED, RUN_PAGE},
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
     {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {SET_REFUSED, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
-    {PACK_RERUN, RUN_PAGE},
+    {PACK_RERUN, RUN_PAGE}, {CONVERGENCE_NONFINITE, RUN_PAGE},
     {USAGE, RUN_PAGE}, {DIMENSION, RUN_PAGE}, {EXECUTABLE, RUN_PAGE}, {ONE_RANK, RUN_PAGE}, {INFO, RUN_PAGE},
     {LIST, RUN_PAGE}, {DIFF, RUN_PAGE}, {MESH_CONVERT, RUN_PAGE}, {INPUT_UPGRADE, RUN_PAGE}, {EXTRACT, RUN_PAGE},
     {CONVERGENCE, RUN_PAGE}, {PACK, RUN_PAGE}, {OPTION_DEPRECATED, RUN_PAGE},

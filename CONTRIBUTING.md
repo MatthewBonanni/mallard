@@ -64,7 +64,9 @@ cmake --build build -j
   aborts a test that runs longer, naming it, as CI does for the MPI runs.
   Ranks on several machines need `TMPDIR` on a filesystem they all share: the
   tests' files live there, and the suite stops at once, saying so, when a rank
-  cannot see rank 0's temporary directory.
+  cannot see rank 0's temporary directory. A test fails, and keeps its
+  directory, when a file in it is still open or mapped at its end, since shared
+  storage cannot remove such a file.
 - Python tools (`tools/`) need numpy, scipy, matplotlib, imageio and
   imageio-ffmpeg; a virtual environment works.
 
@@ -244,7 +246,8 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - **`main` runs everything every 3 hours** when it has changed: every supported compiler
   on x86-64 and arm64, macOS, Spack on RHEL 8 and 9, every CUDA version, the tutorials and
   case templates, and the fuzzers, so a full run never holds the runners PRs need. Each
-  merge runs the gate on `main` too. A failure opens an issue labeled `ci-main`, fixed
+  merge runs the gate on `main` too, unless it lands a tree that already passed the gate in
+  a batch (`tools/dev/main_covered.sh`). A failure opens an issue labeled `ci-main`, fixed
   before anything else lands; the next passing full run closes it. `-f full=true` runs all of it on a branch,
   for a change that targets one of those platforms.
 - **Batches**: maintainers land several ready PRs on one run by merging their heads onto
@@ -264,7 +267,7 @@ fix and a `fixed` fragment; a documentation fix needs neither.
 - **Device builds**: CUDA, HIP (ROCm) and SYCL (oneAPI), 2D and 3D, compile only,
   run when a branch's changes touch device code: `tools/dev/device_changes.sh` decides (a
   changed `src/` file with Kokkos device constructs, or a Kokkos update). `main` also
-  runs the CUDA builds on every push (on a branch, CUDA 13.5 on x86-64; on `main`, every
+  runs the CUDA builds on every push that runs the gate (on a branch, CUDA 13.5 on x86-64; on `main`, every
   CUDA version). `-f device=true` forces all three. Each CUDA build compiles its objects
   in three jobs (`CI / cuda-13.5-2d-1of3`, ...) and links them in `CI / cuda-13.5-2d`.
 - **GPU CI.** Device code is also run on NVIDIA A100 GPUs by a maintainer-run GPU
@@ -310,7 +313,7 @@ A maintainer releases version X.Y.Z in three steps:
    (`python3 tools/dev/changelog.py release X.Y.Z`) and bumps the version in
    `CMakeLists.txt` and `CITATION.cff`; it lands like any other PR.
 2. `gh workflow run release.yml --ref main -f version=X.Y.Z` builds and smoke-tests the
-   container images, the relocatable archives and the Spack package from `main`, pushes
+   container images, the portable binaries and the Spack package from `main`, pushes
    the images, and only then creates the tag `vX.Y.Z` and a draft release holding the
    archives and `release-manifest.json`. A failed build leaves no tag: fix it on `main`
    and dispatch again.

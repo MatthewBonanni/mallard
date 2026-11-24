@@ -132,11 +132,13 @@ void input_section(report::Text & text, const CheckReport & r) {
     rows.push_back({setup, {"setup", stopped ? "stopped on an error: see " + std::string(n_of(r, diagnostic_code::INPUT)
                                                                                         ? diagnostic_code::INPUT
                                                                                         : diagnostic_code::SETUP)
-                                             : "completed: mesh, partition, boundaries, numerics, initial state"}});
+                                             : r.geometry_only ? "completed, geometry only: mesh, partition, boundaries, regions, probes"
+                                                               : "completed: mesh, partition, boundaries, numerics, initial state"}});
     rows.push_back({n_unused ? Status::ERROR : Status::OK,
                     {"unknown or unused keys",
                      n_unused ? count(n_unused, "key") + ": see " + diagnostic_code::KEY_UNUSED
-                              : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
+                     : r.geometry_only ? "not checked: a geometry-only setup reads only the keys of what it draws"
+                     : (r.setup_done ? "none: every key is used" : "none found up to the error")}});
     rows.push_back({n_deprecated ? Status::WARNING : Status::OK,
                     {"deprecated keys",
                      n_deprecated ? count(n_deprecated, "key") + ": see " + diagnostic_code::KEY_DEPRECATED : "none"}});
@@ -392,6 +394,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
         memory_row("outside Kokkos per GPU", double(r.sizing_overhead),
                          r.overhead_measured ? "measured on this GPU"
                                              : "typical: CUDA's context and kernels' local memory on an A100");
+        uint64_t released = 0;
+        for (const uint64_t b : r.released_on_devices) released += b;
+        if (!r.device_memory && released > 0) {
+            memory_row("freed after setup on GPUs", double(released),
+                       "the mesh's node lists, which this CPU build keeps: left out of the steady state");
+        }
     }
     if (r.max_local_cells == 0) {
         rows.push_back(
@@ -649,11 +657,13 @@ std::string quality_json(const CheckReport & r) {
         const QualitySummary & s = r.quality[m];
         q.raw(MeshQuality::FIELDS[m], json::Object()
                                           .add("name", std::string(MeshQuality::NAMES[m]))
+                                          .add("min", s.min)
                                           .add("max", s.max)
                                           .add("mean", s.mean)
                                           .add("units", std::string(MeshQuality::UNITS[m]))
                                           .add("limit", MeshQuality::LIMITS[m])
                                           .add("above_limit", s.n_over_limit)
+                                          .raw("histogram", histogram_json(s))
                                           .raw("worst", array_json(s.worst, [](const QualityCell & c) {
                                                    return json::Object()
                                                        .add("value", c.value)
@@ -697,7 +707,7 @@ std::string check_text(const CheckReport & r, const bool color) {
         resolution_section(text, r);
         if (r.bytes > 0) memory_section(text, r);
         sizing_section(text, r);
-        if (r.setup_done) cost_section(text, r);
+        if (r.setup_done && !r.geometry_only) cost_section(text, r);
     }
     if (r.environment.checked) environment_section(text, r);
     diagnostics_section(text, r);
@@ -732,6 +742,30 @@ std::string check_json(const CheckReport & r) {
                   .add("turbulence", b.turbulence)
                   .str();
           }));
+    o.raw("unassigned", array_json(r.unassigned, [](const CheckUnassigned & u) {
+              return json::Object().add("zone", u.zone).add("faces", u.faces).str();
+          }));
+    o.raw("periodic", array_json(r.periodic, [](const CheckPeriodic & p) {
+              auto vec = [](const std::array<double, 3> & v) {
+                  std::string out = "[";
+                  for (size_t i = 0; i < N_DIM; i++) out += (i ? ", " : "") + json::number(v[i]);
+                  return out + "]";
+              };
+              return json::Object()
+                  .raw("zones", p.zone_a.empty() ? "null" : "[" + json::quote(p.zone_a) + ", " + json::quote(p.zone_b) + "]")
+                  .add("map", std::string(p.rotation ? "rotation" : "translation"))
+                  .raw("translation", p.rotation ? "null" : vec(p.translation))
+                  .raw("angle", p.rotation ? json::number(p.angle) : "null")
+                  .raw("center", p.rotation ? vec(p.center) : "null")
+                  .raw("axis", p.rotation && N_DIM == 3 ? "[" + json::number(p.axis[0]) + ", " + json::number(p.axis[1]) +
+                                                              ", " + json::number(p.axis[2]) + "]"
+                                                        : "null")
+                  .add("faces", p.faces)
+                  .add("area", p.area)
+                  .add("node_offset_max", p.node_offset_max)
+                  .add("node_offset_relative", p.node_offset_relative)
+                  .str();
+          }));
     o.raw("regions", array_json(r.regions, [](const CheckRegion & g) {
               return json::Object()
                   .add("name", g.name)
@@ -758,6 +792,11 @@ std::string check_json(const CheckReport & r) {
           }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
+    o.add("geometry_only", r.geometry_only);
+    std::vector<std::string> view_files = r.view_images;
+    if (!r.view_file.empty()) view_files.insert(view_files.begin(), r.view_file);
+    o.raw("view", r.view_file.empty() ? "null" : case_view::json(view_files, r.view_blocks, r.geometry_only));
+    o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));
         o.raw("mesh_fields_file", r.mesh_fields_file.empty() ? "null" : json::quote(r.mesh_fields_file));
@@ -804,6 +843,7 @@ std::string check_json(const CheckReport & r) {
                             .add("steps_timed", r.steps_timed)
                             .raw("at_setup_peak", bytes_json(r.setup_bytes))
                             .raw("steady", bytes_json(r.steady_bytes))
+                            .raw("released_on_devices", bytes_json(r.released_on_devices))
                             .str());
     } else {
         o.raw("memory", "null");

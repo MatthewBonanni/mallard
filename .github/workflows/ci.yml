@@ -9,10 +9,10 @@ name: CI
 #
 # Two tiers. A branch runs the gate: the x86-64 suites of each backend, precision and
 # dimension, GCC 16 and Clang 23, and the CUDA, HIP and SYCL builds when it changes device
-# code. Each merge into main runs the gate again on main; every 3 hours, if main has
-# changed, main runs everything: arm64, macOS, every compiler and CUDA version, Spack, the
-# tutorials and the fuzzers. A failure on main opens an issue. -f full=true runs everything
-# on a branch.
+# code. A push to main runs the gate again, unless its tree already passed the gate in a batch
+# (tools/dev/main_covered.sh); every 3 hours, if main has changed, main runs everything:
+# arm64, macOS, every compiler and CUDA version, Spack, the tutorials and the fuzzers. A
+# failure on main opens an issue. -f full=true runs everything on a branch.
 on:
   # The full tier every 3 hours on main, if main has changed since its last full run
   schedule:
@@ -56,6 +56,12 @@ on:
         description: >-
           Run only these tests (googletest --gtest_filter, -* for none) in the backend jobs, which
           still build and run their other checks in full; empty runs every test
+        type: string
+        default: ''
+      stamp:
+        description: >-
+          Space-separated head commits of the pull requests in this batch branch: when the run
+          passes, it sets `CI` on each (as batch.yml would), so they can merge with no other run
         type: string
         default: ''
 
@@ -125,9 +131,11 @@ jobs:
 
   # Whether the changes touch device code (tools/dev/device_changes.sh); the CUDA, HIP and SYCL
   # builds run only then (CUDA also on main). Also the tier: full on main and with -f full=true.
+  # A push to main whose tree passed the gate in a batch runs none of the build jobs.
   device:
     runs-on: ubuntu-26.04
     outputs:
+      covered: ${{ steps.covered.outputs.run }}
       changed: ${{ steps.check.outputs.changed }}
       code: ${{ steps.check.outputs.code }}
       full: ${{ steps.check.outputs.full }}
@@ -144,8 +152,19 @@ jobs:
           JOB_ID: ${{ job.check_run_id }}
           STATUS_NAME: device
         run: sh tools/dev/ci_status.sh running
+      # Any error leaves the push uncovered, so it runs the gate
+      - id: covered
+        if: github.event_name == 'push'
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=$(tools/dev/main_covered.sh "$GITHUB_SHA") || true
+          echo "$out"
+          grep '^run=[0-9]*$' <<< "$out" >> "$GITHUB_OUTPUT" || true
       - id: check
         env:
+          COVERED: ${{ steps.covered.outputs.run }}
           BEFORE: ${{ github.event.before }}
           FULL: ${{ github.event_name == 'schedule' || inputs.full }}
           GH_TOKEN: ${{ github.token }}
@@ -161,6 +180,7 @@ jobs:
           if [ "$FULL" != true ]; then cuda=$(jq 'map(select(.gate))' <<< "$cuda"); fi
           { echo "cuda=$(jq -c . <<< "$cuda")"; echo "cuda_shards=$CUDA_SHARDS"
             echo "cuda_shard_list=$(jq -c -n "[range(1; $CUDA_SHARDS + 1)]")"; } >> "$GITHUB_OUTPUT"
+          if [ -n "$COVERED" ]; then printf 'changed=false\ncode=false\n' >> "$GITHUB_OUTPUT"; exit 0; fi
           if [ "$GITHUB_EVENT_NAME" = push ]; then base=$BEFORE
           elif [ "$GITHUB_EVENT_NAME" = schedule ]; then
             base=$(gh run list -R "$GITHUB_REPOSITORY" -w ci.yml -e schedule -s success -L 1 \
@@ -203,7 +223,8 @@ jobs:
             if extra fuzz; then names="$names fuzz-2d"; fi
             if extra spack; then names="$names ubi8-spack ubi9-spack"; fi
           fi
-          if { [ "$CHANGED" = true ] || [ "$GITHUB_REF" = refs/heads/main ] || [ "$FORCE_DEVICE" = true ]; } && want device; then
+          if { [ "$CHANGED" = true ] || { [ "$GITHUB_REF" = refs/heads/main ] && [ "$CODE" = true ]; } \
+              || [ "$FORCE_DEVICE" = true ]; } && want device; then
             for t in $(jq -r '.[].name' <<< "$CUDA"); do
               for d in 2d 3d; do
                 names="$names $t-$d"
@@ -293,7 +314,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
-                        --limit 10 --json databaseId -q '.[].databaseId'); do
+                        --limit 40 --json databaseId -q '.[].databaseId'); do
             n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
                   -q '[.artifacts[] | select(.name | startswith("junit-"))] | length')
             if [ "$n" -gt 0 ]; then echo "run $id"; echo "run=$id" >> "$GITHUB_OUTPUT"; break; fi
@@ -741,14 +762,18 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache/tutorials/${{ github.sha }}
-      # Both dimensions in one install, run through the mallard front end
+      # Both dimensions in one install, run through the mallard front end. The checks after it
+      # are independent, so each runs whether or not the ones before it pass
       - name: Install (2D and 3D)
+        id: install
         run: for dim in 2 3; do cmake --install build-$dim --prefix ${{ runner.temp }}/mallard > /dev/null; done
       # A program built against the install with find_package(Mallard) runs a case as mallard -i does
       - name: C++ API of the install
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: examples/cpp_api/ci.sh ${{ runner.temp }}/mallard ${{ runner.temp }}/cpp_api
       # The scripts the install wrote: bash and fish complete through them, zsh parses its own
       - name: Shell completion of the install
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           export PATH=${{ runner.temp }}/mallard/bin:$PATH
           share=${{ runner.temp }}/mallard/share
@@ -768,9 +793,11 @@ jobs:
           bash -c ". $share/bash-completion/completions/mallard; COMP_WORDS=(mallard new ''); COMP_CWORD=2; _mallard
                    printf '%s\n' \"\${COMPREPLY[@]}\"" | grep -qx cylinder
       - name: Run the tutorials
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: tutorials/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/tutorials
       # docs/input-keys/ is what setup reads from the examples and tutorials
       - name: Check the key catalog
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           python3 tools/dev/input_catalog.py build --mallard-2d build-2/src/mallard --mallard-3d build-3/src/mallard --check
           n=$(ls docs/input-keys | wc -l)
@@ -779,6 +806,7 @@ jobs:
                  python3 -c 'import json, sys; print(len(json.load(sys.stdin)["keys"]))') -eq $n
       # Every case template (mallard new --quick)
       - name: Run the case templates
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: templates/ci.sh ${{ runner.temp }}/mallard/bin/mallard ${{ runner.temp }}/templates
       - name: Report the job's result
         if: always()
@@ -796,7 +824,8 @@ jobs:
   cuda:
     needs: [changelog, device]
     if: >-
-      (needs.device.outputs.changed == 'true' || github.ref == 'refs/heads/main' || inputs.device)
+      (needs.device.outputs.changed == 'true' || inputs.device
+       || github.ref == 'refs/heads/main' && needs.device.outputs.code == 'true')
       && (!inputs.only || contains(format(',{0},', inputs.only), ',device,'))
     runs-on: ${{ matrix.toolchain.os }}
     container: nvidia/cuda:${{ matrix.toolchain.cuda }}-devel-ubuntu26.04
@@ -1195,6 +1224,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
           ONLY: ${{ inputs.only }}
+          COVERED: ${{ needs.device.outputs.covered }}
+          STAMP: ${{ inputs.stamp }}
         run: |
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
             --jq '.jobs[] | select(.name != "CI result" and .status == "completed"
@@ -1212,7 +1243,7 @@ jobs:
           done
           # A count per result, then the only input, cut to fit a status description (140 characters)
           desc="Jobs: $(tr ' ' '\n' <<< "$RESULTS" | sort | uniq -c | awk '{ printf "%s%d %s", (NR > 1 ? ", " : ""), $1, $2 }')"
-          only=${ONLY:+ (only $ONLY)}
+          only=${ONLY:+ (only $ONLY)}${COVERED:+ (gate passed in batch run $COVERED)}
           if [ $(( ${#desc} + ${#only} )) -gt 140 ]; then only="${only:0:$(( 136 - ${#desc} ))}...)"; fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=$state -f context=CI \
             -f description="$desc$only" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -1231,6 +1262,19 @@ jobs:
             elif [ -n "$open" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
               gh issue close "$open" -R "$GITHUB_REPOSITORY" --comment "CI passes on main at $GITHUB_SHA ([run]($run))."
             fi
+          fi
+          if [ "$state" = success ] && [ -n "$STAMP" ] && [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            for sha in $STAMP; do
+              case "$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...$GITHUB_SHA" --jq .status)" in ahead|identical) ;;
+                *) echo "::error::$sha is not in $GITHUB_SHA: no CI set on the heads"; exit 1 ;;
+              esac
+            done
+            for sha in $STAMP; do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$sha" -f state=success -f context=CI \
+                -f description="Passed in batch ${GITHUB_SHA:0:8} (run $GITHUB_RUN_ID)" -f target_url="$url" > /dev/null
+              echo "CI success on $sha"
+            done
           fi
           [ "$state" = success ]
       # Each build's newest compiler cache on main is the one branches restore; the older ones
