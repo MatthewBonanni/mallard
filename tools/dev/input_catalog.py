@@ -139,7 +139,17 @@ def finish(merged, untyped):
         m["set_in"].sort()
 
 
+def require_hdf5(mallard):
+    """Defaults that depend on the build (write_data's format) are the HDF5 builds' ones."""
+    out = subprocess.run([str(Path(mallard).resolve()), "version", "--format", "json"],
+                         capture_output=True, text=True, check=True).stdout
+    if not json.loads(out)["build"]["hdf5"]:
+        sys.exit(f"{mallard} is built without HDF5, whose defaults differ: build with -DMallard_ENABLE_HDF5=ON")
+
+
 def build(args):
+    require_hdf5(args.mallard_2d)
+    require_hdf5(args.mallard_3d)
     merged, untyped = {}, set()
     with tempfile.TemporaryDirectory() as tmp:
         for path, dim in inputs():

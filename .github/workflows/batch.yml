@@ -3,7 +3,8 @@ name: Batch
 # Lands several pull requests on one CI run (tools in the maintainers' own scripts): their
 # heads are merged onto main in a batch/* branch, ci.yml runs there once, and this workflow
 # then sets the commit status `CI` that main requires on each head the batch contains, so
-# the pull requests can merge without a run each. Run from main:
+# the pull requests can merge without a run each. A batch's own run sets it itself (ci.yml's
+# stamp input); this is for a batch whose tree an earlier run covered. Run from main:
 #   gh workflow run batch.yml --ref main -f run=<ci.yml run on the batch> -f shas="<sha> ..."
 on:
   workflow_dispatch:
