@@ -12,14 +12,14 @@
 
 #include <stdexcept>
 
-#include "version.h"
+#include "build_info.h"
 
 namespace file_format {
 
 void check_version(const Format & format, const std::string & file, int64_t version) {
     if (version >= format.oldest && version <= format.version) return;
     const std::string reads =
-        "Mallard " MALLARD_VERSION " reads " + std::string(format.name) + " files of " +
+        "Mallard " + mallard_version() + " reads " + format.name + " files of " +
         (format.oldest == format.version
              ? "version " + std::to_string(format.version)
              : "versions " + std::to_string(format.oldest) + " to " + std::to_string(format.version));
