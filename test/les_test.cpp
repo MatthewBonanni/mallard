@@ -579,7 +579,7 @@ TEST(LESReconstructionGradients, TroubledCellsKeepTheLeastSquaresGradients) {
 namespace {
 
 /**
- * @brief A channel of n x n cells (3D: x 3 periodic in z) between isothermal walls at rest (y = 0) and moving
+ * @brief A channel of n x n cells (3D: x n / 2, periodic in z) between isothermal walls at rest (y = 0) and moving
  *        (y = 1), with a velocity that varies along and across it, TENO5, viscous_gradients = "reconstruction"
  *        and Smagorinsky's model.
  */
@@ -587,7 +587,7 @@ std::string wall_channel(const uint32_t n, const std::string & mesh, const std::
     std::ostringstream s;
     s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
       << "\nLx = 1.0\nLy = 1.0\n"
-      << (N_DIM == 3 ? "Nz = 3\nLz = 0.375\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+      << (N_DIM == 3 ? "Nz = " + std::to_string(n / 2) + "\nLz = 0.5\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
       << "[[periodic]]\nzones = [\"left\", \"right\"]\n"
       << "[initialize]\ntype = \"analytical\"\nn_subdivisions = 6\nrho = \"1.0\"\np = \"1.0\"\n"
       << "u = [\"0.5 * y + 0.3 * sin(2 * pi * x) * y * (1 - y)\", \"0.1 * cos(2 * pi * x) * y^2 * (1 - y)^2\""
@@ -615,47 +615,45 @@ Gradient wall_channel_gradient(const double x, const double y) {
 
 // With viscous_gradients = "reconstruction" the models take the polynomials' gradients too, the wall fits'
 // in the cells whose stencils mirror across a wall: in the eddy viscosity of a state, and in the gradients
-// each right-hand side's reconstruction writes
+// each right-hand side's reconstruction writes, which are the state's
 TEST(LESReconstructionGradients, ViscousReconstructionGradientsCarryTheModelsThroughTheWallCells) {
     const std::vector<std::string> meshes = N_DIM == 2 ? std::vector<std::string>{"cartesian", "cartesian_tri"}
                                                        : std::vector<std::string>{"cartesian"};
     for (const std::string & mesh : meshes) {
-        double nu_t[2][2] = {}, gradient[2][2] = {};
+        double nu_t[2][2] = {};
         for (uint32_t m = 0; m < 2; m++) {
             const uint32_t n = 8u << m;
             auto solver = make_solver(wall_channel(n, mesh, SMAGORINSKY));
-            solver->copy_device_to_host();
-            const auto mu_t = solver->get_les_coefficients();
             const auto grid = solver->get_mesh();
-            double of_state[3][2] = {};
-            std::vector<double> mu_t_host(grid->n_owned());
-            for (uint32_t c = 0; c < grid->n_owned(); c++) mu_t_host[c] = double(mu_t(c, 0));
             State rhs("rhs", grid->n_cells, 0);
             solver->calc_rhs(solver->state(), rhs, 0.0_r);
             const auto g = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+            solver->eddy_viscosity_of_state(grid->n_cells);
+            solver->copy_device_to_host();
+            const auto mu_t = solver->get_les_coefficients();
+            const auto of_state = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), solver->get_les_velocity_gradients());
+            double sums[2][2] = {};
             for (uint32_t c = 0; c < grid->n_owned(); c++) {
                 const double x = double(grid->h_cell_coords(c, 0)), y = double(grid->h_cell_coords(c, 1));
                 const Gradient exact = wall_channel_gradient(x, y);
                 const double delta = std::pow(double(grid->h_cell_measure(c)), 1.0 / N_DIM);
                 const uint32_t wall = (y < 1.0 / n || y > 1.0 - 1.0 / n) ? 1 : 0;
-                of_state[0][wall] += std::fabs(mu_t_host[c] / (0.2 * 0.2 * delta * delta) - D(SGSModel::SMAGORINSKY, exact));
-                double e = 0.0;
-                FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) e = std::max(e, std::fabs(double(g(c, i, j)) - exact[i][j]));
-                of_state[1][wall] += e;
-                of_state[2][wall] += 1.0;
+                sums[0][wall] += std::fabs(double(mu_t(c, 0)) / (0.2 * 0.2 * delta * delta) -
+                                           D(SGSModel::SMAGORINSKY, exact));
+                sums[1][wall] += 1.0;
+                FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) {
+                    EXPECT_NEAR(double(g(c, i, j)), double(of_state(c, i, j)), roundoff(1e-12))
+                        << mesh << " n = " << n << ", cell " << c << " at y = " << y;
+                }
             }
             for (uint32_t r = 0; r < 2; r++) {
-                const double count = comm::allreduce(of_state[2][r], comm::Op::SUM);
-                nu_t[m][r] = comm::allreduce(of_state[0][r], comm::Op::SUM) / count;
-                gradient[m][r] = comm::allreduce(of_state[1][r], comm::Op::SUM) / count;
+                nu_t[m][r] = comm::allreduce(sums[0][r], comm::Op::SUM) / comm::allreduce(sums[1][r], comm::Op::SUM);
             }
         }
         for (uint32_t r = 0; r < 2; r++) {
             EXPECT_GT(std::log2(nu_t[0][r] / nu_t[1][r]), 3.0)
-                << mesh << (r ? " wall" : " interior") << " cells, eddy viscosity / (C Delta)^2: " << nu_t[0][r] << " " << nu_t[1][r];
-            EXPECT_GT(std::log2(gradient[0][r] / gradient[1][r]), 3.0)
-                << mesh << (r ? " wall" : " interior") << " cells, right-hand side's gradients: " << gradient[0][r]
-                << " " << gradient[1][r];
+                << mesh << (r ? " wall" : " interior") << " cells, eddy viscosity / (C Delta)^2: " << nu_t[0][r] << " "
+                << nu_t[1][r];
         }
     }
 }
