@@ -874,11 +874,10 @@ void Spectra::write_file(const std::string & name, uint64_t step, rtype t, const
     out << ",index,abscissa,value,units\n";
     // The value's units: a mean's are its field's; spectra (sums, not densities) and correlations, the product's
     std::vector<std::string> units(fields.size()), pair_units(pairs.size());
-    for (size_t f = 0; f < fields.size(); f++) units[f] = field_units::describe(fields[f]).units();
+    for (size_t f = 0; f < fields.size(); f++) units[f] = units::of(field_units::describe(fields[f]).dimension);
     for (size_t p = 0; p < pairs.size(); p++) {
-        pair_units[p] = field_units::describe(fields[pairs[p].first])
-                            .dimension.times(field_units::describe(fields[pairs[p].second]).dimension)
-                            .udunits();
+        pair_units[p] = units::of(field_units::describe(fields[pairs[p].first])
+                                      .dimension.times(field_units::describe(fields[pairs[p].second]).dimension));
     }
     auto position = [&](uint32_t pos) {
         std::ostringstream s;
