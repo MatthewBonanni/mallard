@@ -240,7 +240,7 @@ vertex neighbors, enters only through `Delta_hat^2 = Delta^2 + 12 / d
 tr(cov)` of each cell's own stencil (`3 Delta` on uniform hexahedra), so
 mesh transitions are handled cell by cell. Favre-weighted `L` and `M` (Moin
 et al. 1991), filtered gradients for the gradients of the filtered field.
-The sums are exact (fixed point, scaled to the largest term), so the constant
+The sums are exact (rounded once from integer sums), so the constant
 does not depend on the rank count. Cost: one extra pass over the vertex
 neighbors per step (about 30% of a CPU step on the CBC case, once per step).
 
