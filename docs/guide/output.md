@@ -968,6 +968,9 @@ zone names), which keep their case inside the names built on them
 Every value Mallard writes is in SI units (the mesh-quality angle
 `NON_ORTHOGONALITY` excepted, in degrees), and every output file says which,
 as metadata in the way its format's tools expect; field names never change.
+In a nondimensional case (`physics.units = "nondimensional"`,
+[Units](input_files.md#units)) every physical quantity's units are `1`, in
+every file and block below.
 Restart files are the exception: they hold the conservative variables, in SI
 units by definition, for Mallard to read back.
 
@@ -976,8 +979,8 @@ units by definition, for Mallard to read back.
 | VTKHDF, HDF5 (snapshots, their mesh file, probes) | CF-convention string attributes of each dataset: `units` ([UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) syntax, `1` for dimensionless) and `long_name`; `standard_name` only where a CF standard name fits, which no field does yet (`air_pressure` and the like are for atmospheres); `cell_methods` for [cell averages and point values](#cell-averages-and-point-values) |
 | XDMF (`.xmf`) | `<Information Name="units" Value="..."/>` and `<Information Name="long_name" .../>` in each `<Attribute>` |
 | VTU, VTP (each piece of a PVTU) | Field data: the string arrays `MALLARD_FIELD_NAMES`, `MALLARD_FIELD_UNITS` and `MALLARD_FIELD_LONG_NAMES`, entry *i* of each for the same array (VTK has no units attribute) |
-| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column) |
-| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` |
+| CSV (forces, integrals, probes, `mallard reactor` and its chemistry benchmark) | A line `# units: ...` after the header, one entry per column (`1` for a dimensionless or text column, and for every column of a nondimensional case) |
+| Spectra CSV (`[statistics.spectra]`) | A last column `units`: the units of each row's `value` (`1` in a nondimensional case) |
 
 ```python
 import mallard                                     # the Python package: any file Mallard writes
@@ -1108,7 +1111,7 @@ The block's fields:
 | `statistics` | Snapshots of time-averaged fields (`MEAN_`, `COV_`, `PHASE_`) and spectra: `average_start`, `average_end` (s), `samples`; absent otherwise |
 | `reconstruction` | Snapshots with point values: how they were evaluated, `method` (`TENO`, `linear_least_squares`), its design `order`, and `fallback`, what replaces it in order where it cannot be used ([below](#cell-averages-and-point-values)); absent otherwise |
 | `fields` | Per field: `name`, `units`, `long_name`, `stored` (`float64`, `float32`: as written, which a single-precision build or output makes `float32`), `value` (`cell_average`, `cell_state`, `point_value`: [below](#cell-averages-and-point-values)), and for time-averaged fields `average` ([below](#time-averaged-fields)) |
-| `units` | The units of the block's own numbers (`time`: `s`) |
+| `units` | The units of the block's own numbers (`time`: `s`; `1` in a nondimensional case) |
 
 Files written before 0.10 have no snapshot block. Readers then take step and
 time from the format's own slots, and say so: VTU, VTKHDF and the indexes had
@@ -1202,7 +1205,7 @@ of each VTP file:
 | `points` | For `point` and `points` probes, curves on `n_points` samples, resampled surfaces and grids in regions: `n` samples, `max_distance` and `mean_distance`, and per sample, in sample order, the `requested` point, the owning `cell` (global id), its `centroid` and the `distance` from the requested point to where the value is read; `null` for probes of a region's cells, a cut plane, a curve on its cells or a boundary's faces |
 | `clipped` | For a curve or resampled surface partly outside the mesh: the samples `dropped`, `of` how many, and the dropped share of its length (`length_fraction`) or area (`area_fraction`); a curve on its cells, the share of its length outside (`length_fraction`); for a filled region partly outside the domain, the share of its volume outside (`volume_fraction`; planar 2D: `area_fraction`); `null` when nothing was dropped |
 | `measures` | For a filled region probe ([Measures](probes.md#region-probes)): the `region`'s own `volume` and `surface_area` (planar 2D: `area` and `perimeter`; axisymmetric: per radian) with their relative `tolerance` (0: closed form), `null` for a region of the mesh or an unbounded one, and the same of its part in the domain (`in_domain`; with `sampling = "point"`, its volume is that of the quadrature); `null` for other probes |
-| `units` | Units of the dimensional keys (m, s) |
+| `units` | Units of the dimensional keys, in UDUNITS syntax (`m`, `s`, `m2`; `1` in a nondimensional case) |
 
 The distance is zero for a point value and the distance to the centroid of
 the cell for a cell sample. Every sample lies in the mesh: a point on a

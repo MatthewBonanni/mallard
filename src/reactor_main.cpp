@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -48,20 +49,14 @@ std::string brief(const double x) {
     return buffer;
 }
 
-void run(const std::string & input_file) {
-    const Input input = parse_input(input_file);
+void run(const Input & input, const std::string & input_file) {
     provenance::start_run();
     {
         std::ifstream text(input_file);
         provenance::set_input(input_file, std::string(std::istreambuf_iterator<char>(text), {}));
     }
     const MixtureModel model = MixtureModel::from_input(input);
-    if (!input.contains("reactor")) throw InputError("missing [reactor].");
-    const Input & table = input.at("reactor");
-    const std::string type = find_value_or<std::string>(table, "type", "constant_volume");
-    if (type != "constant_volume") {
-        throw InputError("reactor.type = \"" + type + "\": only \"constant_volume\" is supported.");
-    }
+    const Input & table = reactor_table(input);
     const double T0 = find_double(table, "T", dim::temperature), p0 = find_double(table, "p", dim::pressure);
     const double end_time = find_double(table, "end_time", dim::time);
     const double interval = find_double_or(table, "output_interval", dim::time, end_time / 100.0);
@@ -72,6 +67,7 @@ void run(const std::string & input_file) {
     }
     std::vector<double> Y = model.mass_fractions(table, "reactor");
     const chemistry::ReactorOptions options = reactor_options(input);
+    reject_unused_keys(input);
 
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
@@ -177,17 +173,24 @@ int reactor_main(const cli::Args & args) {
         return 1;
     }
     Kokkos::ScopeGuard kokkos(argc, argv);
+    Input input;
+    // As the solver's setup: the unused keys that look misspelled may be why the reading stopped
+    auto misspelled = [&](const char * code) {
+        return input.is_table() && std::strcmp(code, diagnostic_code::KEY_UNUSED) != 0 ? possibly_misspelled(input)
+                                                                                        : std::string();
+    };
     try {
-        if (parse_input(input_file).contains("benchmark")) {
-            benchmark(parse_input(input_file));
+        input = parse_input(input_file);
+        if (input.contains("benchmark")) {
+            benchmark(input);
         } else {
-            run(input_file);
+            run(input, input_file);
         }
     } catch (const InputError & e) {
-        logging::error(e.code, input_file + ": " + e.what());
+        logging::error(e.code, input_file + ": " + e.what() + misspelled(e.code));
         return 1;
     } catch (const std::exception & e) {
-        logging::error(diagnostic_code::RUN, e.what());
+        logging::error(diagnostic_code::RUN, e.what() + misspelled(diagnostic_code::RUN));
         return 1;
     }
     return 0;
