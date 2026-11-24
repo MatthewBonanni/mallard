@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-case-view.v1.schema.json",
-  "title": "The case view written: case.view, and the view member of mallard check --view DIR --format json",
+  "title": "The case view written: case.view, and the view member of mallard check --view DIR --format json and mallard info MESH --view DIR --format json",
   "type": "object",
   "required": [
     "schema",
     "version",
+    "geometry_only",
     "files",
     "blocks",
     "frames"
@@ -16,6 +17,10 @@
     },
     "version": {
       "const": 1
+    },
+    "geometry_only": {
+      "type": "boolean",
+      "description": "whether mallard check --geometry-only set up the geometry alone"
     },
     "files": {
       "type": "array",
@@ -32,6 +37,11 @@
         "required": [
           "name",
           "kind",
+          "key",
+          "element",
+          "index",
+          "zone",
+          "cells",
           "condition",
           "label"
         ],
@@ -50,6 +60,39 @@
               "snapshot",
               "periodic"
             ]
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the key path of the input value it draws"
+          },
+          "element": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "the input table that holds it"
+          },
+          "index": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "the element's index in its array of tables"
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "boundary and cell zones: the mesh's zone"
+          },
+          "cells": {
+            "type": "number",
+            "minimum": 0,
+            "description": "the block's cells over every rank"
           },
           "condition": {
             "type": [

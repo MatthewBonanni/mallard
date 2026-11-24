@@ -50,6 +50,7 @@ struct CheckOptions {
     std::string view_dir;       // directory of the case view (case_view.h), or empty
     bool view_frames = false;   // without view_dir: the view's boundary frames only, nothing written
     std::string boundary_values_dir;  // directory of the boundaries' values at their faces, or empty
+    bool geometry_only = false;  // set up and check only what the case view draws (--geometry-only)
     std::string input_file;     // named before input errors, as a run names it, or empty
     bool partial = false;       // an input still being written (--partial): only missing pieces is no failure
     uint64_t memory = 0;        // memory per rank to size the run for (bytes); 0: the device's, if any
@@ -181,11 +182,6 @@ struct CheckFrame {
     std::string error;  // why the faces have no u, or empty
 };
 
-/** @brief A block of the case view: its name, what it shows and, for boundary zones, their condition. */
-struct CheckViewBlock {
-    std::string name, kind, condition, label;
-};
-
 struct CheckReport {
     std::vector<CheckDiagnostic> diagnostics;
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
@@ -202,9 +198,10 @@ struct CheckReport {
     std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
-    std::vector<CheckViewBlock> view_blocks;
-    std::vector<CheckFrame> frames;        // of each [[boundaries]] entry, with the view or view_frames
-    bool view_frames = false;              // the frames without the view (CheckOptions::view_frames)
+    std::vector<case_view::BlockInfo> view_blocks;  // and its blocks
+    std::vector<CheckFrame> frames;                 // of each [[boundaries]] entry, with the view or view_frames
+    bool view_frames = false;                       // the frames without the view (CheckOptions::view_frames)
+    bool geometry_only = false;  // the check of geometry alone (CheckOptions::geometry_only)
     std::string boundary_values;           // mallard-boundary-values, with boundary_values_dir; else empty
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
