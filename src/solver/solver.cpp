@@ -265,7 +265,7 @@ void Solver::setup_from_input() {
         init_boundaries();
     });
     timed_phase("numerics", [&] { init_numerics(); });
-    while (halo_too_shallow()) {
+    while (!geometry_only && halo_too_shallow()) {
         timed_phase("halo rebuild (" + logging::count(uint64_t(halo_layers), "layer") + ")", [&] {
             init_mesh();
             init_boundaries();
@@ -284,10 +284,12 @@ void Solver::setup_from_input() {
         // Output of states read from files takes no steps
         if (!state_reader) {
             init_particles(*used_regions);
-            allocate_time_stepping();
+            if (!geometry_only) allocate_time_stepping();
         }
-        init_les();
-        init_rhs_split();
+        if (!geometry_only) {
+            init_les();
+            init_rhs_split();
+        }
         statistics.init(input, species_names, *mesh, derived_selection,
                         {.chemistry = reacting,
                          .regions = used_regions.get(),
@@ -300,9 +302,12 @@ void Solver::setup_from_input() {
         init_output(*used_regions);
         init_check_inputs();
     });
-    timed_phase("initial solution", [&] { init_solution(); });
-    init_health();
-    stages.end_rest();
+    if (!geometry_only) {
+        timed_phase("initial solution", [&] { init_solution(); });
+        init_health();
+        // A geometry-only setup is no setup for SetupCache to keep
+        stages.end_rest();
+    }
     setup_check_json.clear();
     if (run_log_on && !check_only) timed_phase("mesh quality and resolution", [&] { setup_check_json = setup_check(); });
     // A kept mesh keeps its setup data for the setups that take it
@@ -1691,7 +1696,8 @@ void Solver::init_numerics() {
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
 
-    switch (it_face->second) {
+    // The case view's geometry needs no stencils
+    switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
         case FaceReconstructionType::FIRST_ORDER:
             face_reconstruction = std::make_unique<FirstOrder>();
             break;

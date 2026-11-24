@@ -140,6 +140,8 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
             // The mixture of releases before 0.11.0 ran with every species bound on the cell's shared
             // limiter: bounds on the species' own slopes (#1169) put the cells at its ignition front back at
             // second order, which moves the energy by 2.1e-5 and the momentum by 1.2e-5.
+            // The nscbc inlet of releases before 0.11.0 took transverse terms (beta = M, #1179): leaving
+            // them out moves the momentum by 1.5e-6.
             // Running to step 2 from step 2 applies a pending chemistry half step (fused since 0.10.0).
             const auto analytical = solver_state(fixture_input(f.name), false);
             const auto from_first = solver_state(fixture_input(f.name, first), false);
@@ -151,7 +153,10 @@ TEST(FormatCompatTest, RestartFilesOfPastReleasesStartARun) {
                 for (double value : x) m = std::max(m, std::abs(value));
                 return m;
             };
-            const double tolerance = f.name == "mixture" && older(f.release, "v0.11.0") ? 1e-4 : 1e-10;
+            const double tolerance = !older(f.release, "v0.11.0") ? 1e-10
+                                     : f.name == "mixture"            ? 1e-4
+                                     : f.name == "nscbc"              ? 3e-6
+                                                                      : 1e-10;
             bool moved = false;
             for (size_t v = 0; v < analytical.size(); v++) {
                 // Species densities, some zero everywhere, compare with the density

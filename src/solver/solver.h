@@ -1329,6 +1329,7 @@ class Solver {
         struct SetupStopped : std::runtime_error {
             SetupStopped() : std::runtime_error("the setup stopped at the errors of independent parts") {}
         };
+        bool geometry_only = false;  // within check(): set up what the case view draws, no numerics or initial state
         std::function<RestartData(const Mesh &)> state_reader;  // post-processing: the state of output files
         std::function<void(const Mesh &, std::vector<Data> &)> output_data;  // post-processing: fields of its own
         numerics_preset::Resolution preset;

@@ -1276,7 +1276,7 @@ takes the interior's.
 |---|---|---|
 | `L` | required | A length of the domain, setting the relaxation rate `K = sigma c (1 - M^2) / L` |
 | `sigma` | 0.25 | Relaxation coefficient; 0 lets the mean drift, large values approach a fixed pressure (velocity) |
-| `beta` | local Mach (outlet); 0 for a turbulent inlet | Weight of the transverse terms, 0 to 1 |
+| `beta` | local Mach (outlet); 0 (inlet) | Weight of the transverse terms, 0 to 1 |
 | `sigma_T`, `sigma_t` | imposed | Inlets only: relax temperature and tangential velocity instead of imposing them |
 
 The table may also be a sub-table:
@@ -1303,6 +1303,11 @@ Pitfalls:
   the flow in its last cells; such faces drop their transverse terms and take
   the entropy of the exterior state, and `beta = 0` is more robust (the
   `channel_inflow_retau180` example).
+- **`beta` on inlets.** The transverse terms hold an inlet's normal velocity
+  off its target by `beta T- / (K rho c)`, so inlets leave them out by
+  default. A nonzero `beta` there fails where the target varies along the
+  inlet: at a step in velocity, as between two streams, `T-` grows as the
+  inverse of the cell size, and the step smears into spurious velocities.
 - **Viscous terms** treat characteristic faces like `outlet_extrapolation`
   (zero normal gradients).
 
