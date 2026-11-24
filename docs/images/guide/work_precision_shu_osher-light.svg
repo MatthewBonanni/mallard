@@ -953,7 +953,7 @@ z
      </g>
     </g>
     <g id="text_17">
-     <text style="font-size: 13px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="471.992457" y="281.712" transform="rotate(-0 471.992457 281.712)">wall time, s (2 threads)</text>
+     <text style="font-size: 13px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #1f1a1d" x="471.992457" y="281.712" transform="rotate(-0 471.992457 281.712)">wall time, s (2 threads, AMD EPYC 7763)</text>
     </g>
    </g>
    <g id="matplotlib.axis_4">
