@@ -549,8 +549,6 @@ which keeps them when `--restart` replaces `[initialize]`. Details:
 | `mechanism` | The mechanism of the source's species, where the file its run block names does not exist; for a flamelet source, the mechanism of the table's species, where the case's mechanism lacks some. Default: the run block's |
 | `table` | The source's flamelet table, where the file its run block names does not exist. Default: the run block's |
 | `aliases` | Source species mapped onto target species of other names, `{"CH2*" = "CH2(S)"}`; each pair must have the same elemental composition. Default: none |
-| `progress_variable` | (tables of format version 1 only) The weights of `C = sum_k w_k Y_k`, `{H2O = 1.0}`. Default: the table's |
-| `fuel`, `oxidizer` | (tables of format version 1 only) The streams of Bilger's `Z`: `{X = {H2 = 1.0, N2 = 1.0}}` (mole fractions) or `{Y = {...}}` (mass fractions), normalized. Default: the table's |
 
 ### `[[initialize.regions]]`
 

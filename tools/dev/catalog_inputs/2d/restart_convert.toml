@@ -27,9 +27,6 @@ accept = "element-projection"
 mechanism = "../../../../mechanisms/h2o2.yaml"
 table = "../../../../test/data/flamelet/convert_h2.h5"
 aliases = {H2O2 = "H2O2"}
-progress_variable = {H2O = 1.0}
-fuel = {X = {H2 = 1.0, N2 = 1.0}}
-oxidizer = {Y = {O2 = 0.233, N2 = 0.767}}
 
 [[boundaries]]
 name = "left"

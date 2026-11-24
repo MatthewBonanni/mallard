@@ -114,73 +114,6 @@ const Species * find_species(const std::string & name, const std::vector<const s
     return nullptr;
 }
 
-std::vector<std::pair<std::string, double>> mass_fractions(const std::vector<std::pair<std::string, double>> & given,
-                                                           const bool moles, const char * key,
-                                                           const std::vector<const std::vector<Species> *> & catalogs) {
-    std::vector<std::pair<std::string, double>> Y = given;
-    double sum = 0.0;
-    for (auto & [name, value] : Y) {
-        if (moles) {
-            const Species * s = find_species(name, catalogs);
-            if (!s) {
-                throw InputError(Diagnostic{.key = std::string(KEY) + "." + key,
-                                            .message = "names " + name + ", which no mechanism of the conversion has",
-                                            .docs = DOCS});
-            }
-            value *= s->molecular_weight;
-        }
-        sum += value;
-    }
-    if (!(sum > 0.0)) {
-        throw InputError(Diagnostic{.key = std::string(KEY) + "." + key, .message = "is empty or zero", .docs = DOCS});
-    }
-    for (auto & entry : Y) entry.second /= sum;
-    return Y;
-}
-
-/**
- * @brief The table's definitions of Z and C: its own from format version 2, else the options' (the keys of
- *        version 1 tables), checked against the table.
- */
-Definitions definitions_of(const flamelet::Table & table, const std::string & file, const Options & o,
-                           const std::vector<const std::vector<Species> *> & catalogs) {
-    const bool given = !o.progress_variable.empty() || !o.fuel.empty() || !o.oxidizer.empty();
-    if (table.version() >= 2) {
-        if (given) {
-            throw InputError(Diagnostic{
-                .key = std::string(KEY) + (o.progress_variable.empty() ? (o.fuel.empty() ? ".oxidizer" : ".fuel")
-                                                                       : ".progress_variable"),
-                .message = "is given, but the table " + file + " (format version 2) defines its progress variable "
-                           "and mixture fraction itself",
-                .fix = "Remove progress_variable, fuel and oxidizer",
-                .docs = DOCS});
-        }
-        return table.definitions();
-    }
-    if (o.progress_variable.empty() || o.fuel.empty() || o.oxidizer.empty()) {
-        throw InputError(Diagnostic{
-            .key = KEY,
-            .message = "the table " + file + " is of format version 1, which does not define its progress variable "
-                       "C = sum_k w_k Y_k nor its mixture fraction's streams; a run does not need them, a conversion "
-                       "does",
-            .fix = "Give [initialize.convert] progress_variable = {H2O = 1.0}, fuel = {X = {...}} and oxidizer = "
-                   "{X = {...}} as the table was generated (mallard restart convert --progress-variable, --fuel, "
-                   "--oxidizer), or regenerate the table with a generator that writes format version 2",
-            .docs = DOCS});
-    }
-    Definitions d;
-    d.mixture_fraction = "bilger";
-    d.progress_variable = o.progress_variable;
-    d.fuel = mass_fractions(o.fuel, o.fuel_moles, "fuel", catalogs);
-    d.oxidizer = mass_fractions(o.oxidizer, o.oxidizer_moles, "oxidizer", catalogs);
-    try {
-        table.check_definitions(d);
-    } catch (const std::runtime_error & e) {
-        throw InputError(Diagnostic{.key = std::string(KEY) + ".progress_variable", .message = e.what(), .docs = DOCS});
-    }
-    return d;
-}
-
 /** @brief Bilger's mixture fraction Z = (beta - beta_O) / (beta_F - beta_O) of the table's streams. */
 struct Bilger {
     double beta_F = 0.0, beta_O = 0.0;
@@ -253,52 +186,6 @@ Options Options::from_input(const Input & initialize) {
     o.accept = find_value_or<std::string>(c, "accept", "");
     if (!o.accept.empty() && o.accept != CompositionMap::RULE) {
         throw not_accepted(c, std::string(KEY) + ".accept", o.accept, {CompositionMap::RULE});
-    }
-    auto names = [&](const char * key) {
-        std::vector<std::pair<std::string, double>> out;
-        if (!contains_optional(c, key)) return out;
-        const Input & t = c.at(key);
-        if (!t.is_table()) {
-            throw InputError(Diagnostic{.key = std::string(KEY) + "." + key,
-                                        .line = line_of(c, key),
-                                        .message = "is a table of species and numbers, e.g. {H2O = 1.0}",
-                                        .docs = DOCS});
-        }
-        for (const auto & [name, value] : t.as_table()) {
-            if (!value.is_floating() && !value.is_integer()) {
-                throw InputError(Diagnostic{.key = std::string(KEY) + "." + key + "." + name,
-                                            .line = line_of(t, name),
-                                            .message = "is a number",
-                                            .docs = DOCS});
-            }
-            out.emplace_back(name, value.is_floating() ? value.as_floating() : static_cast<double>(value.as_integer()));
-        }
-        return out;
-    };
-    o.progress_variable = names("progress_variable");
-    for (const char * key : {"fuel", "oxidizer"}) {
-        if (!contains_optional(c, key)) continue;
-        const Input & stream = c.at(key);
-        const bool X = stream.is_table() && stream.contains("X"), Y = stream.is_table() && stream.contains("Y");
-        if (X == Y) {
-            throw InputError(Diagnostic{.key = std::string(KEY) + "." + key,
-                                        .line = line_of(c, key),
-                                        .message = "is a composition {X = {...}} or {Y = {...}}",
-                                        .fix = std::string("e.g. ") + key +
-                                               (std::string(key) == "fuel" ? " = {X = {H2 = 1, N2 = 1}}"
-                                                                           : " = {X = {O2 = 0.21, N2 = 0.79}}"),
-                                        .docs = DOCS});
-        }
-        auto values = [&](const char * which) {
-            std::vector<std::pair<std::string, double>> out;
-            const Input & t = stream.at(which);
-            for (const auto & [name, value] : t.as_table()) {
-                out.emplace_back(name, value.is_floating() ? value.as_floating() : static_cast<double>(value.as_integer()));
-            }
-            return out;
-        };
-        (std::string(key) == "fuel" ? o.fuel : o.oxidizer) = values(X ? "X" : "Y");
-        (std::string(key) == "fuel" ? o.fuel_moles : o.oxidizer_moles) = X;
     }
     if (contains_optional(c, "aliases")) {
         const Input & t = c.at("aliases");
@@ -492,8 +379,7 @@ Summary convert(RestartData & restart, const std::string & file, const Options &
     double z_offset = 0.0;
     std::vector<std::string> missing_weights;
     if (table) {
-        const std::string table_file = to_table ? s.target_model : s.source_model;
-        defs = definitions_of(*table, table_file, options, catalogs);
+        defs = table->definitions();
         try {
             bilger.emplace(*defs, catalogs);
         } catch (const std::runtime_error & e) {

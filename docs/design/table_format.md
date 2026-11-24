@@ -1,4 +1,4 @@
-# Table format for tabulated chemistry (HDF5, version 2)
+# Table format for tabulated chemistry (HDF5, version 1)
 
 Status: specified (#631). The contract between Mallard and the programs that
 write tables for it. Mallard reads tables and does not generate them: tables are
@@ -100,7 +100,7 @@ tolerance of the linearity of `C` in `Lambda` relaxed from 1e-9 to 1e-6.
 | Attribute | Type | Required | Meaning |
 |---|---|---|---|
 | `format` | string | yes | `"mallard-table"` |
-| `version` | integer | yes | `2` (Mallard also reads `1`, [section 8](#8-versioning-and-new-models)) |
+| `version` | integer | yes | `1` |
 | `model` | string | yes | Model tag ([section 5](#5-models)): what the axes and the model's fields mean |
 | `thermodynamics` | string | yes | Thermodynamics tag ([section 6](#6-thermodynamics)) |
 | `species` | array of strings | yes | The species block, possibly empty: species names as in the mechanism. Species `k` is stored as the field `Y_k` (mass fraction, units `"1"`). Every field whose name starts with `Y_` must be in this list |
@@ -278,7 +278,7 @@ Mallard reads a table once at setup and refuses it, with the file name and the
 reason, unless:
 
 1. The build has HDF5, and the file is an HDF5 file.
-2. The root's `format` is `"mallard-table"` and `version` is 1 or 2.
+2. The root's `format` is `"mallard-table"` and `version` is 1.
 3. `model` and `thermodynamics` are tags this version of Mallard supports. An
    unknown or reserved tag is refused by name, with the list of supported tags.
 4. Every required attribute, group and dataset is present with its type.
@@ -296,8 +296,8 @@ reason, unless:
 9. Every field required by the model, the thermodynamics, transport and the
    species block is present, with exactly the listed units, and its values
    meet the listed checks.
-10. Model-specific checks pass. For `fpv`, `C` is linear in `Lambda`; in
-    version 2, `mixture_fraction` is `"bilger"`, every species
+10. Model-specific checks pass. For `fpv`, `C` is linear in `Lambda`,
+    `mixture_fraction` is `"bilger"`, every species
     `progress_variable` weighs is in the species block, `C` equals
     `sum_k w_k Y_k` at every node to `1e-9` (float64) or `1e-6` (float32) of
     the largest `|C|` or `sum_k |w_k Y_k|`, and each stream's mass fractions
@@ -308,13 +308,7 @@ from the run's reference pressure by more than 10%.
 
 ## 8. Versioning and new models
 
-- Version 2 is this page. It adds the required `/model_data/mixture_fraction`
-  of `fpv` tables and the checks of the definitions of `Z` and `C`
-  (section 7, item 10). Mallard still runs version 1 tables, whose weights and
-  streams it reads unchecked; converting a solution to or from one needs the
-  definitions of `Z` and `C` from the user
-  ([flamelet.md](../guide/flamelet.md#converting-between-finite-rate-and-fpv)).
-- The version changes when the layout changes, when a
+- Version 1 is this page. The version changes when the layout changes, when a
   required attribute, group, dataset or field is added or removed, or when the
   meaning of an existing one or of a tag changes. Mallard refuses versions it
   does not know.
@@ -323,7 +317,7 @@ from the run's reference pressure by more than 10%.
 - New models and thermodynamics are new tags, specified here before Mallard
   reads them. They need no new version. A Mallard that does not support a tag
   refuses the table by name.
-- Values are float64 or float32 (section 2).
+- Values are float64 or float32 within version 1 (section 2).
 
 ## 9. Reading a table with h5py
 
@@ -331,7 +325,7 @@ from the run's reference pressure by more than 10%.
 import h5py
 
 with h5py.File("table.h5", "r") as f:
-    assert f.attrs["format"] == "mallard-table" and f.attrs["version"] == 2
+    assert f.attrs["format"] == "mallard-table" and f.attrs["version"] == 1
     values = f["values"]
     axes = {a: f["axes"][a][()] for a in values.attrs["axes"]}
     fields = list(values.attrs["fields"])

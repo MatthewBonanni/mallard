@@ -459,13 +459,12 @@ Table Table::read(const std::string & file) {
             fail(file, "it is not a Mallard table: its attribute \"format\" on / is not \"mallard-table\"");
         }
         const double version = r.number(h5, "version", "/");
-        if (version != 1.0 && version != 2.0) {
+        if (version != 1.0) {
             std::ostringstream v;
             v << version;
             fail(file, "it is a Mallard table of version " + v.str() +
-                           ", which this version of Mallard does not read (it reads versions 1 and 2)");
+                           ", which this version of Mallard does not read (it reads version 1)");
         }
-        t.m_version = static_cast<uint32_t>(version);
         t.m_model = r.text(h5, "model", "/");
         t.m_thermodynamics = r.text(h5, "thermodynamics", "/");
         supported(model_contracts(), "model", t.m_model, file);
@@ -518,12 +517,10 @@ Table Table::read(const std::string & file) {
             for (const auto & s : species) {
                 t.m_definitions.progress_variable.emplace_back(s, r.number(weights, s, "/model_data/progress_variable"));
             }
-            if (t.m_version >= 2) {
-                t.m_definitions.mixture_fraction = r.text(model_data, "mixture_fraction", "/model_data");
-                if (t.m_definitions.mixture_fraction != "bilger") {
-                    fail(file, "its attribute \"mixture_fraction\" on /model_data is \"" +
-                                   t.m_definitions.mixture_fraction + "\", where Mallard reads \"bilger\"");
-                }
+            t.m_definitions.mixture_fraction = r.text(model_data, "mixture_fraction", "/model_data");
+            if (t.m_definitions.mixture_fraction != "bilger") {
+                fail(file, "its attribute \"mixture_fraction\" on /model_data is \"" +
+                               t.m_definitions.mixture_fraction + "\", where Mallard reads \"bilger\"");
             }
             for (const char * s : {"fuel", "oxidizer"}) {
                 const std::string path = "/model_data/streams/" + std::string(s);
@@ -540,7 +537,7 @@ Table Table::read(const std::string & file) {
                     composition.emplace_back(k, y);
                     sum += y;
                 }
-                if (t.m_version >= 2 && !(std::abs(sum - 1.0) <= 1e-6)) {
+                if (!(std::abs(sum - 1.0) <= 1e-6)) {
                     std::ostringstream o;
                     o << sum;
                     fail(file, "the mass fractions of " + path + "/Y sum to " + o.str() + ", not 1");
@@ -600,25 +597,14 @@ Table Table::read(const std::string & file) {
     }
     t.finish();
     t.check_contract();
-    if (t.m_version >= 2) t.check_definitions(t.m_definitions);
+    if (t.m_model == "fpv") t.check_definitions();
     return t;
 #endif
 }
 
-void Table::set_definitions(Definitions d) {
-    m_definitions = std::move(d);
-    m_version = 2;
-    check_definitions(m_definitions);
-}
-
-void Table::check_definitions(const Definitions & d) const {
+void Table::check_definitions() const {
     const std::string & where = m_where;
-    if (m_model != "fpv") return;
-    if (d.mixture_fraction != "bilger") {
-        fail(where, "its mixture fraction is defined as \"" + d.mixture_fraction +
-                        "\", where Mallard reads \"bilger\" (/model_data/mixture_fraction)");
-    }
-    if (d.progress_variable.empty()) fail(where, "its progress variable has no weights");
+    const Definitions & d = m_definitions;
     std::vector<uint32_t> fields;
     std::vector<double> weights;
     for (const auto & [species, w] : d.progress_variable) {

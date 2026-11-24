@@ -361,17 +361,10 @@ chemistry integrator's step seed (`CHEM_H`) is dropped. Averages of fields the
 target does not sample are left out, and a target that samples fields the
 source did not average refuses the file unless `[statistics] reset = true`.
 
-A table of [format version 2](../design/table_format.md) defines `Z` and `C`
-itself. A table of version 1 does not, so converting to or from one needs the
-definitions: `--progress-variable H2O=1 --fuel H2:1,N2:1 --oxidizer O2:0.21,N2:0.79`
-(mole fractions of the streams), or in `[initialize.convert]`:
-
-```toml
-[initialize.convert]
-progress_variable = {H2O = 1.0}
-fuel = {X = {H2 = 1.0, N2 = 1.0}}         # or Y = {...}: mass fractions
-oxidizer = {X = {O2 = 0.21, N2 = 0.79}}
-```
+The table's own `/model_data` defines `Z` and `C`: its progress-variable
+weights, its streams and `mixture_fraction = "bilger"`, which
+[the table format](../design/table_format.md) requires and Mallard checks on
+reading.
 
 ## Not yet supported
 

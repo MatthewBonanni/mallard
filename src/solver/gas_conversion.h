@@ -71,9 +71,6 @@ struct Options {
     std::string table;      ///< the source's table, if its run block's does not resolve
     std::vector<std::pair<std::string, std::string>> aliases;  ///< (source name, target name)
     std::string accept;     ///< the rule the user accepted, or empty
-    std::vector<std::pair<std::string, double>> progress_variable;  ///< version 1 tables: C = sum_k w_k Y_k
-    std::vector<std::pair<std::string, double>> fuel, oxidizer;     ///< version 1 tables: the streams of Z
-    bool fuel_moles = false, oxidizer_moles = false;  ///< the streams are given as mole fractions
 
     /** @brief From the optional table [initialize.convert]. */
     static Options from_input(const Input & initialize);

@@ -461,11 +461,6 @@ constexpr Option RESTART_CONVERT_OPTIONS[] = {
      "flamelet source, the mechanism of its table's species. Default: the run block's."},
     {"--table", "", "FILE", "The source's flamelet table, where its run block's does not exist here. Default: the run block's."},
     {"--alias", "", "SOURCE=TARGET,...", "Map source species onto target species of other names (CH2*=CH2(S)). Default: none."},
-    {"--progress-variable", "", "SPECIES=W,...",
-     "For a table of format version 1: the weights of C = sum_k w_k Y_k (H2O=1). Default: the table's."},
-    {"--fuel", "", "SPECIES:X,...", "For a table of format version 1: the fuel stream's mole fractions (H2:1,N2:1). Default: the table's."},
-    {"--oxidizer", "", "SPECIES:X,...",
-     "For a table of format version 1: the oxidizer stream's mole fractions (O2:0.21,N2:0.79). Default: the table's."},
     {"--verbose", "", "", "Also print the setup of the target case."},
     KOKKOS,
 };

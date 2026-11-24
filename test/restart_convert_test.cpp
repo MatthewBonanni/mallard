@@ -17,7 +17,6 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -32,10 +31,6 @@
 #include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
-
-#ifdef Mallard_HAS_HDF5
-#include "hdf5_util.h"
-#endif
 
 namespace {
 
@@ -486,10 +481,9 @@ TEST(RestartConvertTest, ConversionsThatAreNotExactNeedAcceptance) {
     EXPECT_NO_THROW(solver.init(parse_toml(direct + "[initialize.convert]\naccept = \"element-projection\"\n")));
 }
 
-// A table's species the target mechanism lacks need the table's mechanism for their elements; a table of format
-// version 1 needs the definitions of Z and C from the options, and converts with them. Catches conversions that
-// guess compositions or definitions.
-TEST(RestartConvertTest, MissingSpeciesAndDefinitionsAreErrors) {
+// A table's species the target mechanism lacks need the table's mechanism for their elements, and convert with it.
+// Catches conversions that guess compositions.
+TEST(RestartConvertTest, MissingSpeciesAreErrors) {
     const std::string fpv_text = flamelet_case() + "[initialize]\np = 101325.0\nT = 1200.0\nu = " +
                                  std::string(N_DIM == 2 ? "[10.0, 0.0]" : "[10.0, 0.0, 0.0]") + "\nZ = 0.2\nC = 0.05\n";
     write_start(fpv_text, "fpv.restart");
@@ -503,28 +497,6 @@ TEST(RestartConvertTest, MissingSpeciesAndDefinitionsAreErrors) {
     EXPECT_EQ(convert({"fpv.restart", "-i", bfer, "-o", "bfer.restart", "--mechanism", MECHANISMS + "h2o2.yaml",
                        "--accept-mapping", "element-projection"}, &out), 0) << out;
     EXPECT_TRUE(std::filesystem::exists("bfer.restart"));
-
-    // The table as version 1, without its definitions
-    if (comm::is_root()) {
-        std::filesystem::copy_file(TABLE, "v1.h5", std::filesystem::copy_options::overwrite_existing);
-        const std::lock_guard<std::mutex> lock(h5::mutex());
-        const h5::Handle h5(H5Fopen("v1.h5", H5F_ACC_RDWR, H5P_DEFAULT), H5Fclose, "opening v1.h5");
-        h5::set_attribute(h5, "version", 1.0);
-        const h5::Handle g(H5Gopen2(h5, "model_data", H5P_DEFAULT), H5Gclose, "model_data");
-        h5::check(H5Adelete(g, "mixture_fraction"), "delete");
-    }
-    comm::barrier();
-    std::string v1_case = flamelet_case() + "[initialize]\ntype = \"constant\"\n";
-    v1_case.replace(v1_case.find(TABLE), TABLE.size(), "v1.h5");
-    const std::string v1 = write_input("v1.toml", v1_case);
-    write_start(mixture_case("h2o2.yaml") + lean_mixture(), "mixture.restart");
-    EXPECT_EQ(convert({"mixture.restart", "-i", v1, "-o", "v1.restart"}, &out), 1);
-    EXPECT_NE(out.find("is of format version 1, which does not define its progress variable"), std::string::npos) << out;
-    EXPECT_FALSE(std::filesystem::exists("v1.restart"));
-    EXPECT_EQ(convert({"mixture.restart", "-i", v1, "-o", "v1.restart", "--progress-variable", "H2O=1", "--fuel",
-                       "H2:1,N2:1", "--oxidizer", "O2:0.21,N2:0.79", "--format", "json"}, &out), 0) << out;
-    const auto [Z, C] = z_and_c(read_restart("mixture.restart"));
-    expect_near(specific(read_restart("v1.restart"), "RHOY_Z"), Z, 1e-13, "Z");
 }
 
 #endif // Mallard_HAS_HDF5

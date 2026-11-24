@@ -45,27 +45,15 @@ std::vector<std::string> split(const std::string & text, const char by) {
     return parts;
 }
 
-/** @brief "A=1,B=2" (or "A:1,B:2") as a TOML inline table of numbers or, with strings, of names. */
-std::string inline_table(const std::string & option, const std::string & text, const bool strings) {
+/** @brief "A=B,C=D" as a TOML inline table of names. */
+std::string aliases(const std::string & text) {
     std::string table;
     for (const std::string & entry : split(text, ',')) {
-        const size_t at = entry.find_first_of(strings ? "=" : "=:");
+        const size_t at = entry.find('=');
         if (at == std::string::npos || at == 0 || at + 1 == entry.size()) {
-            throw Usage(option + " takes " + (strings ? "SOURCE=TARGET" : "SPECIES=VALUE") +
-                                  " pairs separated by commas, not \"" + entry + "\"");
+            throw Usage("--alias takes SOURCE=TARGET pairs separated by commas, not \"" + entry + "\"");
         }
-        const std::string value = entry.substr(at + 1);
-        if (!strings) {
-            try {
-                size_t used = 0;
-                (void)std::stod(value, &used);
-                if (used != value.size()) throw std::invalid_argument(value);
-            } catch (const std::exception &) {
-                throw Usage(option + ": \"" + value + "\" is not a number");
-            }
-        }
-        table += (table.empty() ? "" : ", ") + json::quote(entry.substr(0, at)) + " = " +
-                 (strings ? json::quote(value) : value);
+        table += (table.empty() ? "" : ", ") + json::quote(entry.substr(0, at)) + " = " + json::quote(entry.substr(at + 1));
     }
     return "{" + table + "}";
 }
@@ -78,16 +66,7 @@ void add_options(Input & input, const cli::Args & args) {
     };
     key("--mechanism", "mechanism", json::quote(args.value_or("--mechanism", "")));
     key("--table", "table", json::quote(args.value_or("--table", "")));
-    if (args.has("--alias")) key("--alias", "aliases", inline_table("--alias", args.value_or("--alias", ""), true));
-    if (args.has("--progress-variable")) {
-        key("--progress-variable", "progress_variable",
-            inline_table("--progress-variable", args.value_or("--progress-variable", ""), false));
-    }
-    for (const char * stream : {"--fuel", "--oxidizer"}) {
-        if (args.has(stream)) {
-            key(stream, stream + 2, "{X = " + inline_table(stream, args.value_or(stream, ""), false) + "}");
-        }
-    }
+    if (args.has("--alias")) key("--alias", "aliases", aliases(args.value_or("--alias", "")));
     if (text.empty()) return;
     const Input flags = parse_input_string("[initialize.convert]\n" + text, "the options");
     if (!input.contains("initialize") || !input.at("initialize").is_table()) {

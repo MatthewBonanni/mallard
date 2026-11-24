@@ -189,8 +189,7 @@ class Table {
         /**
          * @brief The definitions of an fpv table's control variables, from /model_data: the progress variable
          *        C = sum_k w_k Y_k, the mixture fraction's definition ("bilger") and the mass fractions of its
-         *        fuel and oxidizer streams, each by species. Required and checked from format version 2; a
-         *        version 1 table holds what it wrote, unchecked, and no definition of the mixture fraction.
+         *        fuel and oxidizer streams, each by species.
          */
         struct Definitions {
             std::vector<std::pair<std::string, double>> progress_variable;
@@ -228,21 +227,8 @@ class Table {
         const std::string & generator() const { return m_generator; }
         /** @brief "<name> sha256:<hash>" of the mechanism the table was generated with, for the run log. */
         const std::string & mechanism() const { return m_mechanism; }
-        /** @brief The format version of the file: 1 or 2; 2 for a table from parts with definitions, else 1. */
-        uint32_t version() const { return m_version; }
-        /** @brief The definitions of an fpv table's control variables. */
+        /** @brief The definitions of an fpv table's control variables (empty for a table from parts). */
         const Definitions & definitions() const { return m_definitions; }
-        /**
-         * @brief Give a table from parts the definitions of format version 2, checked against its fields.
-         * @throws std::runtime_error naming what disagrees
-         */
-        void set_definitions(Definitions d);
-        /**
-         * @brief Check definitions against this table, as version 2 requires: a mixture fraction "bilger", weights
-         *        only of species of the species block, and the field C the weighted sum of their mass fractions.
-         * @throws std::runtime_error naming what disagrees
-         */
-        void check_definitions(const Definitions & d) const;
         /** @brief Whether the values are float32 (else float64). */
         bool single() const { return m_single; }
         /** @brief Whether the values are mapped from the file (GPU builds), else read into memory. */
@@ -305,6 +291,7 @@ class Table {
         Table() = default;
         void finish();                // container checks, and gathers the axes' nodes
         void check_contract() const;  // the model's and thermodynamics' axes, fields and values
+        void check_definitions() const;  // fpv: the weights name species of the block, and C = sum_k w_k Y_k
         uint32_t fpv_field() const;
         void require_axes(uint32_t d) const;
         void require_value(bool single) const;
@@ -350,7 +337,6 @@ class Table {
         std::string m_generator;
         std::string m_mechanism;
         double m_pressure = 0.0;
-        uint32_t m_version = 1;
         Definitions m_definitions;
 };
 
