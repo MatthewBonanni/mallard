@@ -1,0 +1,1 @@
+- A missing or invalid key of a table read by name (`[reactor] T`, `[[boundaries]]` entries, probes, particles and the like) is reported by its full path with the docs of its table (`reactor.T: missing ... See docs/input.md#mallard-reactor`) rather than its bare name (`T ... See docs/input.md#t`), in a run, `mallard check` and `mallard reactor` (#1482).
