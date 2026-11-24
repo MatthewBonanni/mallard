@@ -45,6 +45,12 @@ constexpr Option RUN_OPTIONS[] = {
      "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
      "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
      "and the text on stderr. Default: text."},
+    {"--set", "", "KEY=VALUE",
+     "Change a setting before the first step, as mallard ctl set does while the run goes on: the same keys "
+     "(n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, an output's or probe's interval "
+     "or time_interval, ...) and checks; a setting it refuses is an error. Give it once per setting. Each "
+     "is a set event of mallard.jsonl, and mallard pack's rerun command repeats it. Default: the input's "
+     "settings."},
     KOKKOS,
 };
 
@@ -591,7 +597,7 @@ constexpr Command COMMANDS[] = {
         .name = "",
         .group = "Run",
         .summary = "Run a case",
-        .synopsis = "mallard -i input.toml [--restart FILE|latest] [Kokkos options]\n"
+        .synopsis = "mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]\n"
                     "mallard <command> [options]",
         .description =
             "Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations on unstructured "
@@ -637,9 +643,10 @@ constexpr Command COMMANDS[] = {
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
-            "check_interval, write_data.<prefix or index>.interval or .time_interval, "
+            "check_interval, control_file_interval, write_data.<prefix or index>.interval or .time_interval, "
             "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
-            "are refused.",
+            "are refused. A SET file in run-dir does the same from anywhere the directory is visible, with "
+            "[run] control_file_interval: lines of key = value, the run log the reply.",
         .options = {},
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"

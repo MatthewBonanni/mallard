@@ -9,9 +9,11 @@
 #include <exception>
 #include <iostream>
 #include <new>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
@@ -53,6 +55,18 @@ std::string error_text(const std::exception & e) {
     if (!comm::is_root()) std::this_thread::sleep_for(std::chrono::seconds(2));
     logging::error(code, message);
     comm::abort(1);
+}
+
+/** @brief The settings of --set, through mallard ctl set's path and checks; refused ones are an input error. */
+void apply_command_line_settings(Solver & solver, const std::vector<std::string> & settings) {
+    const auto [ok, reply] = solver.apply_settings(settings, "--set");
+    if (ok) return;
+    std::string refused;
+    std::istringstream lines(reply);
+    for (std::string line; std::getline(lines, line);) {
+        if (line.rfind("error: ", 0) == 0) refused += (refused.empty() ? "--set " : "\n--set ") + line.substr(7);
+    }
+    throw diagnostic_code::Error(diagnostic_code::INPUT, refused);
 }
 
 /**
@@ -122,6 +136,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 binding::report();
                 solver.enable_control(true);
                 solver.init(input_file, restart_file);
+                apply_command_line_settings(solver, args.every("--set"));
                 code = diagnostic_code::RUN;
                 status = solver.run();
             }
