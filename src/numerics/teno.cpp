@@ -2234,9 +2234,10 @@ struct TENOFunctor {
             };
             for (uint8_t j = 0; j < n_faces; j++) {
                 const uint32_t f = faces_of_cell(f_begin + j);
+                const PlanarFace nodes = planar_nodes(f);
                 for (uint8_t q = 0; q < n_quad; q++) {
                     rtype p[N_DIM], Wq[N_CONSERVATIVE];
-                    if (!face_point(f, q, i_cell, p)) continue;
+                    if (!face_point(f, q, i_cell, nodes, p)) continue;
                     if (!point_state(p, Wq)) {
                         mark_point_gradients(i_cell);
                         return;
@@ -2246,9 +2247,10 @@ struct TENOFunctor {
             for (uint8_t j = 0; j < n_faces; j++) {
                 const uint32_t f = faces_of_cell(f_begin + j);
                 const uint8_t side = side_of(f, i_cell);
+                const PlanarFace nodes = planar_nodes(f);
                 for (uint8_t q = 0; q < n_quad; q++) {
                     rtype p[N_DIM], Wq[N_CONSERVATIVE];
-                    if (!face_point(f, q, i_cell, p)) continue;
+                    if (!face_point(f, q, i_cell, nodes, p)) continue;
                     point_state(p, Wq);
                     store_point_gradient(i_cell, f, q, side, p, Wq,
                                          [&](const uint32_t l, const uint8_t i) { return a[l][i]; }, factor);
@@ -4396,9 +4398,15 @@ void TENO::init_wall_fits() {
     const auto h_mean = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), basis_mean);
     Kokkos::View<rtype ***>::host_mirror_type h_quad_points;
     FaceWeights<Kokkos::HostSpace> h_quad_weights;
+    FaceNodes::host_mirror_type h_face_nodes;
+    NodeCoords::host_mirror_type h_node_coords;
+    Kokkos::View<rtype *[4]>::host_mirror_type h_face_rule;
     if constexpr (N_DIM == 3) {
         h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
         h_quad_weights = face_quad_weights.host();
+        h_face_nodes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_nodes);
+        h_node_coords = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), node_coords);
+        h_face_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
     }
     const uint8_t n_quad = n_face_quadrature_points();
 
@@ -4503,7 +4511,14 @@ void TENO::init_wall_fits() {
             return true;
         } else {
             if (h_quad_weights(f, q) == 0.0_r) return false;
-            FOR_I_DIM x[i] = double(h_quad_points(f, q, i));
+            if (h_quad_points.extent(0) > 0) {
+                FOR_I_DIM x[i] = double(h_quad_points(f, q, i));
+            } else {
+                // Planar faces: the points the device places from the nodes (planar_face_point)
+                rtype x_q[N_DIM];
+                planar_face_point(planar_face(h_face_nodes, h_node_coords, f), h_face_rule, q, x_q);
+                FOR_I_DIM x[i] = double(x_q[i]);
+            }
             return true;
         }
     };
