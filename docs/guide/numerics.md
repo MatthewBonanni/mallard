@@ -484,8 +484,7 @@ Pitfalls:
   whose polynomial is negative in density or pressure at a face point, keep
   the least-squares gradients, as do the walls and boundaries listed above.
   Near shocks the flux is then second order, as before.
-- **Not yet available** for flamelet gases, LES, the
-  hybrid convective flux, curved meshes and rotational
+- **Not yet available** for flamelet gases, LES, curved meshes and rotational
   periodicity, where Mallard reports an error.
 - **Probes.** Surface probes of the diffusive fluxes (`ENERGY_DIFFUSIVE_FLUX`,
   `SPECIES_DIFFUSIVE_FLUX_*`) report the polynomial fluxes the scheme applies,

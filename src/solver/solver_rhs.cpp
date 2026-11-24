@@ -423,10 +423,39 @@ void Solver::update_upwind_sensor() {
     gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     if (is_mixture()) cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
-    gated::parallel_for("upwind_sensor", n_gradient_cells(),
-                        UpwindSensorFunctor{viscous_gradients, W_cells, mesh->cell_volume, physics.get_gamma(),
-                                            cell_gamma, cell_upwind, hybrid_threshold, hybrid_floor,
-                                            hybrid_dilatation_scale});
+    UpwindSensorFunctor sensor{viscous_gradients, W_cells,     mesh->cell_volume, physics.get_gamma(),
+                               cell_gamma,        cell_upwind, hybrid_threshold,  hybrid_floor,
+                               hybrid_dilatation_scale};
+    if (!sensor_gradients.is_allocated()) {
+        gated::parallel_for("upwind_sensor", n_gradient_cells(), sensor);
+        return;
+    }
+    // TENO: the central polynomials' gradients where it finds the cell smooth, least squares elsewhere
+    const uint32_t n_owned = mesh->n_owned(), n = n_gradient_cells();
+    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
+    face_reconstruction->cell_gradients(W_cells, sensor_gradients, n_owned);
+    const Kokkos::View<rtype *> sigma = teno.troubled;
+    const rtype threshold = teno.sigma_threshold;
+    const Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> P = sensor_gradients, G = viscous_gradients;
+    gated::parallel_for("upwind_troubled_gradients", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        if (sigma(c) < threshold) return;
+        FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) P(c, i, d) = G(c, i, d);
+    });
+    UpwindSensorFunctor smooth = sensor;
+    smooth.gradients = sensor_gradients;
+    gated::parallel_for("upwind_sensor", n_owned, smooth);
+    if (n <= n_owned) return;
+    if (!halo.active()) {
+        gated::parallel_for("upwind_sensor_rest", Kokkos::RangePolicy<>(n_owned, n), sensor);
+        return;
+    }
+    // The faces' upwind fractions read the halo cells' as their owners have them
+    const StateView packed = sensor_halo.flow;
+    const Kokkos::View<rtype *> upwind = cell_upwind;
+    gated::parallel_for("upwind_sensor_pack", n_owned, KOKKOS_LAMBDA(const uint32_t c) { packed(c, 0) = upwind(c); });
+    halo.exchange(sensor_halo);
+    gated::parallel_for("upwind_sensor_unpack", Kokkos::RangePolicy<>(n_owned, n),
+                        KOKKOS_LAMBDA(const uint32_t c) { upwind(c) = packed(c, 0); });
 }
 
 void Solver::add_geometric_source(StateView rhs, Kokkos::View<rtype *, Kokkos::LayoutStride> mu) {

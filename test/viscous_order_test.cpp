@@ -252,7 +252,7 @@ std::array<double, N_CONSERVATIVE> face_integral(const Mesh & m, uint32_t f, uin
 }
 
 std::string box_input(const std::string & mesh, uint32_t n, uint32_t order, const std::string & physics,
-                      const std::string & gradients) {
+                      const std::string & gradients, const std::string & numerics = "") {
     std::ostringstream s;
     s << "[run]\nn_steps = 1\ncfl = 0.5\n[mesh]\ntype = \"" << mesh << "\"\nNx = " << n << "\nNy = " << n
       << "\nLx = 1.0\nLy = 1.0\n";
@@ -265,7 +265,7 @@ std::string box_input(const std::string & mesh, uint32_t n, uint32_t order, cons
     s << "]\np = \"" << expr(P) << "\"\n"
       << "[physics]\ntype = \"" << physics << "\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n";
     if (physics == "navier_stokes") s << "mu = " << MU << "\nPr = " << PR << "\n";
-    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n";
+    s << "[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n" << numerics;
     if (!gradients.empty()) s << "viscous_gradients = \"" << gradients << "\"\n";
     s << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = " << order << "\n"
       << "[output]\ncheck_interval = 1000000\n";
@@ -283,12 +283,13 @@ std::vector<std::array<double, N_CONSERVATIVE>> rhs_of(Solver & solver) {
 }
 
 /** @brief Mean error over cells and momentum and energy of the viscous residual at the exact cell averages. */
-double viscous_residual_error(const std::string & mesh, uint32_t n, uint32_t order, const std::string & gradients) {
+double viscous_residual_error(const std::string & mesh, uint32_t n, uint32_t order, const std::string & gradients,
+                              const std::string & numerics = "") {
     Solver viscous, inviscid;
     viscous.set_distributed(false);
     inviscid.set_distributed(false);
-    viscous.init(parse_toml(box_input(mesh, n, order, "navier_stokes", gradients)));
-    inviscid.init(parse_toml(box_input(mesh, n, order, "euler", "")));
+    viscous.init(parse_toml(box_input(mesh, n, order, "navier_stokes", gradients, numerics)));
+    inviscid.init(parse_toml(box_input(mesh, n, order, "euler", "", numerics)));
     const auto a = rhs_of(viscous), b = rhs_of(inviscid);
     const Mesh & m = *viscous.get_mesh();
     double sum = 0.0;
@@ -423,6 +424,20 @@ TEST_P(ViscousOrder, ResidualOfReconstructionGradientsConvergesAtDesignOrder) {
     for (const double k : n) e.push_back(viscous_residual_error(mesh, uint32_t(k), 5, "reconstruction"));
     // Face gradients of order 4; the residual divides their error by h
     verification::expect_order({"viscous", "TENO5, reconstruction gradients", verification::cells_of(mesh),
+                                "mean viscous residual error, manufactured solution", n, e, 3.0,
+                                N_DIM == 2 ? 2.75 : 2.5});
+}
+
+TEST_P(ViscousOrder, ResidualOfReconstructionGradientsWithTheHybridFluxConvergesAtDesignOrder) {
+    // The two runs' sensors see the same field, so the convective fluxes cancel as with the Riemann flux
+    SKIP_IN_SINGLE_PRECISION("the residual errors reach round-off");
+    const std::string mesh = GetParam();
+    const std::vector<double> n = N_DIM == 2 ? std::vector<double>{16, 32} : std::vector<double>{8, 16};
+    std::vector<double> e;
+    for (const double k : n) {
+        e.push_back(viscous_residual_error(mesh, uint32_t(k), 5, "reconstruction", "convective_flux = \"hybrid\"\n"));
+    }
+    verification::expect_order({"viscous", "TENO5, reconstruction gradients, hybrid flux", verification::cells_of(mesh),
                                 "mean viscous residual error, manufactured solution", n, e, 3.0,
                                 N_DIM == 2 ? 2.75 : 2.5});
 }
@@ -634,6 +649,10 @@ TEST(ViscousReconstructionGradients, MatchSerialWithAndWithoutStepGraphs) {
       << "[numerics]\nviscous_gradients = \"reconstruction\"\n"
       << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n[output]\ncheck_interval = 1000000\n";
     expect_matches_serial_with_and_without_step_graphs(s.str());
+    // The hybrid flux's sensor, from the polynomials in owned cells and their owners' in halo cells
+    std::string hybrid = s.str();
+    hybrid.insert(hybrid.find("[numerics]\n") + 11, "convective_flux = \"hybrid\"\n");
+    expect_matches_serial_with_and_without_step_graphs(hybrid);
 }
 
 namespace {
@@ -745,7 +764,6 @@ TEST(ViscousReconstructionGradients, InputsItCannotServeAreRejectedWithTheReason
         {replaced(base, teno5, "type = \"MUSCL\"\n"), "needs the TENO reconstruction"},
         {replaced(base, teno5, "type = \"TENO\"\norder = 3\n"), "order 3"},
         {base + "[les]\n", "LES"},
-        {replaced(base, "[numerics]\n", "[numerics]\nconvective_flux = \"hybrid\"\n"), "hybrid convective flux"},
     };
     for (const auto & [text, reason] : cases) {
         const std::string e = error_of(text);
