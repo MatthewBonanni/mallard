@@ -193,24 +193,11 @@ int Solver::init(const Input & input_in) {
     try {
         setup_from_input();
     } catch (const std::exception & e) {
-        std::string misspelled;
-        for (const Diagnostic & key : unused_keys(input)) {
-            if (!key.suggestion.empty()) misspelled += "\n  " + describe(key);
-        }
+        const std::string misspelled = possibly_misspelled(input);
         if (misspelled.empty() || check_only) throw;
-        throw InputError(std::string(e.what()) + "\npossibly misspelled:" + misspelled);
+        throw InputError(e.what() + misspelled);
     }
-    if (!check_only && !state_reader) {
-        const std::vector<Diagnostic> unused = unused_keys(input);
-        if (!unused.empty()) {
-            std::string list;
-            for (const Diagnostic & key : unused) list += "\n  " + describe(key);
-            InputError error("keys that are unknown or unused with these settings (mallard check lists them all):" +
-                             list);
-            error.code = diagnostic_code::KEY_UNUSED;
-            throw error;
-        }
-    }
+    if (!check_only && !state_reader) reject_unused_keys(input);
     const ResolvedInput resolved = resolve_input(input);
     provenance::set_resolved(resolved.toml);
     std::vector<std::tuple<std::string, std::string, bool>> preset_settings;

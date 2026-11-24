@@ -303,7 +303,8 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
 ```
 
 When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings.
+listed under it as possible misspellings. `mallard reactor` checks its input
+the same way.
 
 ## Error messages
 

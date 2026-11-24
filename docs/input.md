@@ -95,7 +95,7 @@ statistics = "run1/restart_020000.restart"
 | `t_wall_stop` | Stop after this many seconds of wall time |
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
-| `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
+| `control_file_interval` | Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory (default 0: never; `--set control_file_interval=N` turns them on from the command line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
 | `cuda_graphs` | CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL) or before CUDA 12.4; the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
 | `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, a moving region's probe outgrowing its staging, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; CUDA runs without graphs, and HIP and SYCL builds (whose graphs have no conditional nodes), take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
@@ -1768,7 +1768,7 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)) |
+| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)). With `filled = false`, the surface itself; an open one (edges of one triangle only) is a surface (2D: curve) only, facing as its first triangle by the right-hand rule ([Open surfaces from CAD](guide/geometry.md#open-surfaces-from-cad)) |
 | `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, `Y_<species>`, `MACH`, `H`, `X_<species>`, `VORTICITY` (3D: `VORTICITY_X`, `_Y`, `_Z`) and `Q_CRITERION` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
 | `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
@@ -1825,7 +1825,9 @@ Filled regions and flat surfaces may also have `filled` (default `true`):
 `filled = false` is the region's boundary, the same as
 `{type = "boundary", of = {...}}`: `{type = "sphere", ..., filled = false}` is
 the sphere's surface (2D: its circle), `{type = "rectangle", ..., filled = false}`
-in 3D its four edges. On a curve, `filled = false` is an error; take the
+in 3D its four edges. An `stl` or `obj` file of an open surface needs
+`filled = false`, which is that surface itself (default `true`: an error, as it
+has no inside). On a curve, `filled = false` is an error; take the
 boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 
 | Region | `boundary` | `interior` |
@@ -1833,6 +1835,7 @@ boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 | filled (volume; 2D: area) | its closed surface (2D: curve), facing out | error: already filled |
 | closed surface (2D: closed curve), e.g. a sphere's surface, a `circle` in 2D | error: closed | the filled region it encloses |
 | open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
+| open surface from an `stl` or `obj` file | error: not supported yet | error: not closed |
 | closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
 | boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
 
@@ -2080,3 +2083,9 @@ It prints the ignition delay, the time of the maximum of `dT/dt`, once
 `dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
 however small the temperature rise of a lean mixture), and otherwise none.
 Example: `examples/h2_ignition`.
+
+It also reads `[physics] gas` (`mixture`, the default and the only one) and
+`[chemistry] integrator` and `C_reg`, as the solver does; the `[benchmark]`
+mode does not read `[reactor] output_interval` or `output`. Keys it does not
+read are errors, as in a run ([unknown and unused
+keys](guide/input_files.md#unknown-and-unused-keys)).
