@@ -100,6 +100,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         if (!file) r.error(diagnostic_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
     r.unassigned = unassigned_zones;
+    check_restart(r, input_in, resolved.toml);
     if (!r.setup_done && mesh && !options.view_dir.empty()) {
         // The mesh alone, so that what the setup stopped on (a zone without a condition) can be seen
         try {
@@ -134,6 +135,30 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     check_regions(r, options);
     check_initial(r, options);
     return r;
+}
+
+void Solver::check_restart(CheckReport & r, const Input & case_input, const std::string & resolved) const {
+    if (find_value_or<std::string>(case_input, "initialize", "type", "") != "restart") return;
+    const std::string file = find_value_or<std::string>(case_input, "initialize", "file", "");
+    if (file.empty()) return;
+    restart_changes::Restart restart;
+    try {
+        restart = restart_changes::read(file);
+    } catch (const std::exception &) {
+        return;  // the setup reports why the file does not read
+    }
+    r.has_restart = true;
+    r.restart = {restart.file, restart.step, restart.t, restart.run_id, !restart.resolved.empty(), {}};
+    const Input now = parse_input_string(resolved, "the resolved input");
+    r.restart.changes = restart_changes::classify(
+        restart, now, r.setup_done ? restart_variables() : std::vector<std::string>{}, r.setup_done);
+    for (const restart_changes::Change & c : r.restart.changes) {
+        if (c.effect == restart_changes::Effect::INCOMPATIBLE) {
+            r.error(diagnostic_code::RESTART_INCOMPATIBLE, c.key + ": " + c.detail + ".");
+        } else if (c.effect == restart_changes::Effect::RESETS) {
+            r.warning(diagnostic_code::RESTART_RESETS, c.key + ": " + c.detail + ".");
+        }
+    }
 }
 
 void Solver::check_initial(CheckReport & r, const CheckOptions & options) {

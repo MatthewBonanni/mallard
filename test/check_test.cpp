@@ -759,6 +759,55 @@ TEST(CheckResolution, DissipationFromAnEarlierRunsStatistics) {
     EXPECT_NE(first_error(none).find("STRAIN_RATE*STRAIN_RATE"), std::string::npos) << first_error(none);
 }
 
+TEST(CheckRestart, EachKeyTheCaseChangesFromTheRestartsInputIsClassified) {
+    const std::string file = tg_statistics("tg_restart", "fields = [\"RHO\"]\n");
+    // The input tg_statistics ran, started from its restart file
+    std::string input = periodic_box(TG_N, TG_NU, taylor_green());
+    input.replace(input.find("t_stop = 1.0\ncfl = 0.5\n"), 22, "n_steps = 1\ndt = 1e-7\n");
+    input += "[output]\ncheck_interval = 1000000\n[statistics]\nfields = [\"RHO\"]\n";
+    Input same = parse_input_string(input);
+    Solver::start_from_restart(same, file);
+    const CheckReport r = Solver().check(same, {});
+    ASSERT_TRUE(r.has_restart);
+    EXPECT_EQ(r.restart.file, file);
+    EXPECT_EQ(r.restart.step, 1u);
+    EXPECT_TRUE(r.restart.input_recorded);
+    EXPECT_FALSE(r.restart.run_id.empty());
+    // tg_statistics wrote the file with a [[write_data]] this input does not have: output is accepted
+    for (const restart_changes::Change & c : r.restart.changes) {
+        EXPECT_EQ(c.effect, restart_changes::Effect::ACCEPTED) << c.key << ": " << c.detail;
+    }
+    EXPECT_TRUE(r.ok()) << first_error(r);
+
+    // More steps continue; other averages cannot, without a reset
+    std::string edited = input;
+    edited.replace(edited.find("n_steps = 1"), 11, "n_steps = 5");
+    edited.replace(edited.find("fields = [\"RHO\"]"), 16, "fields = [\"RHO\", \"P\"]");
+    Input changed = parse_input_string(edited);
+    Solver::start_from_restart(changed, file);
+    const CheckReport e = Solver().check(changed, {});
+    ASSERT_TRUE(e.has_restart);
+    std::map<std::string, restart_changes::Effect> effects;
+    for (const restart_changes::Change & c : e.restart.changes) effects[c.key] = c.effect;
+    EXPECT_EQ(effects.at("run.n_steps"), restart_changes::Effect::ACCEPTED);
+    EXPECT_EQ(effects.at("statistics.fields"), restart_changes::Effect::INCOMPATIBLE);
+    EXPECT_FALSE(e.ok());
+    EXPECT_TRUE(mentions(e.errors(), "statistics.fields: the restart file holds the averages"));
+    const json::Value report = json::parse(check_json(e));
+    const json::Value * restart = report.find("restart");
+    ASSERT_TRUE(restart && restart->find("changes"));
+    EXPECT_EQ((*restart)["file"].string, file);
+    bool listed = false;
+    for (const json::Value & c : restart->find("changes")->array) {
+        if (c["key"].string != "statistics.fields") continue;
+        listed = true;
+        EXPECT_EQ(c["effect"].string, "incompatible");
+        EXPECT_EQ(c["restart"].string, "[\"RHO\"]");
+    }
+    EXPECT_TRUE(listed);
+    EXPECT_EQ(json::parse(check_json(check(input)))["restart"].type, json::Value::Type::NUL);
+}
+
 TEST(MeshQualityMetrics, UniformQuadsAreIdealAndElongatedOnesHaveTheirAspectRatio) {
     if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
     const auto mesh = make_mesh("cartesian", 10, 2, 1.0, 1.0);  // cells 0.1 x 0.5

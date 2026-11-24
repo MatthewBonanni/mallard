@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/MatthewBonanni/mallard/blob/main/docs/schemas/check-restart.schema.json",
+  "title": "mallard check --restart FILE --format json: the restart member",
+  "description": "The restart member of mallard check's JSON report (schema mallard-check): null without a start from a restart file, else the file and what a start from it does with each key the case changes from the input it was written with. Readers ignore fields they do not know.",
+  "type": ["object", "null"],
+  "required": ["file", "step", "t", "run_id", "input_recorded", "changes"],
+  "properties": {
+    "file": {"type": "string", "description": "The restart file, as the input or --restart names it."},
+    "step": {"type": "integer", "minimum": 0},
+    "t": {"type": "number", "description": "Its simulated time, in the input's units."},
+    "run_id": {"type": ["string", "null"], "description": "The run that wrote it; null if its run block does not say."},
+    "input_recorded": {"type": "boolean", "description": "Its run block holds the resolved input it was written with; without it, changes lists no keys of the input."},
+    "changes": {
+      "type": "array",
+      "description": "One per key that differs between the file's resolved input and the case's ([initialize] left out), and for a dimension, precision or variables the build or case does not share with the file.",
+      "items": {
+        "type": "object",
+        "required": ["key", "restart", "case", "effect", "detail"],
+        "properties": {
+          "key": {"type": "string", "description": "The key, its entries by name where they have one: boundaries[name = \"inlet\"].type; or build.dimension, build.precision, variables."},
+          "restart": {"type": ["string", "null"], "description": "Its value in the file's input, as TOML; null where not set."},
+          "case": {"type": ["string", "null"], "description": "Its value in the case's resolved input, as TOML; null where not set."},
+          "effect": {
+            "enum": ["accepted", "resets", "incompatible"],
+            "description": "accepted: the run continues the file's state; resets: some state of the file starts afresh (W-RESTART-RESETS); incompatible: the file cannot be continued (E-RESTART-INCOMPATIBLE)."
+          },
+          "detail": {"type": ["string", "null"], "description": "What starts afresh, or why the file cannot be continued; for accepted, a note or null."}
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
