@@ -1,0 +1,1 @@
+- Strong and weak scaling study of the Taylor-Green vortex on GPUs: `examples/taylor_green_3d/scaling.toml` and `scaling.py` write its inputs, and `tools/docs/scaling.py` reduces the runs' `mallard.jsonl` logs to times per step and efficiencies. The guide's multi-GPU scaling section shows it on NVIDIA A100-SXM4-80GB GPUs, one and two nodes.
