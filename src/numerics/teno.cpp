@@ -2127,6 +2127,8 @@ struct TENOFunctor {
     // TENO::point_gradients: when allocated, the smooth passes also write there the gradients of their cells'
     // central polynomials at the face points
     FacePointGradients point_gradients{};
+    teno::WallFits wall_fits{};
+    struct WallFitPass {};
 
     /** @brief factor[d] = h^-d (d >= 1) of cell i_cell: its central coefficients of degree d in the unscaled frame over the scaled. */
     KOKKOS_INLINE_FUNCTION
@@ -2147,12 +2149,13 @@ struct TENOFunctor {
                               const rtype * p, const rtype * W_q, A && a, const rtype (&factor)[DEG + 1]) const {
         // Gas mixtures reconstruct W, and take least-squares viscous gradients
         if constexpr (!PRIM) {
-            rtype r[N_DIM], dU[N_CONSERVATIVE][N_DIM], g[FacePointGradients::NQ][N_DIM];
+            rtype r[N_DIM], dU[N_CONSERVATIVE][N_DIM], v[FacePointGradients::NQ], g[FacePointGradients::NQ][N_DIM];
             FOR_I_DIM r[i] = p[i] - cell_coords(i_cell, i);
             FacePointGradients::conservative_gradient<DEG>(
-                r, [&](const uint32_t l, const uint8_t d, const uint8_t v) { return a(l, v) * factor[d]; }, dU);
+                r, [&](const uint32_t l, const uint8_t d, const uint8_t k) { return a(l, k) * factor[d]; }, dU);
+            point_gradients.primitive_value(W_q, v);
             point_gradients.primitive_gradient(W_q, dU, g);
-            point_gradients.store(f, q, side, g);
+            point_gradients.store(f, q, side, v, g);
         }
     }
 
@@ -2162,6 +2165,97 @@ struct TENOFunctor {
         for (uint32_t k = offsets_faces_of_cell(i_cell); k < offsets_faces_of_cell(i_cell + 1); k++) {
             const uint32_t f = faces_of_cell(k);
             point_gradients.mark(f, side_of(f, i_cell));
+        }
+    }
+
+    /**
+     * @brief Wall fit k (TENO::wall_fits) of a cell found smooth: its values and gradients at the cell's face
+     *        points replace those of its central polynomial, unless a face point is inadmissible, which marks
+     *        the cell's sides unusable instead.
+     */
+    KOKKOS_INLINE_FUNCTION
+    void operator()(WallFitPass, const uint32_t k) const {
+        if constexpr (!PRIM) {
+            constexpr uint8_t E = N_DIM + 1;
+            const uint32_t i_cell = wall_fits.cells(k);
+            const uint32_t f_begin = offsets_faces_of_cell(i_cell);
+            const uint8_t n_faces = static_cast<uint8_t>(offsets_faces_of_cell(i_cell + 1) - f_begin);
+            const uint32_t f0 = faces_of_cell(f_begin);
+            if (!point_gradients.usable(f0, side_of(f0, i_cell))) return;
+            const BoundaryCondition & bc = boundaries.bcs(wall_fits.bc(k));
+            rtype u_w[N_DIM];
+            FOR_I_DIM u_w[i] = bc.data[1 + i];
+            const bool isothermal = bc.type == BoundaryType::WALL_ISOTHERMAL;
+            const rtype e_w =
+                isothermal ? point_gradients.R / (gamma - 1.0_r) * bc.data[0] + 0.5_r * dot<N_DIM>(u_w, u_w) : 0.0_r;
+            // V = [rho, rho (u - u_w), rho (E - e_w)]: the wall points' rows ask for V = 0
+            auto to_V = [&](rtype * x) {
+                FOR_I_DIM x[1 + i] -= u_w[i] * x[0];
+                if (isothermal) x[E] -= e_w * x[0];
+            };
+            rtype U0[N_CONSERVATIVE], V0[N_CONSERVATIVE];
+            conservatives(i_cell, U0);
+            FOR_I_CONSERVATIVE V0[i] = U0[i];
+            to_V(V0);
+            rtype a[NK][N_CONSERVATIVE] = {};
+            for (uint16_t s = 0; s < wall_fits.size(k); s++) {
+                rtype dV[N_CONSERVATIVE];
+                conservatives(wall_fits.entries(k, s), dV);
+                FOR_I_CONSERVATIVE dV[i] -= U0[i];
+                to_V(dV);
+                for (uint8_t l = 0; l < NK; l++) {
+                    const rtype P_free = wall_fits.free_pinv(k, l, s), P_wall = wall_fits.wall_pinv(k, l, s);
+                    a[l][0] = fmadd(P_free, dV[0], a[l][0]);
+                    FOR_I_DIM a[l][1 + i] = fmadd(P_wall, dV[1 + i], a[l][1 + i]);
+                    a[l][E] = fmadd(isothermal ? P_wall : P_free, dV[E], a[l][E]);
+                }
+            }
+            for (uint8_t l = 0; l < NK; l++) {
+                const rtype sum = wall_fits.wall_sum(k, l);
+                FOR_I_DIM a[l][1 + i] = fmadd(u_w[i], a[l][0], a[l][1 + i] - sum * V0[1 + i]);
+                if (isothermal) a[l][E] = fmadd(e_w, a[l][0], a[l][E] - sum * V0[E]);
+            }
+            const rtype h = wall_fits.scale(k);
+            rtype factor[DEG + 1];
+            factor[0] = 1.0_r;
+            for (uint8_t d = 1; d <= DEG; d++) factor[d] = factor[d - 1] / h;
+            const uint8_t n_quad = this->n_quad();
+            auto point_state = [&](const rtype * p, rtype * Wq) {
+                rtype xi[N_DIM], psi[NK], U_f[N_CONSERVATIVE];
+                FOR_I_DIM xi[i] = (p[i] - cell_coords(i_cell, i)) / h;
+                teno::monomials(DEG, xi, psi);
+                FOR_I_CONSERVATIVE U_f[i] = U0[i];
+                for (uint8_t l = 0; l < NK; l++) {
+                    const rtype psi_l = psi[l] - wall_fits.mean(k, l);
+                    FOR_I_CONSERVATIVE U_f[i] = fmadd(a[l][i], psi_l, U_f[i]);
+                }
+                to_primitives(U_f, Wq);
+                return Wq[0] > 0.0_r && Wq[E] > 0.0_r && Kokkos::isfinite(Wq[E]);
+            };
+            for (uint8_t j = 0; j < n_faces; j++) {
+                const uint32_t f = faces_of_cell(f_begin + j);
+                const PlanarFace nodes = planar_nodes(f);
+                for (uint8_t q = 0; q < n_quad; q++) {
+                    rtype p[N_DIM], Wq[N_CONSERVATIVE];
+                    if (!face_point(f, q, i_cell, nodes, p)) continue;
+                    if (!point_state(p, Wq)) {
+                        mark_point_gradients(i_cell);
+                        return;
+                    }
+                }
+            }
+            for (uint8_t j = 0; j < n_faces; j++) {
+                const uint32_t f = faces_of_cell(f_begin + j);
+                const uint8_t side = side_of(f, i_cell);
+                const PlanarFace nodes = planar_nodes(f);
+                for (uint8_t q = 0; q < n_quad; q++) {
+                    rtype p[N_DIM], Wq[N_CONSERVATIVE];
+                    if (!face_point(f, q, i_cell, nodes, p)) continue;
+                    point_state(p, Wq);
+                    store_point_gradient(i_cell, f, q, side, p, Wq,
+                                         [&](const uint32_t l, const uint8_t i) { return a[l][i]; }, factor);
+                }
+            }
         }
     }
 
@@ -3701,6 +3795,14 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
         }
     }
     gated::fill(exec, n_troubled, 0u);
+    if constexpr (!PRIM) {
+        if (point_gradients.on() && wall_fits.n_fits() > 0) {
+            functor.wall_fits = wall_fits;
+            gated::parallel_for("teno_wall_fits",
+                                Kokkos::RangePolicy<Space, typename Functor::WallFitPass, HeavyBounds>(exec, 0, wall_fits.n_fits()),
+                                functor);
+        }
+    }
 }
 
 template <uint8_t DEG, bool PRIM, typename TABLE>
@@ -4354,6 +4456,328 @@ void TENO::for_each_stencil(const std::function<void(uint32_t, const CellStencil
             visit(cell_of_row(c0 + k), s);
         }
     }
+}
+
+namespace {
+
+/** @brief Collapsed (Duffy) Gauss quadrature on the reference tetrahedron; weights sum to 1/6. Exact for degree 2n-3. */
+struct TetrahedronRule {
+    std::vector<std::array<double, 3>> x;
+    std::vector<double> w;
+    explicit TetrahedronRule(int n) {
+        std::vector<double> g, gw;
+        gauss_legendre(n, g, gw);
+        for (size_t i = 0; i < g.size(); i++) {
+            for (size_t j = 0; j < g.size(); j++) {
+                for (size_t k = 0; k < g.size(); k++) {
+                    const double u = 0.5 * (g[i] + 1.0), v = 0.5 * (g[j] + 1.0), t = 0.5 * (g[k] + 1.0);
+                    x.push_back({u, v * (1.0 - u), t * (1.0 - u) * (1.0 - v)});
+                    w.push_back(0.125 * gw[i] * gw[j] * gw[k] * (1.0 - u) * (1.0 - u) * (1.0 - v));
+                }
+            }
+        }
+    }
+};
+
+}  // namespace
+
+void TENO::init_wall_fits() {
+    wall_fits = {};
+    fitted_walls = {};
+    if (!point_gradients.on() || primitive) return;
+    const Mesh & m = *mesh;
+    const uint8_t nk = n_dof_large;
+    const auto h_face_bc = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_bc);
+    const auto h_bcs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.bcs);
+    Kokkos::View<int32_t *>::host_mirror_type h_state_index;
+    if (boundaries.face_state_index.is_allocated()) {
+        h_state_index = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundaries.face_state_index);
+    }
+    auto is_wall = [&](const int32_t f) {
+        const int32_t b = h_face_bc(static_cast<size_t>(f));
+        return b >= 0 && h_bcs(static_cast<size_t>(b)).is_wall();
+    };
+    const auto h_scale = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), scale);
+    const auto h_shape = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), cell_shape);
+    const auto h_mean = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), basis_mean);
+    Kokkos::View<rtype ***>::host_mirror_type h_quad_points;
+    FaceWeights<Kokkos::HostSpace> h_quad_weights;
+    FaceNodes::host_mirror_type h_face_nodes;
+    NodeCoords::host_mirror_type h_node_coords;
+    Kokkos::View<rtype *[4]>::host_mirror_type h_face_rule;
+    if constexpr (N_DIM == 3) {
+        h_quad_points = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_quad_points);
+        h_quad_weights = face_quad_weights.host();
+        h_face_nodes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_nodes);
+        h_node_coords = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), node_coords);
+        h_face_rule = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_rule);
+    }
+    const uint8_t n_quad = n_face_quadrature_points();
+
+    // The image of x nearest to ref across the periodic translations
+    std::vector<std::array<double, N_DIM>> images(1, std::array<double, N_DIM>{});
+    for (const auto & t : m.periodic_translations) {
+        const size_t n = images.size();
+        for (const int sign : {-1, 1}) {
+            for (size_t k = 0; k < n; k++) {
+                std::array<double, N_DIM> v = images[k];
+                FOR_I_DIM v[i] += sign * double(t[i]);
+                images.push_back(v);
+            }
+        }
+    }
+    auto nearest = [&](const double * x, const double * ref, double * out) {
+        double best = std::numeric_limits<double>::max();
+        for (const auto & v : images) {
+            double d2 = 0.0;
+            FOR_I_DIM d2 += (x[i] + v[i] - ref[i]) * (x[i] + v[i] - ref[i]);
+            if (d2 < best) {
+                best = d2;
+                FOR_I_DIM out[i] = x[i] + v[i];
+            }
+        }
+    };
+    auto cell_center = [&](const uint32_t c, double * x) { FOR_I_DIM x[i] = double(m.h_cell_coords(c, i)); };
+    auto node = [&](const uint32_t n, double * x) { FOR_I_DIM x[i] = double(m.h_node_coords(n, i)); };
+
+    // Means of the monomials of (x - x0) / h over cell j, placed nearest to x0, over its simplices
+    const int n_rule = degree / 2 + 3;
+    const TriangleRule tri(n_rule);
+    const TetrahedronRule tet(n_rule);
+    auto cell_means = [&](const uint32_t j, const double * x0, const double h, double * means) {
+        double xj[N_DIM], raw[N_DIM];
+        cell_center(j, raw);
+        nearest(raw, x0, xj);
+        for (int l = 0; l < nk; l++) means[l] = 0.0;
+        double volume = 0.0;
+        auto add = [&](const double * p, const double w) {
+            double xi[N_DIM], phi[teno::MAX_NK];
+            FOR_I_DIM xi[i] = (p[i] - x0[i]) / h;
+            teno::monomials(degree, xi, phi);
+            for (int l = 0; l < nk; l++) means[l] += w * phi[l];
+        };
+        for (uint32_t k = 0; k < m.h_n_faces_of_cell(j); k++) {
+            const uint32_t f = m.h_face_of_cell(j, k);
+            const uint32_t n_nodes = m.h_n_nodes_of_face(f);
+            std::vector<std::array<double, N_DIM>> v(n_nodes);
+            for (uint32_t a = 0; a < n_nodes; a++) {
+                double x[N_DIM];
+                node(m.h_node_of_face(f, a), x);
+                nearest(x, xj, v[a].data());
+            }
+            if constexpr (N_DIM == 2) {
+                const double e1[2] = {v[0][0] - xj[0], v[0][1] - xj[1]}, e2[2] = {v[1][0] - xj[0], v[1][1] - xj[1]};
+                const double area = 0.5 * std::abs(e1[0] * e2[1] - e1[1] * e2[0]);
+                volume += area;
+                for (size_t q = 0; q < tri.w.size(); q++) {
+                    const double p[2] = {xj[0] + tri.xi[q] * e1[0] + tri.eta[q] * e2[0],
+                                         xj[1] + tri.xi[q] * e1[1] + tri.eta[q] * e2[1]};
+                    add(p, 2.0 * area * tri.w[q]);
+                }
+            } else {
+                double g[3] = {0.0, 0.0, 0.0};
+                for (const auto & p : v) {
+                    for (size_t i = 0; i < 3; i++) g[i] += p[i] / double(n_nodes);
+                }
+                for (uint32_t a = 0; a < n_nodes; a++) {
+                    const auto & p1 = v[a];
+                    const auto & p2 = v[(a + 1) % n_nodes];
+                    double e[3][3];
+                    for (size_t i = 0; i < 3; i++) {
+                        e[0][i] = g[i] - xj[i];
+                        e[1][i] = p1[i] - xj[i];
+                        e[2][i] = p2[i] - xj[i];
+                    }
+                    const double vol = std::abs(e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                                                e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                                                e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0])) /
+                                       6.0;
+                    volume += vol;
+                    for (size_t q = 0; q < tet.w.size(); q++) {
+                        double p[3];
+                        for (size_t i = 0; i < 3; i++) {
+                            p[i] = xj[i] + tet.x[q][0] * e[0][i] + tet.x[q][1] * e[1][i] + tet.x[q][2] * e[2][i];
+                        }
+                        add(p, 6.0 * vol * tet.w[q]);
+                    }
+                }
+            }
+        }
+        for (int l = 0; l < nk; l++) means[l] /= volume;
+    };
+    // Quadrature point q of boundary face f (in its cell's frame); false for padding points
+    auto wall_point = [&](const uint32_t f, const uint8_t q, double * x) {
+        if constexpr (N_DIM == 2) {
+            const uint32_t a = m.h_node_of_face(f, 0), b = m.h_node_of_face(f, 1);
+            const double s_q = 0.5 * double(quadrature_face.h_points(q, 0));
+            FOR_I_DIM x[i] = double(m.h_face_coords(f, i)) +
+                             s_q * (double(m.h_node_coords(b, i)) - double(m.h_node_coords(a, i)));
+            return true;
+        } else {
+            if (h_quad_weights(f, q) == 0.0_r) return false;
+            if (h_quad_points.extent(0) > 0) {
+                FOR_I_DIM x[i] = double(h_quad_points(f, q, i));
+            } else {
+                // Planar faces: the points the device places from the nodes (planar_face_point)
+                rtype x_q[N_DIM];
+                planar_face_point(planar_face(h_face_nodes, h_node_coords, f), h_face_rule, q, x_q);
+                FOR_I_DIM x[i] = double(x_q[i]);
+            }
+            return true;
+        }
+    };
+
+    std::vector<uint32_t> cells, entries;
+    std::vector<int32_t> bcs;
+    std::vector<uint16_t> sizes;
+    std::vector<rtype> scales, means, free_pinv, wall_pinv, wall_sum;
+    std::vector<uint8_t> fitted(m.n_state_faces(), 0);
+    uint16_t max_size = 0;
+    std::vector<double> A, X;
+    for_each_stencil([&](const uint32_t c, const CellStencils & st) {
+        if (c >= n_direct_rows) return;
+        std::vector<int32_t> walls;
+        std::vector<uint32_t> own;
+        bool usable = true;
+        for (uint16_t s = 0; s < st.central; s++) {
+            const int32_t j = st.cells[s], code = st.faces[s];
+            if (code < -1) usable = false;
+            if (code >= 0 && is_wall(code) && std::find(walls.begin(), walls.end(), code) == walls.end()) {
+                walls.push_back(code);
+            }
+            if (code == -1 && j != static_cast<int32_t>(c)) own.push_back(static_cast<uint32_t>(j));
+        }
+        if (walls.empty() || !usable) return;
+        const int32_t bc = h_face_bc(static_cast<size_t>(walls[0]));
+        for (const int32_t f : walls) {
+            usable = usable && h_face_bc(static_cast<size_t>(f)) == bc &&
+                     (h_state_index.extent(0) == 0 || h_state_index(static_cast<size_t>(f)) < 0);
+        }
+        if (!usable) return;
+        double x0[N_DIM];
+        cell_center(c, x0);
+        const double h = double(h_scale(c));
+        double mean0[teno::MAX_NK];
+        for (int l = 0; l < nk; l++) mean0[l] = double(h_mean(h_shape(c), l));
+        const int n_own = static_cast<int>(own.size());
+        std::vector<double> rows(size_t(n_own) * nk);
+        for (int s = 0; s < n_own; s++) {
+            double mj[teno::MAX_NK];
+            cell_means(own[size_t(s)], x0, h, mj);
+            for (int l = 0; l < nk; l++) rows[size_t(s) * nk + size_t(l)] = mj[l] - mean0[l];
+        }
+        int n_points = 0;
+        for (const int32_t f : walls) {
+            for (uint8_t q = 0; q < n_quad; q++) {
+                double raw[N_DIM], x[N_DIM], xi[N_DIM], phi[teno::MAX_NK];
+                if (!wall_point(static_cast<uint32_t>(f), q, raw)) continue;
+                nearest(raw, x0, x);
+                FOR_I_DIM xi[i] = (x[i] - x0[i]) / h;
+                teno::monomials(degree, xi, phi);
+                for (int l = 0; l < nk; l++) rows.push_back(phi[l] - mean0[l]);
+                n_points++;
+            }
+        }
+        // The first n_rows rows over the monomials of degree <= d, dropping degrees while the rows do not
+        // resolve them: without its mirror images, the first layer of cells at a flat wall of quadrilaterals or
+        // hexahedra sees one level of cells too few to fit the density to the full degree normal to the wall.
+        // The velocity's and isothermal walls' temperature gradients take its gradient times their differences
+        // from the wall's values, small there; adiabatic walls' temperature gradient loses the degree
+        auto fit = [&](const int n_rows, std::vector<double> & X) {
+            for (uint8_t d = degree; d >= 1; d--) {
+                const int n_cols = teno::n_dof(d);
+                if (n_rows < n_cols) continue;
+                std::vector<double> A(size_t(n_rows) * size_t(n_cols)), Xd;
+                for (int r = 0; r < n_rows; r++) {
+                    for (int l = 0; l < n_cols; l++) A[size_t(r) * size_t(n_cols) + size_t(l)] = rows[size_t(r) * nk + size_t(l)];
+                }
+                if (!teno_setup::least_squares_inverse(A, n_rows, n_cols, max_condition, Xd)) continue;
+                X.assign(size_t(n_rows) * nk, 0.0);
+                for (int r = 0; r < n_rows; r++) {
+                    for (int l = 0; l < n_cols; l++) X[size_t(r) * nk + size_t(l)] = Xd[size_t(r) * size_t(n_cols) + size_t(l)];
+                }
+                return d;
+            }
+            return uint8_t(0);
+        };
+        std::vector<double> X_free, X_wall;
+        const uint8_t d_free = fit(n_own, X_free), d_wall = fit(n_own + n_points, X_wall);
+        if (d_free < 1 || d_wall < 2) return;
+        cells.push_back(c);
+        bcs.push_back(bc);
+        scales.push_back(rtype(h));
+        sizes.push_back(static_cast<uint16_t>(n_own));
+        max_size = std::max(max_size, static_cast<uint16_t>(n_own));
+        entries.insert(entries.end(), own.begin(), own.end());
+        for (int l = 0; l < nk; l++) {
+            means.push_back(rtype(mean0[l]));
+            double sum = 0.0;
+            for (int s = n_own; s < n_own + n_points; s++) sum += X_wall[size_t(s) * nk + size_t(l)];
+            wall_sum.push_back(rtype(sum));
+        }
+        for (int s = 0; s < n_own; s++) {
+            for (int l = 0; l < nk; l++) {
+                free_pinv.push_back(rtype(X_free[size_t(s) * nk + size_t(l)]));
+                wall_pinv.push_back(rtype(X_wall[size_t(s) * nk + size_t(l)]));
+            }
+        }
+        for (uint32_t k = 0; k < m.h_n_faces_of_cell(c); k++) {
+            const uint32_t f = m.h_face_of_cell(c, k);
+            if (m.h_cells_of_face(f, 1) < 0 && is_wall(static_cast<int32_t>(f))) fitted[f] = 1;
+        }
+    }, false);
+
+    const size_t n = cells.size();
+    {
+        wall_fits.cells = Kokkos::View<uint32_t *>("wall_fit_cells", n);
+        wall_fits.bc = Kokkos::View<int32_t *>("wall_fit_bc", n);
+        wall_fits.scale = Kokkos::View<rtype *>("wall_fit_scale", n);
+        wall_fits.size = Kokkos::View<uint16_t *>("wall_fit_size", n);
+        wall_fits.entries = Kokkos::View<uint32_t **>("wall_fit_entries", n, max_size);
+        wall_fits.mean = Kokkos::View<rtype **>("wall_fit_mean", n, nk);
+        wall_fits.free_pinv = Kokkos::View<rtype ***>("wall_fit_free_pinv", n, nk, max_size);
+        wall_fits.wall_pinv = Kokkos::View<rtype ***>("wall_fit_wall_pinv", n, nk, max_size);
+        wall_fits.wall_sum = Kokkos::View<rtype **>("wall_fit_wall_sum", n, nk);
+        auto h_cells = Kokkos::create_mirror_view(wall_fits.cells);
+        auto h_bc = Kokkos::create_mirror_view(wall_fits.bc);
+        auto h_fit_scale = Kokkos::create_mirror_view(wall_fits.scale);
+        auto h_size = Kokkos::create_mirror_view(wall_fits.size);
+        auto h_entries = Kokkos::create_mirror_view(wall_fits.entries);
+        auto h_fit_mean = Kokkos::create_mirror_view(wall_fits.mean);
+        auto h_free = Kokkos::create_mirror_view(wall_fits.free_pinv);
+        auto h_wall = Kokkos::create_mirror_view(wall_fits.wall_pinv);
+        auto h_sum = Kokkos::create_mirror_view(wall_fits.wall_sum);
+        size_t e = 0;
+        for (size_t k = 0; k < n; k++) {
+            h_cells(k) = cells[k];
+            h_bc(k) = bcs[k];
+            h_fit_scale(k) = scales[k];
+            h_size(k) = sizes[k];
+            for (uint16_t s = 0; s < sizes[k]; s++) {
+                h_entries(k, s) = entries[e + s];
+                for (uint8_t l = 0; l < nk; l++) {
+                    h_free(k, l, s) = free_pinv[(e + s) * nk + l];
+                    h_wall(k, l, s) = wall_pinv[(e + s) * nk + l];
+                }
+            }
+            e += sizes[k];
+            for (uint8_t l = 0; l < nk; l++) {
+                h_fit_mean(k, l) = means[k * nk + l];
+                h_sum(k, l) = wall_sum[k * nk + l];
+            }
+        }
+        Kokkos::deep_copy(wall_fits.cells, h_cells);
+        Kokkos::deep_copy(wall_fits.bc, h_bc);
+        Kokkos::deep_copy(wall_fits.scale, h_fit_scale);
+        Kokkos::deep_copy(wall_fits.size, h_size);
+        Kokkos::deep_copy(wall_fits.entries, h_entries);
+        Kokkos::deep_copy(wall_fits.mean, h_fit_mean);
+        Kokkos::deep_copy(wall_fits.free_pinv, h_free);
+        Kokkos::deep_copy(wall_fits.wall_pinv, h_wall);
+        Kokkos::deep_copy(wall_fits.wall_sum, h_sum);
+    }
+    fitted_walls = Kokkos::View<uint8_t *>("fitted_walls", fitted.size());
+    Kokkos::deep_copy(fitted_walls, Kokkos::View<const uint8_t *, Kokkos::HostSpace>(fitted.data(), fitted.size()));
 }
 
 TENO::Stencils TENO::large_stencils() const {

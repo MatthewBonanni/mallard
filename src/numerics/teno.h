@@ -277,6 +277,35 @@ struct BlockStencils {
     const int32_t * offsets_of(const uint32_t k) const { return offsets.data() + size_t(k) * stride; }
 };
 
+/**
+ * @brief One-sided least-squares fits of the cells whose central stencils
+ *        mirror cells across a wall, for the viscous gradients
+ *        (TENO::wall_fits): the stencil's own cells alone, without the
+ *        mirror images, whose odd reflection of the velocity (and of the
+ *        temperature of isothermal walls) is smooth only where the wall's
+ *        second derivatives vanish, plus the wall's condition at the
+ *        quadrature points of the walls the stencil mirrored across. Each fit
+ *        is in TENO's frame of the cell, monomials of (x - x_c) / h minus
+ *        their means mean(fit, l): the fit with the wall points (wall_pinv,
+ *        and wall_sum, the sum of its columns of the wall points) serves the
+ *        velocity, as V = rho (u - u_w), which vanishes there, and isothermal
+ *        walls' energy, as rho (E - e_w); the fit without them (free_pinv),
+ *        the density and adiabatic walls' energy.
+ */
+struct WallFits {
+    Kokkos::View<uint32_t *> cells;     // (fit): the cell
+    Kokkos::View<int32_t *> bc;         // (fit): its wall's condition (BoundaryData::bcs)
+    Kokkos::View<rtype *> scale;        // (fit): h
+    Kokkos::View<uint16_t *> size;      // (fit): stencil entries
+    Kokkos::View<uint32_t **> entries;  // (fit, s): the stencil's cells
+    Kokkos::View<rtype **> mean;        // (fit, l)
+    Kokkos::View<rtype ***> free_pinv;  // (fit, l, s)
+    Kokkos::View<rtype ***> wall_pinv;  // (fit, l, s)
+    Kokkos::View<rtype **> wall_sum;    // (fit, l)
+
+    uint32_t n_fits() const { return static_cast<uint32_t>(cells.extent(0)); }
+};
+
 /** @brief (cell, k): central moments of each cell, mean of ((x - x_c) / h_c)^a ... (3D). */
 using Moments = Kokkos::View<double **, Kokkos::LayoutRight>;
 
