@@ -24,7 +24,7 @@ typedef struct mallard_array mallard_array;
 
 /** @brief The message of the last error on this thread. */
 const char * mallard_error(void);
-/** @brief The version of the build, as runs record it (`git describe`, else "0.10.0"). */
+/** @brief The version of the build, as runs record it (`git describe`, else the project version). */
 const char * mallard_library_version(void);
 /** @brief The dimension of the build, 2 or 3: that of the mesh files it reads. */
 int mallard_dim(void);

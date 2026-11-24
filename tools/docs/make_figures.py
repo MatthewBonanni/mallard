@@ -41,6 +41,7 @@ import python
 import regions
 import run_report
 import runs
+import scaling
 import schematics
 import structured_blocks
 import teno
@@ -74,6 +75,7 @@ def main():
     limiters.figures()
     particles.figures(args.mallard)
     post_flame.figures()
+    scaling.figures()
     schematics.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()
