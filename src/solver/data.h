@@ -48,6 +48,14 @@ class Data {
         }
 
         /**
+         * @brief Point the data array at a view in place (its users hold pointers to it).
+         * @param view View of data array.
+         */
+        void bind(Kokkos::View<rtype *, Kokkos::LayoutStride>::host_mirror_type view) {
+            m_view = view;
+        }
+
+        /**
          * @brief Get the name of the data array.
          * @return Name of data array.
          */
