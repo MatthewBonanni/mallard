@@ -145,7 +145,8 @@ Upwind Riemann solvers dissipate kinetic energy at the grid scale, the very
 scales the SGS model is meant to handle. `convective_flux = "hybrid"` uses the
 kinetic-energy-preserving central flux of Kuya, Totani & Kawai (2018) on the
 reconstructed states (the cells' values with TENO) and blends in the Riemann solver only where a Ducros
-shock sensor (restricted to compressions) fires:
+shock sensor (restricted to compressions) fires. With TENO the sensor's dilatation and
+vorticity are the central polynomials' in the cells TENO finds smooth, least squares in troubled ones:
 
 | `[numerics.hybrid]` key | Default | Meaning |
 |---|---|---|

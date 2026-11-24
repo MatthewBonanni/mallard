@@ -1378,6 +1378,8 @@ class Solver {
         rtype hybrid_dilatation_scale = static_cast<rtype>(DEFAULT_DILATATION_SCALE);
         CentralFlux hybrid_central = CentralFlux::RECONSTRUCTED;  // [numerics.hybrid] central
         Kokkos::View<rtype *> cell_upwind;  // hybrid flux: upwind fraction of each cell, else empty
+        Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> sensor_gradients;  // hybrid flux with TENO: (owned cell)
+        State sensor_halo;  // its cell_upwind's halo exchange, with a distributed mesh
         bool positivity_limiter = false;         // bound-preserving TENO, planar single gas: limit_flux_positivity
         Kokkos::View<rtype *> positivity_kappa;  // (cell): dt sum_f A_f alpha_f / V
         std::unique_ptr<TimeIntegrator> time_integrator;

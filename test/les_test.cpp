@@ -1017,3 +1017,40 @@ TEST(HybridFlux, ShocksKeepTheRiemannSolver) {
 }
 
 #endif
+
+namespace {
+
+/**
+ * @brief The convective kinetic-energy rate minus the pressure work of a TENO5 box at sensor threshold T:
+ *        u = -0.1 sin(2 pi x) / (2 pi), v = a times that negated, so that every compressing cell has the
+ *        sensor value 1 / (1 + a^2) = 0.6 exactly; zero to round-off when no cell takes the Riemann solver.
+ */
+double sensor_gap(const double T) {
+    const double a = std::sqrt(1.0 / 0.6 - 1.0);
+    std::ostringstream s;
+    s.precision(17);
+    s << "[run]\nn_steps = 0\ncfl = 0.5\n[mesh]\ntype = \"" << (N_DIM == 2 ? "cartesian_tri" : "cartesian_tet")
+      << "\"\nNx = 8\nNy = 8\nLx = 1.0\nLy = 1.0\n";
+    if (N_DIM == 3) s << "Nz = 3\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    s << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+      << "[initialize]\ntype = \"analytical\"\nn_subdivisions = 6\nrho = \"1\"\np = \"1\"\n"
+      << "u = [\"-0.1 * sin(2 * pi * x) / (2 * pi)\", \"" << 0.1 * a << " * sin(2 * pi * x) / (2 * pi)\""
+      << (N_DIM == 3 ? ", \"0\"" : "") << "]\n"
+      << "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+      << "[numerics]\nriemann_solver = \"HLLC\"\nconvective_flux = \"hybrid\"\n"
+      << "[numerics.hybrid]\nsensor_threshold = " << T << "\ndilatation_scale = 0.0\n"
+      << "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 5\n[output]\ncheck_interval = 1000000\n";
+    auto solver = make_solver(s.str());
+    solver->copy_device_to_host();
+    return double(solver->kinetic_energy_budget().convective) - pressure_work(*solver, 1.4);
+}
+
+} // namespace
+
+TEST(HybridFlux, TENOsSensorReadsTheCentralPolynomialsGradients) {
+    // Below 0.6 every compressing cell is upwinded; just above it none is with the polynomials' gradients,
+    // while least squares' second-order errors upwind some of the simplices at 0.605 and 0.61
+    const double upwinded = sensor_gap(0.59);
+    EXPECT_GT(std::abs(upwinded), 0.0);
+    EXPECT_LT(std::abs(sensor_gap(0.605)), precision_tol<double>(1e-6, 1e-1) * std::abs(upwinded));
+}

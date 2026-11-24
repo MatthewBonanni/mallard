@@ -1,0 +1,1 @@
+- `viscous_gradients = "reconstruction"` now combines with `convective_flux = "hybrid"`, and with TENO the hybrid flux's shock sensor takes its dilatation and vorticity from the central polynomials in the cells TENO finds smooth (least squares in troubled cells), instead of least squares everywhere (#1544).

@@ -1788,9 +1788,6 @@ void Solver::init_viscous_gradients(const TENO * teno) {
                           "Set order = 4 or more in [numerics.face_reconstruction]");
     }
     if (LES::in_input(input)) throw unavailable("is not available with LES yet", "Remove [les]");
-    if (hybrid_flux) {
-        throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");
-    }
     if (mesh->curved_geometry) {
         throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
     }
@@ -2293,6 +2290,10 @@ void Solver::allocate_memory() {
     if (positivity_limiter) positivity_kappa = Kokkos::View<rtype *>("positivity_kappa", mesh->n_cells);
     if (hybrid_flux) {
         cell_upwind = Kokkos::View<rtype *>("cell_upwind", mesh->n_cells);
+        if (dynamic_cast<const TENO *>(face_reconstruction.get()) != nullptr) {
+            sensor_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("sensor_gradients", mesh->n_owned());
+            if (halo.active()) sensor_halo = State("hybrid_sensor_halo", mesh->n_cells, 0);
+        }
         if (!viscous_gradients.is_allocated()) {
             viscous_gradients = Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]>("viscous_gradients", mesh->n_cells);
             viscous_gradient = make_vertex_gradient(make_gradient(*mesh, boundary_data, W_cells, viscous_gradients), *mesh,
