@@ -232,16 +232,16 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
         comm::enqueue_wait(comm_space, Kokkos::DefaultExecutionSpace());
         if (local_faces.size() > 0) launch_convective_flux(local_faces);
         face_exchange.start(comm_space, face_solution);
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> point_gradients;
         if (polynomial_viscous) {
-            polynomials = dynamic_cast<const TENO &>(*face_reconstruction).polynomials;
-            polynomial_exchange.start(comm_space, polynomials);
+            point_gradients = dynamic_cast<const TENO &>(*face_reconstruction).point_gradients.values;
+            point_gradient_exchange.start(comm_space, point_gradients);
         }
         if (viscous_gradients_due) {
             gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
         }
         face_exchange.finish(comm_space, face_solution);
-        if (polynomial_viscous) polynomial_exchange.finish(comm_space, polynomials);
+        if (polynomial_viscous) point_gradient_exchange.finish(comm_space, point_gradients);
         comm::enqueue_wait(Kokkos::DefaultExecutionSpace(), comm_space);
         if (partition_faces.size() > 0) launch_convective_flux(partition_faces);
     } else {
@@ -320,9 +320,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
 
 void Solver::set_polynomial_flux(ViscousFluxFunctor & functor) const {
     const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
-    functor.polynomials = CellPolynomials{teno.polynomials, mesh->cell_coords, teno.degree};
-    functor.points = FacePoints{teno.quadrature_face.points, teno.face_nodes, teno.node_coords, mesh->face_coords,
-                                teno.face_quad_points, teno.face_rule};
+    functor.point_gradients = teno.point_gradients;
     functor.face_solution = face_solution;
     functor.quad_weights = teno.quadrature_face.weights;
     functor.face_weights = flux_weights;

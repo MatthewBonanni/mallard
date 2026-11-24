@@ -405,12 +405,19 @@ On 32 × 32 × 2 triangles, TENO5's shear-wave error is 24 times smaller with
 `reconstruction` than with least squares (1.9e-8 against 4.4e-7), and the gap
 grows with resolution.
 
-Cost: each cell keeps its polynomial's coefficients for the stage, 1.4 KB
-per cell for TENO5 in 3D (0.45 KB in 2D), and the halo cells next to
-partition faces receive theirs from their owners. Evaluating the gradients at
-the face points makes a TENO5 step of the 3D Taylor-Green vortex 1.9 times as
-long on hexahedra and 1.6 times on tetrahedra on CPU (16 threads), and 2.2 and
-1.6 times on an A100.
+Cost: TENO's smooth pass evaluates each smooth cell's polynomial gradients
+at its face points while it holds the coefficients, and keeps those of u and
+T for the stage, per face side: 5.3 KB per cell for TENO5 on hexahedra (9
+points per face), 2.7 KB on tetrahedra (7), 0.6 KB on quadrilaterals. The
+halo sides of partition faces come from their owners with the face states.
+A step of the 3D Taylor-Green vortex on an A100 (96^3 hexahedra, 48^3 x 6
+tetrahedra) takes, against least squares:
+
+| TENO | hexahedra | tetrahedra |
+|---|---|---|
+| 4 | 1.5 times | 1.6 times |
+| 5 | 1.7 times | 1.3 times |
+| 6 | 1.4 times | 1.3 times |
 
 Pitfalls:
 
