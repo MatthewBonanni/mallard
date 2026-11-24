@@ -1160,7 +1160,9 @@ TEST(CaseView, BlockFilesHaveDistinctNamesWindowsAccepts) {
         ASSERT_NE(at, std::string::npos) << name;
         const std::string file = text.substr(at + tag.size(), text.find('"', at + tag.size()) - at - tag.size());
         EXPECT_TRUE(std::filesystem::exists(dir / file)) << name;
-        if (name == "inlet" || name == "a_b") EXPECT_EQ(file, "case_blocks/" + name + ".vtu");
+        if (name == "inlet" || name == "a_b") {
+            EXPECT_EQ(file, "case_blocks/" + name + ".vtu");
+        }
     }
 }
 #endif
