@@ -230,8 +230,11 @@ TEST(MPITest, MixtureWallsMatchSerial) {
 
 TEST(MPITest, MixtureReconstructionGradientsMatchSerial) {
     // Halo layer 1 reconstructs its own species polynomials and point gradients
-    expect_matches_serial(mixture_input("viscous_gradients = \"reconstruction\"\n", "type = \"TENO\"\norder = 5\n", "",
-                                        "navier_stokes"));
+    const std::string input =
+        mixture_input("viscous_gradients = \"reconstruction\"\n", "type = \"TENO\"\norder = 5\n", "", "navier_stokes");
+    expect_matches_serial(input);
+    // And the LES models, from the same polynomials
+    expect_matches_serial(input + "[les]\nmodel = \"wale\"\n");
 }
 
 TEST(MPITest, MUSCLMatchesSerial) {
@@ -568,6 +571,11 @@ TEST(MPITest, LargeEddySimulationMatchesSerialWithAndWithoutStepGraphs) {
     teno.replace(teno.find(muscl), muscl.size(), "type = \"TENO\"\norder = 3\n");
     expect_matches_serial_with_and_without_step_graphs(teno + "[les]\nmodel = \"vreman\"\ndynamic = true\n"
                                                               "gradients = \"reconstruction\"\n");
+    // Viscous gradients of the reconstruction: the models' too, with the walls' fits
+    std::string polynomial = input;
+    polynomial.replace(polynomial.find(muscl), muscl.size(), "type = \"TENO\"\norder = 5\n");
+    polynomial.insert(polynomial.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+    expect_matches_serial_with_and_without_step_graphs(polynomial + "[les]\nmodel = \"wale\"\ndynamic = true\n");
 }
 
 TEST(MPITest, StepReductionsKernelByKernelMatchSerial) {

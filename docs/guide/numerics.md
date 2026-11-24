@@ -409,7 +409,7 @@ viscous fluxes converge at the same order as in planar runs, up to the axis.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous and species diffusion face gradients from the TENO polynomials, and at single-gas walls from one-sided fits (TENO4 or higher, no flamelet gases) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous and species diffusion face gradients from the TENO polynomials, and at single-gas walls from one-sided fits (TENO4 or higher, no flamelet gases); with `[les]` the models take the same gradients ([LES guide](les.md#gradients-of-the-reconstruction)) |
 
 Two convergence studies on periodic boxes of every cell type
 (`tools/docs/viscous_gradients.py`) compare the two paths against their design
@@ -484,7 +484,9 @@ Pitfalls:
   whose polynomial is negative in density or pressure at a face point, keep
   the least-squares gradients, as do the walls and boundaries listed above.
   Near shocks the flux is then second order, as before.
-- **Not yet available** for flamelet gases, LES, curved meshes and rotational
+- **LES.** The SGS models take the same polynomial gradients, wall fits
+  included ([LES guide](les.md#gradients-of-the-reconstruction)).
+- **Not yet available** for flamelet gases, curved meshes and rotational
   periodicity, where Mallard reports an error.
 - **Probes.** Surface probes of the diffusive fluxes (`ENERGY_DIFFUSIVE_FLUX`,
   `SPECIES_DIFFUSIVE_FLUX_*`) report the polynomial fluxes the scheme applies,

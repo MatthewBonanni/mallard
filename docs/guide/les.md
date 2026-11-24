@@ -113,6 +113,16 @@ model = "sigma"
 gradients = "reconstruction"
 ```
 
+With `[numerics] viscous_gradients = "reconstruction"` the models take these
+gradients without the key: the viscous fluxes and the models then read one
+gradient, the polynomials'. In cells whose stencils mirror cells across a wall
+that is the wall fit's gradient (as the viscous fluxes'), and the global
+dynamic procedure and the thickened flame's vorticity read the same gradients;
+`gradients = "least_squares"` is then an error. On a channel between walls
+with TENO5, the Smagorinsky eddy viscosity over `(C Delta)^2` converges at
+order 3.7 to 3.8 in the wall cells and the interior, against 1.4 and 1.9 with
+least squares.
+
 The reconstruction computes the gradients in its own pass over the stencil,
 for about 7% more time per step with TENO5 in 3D. The key is experimental: it
 improves decaying isotropic turbulence at $32^3$ but makes it worse at $64^3$,

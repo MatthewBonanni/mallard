@@ -3866,6 +3866,12 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
             gated::parallel_for("teno_wall_fits",
                                 Kokkos::RangePolicy<Space, typename Functor::WallFitPass, HeavyBounds>(exec, 0, wall_fits.n_fits()),
                                 functor);
+            if (smooth_gradients.is_allocated()) {
+                functor.n_gradient_cells = static_cast<uint32_t>(smooth_gradients.extent(0));
+                gated::parallel_for("teno_wall_fit_gradients",
+                                    Kokkos::RangePolicy<Space, typename Functor::WallFitGradientPass>(exec, 0, wall_fits.n_fits()),
+                                    functor);
+            }
         }
     }
 }
