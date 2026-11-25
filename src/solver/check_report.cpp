@@ -93,6 +93,12 @@ std::pair<std::string, std::string> time_parts(const double s) {
     return {format("%.3g", s / 3600.0), "h"};
 }
 
+/** @brief A duration as text in the report's ASCII units, whatever the locale: "100 us", "4.09 ms". */
+std::string time_text(const double s) {
+    const auto [value, units] = time_parts(s);
+    return value + " " + units;
+}
+
 std::string steps(const double n) { return n >= 1000.0 ? count(static_cast<uint64_t>(std::llround(n))) : g4(n); }
 
 template <size_t N>
@@ -468,11 +474,11 @@ std::string scaling_basis(const CheckReport & r) {
     // Terms the fit gave no measurable weight are left out
     return "Step time of the largest part: s " +
            (c.beta >= 0.005 ? format("(owned + %.2f halo cells)", c.beta) : std::string("(owned cells)")) + " + " +
-           logging::duration(c.t0) +
-           (c.gamma >= 1.0e-8 ? " + " + logging::duration(c.gamma) + " per neighbor part" : "") +
+           time_text(c.t0) +
+           (c.gamma >= 1.0e-8 ? " + " + time_text(c.gamma) + " per neighbor part" : "") +
            (c.delta >= 1.0e-12 ? format(" + %.3g ns per halo cell owned on another node", c.delta * 1.0e9) : "") +
            (c.particle >= 1.0e-12 ? format(" + %.3g ns per particle slot", c.particle * 1.0e9) : "") +
-           (c.particle_mpi >= 1.0e-8 ? " (+ " + logging::duration(c.particle_mpi) + " with particles on several ranks)"
+           (c.particle_mpi >= 1.0e-8 ? " (+ " + time_text(c.particle_mpi) + " with particles on several ranks)"
                                      : "") +
            ", s the seconds per cell of one rank alone; " + c.basis +
            format(", fitted to %d measured step times of %d cases (%.1f%% rms; %.1f%% on cases left out: %s). "
