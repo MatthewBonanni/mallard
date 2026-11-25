@@ -158,9 +158,9 @@ spack install mallard +coolprop                          # named droplet liquids
 | `cuda` + `cuda_arch`, `rocm` + `amdgpu_target`, `sycl` | off | Kokkos GPU backend |
 | `mpi`, `gpu_aware_mpi`, `nccl` | `+mpi` | MPI; device buffers to a GPU-aware MPI; halo exchanges with NCCL |
 | `kaminpar` | off | With `+mpi`: the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner for `[parallel] partitioner = "graph"`, with Spack's oneTBB (fetched at configure time) |
+| `coolprop` | off | [Named liquids](guide/particles.md#named-liquids) for droplets, with Spack's CoolProp 8 (`Mallard_ENABLE_COOLPROP`) |
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
 | `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
-| `coolprop` | off | [Named liquids](guide/particles.md#named-liquids) for droplets, with Spack's CoolProp 8 (`Mallard_ENABLE_COOLPROP`) |
 
 `spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, Python and numpy; the library stays, for the [C++ API](guide/cpp_api.md).
 

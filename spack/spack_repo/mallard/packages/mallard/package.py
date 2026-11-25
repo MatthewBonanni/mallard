@@ -72,15 +72,15 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         when="+mpi",
         description="The dKaMinPar graph partitioner (partitioner = \"graph\"), fetched at configure time",
     )
-    variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
-    variant("cgns", default=True, description="Read CGNS mesh files")
-    variant("zlib", default=True, description="zlib compression of VTU and restart files")
-    variant("python", default=True, description="The Python package mallard and the reader library it loads")
     variant(
         "coolprop",
         default=False,
         description="Named liquids for droplets ([particles.liquid] fluid), tabulated from CoolProp at setup",
     )
+    variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
+    variant("cgns", default=True, description="Read CGNS mesh files")
+    variant("zlib", default=True, description="zlib compression of VTU and restart files")
+    variant("python", default=True, description="The Python package mallard and the reader library it loads")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
