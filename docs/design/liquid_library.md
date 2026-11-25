@@ -34,11 +34,13 @@ the host C++ compiler, the one `nvcc_wrapper` or `hipcc` would call, into a
 static library. Mallard includes only its C interface, `CoolPropLib.h`, in one
 file, `src/particles/liquid_coolprop.cpp`, so nvcc, hipcc and SYCL compilers
 never see CoolProp's headers, and the option needs nothing of the device
-toolchain. `-DMallard_COOLPROP_ROOT` takes an installed static CoolProp
+toolchain. `-DMallard_COOLPROP_ROOT` takes an installed CoolProp, static or shared,
 instead (offline builds, packages). Its first build takes about 5 minutes on 3
 cores; the library is 24 MB. CoolProp is MIT licensed
-(`licenses/CoolProp-MIT.txt`). A Spack variant `+coolprop` waits for the
-Spack package itself (#1027).
+(`licenses/CoolProp-MIT.txt`). The Spack variant `+coolprop` takes
+Spack's `coolprop` package (8.0 or newer, shared, built by the host compiler as
+any Spack library is) through `Mallard_COOLPROP_ROOT`; a shared CoolProp
+exports the C interface with C linkage, which `COOLPROP_LIB` then declares.
 
 ## Tables
 
@@ -124,7 +126,7 @@ compressed liquid's deviation from the saturated one:
 
 At engine pressures and near the critical temperature that is more than the
 tables' error by orders of magnitude, so tables in $(T, p)$ for density and
-$c_p$ are a follow-up, with the energy reference extended to a
+$c_p$ are a follow-up (#1573), with the energy reference extended to a
 pressure-dependent liquid enthalpy.
 
 ## Verification
@@ -157,9 +159,8 @@ temperature of an enthalpy.
 
 ## Not in this layer
 
-- Tables in $(T, p)$ of the compressed liquid ([pressure](#pressure)).
+- Tables in $(T, p)$ of the compressed liquid ([pressure](#pressure), #1573).
 - Multicomponent liquids and mixtures (CoolProp's mixture models are slower
   and narrower; tables in composition would be another dimension).
 - Using the surface tension in breakup or Weber-number models; for now it is a
   particle expression variable (`SIGMA_P`).
-- Spack `+coolprop` (#1027).

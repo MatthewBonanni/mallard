@@ -244,13 +244,20 @@ if(${PROJECT_NAME}_ENABLE_COOLPROP)
     add_library(mallard_coolprop INTERFACE)
     if(${PROJECT_NAME}_COOLPROP_ROOT)
         find_path(COOLPROP_INCLUDE_DIR CoolPropLib.h HINTS ${${PROJECT_NAME}_COOLPROP_ROOT}
-                  PATH_SUFFIXES include/CoolProp static_library/include/CoolProp include static_library
+                  PATH_SUFFIXES include/CoolProp static_library/include/CoolProp include static_library shared_library
                   NO_DEFAULT_PATH REQUIRED)
-        # CoolProp installs its static library under static_library/<system>/<bits>_<compiler>/
-        file(GLOB_RECURSE coolprop_found
-             "${${PROJECT_NAME}_COOLPROP_ROOT}/*${CMAKE_STATIC_LIBRARY_PREFIX}CoolProp${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        # CoolProp installs its library under static_library/ or shared_library/<system>/<bits>...; a shared one
+        # (Spack's default) exports the C interface with C linkage, which COOLPROP_LIB declares
+        set(coolprop_root "${${PROJECT_NAME}_COOLPROP_ROOT}")
+        set(coolprop_name ${CMAKE_STATIC_LIBRARY_PREFIX}CoolProp)
+        file(GLOB_RECURSE coolprop_found "${coolprop_root}/*${coolprop_name}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        set(COOLPROP_SHARED OFF)
         if(NOT coolprop_found)
-            message(FATAL_ERROR "Mallard_COOLPROP_ROOT=${${PROJECT_NAME}_COOLPROP_ROOT} has no static CoolProp library")
+            file(GLOB_RECURSE coolprop_found "${coolprop_root}/*${coolprop_name}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+            set(COOLPROP_SHARED ON)
+        endif()
+        if(NOT coolprop_found)
+            message(FATAL_ERROR "Mallard_COOLPROP_ROOT=${coolprop_root} has no CoolProp library")
         endif()
         list(GET coolprop_found 0 COOLPROP_LIBRARY)
         message(STATUS "Mallard: CoolProp ${COOLPROP_LIBRARY}")

@@ -737,7 +737,8 @@ jobs:
           key: ccache/tutorials/${{ github.sha }}
           restore-keys: ccache/tutorials/
       # With HDF5, so that the tutorials and templates write the default VTKHDF output, and
-      # the Python package's library, which the post-processing tutorial reads it with
+      # the Python package's library, which the post-processing tutorial reads it with; with
+      # CoolProp, whose keys the key catalog's check sets up
       - name: Build (2D and 3D)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -749,7 +750,7 @@ jobs:
             cmake -S . -B build-$dim -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
               -DUSE_SYSTEM_KOKKOS=OFF -DMallard_WARNINGS_AS_ERRORS=ON -DKokkos_ENABLE_SERIAL=ON \
-              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_DIM=$dim
+              -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_COOLPROP=ON -DMallard_DIM=$dim
             cmake --build build-$dim -j $(nproc) --target mallard MallardLibrary
           done
           ccache --show-stats

@@ -1,5 +1,6 @@
 # For the key catalog only (tools/dev/input_catalog.py): evaporating droplets
-# with every key of [particles] and [particles.liquid] they read given.
+# with every key of [particles] and [particles.liquid] they read given, but the
+# named liquids' (named_liquid.toml).
 
 [run]
 n_steps = 1
@@ -57,3 +58,6 @@ boiling_pressure = 101325.0
 critical_temperature = 647.1
 critical_pressure = 22.064e6
 antoine = [10.19621, 1730.63, -39.724]
+viscosity = 2.8e-4
+conductivity = 0.68
+surface_tension = 0.059

@@ -147,6 +147,7 @@ spack install mallard +cuda cuda_arch=90 +nccl           # H100, halo exchanges 
 spack install mallard +rocm amdgpu_target=gfx90a         # AMD MI250X (gfx942: MI300X)
 spack install mallard ~mpi dims=3 precision=single       # one workstation, 3D only, single precision
 spack install mallard ^openmpi@5                         # a particular MPI
+spack install mallard +coolprop                          # named droplet liquids (CoolProp)
 ```
 
 | Variant | Default | Description |
@@ -159,6 +160,7 @@ spack install mallard ^openmpi@5                         # a particular MPI
 | `kaminpar` | off | With `+mpi`: the [dKaMinPar](https://github.com/KaHIP/KaMinPar) graph partitioner for `[parallel] partitioner = "graph"`, with Spack's oneTBB (fetched at configure time) |
 | `hdf5`, `cgns`, `zlib` | on | HDF5 meshes and output; CGNS meshes; zlib compression |
 | `python` | on | The [Python package](guide/python.md) `mallard` and its library, with Python and numpy |
+| `coolprop` | off | [Named liquids](guide/particles.md#named-liquids) for droplets, with Spack's CoolProp 8 (`Mallard_ENABLE_COOLPROP`) |
 
 `spack load mallard` also puts the [Python package](guide/python.md) on `PYTHONPATH`, with Spack's Python and numpy: `python3 -c 'import mallard'` works with no other step. `spack install mallard ~python` leaves out the package, Python and numpy; the library stays, for the [C++ API](guide/cpp_api.md).
 
@@ -219,7 +221,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
-| `Mallard_ENABLE_COOLPROP` | `OFF` | [Named liquids](guide/particles.md#named-liquids) for droplets (`[particles.liquid] fluid = "water"`, ...), whose properties [CoolProp](http://www.coolprop.org) tabulates at setup. CoolProp v8.0.0 is fetched and built at build time (about 5 minutes, needs Python 3 and network access), as its own project with the host compiler: with CUDA or HIP, nvcc and hipcc never compile it (`Mallard_COOLPROP_CXX_COMPILER` picks another compiler); kernels read only the tables. `Mallard_COOLPROP_ROOT` names an installed static CoolProp instead (with `CoolPropLib.h` and `libCoolProp.a` under it). Liquids given property by property need no CoolProp |
+| `Mallard_ENABLE_COOLPROP` | `OFF` | [Named liquids](guide/particles.md#named-liquids) for droplets (`[particles.liquid] fluid = "water"`, ...), whose properties [CoolProp](http://www.coolprop.org) tabulates at setup. CoolProp v8.0.0 is fetched and built at build time (about 5 minutes, needs Python 3 and network access), as its own project with the host compiler: with CUDA or HIP, nvcc and hipcc never compile it (`Mallard_COOLPROP_CXX_COMPILER` picks another compiler); kernels read only the tables. `Mallard_COOLPROP_ROOT` names an installed CoolProp instead, static or shared (with `CoolPropLib.h` and `libCoolProp` under it), as the Spack variant `+coolprop` does. Liquids given property by property need no CoolProp |
 | `Mallard_ENABLE_LIBRARY` | `ON` | `libmallard2d` or `libmallard3d`, installed in `lib/`: the [C++ API](guide/cpp_api.md), with its header in `include/mallard/` and the CMake package `Mallard` in `lib/cmake/Mallard/`, and the output reader of the [Python package](guide/python.md); compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
 | `Mallard_ENABLE_PYTHON` | `ON` | Checks that the [Python package](guide/python.md)'s version is Mallard's, for `Mallard_PYTHON_INSTALL_DIR`; needs `Mallard_ENABLE_LIBRARY` |
 | `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |

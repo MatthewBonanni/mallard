@@ -402,6 +402,9 @@ if(Mallard_ENABLE_COOLPROP)
     target_sources(MallardCore PRIVATE particles/liquid_coolprop.cpp)
     set_source_files_properties(particles/liquid_coolprop.cpp PROPERTIES
                                 COMPILE_OPTIONS "-isystem;${COOLPROP_INCLUDE_DIR}")
+    if(COOLPROP_SHARED)
+        set_property(SOURCE particles/liquid_coolprop.cpp APPEND PROPERTY COMPILE_DEFINITIONS COOLPROP_LIB)
+    endif()
     target_link_libraries(MallardCore PUBLIC mallard_coolprop)
 endif()
 
