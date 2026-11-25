@@ -554,6 +554,19 @@ solid angle in 3D). `diameter` is a diameter or a size distribution, and
 `weight` and `temperature` default to those of `[particles]`. Tracers take
 none of these: they move with the gas.
 
+![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-light.svg#gh-light-mode-only)
+![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-dark.svg#gh-dark-mode-only)
+
+*Each panel a Mallard run of solid particles of 100 µm into air at rest.
+Left: `region = "inner"`, the inner circle of an annulus, with `speed = 5.0`
+and no `direction`: particles enter uniformly along the circle and move along
+its inward normal (arrows), radially out, after 6 ms. Middle: a filled region,
+the union of a disk and a tilted rectangle, with `velocity = [0.0, 0.0]`:
+particles fill it uniformly in area, whatever cells (grey) it cuts. Right: two
+`point` injectors with `speed = 10.0` along x, after 5 ms: `cone_angle = 15`
+spreads the directions uniformly within ±15° (dotted), `cone_angle = 0`
+sends every particle along `direction`.*
+
 | Key | Default | Meaning |
 |---|---|---|
 | `name` | required | Its name: letters, digits and `_` |
@@ -566,6 +579,20 @@ none of these: they move with the gas.
 | `diameter` | `[particles] diameter` | A diameter or a size distribution |
 | `weight` | `[particles] weight` | Particles per parcel |
 | `temperature` | `[particles] temperature` | With heat transfer |
+
+![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-light.svg#gh-light-mode-only)
+![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-dark.svg#gh-dark-mode-only)
+
+*Two injectors in one Mallard run of fixed `dt = 1e-3`. Left: `rate = 700`
+is 0.7 parcels per step, so steps inject 0 or 1 parcel (dots), and the
+fraction left over (bottom) is carried to the next step: the count is always
+rate × time injecting minus that fraction, below one parcel. `start = 3.5e-3`
+and `end = 26.5e-3` fall within steps, which inject for the part of the step
+inside the window; after `end` the count stays at 16 of 16.1. Right:
+`mass_flow` with diameters uniform in [20, 40] µm sets a rate of 20 parcels
+per step from the mean mass of a particle; the mass injected follows
+mass_flow × t to within the randomness of the diameters (98.6% after 30
+steps).*
 
 **Size distributions.** `diameter = {distribution = ..., basis = ...}` with:
 
@@ -585,6 +612,21 @@ quantiles in its basis; a distribution by mass whose number of small
 particles diverges (Rosin–Rammler with `spread` below 3) needs a `min`. The
 setup log shows each injector's mean diameter D10 and Sauter mean diameter
 D32.
+
+![The diameters drawn from each of the five size distributions against its density, by number and by mass](../images/guide/particle_size_distributions-light.svg#gh-light-mode-only)
+![The diameters drawn from each of the five size distributions against its density, by number and by mass](../images/guide/particle_size_distributions-dark.svg#gh-dark-mode-only)
+
+*20000 diameters drawn by Mallard from each distribution (histograms)
+against its density (lines), by number (blue) and by mass (orange), both
+normalized. The solid line is the density the input gives, in its `basis`; the
+dashed one follows from it, f by mass being f by number times d³. The same
+parameters by mass put most particles at small diameters (`rosin_rammler`,
+`table`); by number, most of the mass is in the few large particles
+(`uniform` by number is far from uniform by mass). Parameters: `rosin_rammler`
+`size = 40e-6`, `spread = 3.0`, `min = 5e-6`, `max = 100e-6`; `log_normal`
+`median = 20e-6`, `sigma = 0.5`; `nukiyama_tanasawa` `size = 8e-6`,
+`spread = 1.0`, `exponent = 2.0`; `uniform` `min = 10e-6`, `max = 50e-6`;
+`table` `diameters = [10e-6, 30e-6, 60e-6, 90e-6]`, `pdf = [0.0, 1.0, 1.0, 0.0]`.*
 
 ![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-light.svg#gh-light-mode-only)
 ![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-dark.svg#gh-dark-mode-only)
