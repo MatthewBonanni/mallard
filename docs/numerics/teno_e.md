@@ -369,7 +369,7 @@ multiply-adds, so it equals the entry the setup would have stored.
 
 Each step, every reconstructed cell runs the smooth pass; the troubled cells
 it queues then run the troubled passes, in rounds of at most
-`troubled_capacity` of the cells (default 0.25 in 3D, 1 in 2D) to bound
+`troubled_capacity` of the cells (default 0.125 in 3D, 1 in 2D) to bound
 their scratch memory.
 
 ### Troubled-cell measure
