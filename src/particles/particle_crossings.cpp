@@ -319,8 +319,10 @@ void Particles::write_crossings(const uint64_t step, const double t, const doubl
         const auto h_entry = copy(events.entry);
         const auto h_alpha = copy(events.alpha);
         const auto h_direction = copy(events.direction);
-        const auto e_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(),
-                                                             Kokkos::subview(events.x, range, Kokkos::ALL));
+        Kokkos::View<double *[3], Kokkos::LayoutRight> x_rows(
+            Kokkos::view_alloc(Kokkos::WithoutInitializing, "particle_crossings_x_rows"), n);
+        Kokkos::deep_copy(x_rows, Kokkos::subview(events.x, range, Kokkos::ALL));
+        const auto e_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), x_rows);
         const auto h_values = Kokkos::create_mirror_view_and_copy(
             Kokkos::HostSpace(), Kokkos::subview(crossing_values, range, Kokkos::ALL));
         for (size_t k = 0; k < n; k++) {
