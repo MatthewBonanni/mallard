@@ -3735,7 +3735,7 @@ void Solver::stage_particle_snapshot(const size_t k) {
     const uint32_t snapshot = static_cast<uint32_t>(writer_particles[k]);
     if (particles->snapshot_reads_gas(snapshot)) {
         update_cell_W();
-        particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+        particles->sample(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
     }
     particles->stage_snapshot(snapshot);
 }
