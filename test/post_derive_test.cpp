@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "comm.h"
 #include "commands.h"
 #include "data_paths.h"
+#include "memory_tracker.h"
 #include "output_reader.h"
 #include "scratch.h"
 #include "solver.h"
@@ -204,4 +206,42 @@ TEST(PostDeriveTest, TheRunsTenoCacheIsReadFromTheRunsDirectory) {
         ASSERT_EQ(derive({run + "/restart_000004.restart", "--fields", "Q_CRITERION", "-o", "derived"}), 0);
     }
     EXPECT_EQ(caches_in(elsewhere), 0u);
+}
+
+TEST(PostDeriveTest, StatesReadFromFilesSetUpTheVertexGradientAndMixtureStagingOnlyForTheirReaders) {
+    // TENO gives the gradients of a perfect gas without the vertex gradient's weights, and a mixture stages
+    // the Y_* its writer lists but not the X_* nothing reads
+    const auto live_after_setup = [](const std::string & physics, const std::string & fields,
+                                     const std::vector<std::pair<std::string, rtype>> & state) {
+        memory::Tracker tracker;
+        Solver solver;
+        solver.set_state_reader([&](const Mesh & mesh) {
+            RestartData data;
+            data.n_cells = mesh.n_global_cells > 0 ? mesh.n_global_cells : mesh.n_cells;
+            for (const auto & [name, value] : state) {
+                data.names.push_back(name);
+                data.fields.emplace_back(mesh.n_cells, value);
+            }
+            return data;
+        });
+        solver.init(parse_toml(case_input(fresh_dir("readers"), physics, "", "", fields)));
+        std::map<std::string, uint64_t> live = tracker.live(true);
+        live.merge(tracker.live(false));
+        return live;
+    };
+    std::vector<std::pair<std::string, rtype>> flow = {{"RHO", 1.0_r}, {"P", 1.0_r}};
+    for (size_t d = 0; d < N_DIM; d++) flow.emplace_back(std::string("U_") + "XYZ"[d], 0.1_r);
+    const auto perfect = live_after_setup("[physics]\ntype = \"navier_stokes\"\nunits = \"nondimensional\"\ngamma = 1.4\n"
+                                          "p_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\nmu = 1.0e-3\nPr = 0.71\n",
+                                          "\"Q_CRITERION\", \"VORTICITY\"", flow);
+    EXPECT_TRUE(perfect.contains("viscous_gradients"));
+    EXPECT_FALSE(perfect.contains("vertex_gradient_weights_cells"));
+    std::vector<std::pair<std::string, rtype>> mixture = {{"P", 1.0e5_r}, {"T", 400.0_r}, {"Y_H2", 0.5_r}, {"Y_O2", 0.5_r}};
+    for (const char * name : {"H", "O", "OH", "H2O", "HO2", "H2O2", "AR", "N2"}) mixture.emplace_back(std::string("Y_") + name, 0.0_r);
+    for (size_t d = 0; d < N_DIM; d++) mixture.emplace_back(std::string("U_") + "XYZ"[d], 0.1_r);
+    const auto staged = live_after_setup("[physics]\ntype = \"euler\"\ngas = \"mixture\"\nmechanism = \"" + source_dir() +
+                                             "/mechanisms/h2o2.yaml\"\n",
+                                         "\"RHO\", \"Y_*\"", mixture);
+    EXPECT_TRUE(staged.contains("Y"));
+    EXPECT_FALSE(staged.contains("X"));
 }

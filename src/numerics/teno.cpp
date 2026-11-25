@@ -3931,7 +3931,7 @@ void TENO::set_mixture(Kokkos::View<rtype *, Kokkos::LayoutStride> gamma, Kokkos
     selection = Kokkos::View<uint8_t **>("teno_selection", mesh->n_state_faces(), 2);
 }
 
-bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+void TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, const uint32_t n_cells) {
 #if N_DIM == 3
     if (single_tables) {
@@ -3942,7 +3942,7 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
             case 5: launch_gradients<5, false, float>(solution, gradients, n_cells); break;
             default: throw std::runtime_error("TENO: unsupported degree.");
         }
-        return true;
+        return;
     }
 #endif
     switch (degree * 2 + primitive) {
@@ -3956,7 +3956,6 @@ bool TENO::cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
         case 11: launch_gradients<5, true, rtype>(solution, gradients, n_cells); break;
         default: throw std::runtime_error("TENO: unsupported degree.");
     }
-    return true;
 }
 
 bool TENO::point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
