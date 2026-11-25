@@ -15,6 +15,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -259,15 +260,19 @@ class FaceReconstruction {
         std::vector<uint32_t> halo_image_cells() const;
 
         /**
-         * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
-         *        cells from the reconstruction polynomials, if the scheme has
-         *        higher-order ones than least squares on face neighbors.
-         * @return Whether gradients were written.
+         * @brief Whether cell_gradients gives gradients: the scheme has higher-order
+         *        polynomials than least squares on face neighbors.
          */
-        virtual bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+        virtual bool has_cell_gradients() const { return false; }
+
+        /**
+         * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
+         *        cells from the reconstruction polynomials (has_cell_gradients() only).
+         */
+        virtual void cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> /*gradients*/,
                                     uint32_t /*n_cells*/) {
-            return false;
+            throw std::logic_error("cell_gradients: the reconstruction has no cell gradients");
         }
         
         /**
@@ -553,7 +558,8 @@ class TENO : public FaceReconstruction {
         void discard_cell_face_values() override;
         size_t scratch_bytes() const override;
         void place_scratch(void * storage) override;
-        bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+        bool has_cell_gradients() const override { return true; }
+        void cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,

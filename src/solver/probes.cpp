@@ -2862,6 +2862,13 @@ bool Probes::any_gradients() const {
                        [](const auto & p) { return p->gradients || p->sampling == Sampling::POINT; });
 }
 
+bool Probes::reads(const Data & data) const {
+    return std::any_of(probes.begin(), probes.end(), [&](const auto & p) {
+        return std::any_of(p->cell_columns.begin(), p->cell_columns.end(),
+                           [&](const auto & column) { return column.second == &data; });
+    });
+}
+
 bool Probes::any_solution() const {
     return std::any_of(probes.begin(), probes.end(), [](const auto & p) { return p->solution; });
 }

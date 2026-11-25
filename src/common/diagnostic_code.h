@@ -67,6 +67,7 @@ inline constexpr const char * TENO_CACHE = "W-TENO-CACHE";
 inline constexpr const char * QUADRATURE_WEIGHTS = "W-QUADRATURE-WEIGHTS";
 inline constexpr const char * SIGNAL_HANDLERS = "W-SIGNAL-HANDLERS";
 inline constexpr const char * CONTROL_SOCKET = "W-CONTROL-SOCKET";
+inline constexpr const char * SET_REFUSED = "W-SET-REFUSED";  // a setting of the SET file refused
 inline constexpr const char * RUN_REPORT = "W-RUN-REPORT";
 inline constexpr const char * EXTRACT_AVERAGED = "W-EXTRACT-AVERAGED";
 inline constexpr const char * PACK_RERUN = "W-PACK-RERUN";
@@ -97,7 +98,7 @@ inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 65> ALL = {{
+inline constexpr std::array<Entry, 66> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {INITIAL_WRITE, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
@@ -112,7 +113,7 @@ inline constexpr std::array<Entry, 65> ALL = {{
     {RUN, RUN_PAGE}, {DIVERGED, RUN_PAGE}, {HEALTH_MARGIN, RUN_PAGE}, {RESTART_SKIPPED, RUN_PAGE},
     {MESH_DIFFERS, RUN_PAGE}, {SNAPSHOT_INDEX, RUN_PAGE}, {FORMAT_VTU, RUN_PAGE}, {KEY_IGNORED, RUN_PAGE},
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
-    {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
+    {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {SET_REFUSED, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},
     {PACK_RERUN, RUN_PAGE}, {CONVERGENCE_NONFINITE, RUN_PAGE},
     {USAGE, RUN_PAGE}, {DIMENSION, RUN_PAGE}, {EXECUTABLE, RUN_PAGE}, {ONE_RANK, RUN_PAGE}, {INFO, RUN_PAGE},
     {LIST, RUN_PAGE}, {DIFF, RUN_PAGE}, {MESH_CONVERT, RUN_PAGE}, {INPUT_UPGRADE, RUN_PAGE}, {EXTRACT, RUN_PAGE},
