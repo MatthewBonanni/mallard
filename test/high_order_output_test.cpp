@@ -388,7 +388,9 @@ TEST(HighOrderOutputTest, NodesHoldThePolynomialItReconstructsExactlyOnEveryCell
             }
         }
         EXPECT_GT(n_checked, 7u) << type;
-        if (shape == Shape::TETRAHEDRON) EXPECT_NEAR(volume, 1.0, roundoff(1e-12)) << type;
+        if (shape == Shape::TETRAHEDRON) {
+            EXPECT_NEAR(volume, 1.0, roundoff(1e-12)) << type;
+        }
     }
 }
 
