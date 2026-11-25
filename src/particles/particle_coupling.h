@@ -44,9 +44,8 @@ struct Walker;
  * spread then converges at second order in the cell size instead of first, and
  * its error does not depend on where the particles sit in their cells.
  *
- * Each cell's sum is exact in fixed point, in units of its largest term
- * (exact_sums.h), so it does not depend on the order of the slots, which
- * differs between rank counts. The spreading is width^2 / 2 of diffusion with
+ * Each cell's sum is exact, rounded once (exact_sums.h), so it does not
+ * depend on the order of the slots, which differs between rank counts. The spreading is width^2 / 2 of diffusion with
  * unit diffusivity, by explicit steps of the face-flux Laplacian over the mesh:
  * its continuum limit is the Gaussian, so deposited fields converge under
  * refinement at fixed width, and it conserves the sums to round-off, since a
@@ -95,9 +94,9 @@ class Deposition {
         uint32_t steps = 0;
         rtype width = 0.0_r;
         Kokkos::View<double **, Kokkos::LayoutRight> values;  // (slot, column)
-        Kokkos::View<double **, Kokkos::LayoutRight> largest;  // (cell, column)
-        Kokkos::View<int64_t **, Kokkos::LayoutRight> fixed;   // (cell, column)
-        Kokkos::View<uint32_t *> count;                         // (cell)
+        Kokkos::View<uint32_t *> count;                         // (cell): its occupied slots
+        Kokkos::View<uint32_t *> ends;                          // (cell): the end of its slots in order
+        Kokkos::View<uint32_t *> order;                         // occupied slots, grouped by cell
         State sums;                                             // (cell, column)
         State density;                                          // spreading: sums / measure, halo included
         Kokkos::View<rtype *> measure;

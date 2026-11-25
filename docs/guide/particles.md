@@ -682,6 +682,7 @@ winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
 [`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
+[`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake),
 [`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain).
 
 Each `[[particles.quantities]]` follows one value along every particle's
@@ -757,7 +758,8 @@ interval = 100
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
 [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
-[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step).
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
+[`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake).
 
 A particle probe writes, every `interval` steps, the number of particles in
 its region and the mean, standard deviation, minimum and maximum of each field

@@ -334,16 +334,16 @@ exponential integration is exact for linear forcing. Restart files carry e as
 `PARTICLE_E` beside `PARTICLE_T`, so restarts are bitwise.
 
 **Deposition** (`particles::Deposition`) runs after the particle rates of a
-stage, before the rates are divided into the gas's. Three plain kernels:
+stage, before the rates are divided into the gas's. Four plain kernels:
 
-- per slot, an atomic count of the particles in its cell and atomic maxima of
-  each term's magnitude per cell (order independent);
-- per slot, an atomic sum of each term in fixed point, in units of the cell's
-  largest term over 2^(62 - ceil(log2(n + 1))), n the cell's count
-  (`exact_sums.h`);
-- per owned cell, the totals back in floating point.
+- per slot, an atomic count of the particles in its cell;
+- per cell, the start of its slots (a prefix sum of the counts);
+- per slot, its place among its cell's slots (an atomic increment, so in any
+  order);
+- per owned cell, each term summed over its slots exactly in integer limbs and
+  rounded once (`exact_sums.h`).
 
-Each cell's sum is thus exact (errors of 2^-60 of its largest term), whatever
+Each cell's sum is thus the exact sum rounded to the nearest double, whatever
 the slot order, which differs between rank counts and migrations: no sort, no
 global reduction, nothing on the host. The start cell is always owned, so
 deposits never land in a halo.
@@ -397,12 +397,9 @@ per unit time per direction to the second moment there, the spread has
 covariance sigma^2 I wherever the particle sits; elsewhere the correction is
 consistent and the offset dependence drops to higher order. Pi turns as Q Pi
 Q^T across rotational periodic faces. It costs one more cell kernel and halo
-exchange per deposit, and the exact sums run in two passes of half the columns
-each, so their buffers grow only from (1 + N_DIM) to (1 + N_DIM + N_DIM (N_DIM +
-1) / 2) / 2 columns per value (unchanged in 2D, 20 to 25 in 3D).
+exchange per deposit; the exact sums need no buffers per column.
 
-**Cost.** Per stage, three kernels over the slots and one over the cells (five
-and two with a width, for the two passes of exact sums), then
+**Cost.** Per stage, two kernels over the slots, a prefix sum over the cells and one kernel over the owned cells, then
 with a width two moment passes and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
 the owned cells and (distributed) a halo exchange. A width of two cells is
 16 steps in 2D and 24 in 3D.
@@ -481,7 +478,7 @@ A probe samples on the host after a step it is due at: the gas at the
 particles of the current state (the same path as the stage evaluation,
 `Particles::sample`, after `update_cell_W`), then one kernel writes each
 field's value per slot, NaN outside the probe's region. Counts, sums and sums
-of squares are `ExactSums` (fixed point), so the statistics are bitwise the
+of squares are `ExactSums` (exact, rounded once), so the statistics are bitwise the
 same on any rank count; minima and maxima are order independent. Steps decided
 on the device stop at the probes' steps (`step_horizon`), so device steps stay
 on for runs with probes. Staging the reductions in the step graph, as the gas
