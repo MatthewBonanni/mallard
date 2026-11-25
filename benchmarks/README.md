@@ -30,7 +30,9 @@ and `bin_by_cost` (GPUs: order the queue by the cells' last cost, most
 expensive first; default true, ignored on CPUs).
 `[chemistry] sparse = true/false` chooses the LU (by default sparse from 30 species
 when it pays: GRI-3.0 and larger); `[chemistry] integrator = "bdf"` benchmarks the BDF integrator
-(rows `... bdf` in `baselines.csv`; [design notes](../docs/design/chemistry.md#bdf-integrator-issue-143)). V3 with the large mechanism: `python tools/dev/v3_check.py
+(rows `... bdf` in `baselines.csv`; [design notes](../docs/design/chemistry.md#bdf-integrator-issue-143)).
+`[chemistry] explicit_step = true` first tries the explicit steps of non-stiff cells and
+`[chemistry] T_frozen` leaves colder cells out, as in the solver. V3 with the large mechanism: `python tools/dev/v3_check.py
 <build>/src/mallard reactor` against `chemistry/nhexane_ignition.csv`.
 
 ## `perf/`: performance set
