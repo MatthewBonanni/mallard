@@ -1,0 +1,66 @@
+# The flow of particle_wake: the Karman vortex street behind a circular
+# cylinder at Re = 100 and Mach 0.2 (the cylinder example, on a finer O-grid
+# that resolves the street 15 diameters downstream), run to developed
+# shedding. Its restart file at t = 100 is where input.toml seeds the
+# particles. Generate the mesh first (768 x 320 quads):
+#   python ../../tools/mesh/make_cylinder_mesh.py cylinder.msh --n-theta 768 --n-r 320 --r-far 25 --dr0 0.005
+# Nondimensionalization: cylinder diameter 1, free-stream density and sound
+# speed 1, so U = M = 0.2 and mu = U D / Re.
+
+[run]
+t_stop = 100.0
+cfl = 1.0
+
+[mesh]
+type = "file"
+filename = "cylinder.msh"
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+# A transverse kick behind the cylinder starts the shedding
+u = ["0.2 * (1 - exp(-4 * (x^2 + y^2 - 0.25)))",
+     "0.1 * exp(-((x - 1.5)^2 + y^2))"]
+p = "0.7142857142857143"
+
+[[boundaries]]
+name = "cylinder"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "farfield"
+type = "farfield"
+u = [0.2, 0.0]
+p = 0.7142857142857143
+T = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+gamma = 1.4
+p_ref = 0.7142857142857143
+T_ref = 0.7142857142857143
+rho_ref = 1.0
+mu = 0.002
+Pr = 0.72
+
+[output]
+check_interval = 2000
+
+[[forces]]
+zone = "cylinder"
+interval = 20
+file = "./solut/forces_cylinder.csv"
+
+[[write_data]]
+prefix = "./solut/flow"
+format = "restart"
+time_interval = 100.0
