@@ -3,7 +3,7 @@
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief [[particles.crossings]]: particles leaving through a boundary zone
  *        and crossing surfaces, where and when, once each, on any rank count
- *        and across restarts.
+ *        and across restarts; [[particles.fluxes]]: their counts per interval.
  * @version 0.1
  * @date 2026-11-21
  *
@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <numbers>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -94,6 +95,29 @@ std::vector<std::vector<double>> rows(const std::string & file) {
 /** @brief The seeds of box(lo, hi), by id. */
 std::array<double, 2> seed(uint64_t id, double lo, double hi) {
     return {lo + (hi - lo) * static_cast<double>(id % 4) / 3.0, lo + (hi - lo) * static_cast<double>(id / 4 % 4) / 3.0};
+}
+
+/** @brief The columns of a CSV file by name. */
+std::map<std::string, std::vector<double>> columns(const std::string & file) {
+    std::ifstream in(file);
+    std::string line;
+    while (std::getline(in, line) && (line.empty() || line[0] == '#')) {
+    }
+    std::vector<std::string> names;
+    std::stringstream header(line);
+    for (std::string name; std::getline(header, name, ',');) names.push_back(name);
+    std::map<std::string, std::vector<double>> out;
+    for (const auto & r : rows(file)) {
+        for (size_t k = 0; k < names.size() && k < r.size(); k++) out[names[k]].push_back(r[k]);
+    }
+    return out;
+}
+
+/** @brief An n x n lattice in place of box()'s 4 x 4. */
+std::string with_lattice(std::string input, int n) {
+    const std::string from = N_DIM == 3 ? "n = [4, 4, 1]" : "n = [4, 4]";
+    const std::string to = "n = [" + std::to_string(n) + ", " + std::to_string(n) + (N_DIM == 3 ? ", 1]" : "]");
+    return input.replace(input.find(from), from.size(), to);
 }
 
 // Supersonic: the inlet and outlet impose nothing the flow does not already have
@@ -293,4 +317,122 @@ TEST(ParticleCrossingsTest, InputErrorsNameTheKey) {
     const std::string twice = error("[[particles.crossings]]\nname = \"a\"\nregion = \"right\"" + file +
                                     "[[particles.crossings]]\nname = \"a\"\nregion = \"left\"" + file);
     EXPECT_NE(twice.find("names two entries"), std::string::npos) << twice;
+    const std::string interval = error("[[particles.fluxes]]\nname = \"i\"\nregion = \"right\"\ninterval = 0" + file);
+    EXPECT_NE(interval.find("particles.fluxes[0].interval"), std::string::npos) << interval;
+    const std::string flux_wall = error("[[particles.fluxes]]\nname = \"w\"\nregion = \"top\"" + file);
+    EXPECT_NE(flux_wall.find("particles.fluxes[0].region"), std::string::npos) << flux_wall;
+}
+
+TEST(ParticleFluxesTest, TheNetFluxOutOfACircleIsWhatItsProbeLoses) {
+    // Particles drifting across the periodic box enter and leave the circle: at every row, those inside at the
+    // start less the integrated net flux out are the probe's count at the same step, with or without step graphs
+    const std::filesystem::path dir = scratch_dir() / "mallard_particle_fluxes_closed";
+    const double u[3] = {0.7, -0.45, 0.0};
+    const double cx = 0.5, cy = 0.5, r = 0.3;
+    const std::string disk = N_DIM == 3 ? "{type = \"cylinder\", center = [0.5, 0.5, 0.25], axis = [0.0, 0.0, 1.0], "
+                                          "radius = 0.3}"
+                                        : "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}";
+    const int n = 10;
+    const double lo = 0.03, hi = 0.97;
+    uint64_t inside0 = 0;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            const double x = lo + (hi - lo) * i / (n - 1), y = lo + (hi - lo) * j / (n - 1);
+            inside0 += std::hypot(x - cx, y - cy) < r ? 1u : 0u;
+        }
+    }
+    std::vector<std::string> flux_rows[2];
+    for (const bool graphs : {true, false}) {
+        const std::string out = (dir / (graphs ? "graphs" : "plain")).string();
+        std::string input = with_lattice(
+            box(u, "xy", "", 120, lo, hi,
+                "[[particles.fluxes]]\nname = \"circle\"\nregion = {type = \"boundary\", of = " + disk +
+                    "}\ninterval = 8\nfile = \"" + out + "_fluxes.csv\"\n[[particles.probes]]\nname = \"inside\"\n"
+                    "region = " + disk + "\ninterval = 8\nfile = \"" + out + "_probe.csv\"\n"),
+            n);
+        if (!graphs) input.replace(input.find("[run]\n"), 6, "[run]\ncuda_graphs = false\n");
+        Solver solver;
+        solver.init(parse_toml(input));
+        solver.run();
+        comm::barrier();
+        auto fluxes = columns(out + "_fluxes.csv");
+        auto probe = columns(out + "_probe.csv");
+        const auto & count = probe.count("COUNT") ? probe["COUNT"] : probe["count"];
+        ASSERT_EQ(fluxes["step"].size(), 15u);
+        ASSERT_EQ(count.size(), 15u);
+        double net = 0.0, in = 0.0, previous = 0.0;
+        for (size_t k = 0; k < count.size(); k++) {
+            EXPECT_EQ(fluxes["step"][k], 8.0 * static_cast<double>(k + 1));
+            EXPECT_EQ(fluxes["t_start"][k], previous) << "row " << k;
+            previous = fluxes["t"][k];
+            EXPECT_EQ(fluxes["parcels_net"][k], fluxes["parcels_out"][k] - fluxes["parcels_in"][k]);
+            net += fluxes["parcels_net"][k];
+            in += fluxes["parcels_in"][k];
+            EXPECT_EQ(static_cast<double>(inside0) - net, count[k]) << "step " << fluxes["step"][k];
+        }
+        EXPECT_GE(in, 10.0) << "particles enter as well as leave";
+        flux_rows[graphs ? 0 : 1] = lines(out + "_fluxes.csv");
+    }
+    EXPECT_EQ(flux_rows[0], flux_rows[1]);
+}
+
+TEST(ParticleFluxesTest, ParcelsParticlesAndMassLeavingThroughAZoneByInterval) {
+    // Solid particles moving with the gas at u = 2: the column at x0 leaves at x = 1 in the step holding
+    // t = (1 - x0) / 2, so in 50 steps of 0.01 the 4 columns of 4 leave in steps 5, 19, 32 and 45
+    const std::string file = (scratch_dir() / "mallard_particle_fluxes_outlet.csv").string();
+    const double weight = 3.0, diameter = 0.01, density = 50.0;
+    std::string input = box(CHANNEL_U, "y", CHANNEL, 50, 0.1, 0.9,
+                            "[[particles.fluxes]]\nname = \"outlet\"\nregion = \"right\"\ninterval = 10\nfile = \"" +
+                                file + "\"\n");
+    std::ostringstream solid;
+    solid.precision(17);
+    solid << "type = \"solid\"\ndiameter = " << diameter << "\ndensity = " << density << "\nweight = " << weight
+          << "\nvelocity = " << numbers(2.0, 0.0, 0.0) << "\n";
+    input.replace(input.find("type = \"tracer\"\n"), 16, solid.str());
+    input.replace(input.find("type = \"euler\"\n"), 15, "type = \"navier_stokes\"\nmu = 1e-4\n");
+    Solver solver;
+    solver.init(parse_toml(input));
+    solver.run();
+    comm::barrier();
+    auto c = columns(file);
+    const double mass = weight * density * std::numbers::pi / 6.0 * diameter * diameter * diameter;
+    const std::vector<double> expected = {4.0, 4.0, 0.0, 4.0, 4.0};
+    ASSERT_EQ(c["step"].size(), expected.size());
+    for (size_t k = 0; k < expected.size(); k++) {
+        EXPECT_EQ(c["parcels_out"][k], expected[k]) << "interval ending at step " << c["step"][k];
+        EXPECT_EQ(c["parcels_in"][k], 0.0);
+        EXPECT_EQ(c["particles_out"][k], weight * expected[k]);
+        EXPECT_NEAR(c["mass_out"][k], mass * expected[k], roundoff(1e-14));
+        EXPECT_NEAR(c["mass_rate"][k], mass * expected[k] / (c["t"][k] - c["t_start"][k]), roundoff(1e-10));
+    }
+}
+
+TEST(ParticleFluxesTest, RowsAreBitwiseTheSameOnAnyRankCount) {
+    if (comm::size() == 1) GTEST_SKIP() << "compares distributed runs with serial ones";
+    const std::filesystem::path dir = scratch_dir() / "mallard_particle_fluxes_ranks";
+    const double u[3] = {0.7, -0.45, 0.2};
+    auto input = [&](const std::string & name) {
+        return with_lattice(
+            box(u, "xy", "", 240, 0.07, 0.93,
+                "[[particles.fluxes]]\nname = \"circle\"\nregion = {type = \"boundary\", of = " +
+                    std::string(N_DIM == 3 ? "{type = \"sphere\", center = [0.5, 0.5, 0.25], radius = 0.3}"
+                                           : "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}") +
+                    "}\ninterval = 12\nfile = \"" + (dir / name).string() + "\"\n"),
+            8);
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed.csv")));
+    distributed.run();
+    comm::barrier();
+    if (!comm::is_root()) return;
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input("serial.csv")));
+    serial.run();
+    const auto a = lines((dir / "distributed.csv").string());
+    ASSERT_EQ(a.size(), 20u);
+    double crossings = 0.0;
+    for (const auto & r : rows((dir / "distributed.csv").string())) crossings += r[3] + r[4];
+    EXPECT_GE(crossings, 40.0);
+    EXPECT_EQ(a, lines((dir / "serial.csv").string()));
 }

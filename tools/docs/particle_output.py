@@ -7,7 +7,8 @@ From short runs of examples/particle_vortex (a 2D build with HDF5, about a
 minute on 2 CPU threads): particle snapshots of [[write_data]] over the gas
 speed of a VTU snapshot at the same times (particle_snapshots), and the
 crossings of the boundary of the core probe's disk against the probe's count
-(particle_crossings), and the trajectories of a fraction of the particles
+(particle_crossings), the fluxes through it per probe sample against the
+probe's count (particle_fluxes), and the trajectories of a fraction of the particles
 colored by their temperature (particle_trajectories). The particle files are read with h5py.
 """
 import argparse
@@ -156,6 +157,56 @@ def particle_crossings(P, args):
 
 
 @functools.cache
+def flux_run(binary):
+    """The fluxes through the boundary of the probe's disk at the probe's samples, and the probe."""
+    work = Path(tempfile.mkdtemp())
+    cx, cy, r = CORE
+    run(binary, vortex_input('[[particles.fluxes]]\nname = "core"\ninterval = 50\n'
+                             f'region = {{type = "boundary", of = {{type = "disk", center = [{cx}, {cy}], radius = {r}}}}}\n'),
+        work)
+    return read_csv(work / "particle_fluxes_core.csv"), read_csv(work / "particle_probe_core.csv")
+
+
+def particle_fluxes(P, args):
+    fluxes, probe = flux_run(args.mallard)
+    cx, cy, r = CORE
+    lattice = np.linspace(0.1, 0.4, 9)
+    X, Y = np.meshgrid(lattice, lattice)
+    inside0 = int(np.sum(np.hypot(X - cx, Y - cy) < r))
+    sampled = probe["COUNT"] if "COUNT" in probe else probe["count"]
+    assert np.array_equal(fluxes["step"], probe["step"]), "the fluxes and the probe sample the same steps"
+    remaining = inside0 - np.cumsum(fluxes["parcels_net"])
+    assert np.array_equal(remaining, sampled), "the integrated net flux accounts for the probe's count"
+    fig, (a, b) = plt.subplots(1, 2, figsize=(11.0, 4.3), gridspec_kw=dict(wspace=0.42))
+    width = fluxes["t"] - fluxes["t_start"]
+    a.bar(fluxes["t_start"], fluxes["parcels_out"], width, align="edge", color=P["flame"], label="parcels_out")
+    a.bar(fluxes["t_start"], -fluxes["parcels_in"], width, align="edge", color=P["blue"],
+          label=f"parcels_in (down): {int(fluxes['parcels_in'].sum())}")
+    a.axhline(0, color=P["line"], lw=0.8)
+    a.set_xlabel("t")
+    a.set_ylabel("parcels per row (50 steps)")
+    a.set_xlim(0, fluxes["t"][-1])
+    a.set_ylim(-1, None)
+    a.yaxis.get_major_locator().set_params(integer=True)
+    per_parcel = float(np.sum(fluxes["mass_out"]) / np.sum(fluxes["parcels_out"]))
+    m = a.secondary_yaxis("right", functions=(lambda n: n * per_parcel, lambda w: w / per_parcel))
+    m.set_ylabel("mass per row (mass_out)")
+    a.legend(fontsize=10, loc="upper right")
+    a.set_title("fluxes through the core's circle", fontsize=12)
+    b.step(np.concatenate([[0], fluxes["t"]]), np.concatenate([[inside0], remaining]), where="post", color=P["flame"],
+           label="seeds inside less summed parcels_net")
+    b.plot(probe["t"], sampled, "o", color=P["blue"], ms=4, mfc="none", label="probe count")
+    b.set_xlabel("t")
+    b.set_ylabel("particles in the core")
+    b.set_xlim(0, None)
+    b.set_ylim(0, None)
+    b.yaxis.get_major_locator().set_params(integer=True)
+    b.legend(fontsize=10, loc="upper right")
+    b.set_title("the net flux accounts for the probe's count", fontsize=12)
+    return fig
+
+
+@functools.cache
 def trajectory_run(binary):
     """A quarter of the particles of examples/particle_vortex every 10 steps, with their temperature."""
     work = Path(tempfile.mkdtemp())
@@ -191,8 +242,8 @@ def particle_trajectories(P, args):
     return fig
 
 
-GUIDE_RUNS = {"particle_crossings": particle_crossings, "particle_snapshots": particle_snapshots,
-              "particle_trajectories": particle_trajectories}
+GUIDE_RUNS = {"particle_crossings": particle_crossings, "particle_fluxes": particle_fluxes,
+              "particle_snapshots": particle_snapshots, "particle_trajectories": particle_trajectories}
 
 
 def figures(mallard=None, names=None):

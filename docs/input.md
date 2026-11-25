@@ -1659,6 +1659,22 @@ for a surface `direction`, then the fields. At most 8 entries.
 | `fields` | Particle variables (`RHO`, `U`, `P`, `T`, `V`, `T_P`) and names of `[[particles.quantities]]`, vectors by name, default none |
 | `file` | Its CSV file, default `particle_crossings_<name>.csv` |
 
+### `[[particles.fluxes]]`
+
+The particles crossing a surface or leaving through a boundary zone, counted
+per interval ([Particle fluxes](guide/particles.md#particle-fluxes)): per row
+`step`, `t`, `t_start` (the start of the interval), `parcels_out`,
+`parcels_in`, `parcels_net`, and for solid particles `particles_out`,
+`particles_in`, `particles_net`, `mass_out`, `mass_in`, `mass_net`,
+`mass_rate`. At most 8 entries.
+
+| Key | Description |
+|---|---|
+| `name` | Its name. Required |
+| `region` | As in `[[particles.crossings]]`: a boundary zone (by name) or a surface of regions of shapes that does not move; its pieces count toward the 8 of `[[particles.crossings]]`. Required |
+| `interval` | Steps between rows, default 1 |
+| `file` | Its CSV file, default `particle_fluxes_<name>.csv` |
+
 ### `[[particles.trajectories]]`
 
 A subset of the particles at the start and every `interval` or `time_interval`

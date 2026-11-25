@@ -13,7 +13,8 @@ statistics of the particles in a region. With
 [dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
 [Snapshots](#particle-snapshots) write every particle, with the mesh or
 alone, [crossings](#particle-crossings) record the particles leaving
-through a boundary or crossing a surface, and [trajectories](#particle-trajectories)
+through a boundary or crossing a surface, [fluxes](#particle-fluxes) count
+them per interval, and [trajectories](#particle-trajectories)
 follow a subset of them through the run. Sprays and injection during the run follow in later releases
 ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
@@ -739,6 +740,75 @@ against the probe `core`'s count at its samples.*
   it again; take the rows of the last `# mallard-run` block for those steps.
 - The events of a step are held on the device: up to `capacity` per surface
   piece, plus `capacity` for the boundary zones.
+
+## Particle fluxes
+
+Particle mass flux through a plane, every 100 steps:
+
+```toml
+[[particles.fluxes]]
+name = "station"
+region = {type = "boundary", of = {type = "half_space", point = [0.2, 0, 0], normal = [1, 0, 0]}}
+interval = 100
+```
+
+Deposition rate on a wall that catches the particles:
+
+```toml
+[[particles.walls]]
+zones = ["plate"]
+interaction = "stick"
+
+[[particles.fluxes]]
+name = "deposition"
+region = "plate"
+interval = 100
+```
+
+A `[[particles.fluxes]]` entry counts the particles that cross a surface or
+leave through a boundary zone, as [`[[particles.crossings]]`](#particle-crossings)
+finds them, and writes one row per `interval` steps to its CSV file
+(`particle_fluxes_<name>.csv`) instead of a row per crossing:
+
+| Column | Meaning |
+|---|---|
+| `step`, `t` | The step and time of the row |
+| `t_start` | The time of the previous row (0, or the restart's time, for the first): the row counts the crossings in (`t_start`, `t`] |
+| `parcels_out`, `parcels_in`, `parcels_net` | Parcels crossing out of the region the surface bounds, into it, and out less in; through a boundary zone, those leaving (`in` is 0) |
+| `particles_out`, `particles_in`, `particles_net` | Solid particles only: parcels times `weight`, the physical particles (per unit depth in 2D) |
+| `mass_out`, `mass_in`, `mass_net` | Solid particles only: particles times the mass of one, `density * pi * diameter^3 / 6` |
+| `mass_rate` | Solid particles only: `mass_net / (t - t_start)`, the mass flux through the surface over the interval |
+
+A half space is the side its `normal` points away from: the plane above
+bounds `x < 0.2`, so `out` counts the particles crossing it toward `+x`,
+downstream, and `mass_rate` is the mass flux in that direction. Tracers are massless and get the parcel counts
+only. The counts are integers summed on the device, so the rows are bitwise
+the same on any number of ranks and with or without step graphs, and no
+per-crossing rows are written or held: a run with millions of crossings
+writes one small row per interval. Steps decided on the device stop at the
+rows, as for [probes](#particle-probes).
+
+![Fluxes through the circle bounding the core probe's disk in the particle_vortex example: parcels out and in per interval, and the seeds inside less the summed net flux, which equals the probe's count at every row](../images/guide/particle_fluxes-light.svg#gh-light-mode-only)
+![Fluxes through the circle bounding the core probe's disk in the particle_vortex example: parcels out and in per interval, and the seeds inside less the summed net flux, which equals the probe's count at every row](../images/guide/particle_fluxes-dark.svg#gh-dark-mode-only)
+
+*The [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example with fluxes through the boundary of its probe's disk every 50 steps,
+the probe's interval (a Mallard run). Left: the parcels out of and into the
+disk per row (20 out, none in) and their mass. Right: the 21 seeds inside
+less the summed `parcels_net`, against the probe `core`'s count at the same
+steps: equal at every row.*
+
+**Pitfalls.**
+
+- A closed surface counts every crossing either way, so a particle orbiting
+  near it adds to both `out` and `in`; `net` is what changes the count inside.
+- A restart starts a new interval at its time: write restarts at multiples of
+  `interval` to keep the rows of a straight run.
+- The last row is at the last multiple of `interval`: the crossings after it
+  are not written.
+- The limits and the second-order location of
+  [`[[particles.crossings]]`](#particle-crossings) apply: a grazing pass
+  through a surface within one step is not counted.
 
 ## Particle trajectories
 
