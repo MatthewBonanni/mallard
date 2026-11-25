@@ -1,0 +1,1 @@
+- Rebuilding the TENO tables of moved cells with shared tables (`rebuild_cells`) packs and shares every cell's tables on the device, as the full setup does, instead of downloading every cell's stencils and pseudo-inverses and repacking them on the host; results are bitwise unchanged (#1070).

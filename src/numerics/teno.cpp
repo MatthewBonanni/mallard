@@ -1018,21 +1018,129 @@ void store_cell_rows(TENO & scheme, const Kokkos::View<uint32_t *> & rows, const
 
 PackedRows large_rows(const TENO & scheme);
 PackedRows small_rows(const TENO & scheme);
-void download_tables(const TENO & scheme, const HostIndex & large_index, const HostIndex & small_index, uint32_t c0,
-                     std::vector<CellTables> & tables);
 
-/** @brief Pack every cell's stencils again, sharing the pseudo-inverses that are equal. */
+/** @brief Slot t < n of cells, faces and pinv: the sizes(t) entries of cell c0 + t's packed stencil. */
+void unpack_slots(const teno::PackedStencils & packed, const uint32_t c0, const uint32_t n,
+                  const Kokkos::View<uint16_t *> & sizes, const teno_setup::SlotArray<int32_t> & cells,
+                  const teno_setup::SlotArray<int32_t> & faces, const teno_setup::SlotArray<rtype> & pinv) {
+    const uint8_t sh = packed.shift;
+    const uint8_t w = packed.width;
+    const bool sg = packed.single;
+    auto start = packed.slice_start;
+    auto index = packed.pinv_index;
+    auto entries = packed.cells;
+    auto images = packed.images;
+    auto values = packed.pinv;
+    gated::parallel_for("teno_unpack_slots", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t t) {
+        const uint32_t c = c0 + t;
+        const uint32_t lane = c & ((1u << sh) - 1);
+        const uint64_t s0 = start(c >> sh);
+        const uint64_t p0 = index(c) >> sh;
+        const uint64_t lane_pinv = index(c) & ((1u << sh) - 1);
+        const auto lc = cells.lane(t);
+        const auto lf = faces.lane(t);
+        const auto lp = pinv.lane(t);
+        for (uint32_t s = 0; s < sizes(t); s++) {
+            const int32_t e = entries(((s0 + s) << sh) + lane);
+            lc[s] = e >= 0 ? e : images(2 * (-1 - e));
+            lf[s] = e >= 0 ? -1 : images(2 * (-1 - e) + 1);
+            for (uint32_t l = 0; l < w; l++) {
+                const uint64_t k = (((p0 + s) * w + l) << sh) + lane_pinv;
+                lp[s * w + l] = sg ? rtype(reinterpret_cast<const float *>(values.data())[k]) : values(k);
+            }
+        }
+    });
+}
+
+/**
+ * @brief (slot t < n): the first slot whose table is bitwise that of slot t
+ *        (sizes, segments if any, and width pseudo-inverse entries per slot):
+ *        the same of PackedRows::add_batch(), which then ranks each table once.
+ */
+std::vector<uint32_t> bitwise_same(const uint32_t n, const Kokkos::View<uint16_t *> & sizes,
+                                   const teno_setup::TableBatch::V<uint16_t **> & segments, const uint32_t width,
+                                   const teno_setup::SlotArray<rtype> & pinv) {
+    using Bits = std::conditional_t<sizeof(rtype) == 8, uint64_t, uint32_t>;
+    const bool sectors = segments.is_allocated();
+    Kokkos::View<uint64_t *> hash(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_share_again_hash"), n);
+    gated::parallel_for("teno_share_again_hash", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t t) {
+        uint64_t h = sizes(t);
+        if (sectors) {
+            for (int k = 0; k < teno::MAX_FACES; k++) h = (h ^ segments(t, k)) * 0x9e3779b97f4a7c15ULL;
+        }
+        const auto lp = pinv.lane(t);
+        for (uint32_t i = 0; i < sizes(t) * width; i++) {
+            h = ((h ^ Kokkos::bit_cast<Bits>(lp[i])) * 0x9e3779b97f4a7c15ULL) ^ (h >> 29);
+        }
+        hash(t) = h;
+    });
+    auto h_hash = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), hash);
+    std::vector<uint32_t> same(n);
+    std::unordered_map<uint64_t, uint32_t> first;
+    for (uint32_t t = 0; t < n; t++) same[t] = first.try_emplace(h_hash(t), t).first->second;
+    Kokkos::View<uint32_t *> candidate(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_share_again_candidate"), n);
+    Kokkos::deep_copy(candidate, HostUnmanaged<const uint32_t>(same.data(), n));
+    Kokkos::View<uint8_t *> equal(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_share_again_equal"), n);
+    gated::parallel_for("teno_share_again_equal", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t t) {
+        const uint32_t r = candidate(t);
+        bool eq = sizes(r) == sizes(t);
+        for (int k = 0; sectors && k < teno::MAX_FACES && eq; k++) eq = segments(r, k) == segments(t, k);
+        const auto a = pinv.lane(t);
+        const auto b = pinv.lane(r);
+        for (uint32_t i = 0; i < sizes(t) * width && eq; i++) eq = Kokkos::bit_cast<Bits>(a[i]) == Kokkos::bit_cast<Bits>(b[i]);
+        equal(t) = eq ? 1 : 0;
+    });
+    auto h_equal = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), equal);
+    for (uint32_t t = 0; t < n; t++) {
+        if (!h_equal(t)) same[t] = t;
+    }
+    return same;
+}
+
+/** @brief Pack every cell's stencils again on the device, sharing the pseudo-inverses that are equal. */
 void share_again(TENO & scheme) {
     const uint32_t n_cells = static_cast<uint32_t>(scheme.scale.extent(0));
-    const HostIndex large_index = host_index(scheme.stencil_large);
-    const HostIndex small_index = host_index(scheme.stencil_small);
+    auto large_size = scheme.stencil_large_size;
+    auto small_size = scheme.stencil_small_size;
+    uint64_t max_large = 0, max_small = 0;
+    gated::parallel_reduce("teno_share_again_most", Kokkos::RangePolicy<>(0, n_cells),
+                            KOKKOS_LAMBDA(const uint32_t c, uint64_t & a, uint64_t & b) {
+        uint64_t total = 0;
+        for (int k = 0; k < teno::MAX_FACES; k++) total += small_size(c, k);
+        a = large_size(c) > a ? large_size(c) : a;
+        b = total > b ? total : b;
+    }, Kokkos::Max<uint64_t>(max_large), Kokkos::Max<uint64_t>(max_small));
+    const uint32_t slots = std::max(1u, std::min(CHUNK_CELLS, n_cells));
+    const bool interleaved = teno_setup::batch_interleaved();
+    using teno_setup::SlotArray;
+    using Sizes = teno_setup::TableBatch::V<uint16_t **>;
+    Kokkos::View<uint16_t *> large_slot_size("teno_share_again_large_size", slots);
+    Kokkos::View<uint16_t *> small_slot_total("teno_share_again_small_total", slots);
+    Sizes small_slot_size("teno_share_again_small_size", slots, teno::MAX_FACES);
+    SlotArray<int32_t> large_cells("teno_share_again_large_cells", max_large, slots, interleaved);
+    SlotArray<int32_t> large_faces("teno_share_again_large_faces", max_large, slots, interleaved);
+    SlotArray<rtype> large_pinv("teno_share_again_large_pinv", max_large * scheme.n_dof_large, slots, interleaved);
+    SlotArray<int32_t> small_cells("teno_share_again_small_cells", max_small, slots, interleaved);
+    SlotArray<int32_t> small_faces("teno_share_again_small_faces", max_small, slots, interleaved);
+    SlotArray<rtype> small_pinv("teno_share_again_small_pinv", max_small * teno::NK_SMALL, slots, interleaved);
     PackedRows large = large_rows(scheme), small = small_rows(scheme);
-    std::vector<CellTables> chunk;
-    for (uint32_t c0 = 0; c0 < n_cells; c0 += CHUNK_CELLS) {
-        chunk.assign(std::min(CHUNK_CELLS, n_cells - c0), CellTables());
-        download_tables(scheme, large_index, small_index, c0, chunk);
-        large.add(c0, chunk);
-        small.add(c0, chunk);
+    for (uint32_t c0 = 0; c0 < n_cells; c0 += slots) {
+        const uint32_t n = std::min(slots, n_cells - c0);
+        gated::parallel_for("teno_share_again_sizes", Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t t) {
+            uint16_t total = 0;
+            for (int k = 0; k < teno::MAX_FACES; k++) {
+                small_slot_size(t, k) = small_size(c0 + t, k);
+                total = static_cast<uint16_t>(total + small_size(c0 + t, k));
+            }
+            large_slot_size(t) = large_size(c0 + t);
+            small_slot_total(t) = total;
+        });
+        unpack_slots(scheme.stencil_large, c0, n, large_slot_size, large_cells, large_faces, large_pinv);
+        unpack_slots(scheme.stencil_small, c0, n, small_slot_total, small_cells, small_faces, small_pinv);
+        large.add_batch(c0, n, large_slot_size, {}, large_cells, large_faces, large_pinv,
+                        bitwise_same(n, large_slot_size, {}, scheme.n_dof_large, large_pinv));
+        small.add_batch(c0, n, small_slot_total, small_slot_size, small_cells, small_faces, small_pinv,
+                        bitwise_same(n, small_slot_total, small_slot_size, teno::NK_SMALL, small_pinv));
     }
     scheme.stencil_large = large.finish("teno_stencil_large");
     scheme.stencil_small = small.finish("teno_stencil_small");
