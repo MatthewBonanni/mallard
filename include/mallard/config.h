@@ -938,7 +938,7 @@ class NumericsFaceReconstruction : public Table {
         NumericsFaceReconstruction & stencil_factor(double v) { put("stencil_factor", v); return *this; }
         /** @brief (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes
          *        their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells'
-         *        central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in
+         *        central coefficients, so results do not depend on which cells share a round. Default 0.125 in 3D (1 in
          *        2D).
          */
         NumericsFaceReconstruction & troubled_capacity(double v) { put("troubled_capacity", v); return *this; }
@@ -2240,9 +2240,10 @@ class Run : public Table {
          *        preset sets `cfl`.
          */
         Run & cfl(double v) { put("cfl", v); return *this; }
-        /** @brief Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0:
-         *        never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step
-         *        reduction reads the request, within `step_queue` steps of the step the host had reached.
+        /** @brief Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory
+         *        (default 0: never; `--set control_file_interval=N` turns them on from the command line). A file found
+         *        acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads
+         *        the request, within `step_queue` steps of the step the host had reached.
          */
         Run & control_file_interval(std::int64_t v) { put("control_file_interval", v); return *this; }
         /** @brief Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`).
