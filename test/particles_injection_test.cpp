@@ -399,6 +399,22 @@ TEST(ParticleInjectionTest, ACountInjectorReleasesItsParcelsOnceAtItsStart) {
     }
 }
 
+TEST(ParticleInjectionTest, AMassReleasesItsMassToWithinHalfAParcel) {
+    // 37.7 parcels' worth of HEAVY spheres, 2 per parcel: 38 parcels, 0.3 of a parcel over (a floor would be 0.7 under)
+    const double w = 2.0, m = 1e6 * PI / 6.0 * 1e-9, parcel = w * m, mass = 37.7 * parcel;
+    std::ostringstream keys;
+    keys.precision(17);
+    keys << HEAVY << "weight = " << w << "\n[[particles.injectors]]\nname = \"heap\"\nregion = \"domain\"\nmass = " << mass
+         << "\nvelocity = " << numbers(0.0, 0.0, 0.0) << "\n";
+    Solver solver;
+    solver.init(parse_toml(box(0.0, "n_steps = 2\ndt = 0.005\n", keys.str(), "solid")));
+    solver.run();
+    double seeded = 0.0;
+    for (const auto & r : solver.get_particles()->gather()) seeded += r.w * 1e6 * PI / 6.0 * r.d * r.d * r.d;
+    EXPECT_EQ(solver.get_particles()->count(), 38u);
+    EXPECT_LE(std::abs(seeded - mass), 0.5 * parcel);
+}
+
 namespace {
 
 /**
@@ -549,6 +565,10 @@ TEST(ParticleInjectionTest, InjectorInputErrors) {
     EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\n" + point +
                                                                "rate = 1.0\ncount = 10\n"))
                   .find("exactly one of rate"),
+              std::string::npos);
+    EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\n" + point +
+                                                               "mass = 1.0\n"))
+                  .find("tracers have no mass"),
               std::string::npos);
     EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\n" + point +
                                                                "rate = 1.0\nspeed = 2.0\n"))

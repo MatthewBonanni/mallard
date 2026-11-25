@@ -807,6 +807,7 @@ std::string check_json(const CheckReport & r) {
                   .add("cone_angle", j.cone_angle)
                   .add("rate", j.rate)
                   .raw("count", j.count > 0 ? std::to_string(j.count) : std::string("null"))
+                  .raw("mass", finite(j.mass))
                   .raw("mass_flow", finite(j.mass_flow))
                   .add("start", j.start)
                   .raw("end", finite(j.end))

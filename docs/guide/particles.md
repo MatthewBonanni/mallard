@@ -122,7 +122,7 @@ Particles enter the run in these ways, which combine freely:
 |---|---|---|
 | At given points | `points` | At the start |
 | On a regular lattice | [`[particles.lattice]`](#tracers-particles) | At the start |
-| At random in a region, on boundary zones or at a point | [`[[particles.injectors]]`](#injectors) with `count` | All at once, at the start (or at its `start`) |
+| At random in a region, on boundary zones or at a point | [`[[particles.injectors]]`](#injectors) with `count`, or `mass` (solid particles) | All at once, at the start (or at its `start`) |
 | At random in a region, on boundary zones or at a nozzle, continuously | [`[[particles.injectors]]`](#injectors) with `rate` or `mass_flow` | Every step from `start` to `end` |
 | From a restart file | [`[initialize] type = "restart"`](#restarts) | The file's particles continue; a file without particles, or a `remap` start, seeds them as above |
 
@@ -136,6 +136,23 @@ type = "tracer"
 name = "cloud"
 region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
 count = 1000
+```
+
+2 g of 50 µm droplets at random in a disk at the start (`mass` is the total;
+per meter of depth in 2D), as parcels of 1000 droplets:
+
+```toml
+[particles]
+type = "solid"
+density = 800.0
+weight = 1e3
+
+[[particles.injectors]]
+name = "cloud"
+region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
+mass = 2e-3
+velocity = [0.0, 0.0]
+diameter = 50e-6
 ```
 
 20000 tracers per second at random in a rectangle, until t = 0.1:
@@ -577,6 +594,11 @@ Each `[[particles.injectors]]` seeds particles at random places
   run's start, and they are there with the seeds before the first step (and
   in the initial output); a later `start` releases them at the end of the
   first step that reaches it;
+- `mass` (solid particles): the same, the count being `mass / (weight m)`
+  rounded to the nearest parcel, `m` the mean mass of a particle of its size
+  distribution, so that the parcels' mass is `mass` to within half a parcel
+  of mean mass (for one diameter; a distribution's sampled diameters add
+  their statistical spread);
 - `rate` parcels per second (or `mass_flow`, from the mean mass of a
   particle of its size distribution and `weight`): after every step, for the
   part of the step between `start` and `end`, carrying fractions of a parcel
@@ -602,8 +624,8 @@ none of these: they move with the gas.
 |---|---|---|
 | `name` | required | Its name: letters, digits and `_` |
 | `point`, `region` | one of them | Where it injects |
-| `count`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
-| `start`, `end` | 0, never | When it injects (`count`: `start` only) |
+| `count`, `mass`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, their total mass (solid particles; per meter of depth in 2D), parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
+| `start`, `end` | 0, never | When it injects (`count` and `mass`: `start` only) |
 | `velocity`, `speed` | one of them (solid particles) | The particles' velocity, or their speed along `direction` |
 | `direction` | the inward normal of a zone | Direction of the velocity with `speed` |
 | `cone_angle` | 0 | Half angle of the cone of velocities, degrees |

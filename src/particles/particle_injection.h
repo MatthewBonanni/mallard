@@ -302,6 +302,7 @@ struct InjectorInfo {
     double speed = 0.0, cone_angle = 0.0;  // m/s, degrees (half angle)
     double rate = 0.0;                     // parcels per second
     uint64_t count = 0;                    // parcels released at once at start, in place of a rate
+    double mass = std::numeric_limits<double>::quiet_NaN();  // kg released at once (solid particles), if given
     double mass_flow = std::numeric_limits<double>::quiet_NaN();  // kg/s (solid particles)
     double start = 0.0, end = 0.0;
     double weight = 1.0;

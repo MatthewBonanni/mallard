@@ -208,7 +208,9 @@ state. The run's start calls the injection once at its own time, after the
 particles that start at the gas velocity take it, so a burst at `start = 0`
 is there before the first step without its velocities being overwritten; a
 rate owes nothing over that empty interval. Restart files carry the injected
-count, so the burst is not repeated.
+count, so the burst is not repeated. A `mass` sets the count at setup,
+rounded to the nearest parcel of the distribution's mean mass, as `mass_flow`
+sets a rate.
 
 Each parcel draws everything (its element, the point in it, the cone, the
 diameter) from a counter-based generator: SplitMix64 of (seed, injector,

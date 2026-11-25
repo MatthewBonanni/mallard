@@ -506,22 +506,25 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
 
         // When and how many
         const bool by_rate = contains_optional(e, "rate"), by_mass = contains_optional(e, "mass_flow");
-        const bool by_count = contains_optional(e, "count");
-        if (int(by_rate) + int(by_mass) + int(by_count) != 1) {
+        const bool by_count = contains_optional(e, "count"), by_total = contains_optional(e, "mass");
+        if (int(by_rate) + int(by_mass) + int(by_count) + int(by_total) != 1) {
             throw InputError(Diagnostic{.key = where, .line = line_of(e),
-                                        .message = "needs exactly one of rate (parcels per second), mass_flow and "
-                                                   "count (parcels released at once at start)",
+                                        .message = "needs exactly one of rate (parcels per second), mass_flow, count "
+                                                   "(parcels released at once at start) and mass (their total mass)",
                                         .docs = DOCS});
         }
         p.start = find_double_or(e, "start", dim::time, 0.0);
-        if (by_count) {
+        const uint64_t most = uint64_t(std::numeric_limits<int32_t>::max());
+        if (by_count || by_total) {
             if (contains_optional(e, "end")) {
-                throw invalid(e, "end", where, "is for rate and mass_flow; count releases its parcels at once at start",
+                throw invalid(e, "end", where, "is for rate and mass_flow; count and mass release at once at start",
                               "Remove end");
             }
-            p.count = find_value<uint64_t>(e, "count");
-            if (p.count == 0 || p.count > uint64_t(std::numeric_limits<int32_t>::max())) {
-                throw invalid(e, "count", where, "must be a positive number of parcels, at most 2^31 - 1");
+            if (by_count) {
+                p.count = find_value<uint64_t>(e, "count");
+                if (p.count == 0 || p.count > most) {
+                    throw invalid(e, "count", where, "must be a positive number of parcels, at most 2^31 - 1");
+                }
             }
             p.end = p.start;
         } else {
@@ -615,7 +618,21 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             size.log_d = {0.0};
             size.cdf = {1.0};
         }
-        if (by_count) {
+        if (by_total) {
+            if (!defaults.solid) throw invalid(e, "mass", where, "is for solid particles; tracers have no mass", "Give count");
+            const double total = positive_double(e, "mass", where, N_DIM == 3 ? dim::of(1, 0, 0) : dim::of(1, -1, 0));
+            const double mass = static_cast<double>(defaults.density) * std::numbers::pi / 6.0 * size.mean_d3;
+            const double parcels = std::round(total / (static_cast<double>(p.weight) * mass));
+            if (!(parcels >= 1.0) || parcels > static_cast<double>(most)) {
+                throw invalid(e, "mass", where,
+                              "makes " + logging::real(parcels) + " parcels of the mean mass " +
+                                  logging::real(static_cast<double>(p.weight) * mass) + "; between 1 and 2^31 - 1 are available",
+                              "Change mass, or weight (particles per parcel)");
+            }
+            p.count = static_cast<uint64_t>(parcels);
+            info.count = p.count;
+            info.mass = total;
+        } else if (by_count) {
             info.count = p.count;
         } else if (by_rate) {
             p.rate = positive_double(e, "rate", where, dim::rate);

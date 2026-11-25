@@ -659,6 +659,7 @@ void Solver::check_particles(CheckReport & r) {
         j.cone_angle = info.cone_angle;
         j.rate = info.rate;
         j.count = info.count;
+        j.mass = info.mass;
         j.mass_flow = info.mass_flow;
         j.start = info.start;
         j.end = info.end;

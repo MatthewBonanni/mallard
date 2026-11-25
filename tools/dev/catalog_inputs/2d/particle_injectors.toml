@@ -109,3 +109,11 @@ count = 50
 start = 0.0
 velocity = [0.0, 0.1]
 diameter = 0.01
+
+[[particles.injectors]]
+name = "heap"
+point = [0.7, 0.7]
+mass = 1e-3
+start = 0.0
+velocity = [0.0, 0.1]
+diameter = 0.01
