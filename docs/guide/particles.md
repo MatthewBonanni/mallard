@@ -11,8 +11,8 @@ first times, turns about an axis), and [probes](#particle-probes) give
 statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas, and
 [dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
-[Injectors](#injectors) seed particles during the run, at nozzles, on inlets or
-in regions, with size distributions. Sprays and particle output beyond the
+Particles enter at points, on a lattice, at random in a region or on inlets,
+at the start or continuously ([Seeding](#seeding)), with size distributions. Sprays and particle output beyond the
 final positions follow in later releases
 ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
@@ -107,37 +107,73 @@ bitwise the same on any number of ranks.
 | Key | Default | Meaning |
 |---|---|---|
 | `type` | required | `"tracer"` |
-| `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
-| `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
+| `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) ([Seeding](#seeding)) |
+| `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) ([Seeding](#seeding)) |
+| `injectors` | none | Particles at random in a region, on boundary zones or at a point, at the start or continuously ([Injectors](#injectors)) |
 | `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
 | `capacity` | the number of particles, and those the [injectors](#injectors) emit over the run | Particles a rank can hold |
+| `seed` | 0 | Seed of the injectors' random numbers |
 
 ### Seeding
 
-Seeds enter at the start of the run, from `points`, a `lattice`, or both,
-and [injected](#injectors) particles during it. Ids follow the seeds: the
-`points` first, in order, then the lattice with `x` varying fastest, then the
-injected particles in the order they entered. A seed outside the mesh is an error,
+Particles enter the run in these ways, which combine freely:
+
+| How | Keys | When |
+|---|---|---|
+| At given points | `points` | At the start |
+| On a regular lattice | [`[particles.lattice]`](#tracers-particles) | At the start |
+| At random in a region, on boundary zones or at a point | [`[[particles.injectors]]`](#injectors) with `count` | All at once, at the start (or at its `start`) |
+| At random in a region, on boundary zones or at a nozzle, continuously | [`[[particles.injectors]]`](#injectors) with `rate` or `mass_flow` | Every step from `start` to `end` |
+| From a restart file | [`[initialize] type = "restart"`](#restarts) | The file's particles continue; a file without particles, or a `remap` start, seeds them as above |
+
+1000 tracers at random in a disk at the start:
+
+```toml
+[particles]
+type = "tracer"
+
+[[particles.injectors]]
+name = "cloud"
+region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
+count = 1000
+```
+
+20000 tracers per second at random in a rectangle, until t = 0.1:
+
+```toml
+[[particles.injectors]]
+name = "smoke"
+region = {type = "rectangle", center = [0.2, 0.5], size = [0.1, 0.4]}
+rate = 2e4
+end = 0.1
+```
+
+`region` is any filled region (shapes of
+[Geometry](geometry.md), `"domain"`, a cell zone) or boundary zones, and
+`point` a single point; solid particles also take a velocity and a diameter
+or size distribution ([Injectors](#injectors)). Random places are the same on
+any number of ranks and after restarts.
+
+Ids follow the seeds: the `points` first, in order, then the lattice with `x`
+varying fastest, then the injected particles in the order they entered (those
+released at the start included). A seed point outside the mesh is an error,
 naming the point; a seed on a face between two cells goes to the one with the
 lowest global id, so every rank count seeds the same particles in the same
-cells.
-
-To follow particles released along a line, put `n = 1` along the other
-directions (`n = [1, 50]` seeds 50 particles on the vertical line through the
-middle of `lo` and `hi`); to release them in a region, cover its bounding box
-with a lattice and keep the particles inside afterward (the
-[quantities](#per-particle-quantities) with `in(name)` tell which particles
-were where). Seeding during the run, from injectors with rates, is not
-available yet ([#759](https://github.com/MatthewBonanni/mallard/issues/759)).
+cells. To release particles along a line, put `n = 1` along the other
+directions of the lattice (`n = [1, 50]` seeds 50 particles on the vertical
+line through the middle of `lo` and `hi`).
 
 ### Restarts
 
 Restart files carry the particles, and a restarted run continues their
 trajectories exactly, on any number of ranks; the seeds of `[particles]` are
-then not used. A restart file written without particles (by a run without
+then not used, and injectors continue where they were: a `count` injector
+that has released its particles does not release them again, and a rate
+continues its count. A restart file written without particles (by a run without
 `[particles]`) seeds them, which adds tracers to a developed flow: run the
 flow to its statistically steady state, then restart from it with
-`[particles]`. A `remap` start seeds them too.
+`[particles]`. A `remap` start seeds them too. In both, `count` injectors
+whose `start` has passed release their particles at the restart's time.
 
 ### Boundaries
 
@@ -534,11 +570,19 @@ speed = 5.0
 diameter = 10e-6
 ```
 
-Each `[[particles.injectors]]` seeds particles during the run, after every
-step: `rate` parcels per second (or `mass_flow`, from the mean mass of a
-particle of its size distribution and `weight`) for the part of the step
-between `start` and `end`, carrying fractions of a parcel over to the next
-step so that over the run the count matches the rate. Where:
+Each `[[particles.injectors]]` seeds particles at random places
+([Seeding](#seeding) lists the other ways in). How many and when:
+
+- `count`: that many parcels at once, at `start`. By default `start` is the
+  run's start, and they are there with the seeds before the first step (and
+  in the initial output); a later `start` releases them at the end of the
+  first step that reaches it;
+- `rate` parcels per second (or `mass_flow`, from the mean mass of a
+  particle of its size distribution and `weight`): after every step, for the
+  part of the step between `start` and `end`, carrying fractions of a parcel
+  over to the next step so that over the run the count matches the rate.
+
+Where:
 
 - `point`: every particle at a nozzle;
 - `region` a boundary zone (or several, `{type = "zones", ...}`): uniformly
@@ -558,8 +602,8 @@ none of these: they move with the gas.
 |---|---|---|
 | `name` | required | Its name: letters, digits and `_` |
 | `point`, `region` | one of them | Where it injects |
-| `rate`, `mass_flow` | one of them | Parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
-| `start`, `end` | 0, never | When it injects |
+| `count`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
+| `start`, `end` | 0, never | When it injects (`count`: `start` only) |
 | `velocity`, `speed` | one of them (solid particles) | The particles' velocity, or their speed along `direction` |
 | `direction` | the inward normal of a zone | Direction of the velocity with `speed` |
 | `cone_angle` | 0 | Half angle of the cone of velocities, degrees |
@@ -603,7 +647,7 @@ diameter from random numbers keyed by `[particles] seed`, its injector and its
 count within the injector, not from a sequence: the same particles enter on
 any number of ranks, with step graphs or without, and a restarted run
 continues the injection exactly (restart files carry each injector's count and
-fraction of a parcel). Changing the time step changes when particles enter,
+fraction of a parcel, so a `count` injector releases once). Changing the time step changes when particles enter,
 not what they are.
 
 **Capacity.** By default every rank has slots for every particle the run can
@@ -612,12 +656,12 @@ inject: the seeds and what the injectors emit up to `[run] t_stop` (or
 needs `capacity`. For long runs whose particles leave the domain, set
 `capacity` to the most that are in it at once: a run that runs out of slots
 stops, naming it. `mallard check` reports each injector (where, along what,
-its rate, mass flow and parcels over the run) in its JSON
+its rate or count, mass flow and parcels over the run) in its JSON
 (`particle_injectors`).
 
 **Pitfalls.**
 
-- Particles enter at the end of a step, at the point or face where they are
+- Particles of a rate enter at the end of a step, at the point or face where they are
   drawn, all together: a step's particles have the same age. At large rates
   per step, streams come in bunches a step's travel apart.
 - A filled region's particles are placed in the cells it covers by their

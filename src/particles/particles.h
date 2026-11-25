@@ -360,8 +360,11 @@ class Particles {
         /** @brief Whether [[particles.injectors]] seed particles during the run. */
         bool injects() const { return !injectors.empty(); }
 
-        /** @brief The injectors emit from time t on (the first call only: the run's start). */
-        void start_injection(double t) { injectors.start(t); }
+        /**
+         * @brief The injectors emit from time t on, releasing the count of those that start by then (the first
+         *        call only: the run's start, after start_from_gas()).
+         */
+        void start_injection(double t) { injectors.start(t, injection_target()); }
 
         /**
          * @brief After an accepted step, add the particles the injectors emitted up to time t_now, into the

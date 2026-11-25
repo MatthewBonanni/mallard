@@ -2,8 +2,8 @@
  * @file particles_injection_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Tests of the particle injectors: size distributions against their
- *        PDFs, rates, sites and directions, rank-count and step-graph
- *        independence, restarts and capacity.
+ *        PDFs, rates, counts released at once, sites and directions,
+ *        rank-count and step-graph independence, restarts and capacity.
  * @version 0.1
  * @date 2026-11-21
  *
@@ -355,9 +355,56 @@ TEST(ParticleInjectionTest, ARegionInjectorFillsItsShapeUniformly) {
     }
 }
 
+TEST(ParticleInjectionTest, ACountInjectorReleasesItsParcelsOnceAtItsStart) {
+    // Tracers carried at 1 along x for the run's 0.05: those released at the run's start (no start) have moved 0.05,
+    // those of start = 0.0125 enter at the end of the third step and have moved 0.035, and no injector releases twice
+    const double dt = 0.005, T = 0.05, R = 0.2, c[3] = {0.4, 0.5, 0.25}, x0 = 0.3, x1 = 0.6;
+    const std::string shape = N_DIM == 3 ? "sphere" : "disk";
+    const std::string keys =
+        "[[particles.injectors]]\nname = \"cloud\"\nregion = {type = \"" + shape + "\", center = " +
+        numbers(c[0], c[1], c[2]) + ", radius = 0.2}\ncount = 300\n"
+        "[[particles.injectors]]\nname = \"puff\"\npoint = " + numbers(x0, 0.5, 0.25) + "\ncount = 5\n"
+        "[[particles.injectors]]\nname = \"late\"\npoint = " + numbers(x1, 0.5, 0.25) + "\ncount = 3\nstart = 0.0125\n";
+    Solver solver;
+    solver.init(parse_toml(box(1.0, "n_steps = 10\ndt = 0.005\n", keys)));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 308u);
+    for (size_t k = 0; k < records.size(); k++) {
+        const particles::Record & r = records[k];
+        ASSERT_EQ(r.id, k);
+        if (k < 300) {
+            double d2 = 0.0;
+            for (size_t i = 0; i < N_DIM; i++) {
+                const double from = r.x[i] - (i == 0 ? T : 0.0);
+                d2 += (from - c[i]) * (from - c[i]);
+            }
+            EXPECT_LE(std::sqrt(d2), R * (1.0 + ROUND_OFF)) << "parcel " << k;
+        } else {
+            EXPECT_NEAR(r.x[0], k < 305 ? x0 + T : x1 + 7 * dt, ROUND_OFF) << "parcel " << k;
+            EXPECT_NEAR(r.x[1], 0.5, ROUND_OFF);
+        }
+    }
+    // Solid particles leave with the injector's velocity, not the gas's that seeds without one take
+    const std::string solid = HEAVY + "[[particles.injectors]]\nname = \"puff\"\npoint = " + numbers(x0, 0.5, 0.25) +
+                              "\ncount = 4\nvelocity = " + numbers(0.0, 0.5, 0.0) + "\n";
+    Solver spheres;
+    spheres.init(parse_toml(box(1.0, "n_steps = 2\ndt = 0.005\n", solid, "solid")));
+    spheres.run();
+    const std::vector<particles::Record> launched = spheres.get_particles()->gather();
+    ASSERT_EQ(launched.size(), 4u);
+    for (const auto & r : launched) {
+        EXPECT_NEAR(r.v[0], 0.0, 1e-3);
+        EXPECT_NEAR(r.v[1], 0.5, 1e-3);
+    }
+}
+
 namespace {
 
-/** @brief Two-way coupled spheres of a Rosin-Rammler distribution from the inlet, a disk and a nozzle in a crossflow. */
+/**
+ * @brief Two-way coupled spheres of a Rosin-Rammler distribution from the inlet, a disk and a nozzle in a crossflow,
+ *        and a cloud released at once at the start in the whole domain.
+ */
 std::string mixed_injectors(const std::string & run) {
     const std::string keys =
         "coupling = \"two-way\"\ndensity = 1000.0\ndiameter = 2e-3\nweight = 3.0\n"
@@ -368,7 +415,9 @@ std::string mixed_injectors(const std::string & run) {
         "\", center = " + numbers(0.6, 0.3, 0.25) + ", radius = 0.15}\n"
         "rate = 830.0\nvelocity = " + numbers(0.0, 0.5, 0.0) + "\nweight = 10.0\n"
         "[[particles.injectors]]\nname = \"nozzle\"\npoint = " + numbers(0.3, 0.8, 0.1) + "\nrate = 610.0\nspeed = 3.0\n"
-        "direction = " + numbers(1.0, -1.0, 0.5) + "\ncone_angle = 45.0\nstart = 0.02\n";
+        "direction = " + numbers(1.0, -1.0, 0.5) + "\ncone_angle = 45.0\nstart = 0.02\n"
+        "[[particles.injectors]]\nname = \"burst\"\nregion = \"domain\"\ncount = 200\nvelocity = " +
+        numbers(0.5, 0.0, 0.0) + "\n";
     return box(1.0, run, keys, "solid");
 }
 
@@ -395,7 +444,7 @@ TEST(ParticleInjectionTest, InjectedParticlesAreBitwiseIndependentOfRanksAndStep
 
 TEST(ParticleInjectionTest, RestartedRunContinuesTheInjectionExactly) {
     // The injectors' counts, fractions of a parcel and the next id continue: the same parcels enter
-    // (at the restart every injector owes a fraction of a parcel)
+    // (at the restart every rate injector owes a fraction of a parcel), and the burst is not released again
     const std::string dir = (scratch_dir() / "mallard_particles_injection_restart").string();
     const std::string writer = "[[write_data]]\nprefix = \"" + dir + "/restart\"\nformat = \"restart\"\ninterval = 15\n";
     Solver straight;
@@ -496,6 +545,10 @@ TEST(ParticleInjectionTest, InjectorInputErrors) {
     const std::string point = "point = " + numbers(0.5, 0.5, 0.25) + "\n";
     EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\nrate = 1.0\n"))
                   .find("exactly one of point and region"),
+              std::string::npos);
+    EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\n" + point +
+                                                               "rate = 1.0\ncount = 10\n"))
+                  .find("exactly one of rate"),
               std::string::npos);
     EXPECT_NE(error(box(1.0, "n_steps = 1\ndt = 0.005\n", "[[particles.injectors]]\nname = \"a\"\n" + point +
                                                                "rate = 1.0\nspeed = 2.0\n"))

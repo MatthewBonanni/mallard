@@ -1,0 +1,1 @@
+- Particle injectors with `count = N` release N parcels at once, at random in a region, on boundary zones or at a point, at the run's start (with the seeds, before the first step) or at a later `start`; the same particles on any number of ranks, and a restarted run does not release them again. The particles guide's new Seeding overview lists every way particles enter.

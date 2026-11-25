@@ -1603,9 +1603,9 @@ Seeds on a lattice, after the `points` in id order (`x` varying fastest).
 
 ### `[[particles.injectors]]`
 
-Particles seeded during the run, at a point, on boundary zones or in a filled
-region ([Injectors](guide/particles.md#injectors)), at most 8. Give exactly one
-of `point` and `region`, and of `rate` and `mass_flow`; solid particles also
+Particles seeded at random, at a point, on boundary zones or in a filled
+region, at once or continuously ([Injectors](guide/particles.md#injectors)), at most 8. Give exactly one
+of `point` and `region`, and of `count`, `rate` and `mass_flow`; solid particles also
 exactly one of `velocity` and `speed`.
 
 | Key | Description |
@@ -1613,9 +1613,10 @@ exactly one of `velocity` and `speed`.
 | `name` | Its name: letters, digits and `_`, unique. Required |
 | `point` | Where a nozzle injects, `[x, y]` (`[x, y, z]` in 3D) |
 | `region` | Boundary zones (a zone name, injecting uniformly over their faces by area), or a filled region of shapes or of the mesh that does not move (uniformly in its volume), inline or a name |
+| `count` | Parcels released at once, at random, at `start` (at the run's start by default, before the first step); a restarted run does not release them again |
 | `rate` | Parcels per second |
 | `mass_flow` | Mass per second (`"solid"`; per meter of depth in 2D): `rate` is `mass_flow / (weight m)`, `m` the mean particle mass of `diameter` |
-| `start`, `end` | Times it injects between, default 0 and for ever |
+| `start`, `end` | Times it injects between, default 0 and for ever (`count`: `start` only) |
 | `velocity` | Velocity of the particles (`"solid"`) |
 | `speed` | Their speed (`"solid"`), along `direction` |
 | `direction` | Direction of their velocity with `speed`, default the inward normal on boundary zones (required elsewhere) |

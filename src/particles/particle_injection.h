@@ -123,6 +123,7 @@ struct InjectorSpec {
     bool reject = false;       // points outside its region's shapes are drawn again
     bool along_normal = false; // the direction is the zone's inward normal at each face
     double rate = 0.0;         // parcels per second
+    uint64_t count = 0;        // parcels released at once at start, in place of a rate
     double start = 0.0, end = 0.0;
     uint32_t entry_first = 0, entry_count = 0;
     uint32_t size_first = 0, size_count = 0;
@@ -300,6 +301,7 @@ struct InjectorInfo {
     std::array<double, 3> direction{};
     double speed = 0.0, cone_angle = 0.0;  // m/s, degrees (half angle)
     double rate = 0.0;                     // parcels per second
+    uint64_t count = 0;                    // parcels released at once at start, in place of a rate
     double mass_flow = std::numeric_limits<double>::quiet_NaN();  // kg/s (solid particles)
     double start = 0.0, end = 0.0;
     double weight = 1.0;
@@ -312,7 +314,8 @@ struct InjectorInfo {
  * @brief The injectors of [[particles.injectors]]. After each accepted step,
  *        inject() adds to the particles the parcels each injector emitted over
  *        the step: its rate times the part of the step within [start, end),
- *        carrying the fraction of a parcel to the next step. Particle i of
+ *        carrying the fraction of a parcel to the next step, or its count at
+ *        once at the first step that reaches its start. Particle i of
  *        injector j draws everything from Random(seed, j, i), so the same
  *        particles enter on any rank count, with ids in order of injection.
  *        On the device, capturable in a step graph.
@@ -357,8 +360,11 @@ class Injectors {
         /** @brief Scratch for slots of a rank of this capacity. */
         void reserve(uint32_t capacity);
 
-        /** @brief Inject from time t on, at the first call (the run's start). */
-        void start(double t);
+        /**
+         * @brief Inject from time t on, at the first call (the run's start), releasing there the count of each
+         *        injector whose start it has reached.
+         */
+        void start(double t, const InjectionTarget & target);
 
         /** @brief Add the particles emitted up to the device time t_now (capturable). */
         void inject(const rtype * t_now, const InjectionTarget & target);
