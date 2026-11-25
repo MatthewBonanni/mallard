@@ -1,5 +1,5 @@
 {
- "default": "0.25",
+ "default": "0.125",
  "defaults_by_dim": {
   "2": "1.0"
  },
