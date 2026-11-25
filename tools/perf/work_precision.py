@@ -8,8 +8,9 @@
 
 Cases (all Euler, SSPRK3 at cfl = 1.0, each scheme on a sequence of meshes):
 
-- vortex_2d_quad, vortex_2d_tri: the isentropic vortex (Shu 1998, strength 5) convected to t = 2 across a
-  periodic 10 x 10 box of squares, or of irregular triangles (high_order_cost.triangles);
+- vortex_2d_quad, vortex_2d_tri: the isentropic vortex (Shu 1998, strength 5, with a smooth cutoff at radius 5:
+  vortex_fields) convected to t = 2 across a periodic 10 x 10 box of squares, or of irregular triangles
+  (high_order_cost.triangles);
 - vortex_3d_hex, vortex_3d_tet: the same vortex as a tube along z in a periodic box of cubes, 10 x 10 across and max(8, n / 4) cubes along z, or of
   six tetrahedra per cube (cartesian_tet);
 - shu_osher: the Shu-Osher problem (a Mach 3 shock into an entropy wave) to t = 1.8 on Nx x 4 squares.
@@ -82,14 +83,18 @@ def reconstruction(scheme, shock):
 
 def vortex_fields(t=None):
     """Density, velocity and pressure of the vortex as expressions; at time t (convected at u = 1, wrapped into the
-    periodic box) when given, else at t = 0."""
+    periodic box) when given, else at t = 0. The vortex is Shu's with r^2 in its exponent replaced by
+    r^2 / (1 - r^2 / R^2), R = LENGTH / 2: still an exact steady isentropic vortex, and zero with all its
+    derivatives from r = R on, so the field is smooth across the periodic box."""
     c = LENGTH / 2
-    dx = f"(x - {c})" if t is None else f"(x - {c} - {t} - {LENGTH} * round((x - {c} - {t}) / {LENGTH}))"
-    dy = f"(y - {c})"
-    f = f"exp(0.5 * (1.0 - {dx} * {dx} - {dy} * {dy}))"
-    rho = f"pow(1.0 - {(GAMMA - 1.0) * BETA**2 / (8.0 * GAMMA * np.pi**2):.17g} * {f} * {f}, {1.0 / (GAMMA - 1.0):.17g})"
+    dx = f"x - {c}" if t is None else f"x - {c} - {t} - {LENGTH} * round((x - {c} - {t}) / {LENGTH})"
+    k = (GAMMA - 1.0) * BETA**2 / (8.0 * GAMMA * np.pi**2)
     a = BETA / (2 * np.pi)
-    return rho, f"1.0 - {a:.17g} * {f} * {dy}", f"{a:.17g} * {f} * {dx}", f"pow({rho}, {GAMMA})"
+    v = (f"var dx := {dx}; var dy := y - {c}; var r2 := dx * dx + dy * dy; var s := 1.0 - r2 / {c * c}; "
+         f"var f := s > 0.0 ? exp(0.5 * (1.0 - r2 / s)) : 0.0; var g := s > 0.0 ? f / s : 0.0; ")
+    T = f"(1.0 - {k:.17g} * f * f)"
+    return (v + f"pow({T}, {1.0 / (GAMMA - 1.0):.17g})", v + f"1.0 - {a:.17g} * g * dy", v + f"{a:.17g} * g * dx",
+            v + f"pow({T}, {GAMMA / (GAMMA - 1.0):.17g})")
 
 
 PHYSICS = f"""[physics]
@@ -200,6 +205,12 @@ def hardware():
             if line.startswith("model name"):
                 return line.split(":", 1)[1].strip()
     except OSError:
+        pass
+    try:
+        out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True, timeout=30)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
         pass
     return platform.processor() or platform.machine()
 
