@@ -3756,7 +3756,7 @@ void Solver::write_particle_trajectories() {
     if (!particles || !particles->trajectories_due(step, t)) return;
     if (particles->trajectories_read_gas(step, t)) {
         update_cell_W();
-        particles->sample(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients);
+        particles->sample(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
     }
     particles->write_trajectories(step, t);
 }
