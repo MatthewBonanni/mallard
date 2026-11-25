@@ -358,20 +358,18 @@ struct HostRate {
     double scale = 1.0;
     const std::pair<std::string, std::size_t> * key = nullptr;
 
-    double host(const double t) const {
-        const double xt[4] = {0.0, 0.0, 0.0, t};
-        const double v = (*program)(xt);
-        if (!(v >= 0.0) || !std::isfinite(v)) {
-            throw InputError(Diagnostic{.key = key->first, .line = key->second,
-                                        .message = "is " + logging::real(v) + " at t = " + logging::real(t) + "; it " +
-                                                   requirement(setting::RATE),
-                                        .docs = DOCS});
-        }
-        return v * scale;
-    }
-
     KOKKOS_INLINE_FUNCTION double operator()(const double t) const {
-        KOKKOS_IF_ON_HOST((return host(t);))
+        KOKKOS_IF_ON_HOST((
+            const double xt[4] = {0.0, 0.0, 0.0, t};
+            const double v = (*program)(xt);
+            if (!(v >= 0.0) || !std::isfinite(v)) {
+                throw InputError(Diagnostic{.key = key->first, .line = key->second,
+                                            .message = "is " + logging::real(v) + " at t = " + logging::real(t) +
+                                                       "; it " + requirement(setting::RATE),
+                                            .docs = DOCS});
+            }
+            return v * scale;
+        ))
         KOKKOS_IF_ON_DEVICE(((void)t; return 0.0;))
     }
 };
