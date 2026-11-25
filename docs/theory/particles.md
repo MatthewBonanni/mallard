@@ -1131,6 +1131,27 @@ bounds by the trapezoidal rule, linear in $\ln d$ within an interval. The
 moments that set the rate from `mass_flow` come from the same table, so the
 mean mass flow of the sampled parcels is the one given.
 
+**Settings of expressions.** A `rate` (or `mass_flow`) that is an
+expression of $t$ owes $\int_{t'_0}^{t'_1} \dot N(t)\,dt$ over the part of
+the step within $[t_{start}, t_{end})$, by adaptive Simpson quadrature with
+Richardson's correction: the step is split into 4 panels, and an interval is
+bisected while its two halves' Simpson estimates differ from its own by more
+than 15 times its share of the tolerance $\max(10^{-7},
+10^{-10}\,|N_{step}|)$ parcels, at most 30 times and within 2048 evaluations
+a step. The error per step is then within the tolerance for a rate with a
+bounded fourth derivative over the step, and a jump is located by bisection
+to within $\dot N_{jump}\,\Delta t / 2^{32}$ parcels, so over the run the
+count stays within one parcel of the integral; a pulse narrower than the
+initial sampling (an eighth of a step) can be missed. Every rank integrates
+the same intervals in the same order, so the counts are the same on any rank
+count. The other settings are evaluated for each parcel at its point and the
+time of the end of its step; a size distribution whose parameters are
+expressions is inverted for that parcel as the table of numbers above, by the
+trapezoidal rule on $32 \times 32$ cells of $\ln d$ (first over
+$[\ln X - 18, \ln X + 9]$ for the default bounds, then between the bounds),
+summed by blocks so that the inversion revisits one block. An invalid value
+keeps the parcel out and is reported at the next check.
+
 **Random numbers.** Draw $n$ of parcel $i$ of injector $j$ is a counter-based
 hash of (`seed`, $j$, $i$, $n$), SplitMix64's finalizer chained over the key
 ([Steele, Lea & Flood 2014](../references.md#steele-2014)), uniform in

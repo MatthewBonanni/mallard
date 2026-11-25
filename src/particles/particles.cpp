@@ -1643,6 +1643,7 @@ void Particles::inject(const rtype t_now) { injectors.inject(t_now, injection_ta
 void Particles::inject(const rtype * t_now) { injectors.inject(t_now, injection_target()); }
 
 void Particles::check_capacity() const {
+    injectors.check_values();
     const uint64_t n = injectors.overflowed();
     if (n == 0) return;
     throw std::runtime_error("particles: " + logging::count(n, "injected particle") +

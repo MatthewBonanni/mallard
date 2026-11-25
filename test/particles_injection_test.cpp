@@ -120,6 +120,9 @@ TEST(ParticleSizeTest, SampledDistributionsMatchTheirPdfs) {
         std::string keys;
         std::function<double(double)> number_pdf;
         double lo, hi;
+        particles::Law law = particles::Law::TABLE;  // and the same as a distribution of expressions, if one
+        bool by_mass = false;
+        std::array<double, 5> q{};
     };
     const double X = 50e-6, q = 3.0, m = 30e-6, s = 0.5;
     const auto rr = [=](double d) { return q / X * std::pow(d / X, q - 1.0) * std::exp(-std::pow(d / X, q)); };
@@ -127,16 +130,18 @@ TEST(ParticleSizeTest, SampledDistributionsMatchTheirPdfs) {
     const auto nt = [=](double d) { return std::pow(d / X, 2.0) * std::exp(-std::pow(d / X, 1.5)); };
     const std::vector<Case> cases = {
         {"distribution = \"rosin_rammler\"\nsize = 50e-6\nspread = 3.0\nbasis = \"number\"\nmin = 5e-6\nmax = 120e-6\n",
-         rr, 5e-6, 120e-6},
+         rr, 5e-6, 120e-6, particles::Law::ROSIN_RAMMLER, false, {X, q, 0.0, 5e-6, 120e-6}},
         {"distribution = \"rosin_rammler\"\nsize = 50e-6\nspread = 3.0\nbasis = \"mass\"\nmin = 5e-6\nmax = 120e-6\n",
-         [=](double d) { return rr(d) / (d * d * d); }, 5e-6, 120e-6},
+         [=](double d) { return rr(d) / (d * d * d); }, 5e-6, 120e-6, particles::Law::ROSIN_RAMMLER, true,
+         {X, q, 0.0, 5e-6, 120e-6}},
         {"distribution = \"log_normal\"\nmedian = 30e-6\nsigma = 0.5\nbasis = \"number\"\nmin = 8e-6\nmax = 100e-6\n",
-         ln, 8e-6, 100e-6},
+         ln, 8e-6, 100e-6, particles::Law::LOG_NORMAL, false, {m, s, 0.0, 8e-6, 100e-6}},
         {"distribution = \"nukiyama_tanasawa\"\nsize = 50e-6\nspread = 1.5\nexponent = 2.0\nbasis = \"mass\"\nmin = 5e-6\n"
          "max = 300e-6\n",
-         [=](double d) { return nt(d) / (d * d * d); }, 5e-6, 300e-6},
+         [=](double d) { return nt(d) / (d * d * d); }, 5e-6, 300e-6, particles::Law::NUKIYAMA_TANASAWA, true,
+         {X, 1.5, 2.0, 5e-6, 300e-6}},
         {"distribution = \"uniform\"\nmin = 10e-6\nmax = 20e-6\nbasis = \"number\"\n", [](double) { return 1.0; }, 10e-6,
-         20e-6},
+         20e-6, particles::Law::UNIFORM, false, {0.0, 0.0, 0.0, 10e-6, 20e-6}},
         {"distribution = \"table\"\ndiameters = [10e-6, 20e-6, 40e-6]\npdf = [0.0, 1.0, 0.0]\nbasis = \"number\"\n",
          [](double d) { return d < 20e-6 ? (d - 10e-6) / 10e-6 : (40e-6 - d) / 20e-6; }, 10e-6, 40e-6},
     };
@@ -180,6 +185,16 @@ TEST(ParticleSizeTest, SampledDistributionsMatchTheirPdfs) {
         }
         EXPECT_NEAR(sum / N, mean, 4.0 * std::sqrt(var / N));
         EXPECT_LT(ks_distance(samples, cdf), ks_critical(N));
+        if (c.law == particles::Law::TABLE) continue;
+        // As a distribution of expressions, sampled per parcel
+        sum = 0.0;
+        for (size_t k = 0; k < N; k++) {
+            samples[k] = particles::sample_law(c.law, c.by_mass, c.q.data(), true, true,
+                                               particles::Random(7, 0, k).uniform(particles::DIAMETER));
+            sum += samples[k];
+        }
+        EXPECT_NEAR(sum / N, mean, 4.0 * std::sqrt(var / N));
+        EXPECT_LT(ks_distance(samples, cdf), ks_critical(N));
     }
     // One diameter
     Input input = parse_toml("diameter = 42e-6\n");
@@ -196,6 +211,18 @@ TEST(ParticleSizeTest, DefaultBoundsKeepAllButTheFarTails) {
     EXPECT_LT(z, 6.2);
     EXPECT_NEAR(std::log(1e-5 / size.lo) / 0.4, z, 0.1);
     EXPECT_NEAR(size.mean_d, 1e-5 * std::exp(0.5 * 0.4 * 0.4), 1e-4 * 1e-5);
+    // Sampled per parcel, by mass: the number distribution is log-normal of median 1e-5 exp(-3 sigma^2), clipped at
+    // the 1e-9 quantiles by mass, which leave out next to nothing of it
+    const double q[5] = {1e-5, 0.4, 0.0, 0.0, 0.0};
+    const size_t N = 40000;
+    std::vector<double> samples(N);
+    for (size_t k = 0; k < N; k++) {
+        samples[k] = particles::sample_law(particles::Law::LOG_NORMAL, true, q, false, false,
+                                           particles::Random(3, 0, k).uniform(particles::DIAMETER));
+    }
+    const double median = 1e-5 * std::exp(-3.0 * 0.4 * 0.4);
+    const auto cdf = [&](double d) { return 0.5 * std::erfc(-std::log(d / median) / (0.4 * std::sqrt(2.0))); };
+    EXPECT_LT(ks_distance(samples, cdf), ks_critical(N));
 }
 
 TEST(ParticleInjectionTest, APointInjectorEmitsItsRateIntoTheFlow) {
@@ -223,6 +250,88 @@ TEST(ParticleInjectionTest, APointInjectorEmitsItsRateIntoTheFlow) {
     solver.run();
     check(solver);
     EXPECT_EQ(solver.get_particles()->removed(), (std::array<uint64_t, 3>{0, 0, 0}));
+}
+
+TEST(ParticleInjectionTest, ARateOfTimeEmitsItsIntegralToWithinAParcel) {
+    // A ramp and a train of pulses of 40000 parcels/s, whose edges fall within steps: over the run the count is the
+    // integral of the rate, rounded down (a step's rate taken at one time would miss each edge's part of a step)
+    const double T = 0.2, P = 0.0173, duty = 0.37, w = 2.0 * PI / 0.07;
+    const std::string keys = "capacity = 5000\n[[particles.injectors]]\nname = \"pulses\"\npoint = " + numbers(0.5, 0.5, 0.25) +
+                             "\nrate = \"1500 * (1 + sin(" + std::to_string(w) + " * t)) + (frac(t / " +
+                             std::to_string(P) + ") < " + std::to_string(duty) + " ? 40000 : 0)\"\n";
+    Solver solver;
+    solver.init(parse_toml(box(0.0, "n_steps = 50\ndt = 0.004\n", keys)));
+    solver.run();
+    const double full = std::floor(T / P);
+    const double integral = 1500.0 * (T + (1.0 - std::cos(std::stod(std::to_string(w)) * T)) / std::stod(std::to_string(w))) +
+                            40000.0 * (full * duty * P + std::min(T - full * P, duty * P));
+    const double n = static_cast<double>(solver.get_particles()->count());
+    EXPECT_LE(n, integral + 1e-6);
+    EXPECT_GT(n, integral - 1.0);
+}
+
+TEST(ParticleInjectionTest, SettingsOfExpressionsTakeTheirValuesWhereAndWhenEachParticleEnters) {
+    // Spheres too heavy to slow in the run, in gas at rest: a nozzle-like profile in y (and z), growing in t, along
+    // x, so each keeps its y, z and velocity; with a weight and a diameter of y. And a cloud at rest whose diameters
+    // are uniform between bounds of y, 0.1% apart
+    const std::string profile = "2 * (1 - 4 * (y - 0.5)^2) * (1 + 4 * z) * (1 + 10 * t)";
+    const std::string keys =
+        "density = 1e9\ndiameter = 1e-3\n"
+        "[[particles.injectors]]\nname = \"cloud\"\nregion = \"domain\"\ncount = 200\nvelocity = " +
+        numbers(0.0, 0.0, 0.0) +
+        "\ndiameter = {distribution = \"uniform\", basis = \"number\", min = \"1e-3 * (1 + y)\", "
+        "max = \"1.001e-3 * (1 + y)\"}\n"
+        "[[particles.injectors]]\nname = \"jet\"\nregion = \"domain\"\nrate = 2500.0\nvelocity = [\"" + profile +
+        "\", 0.0" + (N_DIM == 3 ? ", \"0\"" : "") + "]\nweight = \"1 + 10 * y\"\ndiameter = \"1e-3 * (1 + y)\"\n";
+    const double dt = 0.004;
+    Solver solver;
+    solver.init(parse_toml(box(0.0, "n_steps = 10\ndt = 0.004\n", keys, "solid")));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    ASSERT_EQ(records.size(), 300u);
+    const double tolerance = sizeof(rtype) == sizeof(double) ? 1e-6 : 1e-5;
+    for (const particles::Record & r : records) {
+        const double y = r.x[1], z = N_DIM == 3 ? r.x[N_DIM - 1] : 0.0;
+        if (r.id < 200) {
+            EXPECT_EQ(r.v[0], 0.0);
+            EXPECT_GE(r.d, 1e-3 * (1 + y) * (1.0 - tolerance)) << "particle " << r.id;
+            EXPECT_LE(r.d, 1.001e-3 * (1 + y) * (1.0 + tolerance)) << "particle " << r.id;
+            continue;
+        }
+        // 10 parcels a step: parcel id enters at the end of step (id - 200) / 10 + 1
+        const double t = static_cast<double>((r.id - 200) / 10 + 1) * dt;
+        const double u = 2.0 * (1.0 - 4.0 * (y - 0.5) * (y - 0.5)) * (1.0 + 4.0 * z) * (1.0 + 10.0 * t);
+        EXPECT_NEAR(r.v[0], u, tolerance * std::abs(u) + 1e-12) << "particle " << r.id;
+        for (size_t i = 1; i < N_DIM; i++) EXPECT_EQ(r.v[i], 0.0);
+        EXPECT_NEAR(r.w, 1.0 + 10.0 * y, tolerance * (1.0 + 10.0 * y)) << "particle " << r.id;
+        EXPECT_NEAR(r.d, 1e-3 * (1.0 + y), tolerance * 1e-3 * (1.0 + y)) << "particle " << r.id;
+    }
+}
+
+TEST(ParticleInjectionTest, AnInvalidSettingStopsTheRunNamingTheInjectorKeyAndPoint) {
+    // A speed negative over half the inlet: the run stops at its end, naming the key, the injector and where
+    const std::string keys = HEAVY + "[[particles.injectors]]\nname = \"inlet\"\nregion = \"left\"\nrate = 400.0\n"
+                                     "speed = \"y - 0.5\"\n";
+    Solver solver;
+    solver.init(parse_toml(box(1.0, "n_steps = 4\ndt = 0.005\n", keys, "solid")));
+    try {
+        solver.run();
+        ADD_FAILURE() << "ran with a negative speed";
+    } catch (const InputError & e) {
+        const std::string what = e.what();
+        EXPECT_NE(what.find("particles.injectors[0].speed"), std::string::npos) << what;
+        EXPECT_NE(what.find("inlet"), std::string::npos) << what;
+        EXPECT_NE(what.find("must not be negative"), std::string::npos) << what;
+    }
+    // A rate is of t only
+    Solver of_x;
+    try {
+        of_x.init(parse_toml(box(1.0, "n_steps = 4\ndt = 0.005\n",
+                                 "[[particles.injectors]]\nname = \"a\"\nregion = \"left\"\nrate = \"100 * y\"\n")));
+        ADD_FAILURE() << "took a rate of y";
+    } catch (const InputError & e) {
+        EXPECT_NE(std::string(e.what()).find("may depend on t only"), std::string::npos) << e.what();
+    }
 }
 
 TEST(ParticleInjectionTest, InjectorsEmitOnlyBetweenTheirStartAndEnd) {
@@ -440,7 +549,8 @@ namespace {
 
 /**
  * @brief Two-way coupled spheres of a Rosin-Rammler distribution from the inlet, a disk and a nozzle in a crossflow,
- *        a cloud released at once at the start in the whole domain, and a nozzle at the gas velocity.
+ *        a cloud released at once at the start in the whole domain, a nozzle at the gas velocity, and a pulsed disk
+ *        whose settings are expressions.
  */
 std::string mixed_injectors(const std::string & run) {
     const std::string keys =
@@ -455,7 +565,13 @@ std::string mixed_injectors(const std::string & run) {
         "direction = " + numbers(1.0, -1.0, 0.5) + "\ncone_angle = 45.0\nstart = 0.02\n"
         "[[particles.injectors]]\nname = \"burst\"\nregion = \"domain\"\ncount = 200\nvelocity = " +
         numbers(0.5, 0.0, 0.0) + "\n"
-        "[[particles.injectors]]\nname = \"drift\"\npoint = " + numbers(0.2, 0.3, 0.2) + "\nrate = 300.0\n";
+        "[[particles.injectors]]\nname = \"drift\"\npoint = " + numbers(0.2, 0.3, 0.2) + "\nrate = 300.0\n"
+        "[[particles.injectors]]\nname = \"pulse\"\nregion = {type = \"" + std::string(N_DIM == 3 ? "sphere" : "disk") +
+        "\", center = " + numbers(0.4, 0.6, 0.25) + ", radius = 0.2}\nrate = \"900 * (1 + sin(150 * t))\"\n"
+        "speed = \"1 + y\"\ndirection = [\"1\", \"x - 0.4\"" + (N_DIM == 3 ? ", \"z\"" : "") + "]\n"
+        "cone_angle = \"10 + 20 * y\"\nweight = \"2 + x\"\n"
+        "diameter = {distribution = \"rosin_rammler\", size = \"1e-3 * (1 + y)\", spread = 2.5, basis = \"mass\", "
+        "min = 2e-4, max = \"3e-3 * (1 + x)\"}\n";
     return box(1.0, run, keys, "solid");
 }
 

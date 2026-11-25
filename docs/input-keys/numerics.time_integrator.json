@@ -80,6 +80,7 @@
   "tools/dev/catalog_inputs/2d/flamelet_transported.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/particle_injector_expressions.toml",
   "tools/dev/catalog_inputs/2d/particle_injectors.toml",
   "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",

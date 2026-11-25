@@ -65,6 +65,7 @@
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/mesh_file.toml",
+  "tools/dev/catalog_inputs/2d/particle_injector_expressions.toml",
   "tools/dev/catalog_inputs/2d/particle_injectors.toml",
   "tools/dev/catalog_inputs/2d/profile_files.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",

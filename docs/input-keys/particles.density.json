@@ -11,6 +11,7 @@
   "examples/particle_settling/input.toml",
   "examples/particle_settling/smoke.toml",
   "examples/particle_vortex/input.toml",
+  "tools/dev/catalog_inputs/2d/particle_injector_expressions.toml",
   "tools/dev/catalog_inputs/2d/particle_injectors.toml",
   "tools/dev/catalog_inputs/2d/solid_particles.toml"
  ],
