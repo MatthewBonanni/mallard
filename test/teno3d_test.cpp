@@ -779,7 +779,9 @@ TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
             }
         }
         EXPECT_GT(written, n / 4) << "m " << m;
-        if (!select_troubled) EXPECT_LT(written, n) << "m " << m << ": no troubled cell";
+        if (!select_troubled) {
+            EXPECT_LT(written, n) << "m " << m << ": no troubled cell";
+        }
     }
 }
 
