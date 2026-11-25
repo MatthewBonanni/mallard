@@ -237,7 +237,7 @@ $10^{-14}$ of the interval.
 
 By default (`[chemistry] coupling = "strang"`), each time step is the
 symmetric sequence ([Strang 1968](../references.md#strang-1968);
-`Solver::take_step`, `src/solver/solver.cpp`)
+`Solver::take_step`, `src/solver/solver_run.cpp`)
 
 $$
 \begin{equation}
