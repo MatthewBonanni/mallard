@@ -1,0 +1,1 @@
+- Internal: the uncalled small-matrix helpers of `src/common/common_math.h` (`transpose`, `gemm`, `QR_householder_noQ`, `forward_substitution`, `back_substitution`, `triangle_J`, `tetrahedron_J`) and their tests are removed; results, inputs and outputs do not change (#1526).
