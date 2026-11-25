@@ -137,41 +137,44 @@ times over:
 ![L2 density error of the isentropic vortex on irregular triangles against cell count and CPU time, for FO, MUSCL and TENO-E 3 to 6](../images/guide/high_order_cost-dark.svg#gh-dark-mode-only)
 
 *The isentropic vortex of [Shu (1998)](../references.md#shu-1998), strength
-5, convected 2 units across a periodic 10 × 10 box of irregular triangles
+5, cut off smoothly at radius 5 so that it is smooth across the box's
+periodic sides ([the vortex](../design/work_precision.md#method)),
+convected 2 units across a periodic 10 × 10 box of irregular triangles
 (nodes jittered by up to a quarter cell), with HLLC, SSPRK3 and `cfl = 1.0`
 for every scheme (MUSCL unlimited). Error: the L2 norm of the density cell
 averages at t = 2 against the exact solution. Cost: the CPU time of the
-whole run, setup and output included, on 2 threads of an Apple Silicon
-laptop shared with other jobs (hence CPU rather than wall time, also
-recorded). Script and data: `tools/docs/high_order_cost.py`.*
+whole run, setup and output included, on 2 pinned threads of an AMD EPYC
+7763, the fastest of three runs (the wall time is also recorded). Script and
+data: `tools/docs/high_order_cost.py`.*
 
 Read off the curves (interpolated between the measured meshes):
 
 | Error | FO | MUSCL | TENO-E 3 | TENO-E 4 | TENO-E 5 | TENO-E 6 |
 |---|---|---|---|---|---|---|
-| 10<sup>-3</sup> | not reached (1.7 × 10<sup>-3</sup> on 524,288 cells, 395 s) | 5,800 cells, 0.57 s | 2,700 cells, 0.52 s | 960 cells, 0.25 s | 1,100 cells, 0.62 s | 750 cells, 0.76 s |
-| 10<sup>-4</sup> | not reached | 64,500 cells, 20.8 s | 13,000 cells, 3.7 s | 3,300 cells, 1.1 s | 3,600 cells, 2.8 s | 1,900 cells, 2.4 s |
-| 10<sup>-5</sup> | not reached | not reached | 61,000 cells, 35 s | 10,000 cells, 4.6 s | 9,700 cells, 10.4 s | 4,400 cells, 6.9 s |
-| Measured order (two finest meshes) | 0.97 | 1.89 (1.23 from 131,072 to 524,288 cells) | 3.00 | 3.90 | 4.87 | 5.54 |
+| 10<sup>-3</sup> | not reached (1.8 × 10<sup>-3</sup> on 524,288 cells, 1,080 s) | 6,300 cells, 1.96 s | 3,200 cells, 1.73 s | 1,100 cells, 0.69 s | 1,300 cells, 1.29 s | 850 cells, 1.17 s |
+| 10<sup>-4</sup> | not reached | 70,000 cells, 81 s | 15,500 cells, 14.9 s | 3,700 cells, 3.6 s | 4,100 cells, 6.3 s | 2,200 cells, 4.3 s |
+| 10<sup>-5</sup> | not reached | not reached | 73,000 cells, 151 s | 11,300 cells, 17.2 s | 11,100 cells, 25.0 s | 4,900 cells, 12.9 s |
+| Measured order (two finest meshes) | 0.96 | 1.90 (1.42 from 131,072 to 524,288 cells) | 3.00 | 3.92 | 4.89 | 6.02 |
 
-- **At an error of 10<sup>-4</sup>** TENO-E 5 needs 18 times fewer cells than
-  MUSCL and 7.4 times less CPU time; FO would need, at its measured first
-  order, about 300 times the cells of its finest run (some 150 million).
-- **FO's finest run** (524,288 cells, 395 s) has an error of 1.7 × 10<sup>-3</sup>;
-  TENO-E 5 has 3.8 × 10<sup>-4</sup> on 2,048 cells in 1.3 s.
-- **The crossover with second order:** above an error of about 9 × 10<sup>-4</sup>
-  (here, meshes under about 5,000 cells, some 7 cells per core radius of the
-  vortex) MUSCL is as cheap as TENO-E 5 or cheaper: at 10<sup>-3</sup> it
-  costs 0.92 times TENO-E 5's time. Below it the gap widens with every
-  refinement, since each halving of h divides TENO-E 5's error by about 29
+- **At an error of 10<sup>-4</sup>** TENO-E 5 needs 17 times fewer cells than
+  MUSCL and 12.9 times less CPU time; FO would need, at its measured first
+  order, about 430 times the cells of its finest run (some 230 million).
+- **FO's finest run** (524,288 cells, 1,080 s) has an error of 1.8 × 10<sup>-3</sup>;
+  TENO-E 5 has 5.0 × 10<sup>-4</sup> on 2,048 cells in 2.3 s.
+- **The crossover with second order:** above an error of about 1.8 × 10<sup>-3</sup>
+  (here, meshes under about 3,500 cells, some 4 cells per core radius of the
+  vortex) MUSCL is as cheap as TENO-E 5 or cheaper; at 10<sup>-3</sup> it
+  already costs 1.5 times TENO-E 5's time. Below it the gap widens with every
+  refinement, since each halving of h divides TENO-E 5's error by about 30
   and MUSCL's by about 4.
-- **Which order is cheapest:** TENO-E 4, over the whole range from
-  10<sup>-3</sup> to 10<sup>-5</sup>. It needs about as many cells as TENO-E 5
-  for a given error, at a smaller stencil, and so reaches it in about 0.4
-  times TENO-E 5's CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error
-  of about 2.5 × 10<sup>-3</sup> (0.66 times its time at 10<sup>-5</sup>) and,
-  at the highest order, closes in on TENO-E 4 as the error falls. TENO-E 3 is
-  cheaper than TENO-E 5 only above about 1.8 × 10<sup>-4</sup>.
+- **Which order is cheapest:** TENO-E 4 from 10<sup>-3</sup> to
+  10<sup>-4</sup>, and TENO-E 6 at 10<sup>-5</sup> (12.9 s, against 17.2 s
+  for TENO-E 4). TENO-E 4 needs about as many cells as TENO-E 5 for a given
+  error, at a smaller stencil, and so reaches it in 0.55 to 0.7 times TENO-E 5's
+  CPU time. TENO-E 6 is cheaper than TENO-E 5 below an error of about
+  3 × 10<sup>-3</sup> (0.52 times its time at 10<sup>-5</sup>) and, at the
+  highest order, overtakes TENO-E 4 as the error falls. TENO-E 3 is cheaper
+  than TENO-E 5 only above about 3.5 × 10<sup>-3</sup>.
 - **Why `high_order` is order 5 nonetheless:** order 4 keeps its advantage
   on shocks and in 3D (0.3 to 0.7 times order 5's CPU time and 0.4 to 0.8
   times its memory, at the same or lower error). It is not as robust, though:
@@ -194,7 +197,7 @@ a flow dominated by discontinuities the gain shrinks to the smooth regions
 between them; for the strongest shocks and blasts, `second_order` (no stencil
 setup, fewer ways to fail) or, as a last resort, `first_order` is the right
 tool. TENO-E also has a one-time stencil setup, included in the times above:
-for TENO-E 5 it is 27% of the run on 2,048 cells and 11% on 32,768 (it grows
+for TENO-E 5 it is 14% of the run on 2,048 cells and 5% on 32,768 (it grows
 with the cells, the time stepping with cells times steps; seconds per
 million cells on a GPU, minutes on CPUs), and it holds more memory per cell.
 
@@ -212,7 +215,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 57 more.
+and 59 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -265,7 +268,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 57 more.
+and 59 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -330,7 +333,7 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
-| `troubled_capacity` | 0.25 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
+| `troubled_capacity` | 0.125 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 
 Pitfalls:
@@ -442,7 +445,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 57 more.
+and 59 more.
 
 | `riemann_solver` | Use |
 |---|---|

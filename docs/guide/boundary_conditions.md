@@ -29,7 +29,7 @@ nscbc = { L = 1.0 }     # an option: non-reflecting
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 49 more.
+and 51 more.
 
 The `type` names the condition: its kind first (`wall_`, `inlet_`,
 `outlet_`), then what it prescribes. It is always explicit, never inferred
@@ -690,7 +690,7 @@ type = "wall_adiabatic"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall)
-and 8 more.
+and 10 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -824,7 +824,7 @@ T = 300.0
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet)
-and 14 more.
+and 15 more.
 
 **Imposes** the full exterior state: velocity, pressure, temperature and
 composition, nothing from the interior. For **supersonic inflow** this is
@@ -1026,7 +1026,7 @@ p = 101325.0
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet),
 [`forced_inlet`](https://matthewbonanni.github.io/mallard/docs/examples/#forced-inlet)
-and 15 more.
+and 16 more.
 
 **Imposes** the pressure `p` on subsonic faces (the incoming acoustic wave),
 with the velocity and temperature of the interior (the other waves leave);
@@ -1134,7 +1134,7 @@ T = 1.0
 [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
-and 1 more.
+and 2 more.
 
 **Imposes** a characteristic free stream: the outgoing Riemann invariant
 comes from the interior and the incoming one from the free stream, entropy and
@@ -1255,8 +1255,8 @@ nscbc = { L = 0.1 }        # a length of the domain [m]; sigma = 0.25 by default
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`turbulent_inflow_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#turbulent-inflow-duct),
-[`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body)
-and 2 more.
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step)
+and 3 more.
 
 `nscbc` makes `outlet_pressure` and `inlet_state` Navier–Stokes
 characteristic boundary conditions, partially non-reflecting (Poinsot & Lele
@@ -1276,7 +1276,7 @@ takes the interior's.
 |---|---|---|
 | `L` | required | A length of the domain, setting the relaxation rate `K = sigma c (1 - M^2) / L` |
 | `sigma` | 0.25 | Relaxation coefficient; 0 lets the mean drift, large values approach a fixed pressure (velocity) |
-| `beta` | local Mach (outlet); 0 for a turbulent inlet | Weight of the transverse terms, 0 to 1 |
+| `beta` | local Mach (outlet); 0 (inlet) | Weight of the transverse terms, 0 to 1 |
 | `sigma_T`, `sigma_t` | imposed | Inlets only: relax temperature and tangential velocity instead of imposing them |
 
 The table may also be a sub-table:
@@ -1303,6 +1303,11 @@ Pitfalls:
   the flow in its last cells; such faces drop their transverse terms and take
   the entropy of the exterior state, and `beta = 0` is more robust (the
   `channel_inflow_retau180` example).
+- **`beta` on inlets.** The transverse terms hold an inlet's normal velocity
+  off its target by `beta T- / (K rho c)`, so inlets leave them out by
+  default. A nonzero `beta` there fails where the target varies along the
+  inlet: at a step in velocity, as between two streams, `T-` grows as the
+  inverse of the cell size, and the step smears into spurious velocities.
 - **Viscous terms** treat characteristic faces like `outlet_extrapolation`
   (zero normal gradients).
 

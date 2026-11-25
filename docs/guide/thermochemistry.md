@@ -152,6 +152,20 @@ Chemistry and flow are split:
 | `lanes` | 0 (automatic) | GPU lanes per cell; automatic: a warp per cell from 16 species |
 | `integrator` | `"rosenbrock"` | `rosenbrock` (RODAS) or `bdf`: variable-order BDF reusing its Jacobian over many sub-steps; 1.0-1.7 times RODAS's throughput on large mechanisms, most at small time steps. Less accurate than RODAS at the same `atol` where trace species matter: lower `atol` (e.g. `1e-14`) for ignition with it |
 
+`explicit_step` pays where the reacting cells are not stiff over a step, as
+in H2/air flames, and costs little where they are, as in CH4/air with
+GRI-3.0 (2 CPU threads; [design notes](../design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)):
+
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-light.svg#gh-light-mode-only)
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-dark.svg#gh-dark-mode-only)
+
+`integrator = "bdf"` needs a lower `atol` than RODAS for the same ignition
+delays, and gains throughput at small time steps
+([design notes](../design/chemistry.md#bdf-integrator-issue-143)):
+
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-light.svg#gh-light-mode-only)
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-dark.svg#gh-dark-mode-only)
+
 Output variables: `HRR` (heat release rate, W/m³), `OMEGA_<species>`
 (production rates), `CHEM_COST` (sub-steps of each cell in the last step).
 Restart files carry each cell's last sub-step, so restarts repeat an
@@ -249,7 +263,8 @@ A `[benchmark]` table turns the run into a chemistry benchmark: states sampled
 along the reactor's trajectory, replicated over many cells and advanced by the
 solver's chemistry kernels, which prints cells per second (see
 `benchmarks/README.md`; keys `cells`, `samples`, `dt`, `repeats`,
-`igniting_fraction`, `lanes`, `threads`, `shared`, `bin_by_cost`, `output`).
+`igniting_fraction`, `lanes`, `threads`, `shared`, `bin_by_cost`, `output`;
+`[chemistry]` `explicit_step` and `T_frozen` apply as in the solver).
 
 ## Flame speed and thickness
 

@@ -1533,11 +1533,23 @@ Accepted cells leave the queue (a second scan of the flags) before it is
 ordered by cost and balanced across ranks, so the RODAS kernels, unchanged,
 integrate only the others, with no idle lanes for the cells that finished;
 an accepted step counts one sub-step and leaves `CHEM_H` as it was. A
-failed step negates `CHEM_H` (issue #1089), and a negative `CHEM_H` is no
+failed step negates `CHEM_H` (issue #1089; without a last sub-step,
+`-h_initial`, RODAS's first one), and a negative `CHEM_H` is no
 candidate: RODAS starts from its magnitude and keeps the sign as long as its
 proposal covers a call, so a cell that stays stiff (burnt gas) tries once,
 not every call, and tries again once its sub-steps have fallen short of a
-call (a front passing) and grown back. The
+call (a front passing) and grown back. The run's summary reports the share
+of integrations the explicit steps took and the cells marked at the end.
+
+A smaller `dt` does not clear the mark, although the stiffness bound
+`h lambda <= 2.5` may then hold. Keeping the `dt` of the failure in
+`CHEM_H` instead of RODAS's proposal was tried and rejected: with fused
+Strang half steps the calls alternate between `dt/2` and `dt`, so a
+half-step call retries every marked cell, and seeding RODAS from the
+failed call's `dt` rather than its proposal costs a sub-step in the next
+full call (burnt H2/air: 45 to 81 sub-steps over 5 steps of a
+9-cell box) and changes results. A separate per-cell `dt` would have to
+travel with restarts and the balancing. The
 explicit pass is one kernel over the queue, by one thread or the lanes of
 a team per cell like RODAS, and one scan, all on the device: no host work
 and graph-capturable. Whether a cell takes the explicit step depends only
@@ -1566,14 +1578,36 @@ The H2 flame's explicit steps take nearly half of its chemistry time off.
 burning out in hot gas); about half the cells that try the explicit step
 fail, most of them burnt gas whose fractional-order fuel consumption is
 stiff, and as each of them tries once rather than every call its chemistry
-stays within 0.5% of RODAS alone. Off by default (issue #1090: enabling it
-where it pays).
+stays within 1% of RODAS alone. Off by default (issue #1090: enabling it
+where it pays). `flame_3d`'s differences above predate the per-species
+bounds of the mass fractions ([reconstruction](#reconstruction), issue
+#1169): its 0D reactors agree to 1e-11 with and without the option, and
+the shared limiter amplified that noise; with the bounds, `explicit_step`
+moves its temperature by 1.5e-7 K.
 `ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
 bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
 of `T`, against RODAS's own 5e-5 from Cantera;
 `ReactingTest.CellsWhoseExplicitStepFailedStopTryingIt` checks that a
 failed step leaves RODAS's state and proposal bitwise as without the option,
-with `CHEM_H` negated, and that an ignition's short sub-steps clear it.
+with `CHEM_H` negated, also in a cell's first call (there, in single
+precision, the proposal only to rounding), and that an ignition's short
+sub-steps clear it.
+
+Which cells take it, and what it saves, on two flames of V8 (phi 1, 300 K,
+1 atm, 20 cells per thermal thickness, from Cantera's) on 2 threads of an
+Apple M4 Pro CPU (`tools/docs/chemistry.py`): the 1D flames, and 2D wrinkled
+ones of 300 x 64 cells (`flame_restart.py --ny 64 --perturb 2`), the
+chemistry time per step the best of three runs of 100 (H2) and 30 (CH4)
+steps:
+
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-light.svg#gh-light-mode-only)
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-dark.svg#gh-dark-mode-only)
+
+Every reacting cell of the H2 flame keeps the explicit step at its time step
+of 8 ns, and its chemistry runs 1.91 times faster. Every reacting cell of the
+CH4 flame fails it at the first call, as GRI-3.0 is stiff over 13 ns wherever
+the flame reacts, and then skips it: its chemistry time stays within the
+run-to-run spread of this shared machine (0.95 times as fast).
 
 ### Explicit steps in the examples (issue #1090)
 
@@ -1758,6 +1792,27 @@ Where it gains:
   and BDF 1.05, and both pay for a Jacobian and factorization of 57k
   entries. On the CPU, where a cell's work is serial, BDF's cheaper sub-step
   shows (1.39).
+
+The same comparison on the two small mechanisms, against `atol`
+(`tools/docs/chemistry.py`): the largest ignition-delay error of the V1 and
+V2 cases against Cantera, each run to 2 delays in four calls, and the
+throughput of `benchmarks/chemistry` with fewer cells (16,384 and 4,096),
+the best of 10 calls, on 2 threads of an Apple M4 Pro CPU. The machine was
+shared, and throughputs vary by about 15% from run to run.
+
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-light.svg#gh-light-mode-only)
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-dark.svg#gh-dark-mode-only)
+
+- BDF's delay error falls with `atol` down to 1e-14 and more: at `atol` 1e-8
+  the H2 delays are up to 89% off, at 1e-10 2.3%, at 1e-12 6.3e-4. RODAS's
+  are 3.5e-4 (H2) and 2.6e-4 (CH4) at 1e-8 and stop falling at 6.1e-5 and
+  3.2e-6. BDF matches them at `atol` 1e-14 (H2: 2.5e-5) and comes within 2 to 3
+  times of them for CH4 at 1e-14 and 1e-16.
+- At `dt` 1e-8 s BDF has 1.6 to 1.9 times RODAS's throughput up to `atol`
+  1e-12, and 1.05 to 1.4 times at 1e-14 and 1e-16.
+- At `dt` 1e-6 s it has 0.75 to 0.96 times RODAS's throughput, except CH4 at
+  `atol` 1e-8 (1.25): with mechanisms this small, its restart at order 1
+  with a fresh Jacobian in every call outweighs its cheaper sub-steps.
 
 The rows are in `benchmarks/baselines.csv` (execution `... bdf`). BDF
 stays an option and not the default. Its throughput gains depend on the regime:

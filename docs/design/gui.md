@@ -1086,10 +1086,10 @@ tested like any other.
 |---|---|---|
 | Programmatic API (#345) | open | not needed for the MVP: `mallard session` is the interface |
 | `mallard session` ([design](session.md), [#1340](https://github.com/MatthewBonanni/mallard/issues/1340)) | missing | the resident JSON-RPC process, its schemas, routed `mallard ctl` with acknowledgments, detached launch |
-| `mallard check` (#321) | done: `--format json`, `--view`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON; no block metadata in the case view; no geometry-only view |
+| `mallard check` (#321) | done: `--format json`, `--view` with block metadata, `--geometry-only`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON |
 | Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; no variants for arrays of tables; no roles for file keys; the general catalog is read from a data directory, not the binary |
-| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node; no `SET` control file |
-| Control files | done: `STOP`, `CHECKPOINT` | off by default (`control_file_interval = 0`); `--set` is listed in [Command line](cli.md) but not implemented |
+| `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node |
+| Control files | done: `STOP`, `CHECKPOINT`, `SET` (#1316) | off by default (`control_file_interval = 0`); `--set control_file_interval=N` turns them on |
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |
 | Rank 0's host in the run log | done: the start record's `provenance` run block (`host`) and `placement` (one entry per rank with its host) | none |
 | Capabilities query | done: `mallard version --format json` (#1314) | none |
