@@ -33,19 +33,19 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Dimension | Keys |
 |---|---|
 | Time (s) | `run.dt`, `t_stop`, `t_wall_stop`; `write_data.time_interval`; `statistics.t_start`, `statistics.spectra.t_start`, `statistics.phase.t_start`, `period`, `t_reference`; `statistics.conditional.t_start`; `probes.time_interval`, `probes.spectra.t_start`, `length`, `time_interval`; `reactor.end_time`, `output_interval`; `benchmark.dt` |
-| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`, `deposition_width`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
+| Length (m) | `mesh.Lx`, `Ly`, `Lz`; `mesh.transform.scale` (the length of one mesh-file unit), `translate`; `mesh.r_inner`, `r_outer` (annulus); `periodic.translation`, `center`; `boundaries.L`, `corners`, `origin`, `toward`; `initialize.turbulence.length_scale`, `kolmogorov_scale`, `period`; `wall_model.exchange_distance`, `edge_distance`; `turbulence.length_scale`; `les.combustion.delta_L`; `probes.point`, `points`, `start`, `end`, `vertices`, `center`, `moment_center`, `radius`, `pivot`, `translate`, `size`, `inner_radius`, `length`, `base`, `base_radius`, `top_radius`, `bounds`, `spectra.strouhal.length`; `statistics.phase.probe`; `particles.points`, `lattice.lo`, `hi`, `diameter`, `minimum_diameter`, `deposition_width`; region lengths (`center`, `radius`, `size`, `vertices`, `translate`, `pivot`, `edge`, ...) |
 | Angle (plain numbers in degrees) | `mesh.transform.rotate` (2D), `rotate.angle` (3D); `probes.rotate` (2D), `rotate.angle` (3D), `angles`; region `rotate` (2D), `rotate.angle` (3D); `mesh.angle` (annulus); `periodic.angle` |
-| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient`; `particles.temperature` |
+| Temperature (K) | `T` of `initialize`, `boundaries`, `sponges`, `reactor`; `boundaries.T0`; `physics.T_ref`, `T_mu_ref`; `les.combustion.T_unburnt`, `T_burnt`; `output.mixture.progress.T_unburnt`, `T_burnt`; `chemistry.T_frozen`; `radiation.T_ambient`; `particles.temperature`, `liquid.boiling_temperature`, `critical_temperature` |
 | Temperature difference (K; no `degC`, `degF`) | `physics.sutherland_S` |
-| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref` |
-| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density` |
+| Pressure (Pa) | `p` of `initialize`, `boundaries`, `sponges`, `reactor`, `probes.reference`, `output.reference`; `boundaries.p0`; `physics.p_ref`; `particles.liquid.boiling_pressure`, `critical_pressure` |
+| Density (kg/m^3) | `physics.rho_ref`; `rho` of `initialize` (`analytical`), `dirichlet` boundaries, `probes.reference` and `output.reference`; `particles.density`, `liquid.density` |
 | Velocity (m/s) | `u` of `initialize`, `boundaries`, `sponges`, `probes.reference`, `output.reference`; `probes.spectra.strouhal.velocity`; `initialize.turbulence.intensity`; `turbulence.convection_velocity`; `les.combustion.s_L`; `particles.velocity` |
-| Velocity squared (m^2/s^2) | `turbulence.reynolds_stress` |
+| Velocity squared (m^2/s^2; J/kg) | `turbulence.reynolds_stress`; `particles.liquid.latent_heat` |
 | Acceleration (m/s^2) | `source.gravity`; `particles.gravity` |
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
 | Dynamic viscosity (Pa s) | `physics.mu` |
-| Specific heat (J/(kg K)) | `particles.specific_heat` |
+| Specific heat (J/(kg K)) | `particles.specific_heat`, `liquid.specific_heat` |
 | Particles per parcel (plain number; per meter of depth in 2D) | `particles.weight` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
@@ -1566,7 +1566,7 @@ reductions = ["mean", "rms"]
 
 ## `[particles]`
 
-Lagrangian particles: massless tracers or solid spheres
+Lagrangian particles: massless tracers, solid spheres or evaporating droplets
 ([Particles](guide/particles.md); equations in the theory manual's
 [Lagrangian particles](theory/particles.md)). Restart files carry them and their
 quantities: a run restarted from a file with particles continues them and does
@@ -1576,21 +1576,41 @@ keys.
 | Key | Description |
 |---|---|
 | `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
-| `diameter` | Sphere diameter (`"solid"`): of the seeded particles, and of injected ones by default. Required for solid particles with seeds, or with an injector that gives none |
-| `density` | Material density (`"solid"`). Required for solid particles |
+| `diameter` | Sphere diameter (`"solid"`): of the seeded particles, and of injected ones by default; initial diameter (`"droplet"`). Required for droplets, and for solid particles with seeds or with an injector that gives none |
+| `density` | Material density (`"solid"`; a droplet's is the liquid's). Required for solid particles |
 | `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
 | `forces` | Forces besides drag and gravity (`"solid"`): any of `"pressure_gradient"` (in place of the buoyancy), `"added_mass"`, `"saffman_lift"`, default none |
-| `velocity` | Velocity of every seeded particle (`"solid"`), default the gas velocity at its seed |
+| `velocity` | Velocity of every seeded particle (`"solid"`, `"droplet"`), default the gas velocity at its seed |
 | `specific_heat` | Specific heat of the particle material (`"solid"`): the particles exchange heat with the gas (Ranz-Marshall), default none (no heat transfer) |
-| `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`), default the gas temperature at its seed |
-| `coupling` | `"one-way"` (the particles feel the gas) or `"two-way"` (the gas feels the momentum and energy they exchange, `"solid"` only) ([Two-way coupling](guide/particles.md#two-way-coupling)), default `"one-way"` |
-| `weight` | Particles per parcel (`"solid"`; per meter of depth in 2D), default 1 |
-| `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`), default 0 (each particle's own cell) |
+| `temperature` | Temperature of every seeded particle (`"solid"` with `specific_heat`, default the gas temperature at its seed; `"droplet"`, below the liquid's `critical_temperature`, required) |
+| `evaporation` | Evaporation model of droplets: `"abramzon_sirignano"` or `"d2_law"`, default `"abramzon_sirignano"` |
+| `minimum_diameter` | Droplets below this diameter are removed, their remains given to the gas with two-way coupling, default `diameter / 100` |
+| `coupling` | `"one-way"` (the particles feel the gas) or `"two-way"` (the gas feels the mass, momentum and energy they exchange, `"solid"` and `"droplet"`) ([Two-way coupling](guide/particles.md#two-way-coupling)), default `"one-way"` |
+| `weight` | Particles per parcel (`"solid"`, `"droplet"`; per meter of depth in 2D), default 1 |
+| `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`, `"droplet"`), default 0 (each particle's own cell) |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
-| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id), default none |
+| `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_P`, diameter `D_P` and mass `M_P`, then the quantities, by id), default none |
 | `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) plus those the injectors emit up to `[run] t_stop` (or `n_steps` times a fixed `dt`) |
 | `seed` | Seed of the injectors' random numbers, default 0 |
+
+### `[particles.liquid]`
+
+The liquid of droplets (`type = "droplet"`), whose vapor is a species of the
+mechanism ([Evaporating droplets](guide/particles.md#evaporating-droplets)).
+Its enthalpy is the vapor's at the boiling point less `latent_heat`, plus
+`specific_heat (T - boiling_temperature)`.
+
+| Key | Description |
+|---|---|
+| `species` | The vapor species of the mechanism. Required |
+| `density` | Liquid density, constant. Required |
+| `specific_heat` | Liquid specific heat, constant; the Kirchhoff latent heat it gives must stay positive up to `critical_temperature`. Required |
+| `latent_heat` | Latent heat of vaporization at the boiling point. Required |
+| `boiling_temperature` | Boiling temperature at `boiling_pressure`. Required |
+| `boiling_pressure` | Pressure of the boiling point, default 101325 Pa |
+| `critical_temperature`, `critical_pressure` | Critical point, above the boiling point. Required |
+| `antoine` | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)`, default Clausius-Clapeyron through the boiling point with `latent_heat` |
 
 ### `[particles.lattice]`
 
@@ -1650,8 +1670,8 @@ rebound elastically.
 A value each particle follows along its path
 ([Per-particle quantities](guide/particles.md#per-particle-quantities)).
 Expressions read `x`, `y`, `z`, `t`, the gas at the particle (`RHO`, `U_X`,
-`U_Y`, `U_Z`, `P`, `T` for a single gas), the particle velocity `V_X`, `V_Y`,
-`V_Z` and temperature `T_P`, the quantities before this one, and `in(name)` of a region of
+`U_Y`, `U_Z`, `P`, `T` for a single gas and droplets), the particle velocity `V_X`, `V_Y`,
+`V_Z`, temperature `T_P` and diameter `D_P`, the quantities before this one, and `in(name)` of a region of
 `[regions]`. Give exactly one of `integral`, `max`, `min`, `first_time`,
 `winding`.
 

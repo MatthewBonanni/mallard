@@ -2448,7 +2448,8 @@ void Solver::init_particles(region::Regions & regions) {
     }
     particles = std::make_unique<Particles>();
     particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
-                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics, t_begin, t_end);
+                    restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics, mixture_model.get(),
+                    cell_scalars, t_begin, t_end);
     if (particles->two_way() && axisymmetric) {
         throw InputError(Diagnostic{.key = "particles.coupling",
                                     .line = line_of(input.at("particles"), "coupling"),
@@ -3818,6 +3819,7 @@ void Solver::take_step() {
     }
     run_health.ledger.end_step(static_cast<double>(dt));
     if (particles) {
+        particles->remove_evaporated(state(), [this](const State & s) { halo.exchange(s); });
         particles->relocate();
         particles->migrate();
         particles->inject(t + dt);

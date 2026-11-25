@@ -6,6 +6,7 @@
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/detonation_1d/input.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml",
   "tools/dev/catalog_inputs/2d/flamelet.toml",
   "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
   "tools/dev/catalog_inputs/2d/flamelet_transported.toml",

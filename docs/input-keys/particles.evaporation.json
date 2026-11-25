@@ -1,0 +1,14 @@
+{
+ "default": "\"abramzon_sirignano\"",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/droplets.toml"
+ ],
+ "type": "string",
+ "values": [
+  "abramzon_sirignano",
+  "d2_law"
+ ]
+}

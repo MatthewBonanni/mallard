@@ -63,6 +63,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Path quantities: time integrals, extrema, first times, turns about an axis; particle probes over regions
 - Two-way coupling: momentum and energy conserved to round-off; sources spread over a physical width; dispersed-phase fields ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#two-way-coupling))
 - Injectors at points, boundary zones and regions; Rosin-Rammler, log-normal or tabulated sizes; same particles on any rank count ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#injectors))
+- Evaporating droplets in gas mixtures: d²-law and Abramzon-Sirignano, film properties from the mechanism, boiling; vapor sources conserve mass, species, momentum, energy ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#evaporating-droplets))
 - GPUs and MPI; bitwise identical on any rank count and across restarts
 
 **Boundary conditions** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/boundary_conditions/))
