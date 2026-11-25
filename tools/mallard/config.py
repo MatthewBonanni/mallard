@@ -798,7 +798,7 @@ class NumericsFaceReconstruction(Table):
         troubled_capacity: (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a
             time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round
             recomputes its cells' central coefficients, so results do not depend on which cells share a round.
-            Default 0.25 in 3D (1 in 2D).
+            Default 0.125 in 3D (1 in 2D).
         troubled_threshold: (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3.
         troubled_upper: (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most
             dissipative), default 1e-2.
@@ -1908,10 +1908,10 @@ class Run(Table):
             `cfl`. Exactly one of `cfl` and `dt` is required, except that with a numerics preset (also the default
             `high_order`, which applies when the input sets neither `[numerics] preset` nor
             `[numerics.face_reconstruction]`) and neither of them the preset sets `cfl`.
-        control_file_interval: Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working
-            directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first
-            step whose time-step reduction reads the request, within `step_queue` steps of the step the host had
-            reached.
+        control_file_interval: Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the
+            working directory (default 0: never; `--set control_file_interval=N` turns them on from the command
+            line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose
+            time-step reduction reads the request, within `step_queue` steps of the step the host had reached.
         control_socket: Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`).
         cuda_graphs: CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step
             (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches
