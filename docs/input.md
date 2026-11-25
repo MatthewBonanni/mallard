@@ -44,8 +44,10 @@ Syntax and the unit table: [Units](guide/input_files.md#units).
 | Acceleration (m/s^2) | `source.gravity`; `particles.gravity` |
 | Rate (1/s) | `sponges.strength` |
 | Wavenumber (1/m) | `initialize.turbulence.k_max` |
-| Dynamic viscosity (Pa s) | `physics.mu` |
+| Dynamic viscosity (Pa s) | `physics.mu`; `particles.liquid.viscosity` |
 | Specific heat (J/(kg K)) | `particles.specific_heat`, `liquid.specific_heat` |
+| Thermal conductivity (W/(m K)) | `particles.liquid.conductivity` |
+| Surface tension (N/m) | `particles.liquid.surface_tension` |
 | Particles per parcel (plain number; per meter of depth in 2D) | `particles.weight` |
 | Heat flux (W/m^2) | `boundaries.q` |
 | Mass flux (kg/(m^2 s)) | `source.mass_flow`; `boundaries.mass_flux` |
@@ -1596,20 +1598,26 @@ keys.
 ### `[particles.liquid]`
 
 The liquid of droplets (`type = "droplet"`), whose vapor is a species of the
-mechanism ([Evaporating droplets](guide/particles.md#evaporating-droplets)).
-Its enthalpy is the vapor's at the boiling point less `latent_heat`, plus
-`specific_heat (T - boiling_temperature)`.
+mechanism ([Evaporating droplets](guide/particles.md#evaporating-droplets)):
+a fluid of the library by name, whose properties are tables of the
+temperature ([Named liquids](guide/particles.md#named-liquids)), or one
+given property by property. A key given with `fluid` replaces that table
+with its constant. Its enthalpy is the vapor's at the boiling point less
+`latent_heat`, plus the integral of `specific_heat` from `boiling_temperature`.
 
 | Key | Description |
 |---|---|
 | `species` | The vapor species of the mechanism. Required |
-| `density` | Liquid density, constant. Required |
-| `specific_heat` | Liquid specific heat, constant; the Kirchhoff latent heat it gives must stay positive up to `critical_temperature`. Required |
-| `latent_heat` | Latent heat of vaporization at the boiling point. Required |
-| `boiling_temperature` | Boiling temperature at `boiling_pressure`. Required |
+| `fluid` | A fluid of the liquid library: `"ammonia"`, `"ethanol"`, `"methane"`, `"methanol"`, `"n-decane"`, `"n-dodecane"`, `"n-heptane"`, `"n-hexane"`, `"n-octane"`, `"n-pentane"`, `"nitrogen"`, `"oxygen"`, `"propane"`, `"toluene"` or `"water"`; needs a build with `Mallard_ENABLE_COOLPROP`. Default none: the properties below are required |
+| `tolerance` | With `fluid`: the tables' largest relative interpolation error, between 1e-10 and 1e-2, default 1e-6 |
+| `density` | Liquid density, constant. Required without `fluid` |
+| `specific_heat` | Liquid specific heat, constant; the Kirchhoff latent heat it gives must stay positive up to `critical_temperature`. Required without `fluid` |
+| `latent_heat` | Latent heat of vaporization at the boiling point; at other temperatures Kirchhoff's law. Required without `fluid` |
+| `boiling_temperature` | Boiling temperature at `boiling_pressure`. Required without `fluid` (with it, from the saturation curve) |
 | `boiling_pressure` | Pressure of the boiling point, default 101325 Pa |
-| `critical_temperature`, `critical_pressure` | Critical point, above the boiling point. Required |
-| `antoine` | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)`, default Clausius-Clapeyron through the boiling point with `latent_heat` |
+| `critical_temperature`, `critical_pressure` | Critical point, above the boiling point. Required without `fluid` (with it, the end of the tables, 0.999 of the critical temperature, and the saturation pressure there) |
+| `antoine` | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)`, default the fluid's table, or else Clausius-Clapeyron through the boiling point with `latent_heat` |
+| `viscosity`, `conductivity`, `surface_tension` | The liquid's viscosity, thermal conductivity and surface tension, constant, for particle expressions (`MU_P`, `K_P`, `SIGMA_P`). Default the fluid's tables, else none (`nan`) |
 
 ### `[particles.lattice]`
 

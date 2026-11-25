@@ -41,12 +41,14 @@ inline constexpr uint32_t MAX_REGIONS = 4;
 /**
  * @brief The variables of particle expressions, by index: x, y, (z), t, the gas
  *        at the particle RHO, U_X, U_Y, (U_Z), P, T, the particle velocity V_X,
- *        V_Y, (V_Z), temperature T_P and diameter D_P, then the quantities,
- *        then in(region) of each region read.
+ *        V_Y, (V_Z), temperature T_P and diameter D_P, its density RHO_P and
+ *        a droplet liquid's viscosity MU_P, conductivity K_P and surface
+ *        tension SIGMA_P, then the quantities, then in(region) of each region read.
  */
 inline constexpr uint32_t VAR_T = N_DIM, VAR_RHO = N_DIM + 1, VAR_U = N_DIM + 2, VAR_P = 2 * N_DIM + 2,
                           VAR_TEMPERATURE = 2 * N_DIM + 3, VAR_V = 2 * N_DIM + 4, VAR_TP = 3 * N_DIM + 4,
-                          VAR_DP = 3 * N_DIM + 5, N_BASE_VARIABLES = 3 * N_DIM + 6;
+                          VAR_DP = 3 * N_DIM + 5, VAR_MATERIAL = 3 * N_DIM + 6, N_MATERIAL = 4,
+                          N_BASE_VARIABLES = VAR_MATERIAL + N_MATERIAL;
 inline constexpr uint32_t MAX_VARIABLES = N_BASE_VARIABLES + MAX_QUANTITIES + MAX_REGIONS;
 
 /** @brief The names of the first N_BASE_VARIABLES variables. */
@@ -56,10 +58,12 @@ std::vector<std::string> base_variables();
  * @brief The first N_BASE_VARIABLES variables: the position x, the time t, the
  *        gas state W = [rho, u, p] at the particle and its temperature T (NaN
  *        where expressions have none), the particle velocity v, the particle
- *        temperature *Tp, or T if Tp is null, and its diameter d (NaN for tracers).
+ *        temperature *Tp, or T if Tp is null, its diameter d (NaN for tracers), and
+ *        its density, viscosity, conductivity and surface tension (NaN where it has none).
  */
 KOKKOS_INLINE_FUNCTION void fill_base(double * vars, const rtype * x, const double t, const rtype * W, const rtype * v,
-                                      const double * Tp, const double T, const double d) {
+                                      const double * Tp, const double T, const double d,
+                                      const double (&material)[N_MATERIAL]) {
     FOR_I_DIM vars[i] = static_cast<double>(x[i]);
     vars[VAR_T] = t;
     vars[VAR_RHO] = static_cast<double>(W[0]);
@@ -69,6 +73,7 @@ KOKKOS_INLINE_FUNCTION void fill_base(double * vars, const rtype * x, const doub
     FOR_I_DIM vars[VAR_V + i] = static_cast<double>(v[i]);
     vars[VAR_TP] = Tp ? *Tp : T;
     vars[VAR_DP] = d;
+    for (uint32_t k = 0; k < N_MATERIAL; k++) vars[VAR_MATERIAL + k] = material[k];
 }
 
 /** @brief A quantity on the device. */

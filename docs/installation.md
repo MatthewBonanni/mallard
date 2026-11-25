@@ -191,6 +191,8 @@ done
 export PATH=$HOME/mallard/bin:$PATH MALLARD_SHARE=$HOME/mallard/share/mallard
 ```
 
+For droplets of [named liquids](guide/particles.md#named-liquids), add `-DMallard_ENABLE_COOLPROP=ON`.
+
 On macOS with Homebrew, `brew install cmake open-mpi hdf5 cgns` and the same loop with `-DKokkos_ENABLE_THREADS=ON` in place of OpenMP, without dKaMinPar, and `-DUSE_SYSTEM_CGNS=ON`. `mallard test` runs the test suites of a build or an install (`mallard-test2d` and `mallard-test3d`, `--dim 2|3` for one), e.g. `mallard test --gtest_filter='Sod*'`.
 
 Pick the Kokkos backend at configure time, for example `-DKokkos_ENABLE_OPENMP=ON`, or `-DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_AMPERE80=ON -DCMAKE_CXX_COMPILER=$PWD/src/external/kokkos/bin/nvcc_wrapper` for NVIDIA A100 GPUs (add `-DKokkos_ENABLE_OPENMP=ON` too, so host-side setup such as TENO's precomputation runs in parallel; with MPI, `-DMallard_ENABLE_NCCL=ON` for halo exchanges with NCCL). The CUDA container is built this way, for several GPUs at once (`docker/Dockerfile.cuda`). To use an installed Kokkos instead, pass `-DUSE_SYSTEM_KOKKOS=ON -DKokkos_DIR=/path/to/kokkos`.
@@ -217,6 +219,7 @@ cmake -S . -B build-hip -DCMAKE_BUILD_TYPE=Release -DUSE_SYSTEM_KOKKOS=OFF \
 | `Mallard_ENABLE_HDF5` | `OFF` | HDF5 mesh files, `mallard mesh convert`, and the HDF5 outputs: `[[write_data]]` `format = "vtkhdf"` (the default) and `"xdmf"`, and `[[probes]]` `"hdf5"` and `"vtkhdf"` (parallel HDF5 with MPI, when available) |
 | `Mallard_ENABLE_ZLIB` | `OFF` | zlib compression of VTU and restart files (`[[write_data]] compression = "zlib"`; HDF5 output compresses with HDF5's own deflate filter and needs no option) |
 | `Mallard_ENABLE_CGNS` | `OFF` | CGNS mesh files, through the [CGNS library](https://cgns.github.io/) (an installed one, found through `CMAKE_PREFIX_PATH`; with `-DUSE_SYSTEM_CGNS=OFF`, v4.5.0 is fetched and built with the HDF5 of `Mallard_ENABLE_HDF5`) |
+| `Mallard_ENABLE_COOLPROP` | `OFF` | [Named liquids](guide/particles.md#named-liquids) for droplets (`[particles.liquid] fluid = "water"`, ...), whose properties [CoolProp](http://www.coolprop.org) tabulates at setup. CoolProp v8.0.0 is fetched and built at build time (about 5 minutes, needs Python 3 and network access), as its own project with the host compiler: with CUDA or HIP, nvcc and hipcc never compile it (`Mallard_COOLPROP_CXX_COMPILER` picks another compiler); kernels read only the tables. `Mallard_COOLPROP_ROOT` names an installed static CoolProp instead (with `CoolPropLib.h` and `libCoolProp.a` under it). Liquids given property by property need no CoolProp |
 | `Mallard_ENABLE_LIBRARY` | `ON` | `libmallard2d` or `libmallard3d`, installed in `lib/`: the [C++ API](guide/cpp_api.md), with its header in `include/mallard/` and the CMake package `Mallard` in `lib/cmake/Mallard/`, and the output reader of the [Python package](guide/python.md); compiles the whole build position independent (`CMAKE_POSITION_INDEPENDENT_CODE`) |
 | `Mallard_ENABLE_PYTHON` | `ON` | Checks that the [Python package](guide/python.md)'s version is Mallard's, for `Mallard_PYTHON_INSTALL_DIR`; needs `Mallard_ENABLE_LIBRARY` |
 | `Mallard_PYTHON_INSTALL_DIR` | empty | A `site-packages` directory into which `cmake --install` also copies the Python package (besides `share/mallard/tools`) |

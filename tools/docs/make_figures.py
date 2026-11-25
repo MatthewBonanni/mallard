@@ -33,6 +33,7 @@ import high_order_cost
 import inlets
 import les_models
 import limiters
+import liquid_library
 import mesh_fields
 import particle_coupling
 import particle_evaporation
@@ -75,6 +76,7 @@ def main():
     inlets.figures()
     les_models.figures()
     limiters.figures()
+    liquid_library.figures()
     particle_coupling.figures(args.mallard)
     particle_evaporation.figures(args.mallard)
     particles.figures(args.mallard)

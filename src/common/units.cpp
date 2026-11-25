@@ -58,6 +58,8 @@ const NamedDimension NAMED[] = {
     {"force", dim::of(1, 1, -2), "N, kN, lbf"},
     {"kinematic viscosity", dim::of(0, 2, -1), "m^2/s"},
     {"specific heat", dim::of(0, 2, -2, -1), "J/(kg K)"},
+    {"thermal conductivity", dim::of(1, 1, -3, -1), "W/(m K)"},
+    {"surface tension", dim::of(1, 0, -2), "N/m, mN/m"},
     {"molar mass", dim::of(1, 0, 0, 0, -1), "kg/mol, g/mol"},
 };
 
