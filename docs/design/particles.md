@@ -380,7 +380,7 @@ the particle sat in its cell. Across rotational periodic faces the
 neighbor's mu turns into the cell's frame as in `Walker::cross`. With width 0
 neither moments nor spreading run.
 
-**Cost.** Per stage, three kernels over the slots and one over the cells, then
+**Cost.** Per stage, two kernels over the slots, a prefix sum over the cells and one kernel over the owned cells, then
 with a width one moment pass and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
 the owned cells and (distributed) a halo exchange. A width of two cells is
 16 steps in 2D and 24 in 3D.
