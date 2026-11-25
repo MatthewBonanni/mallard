@@ -112,7 +112,7 @@ class CellChemistry {
                   uint32_t n_cells);
 
         /** @brief Slots of tallies(): cells of the last call that needed chemistry, then totals of every call. */
-        enum Tally : int { LAST_ACTIVE, ACTIVE, FAILURES, SENT, N_TALLIES };
+        enum Tally : int { LAST_ACTIVE, ACTIVE, FAILURES, SENT, EXPLICIT, N_TALLIES };
 
         /** @brief Totals over every call so far (reads the device). */
         struct Statistics {
@@ -120,6 +120,7 @@ class CellChemistry {
             uint64_t active = 0;       // cells that needed chemistry
             uint64_t failures = 0;     // cells whose integration here failed (sent cells: where they ran)
             uint64_t sent = 0;         // active cells integrated by another rank
+            uint64_t explicit_steps = 0;  // active cells advanced by an accepted explicit step
         };
 
         /**
