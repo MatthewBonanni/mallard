@@ -334,16 +334,16 @@ exponential integration is exact for linear forcing. Restart files carry e as
 `PARTICLE_E` beside `PARTICLE_T`, so restarts are bitwise.
 
 **Deposition** (`particles::Deposition`) runs after the particle rates of a
-stage, before the rates are divided into the gas's. Three plain kernels:
+stage, before the rates are divided into the gas's. Four plain kernels:
 
-- per slot, an atomic count of the particles in its cell and atomic maxima of
-  each term's magnitude per cell (order independent);
-- per slot, an atomic sum of each term in fixed point, in units of the cell's
-  largest term over 2^(62 - ceil(log2(n + 1))), n the cell's count
-  (`exact_sums.h`);
-- per owned cell, the totals back in floating point.
+- per slot, an atomic count of the particles in its cell;
+- per cell, the start of its slots (a prefix sum of the counts);
+- per slot, its place among its cell's slots (an atomic increment, so in any
+  order);
+- per owned cell, each term summed over its slots exactly in integer limbs and
+  rounded once (`exact_sums.h`).
 
-Each cell's sum is thus exact (errors of 2^-60 of its largest term), whatever
+Each cell's sum is thus the exact sum rounded to the nearest double, whatever
 the slot order, which differs between rank counts and migrations: no sort, no
 global reduction, nothing on the host. The start cell is always owned, so
 deposits never land in a halo.
@@ -459,7 +459,7 @@ A probe samples on the host after a step it is due at: the gas at the
 particles of the current state (the same path as the stage evaluation,
 `Particles::sample`, after `update_cell_W`), then one kernel writes each
 field's value per slot, NaN outside the probe's region. Counts, sums and sums
-of squares are `ExactSums` (fixed point), so the statistics are bitwise the
+of squares are `ExactSums` (exact, rounded once), so the statistics are bitwise the
 same on any rank count; minima and maxima are order independent. Steps decided
 on the device stop at the probes' steps (`step_horizon`), so device steps stay
 on for runs with probes. Staging the reductions in the step graph, as the gas

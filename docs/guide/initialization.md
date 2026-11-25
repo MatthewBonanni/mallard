@@ -402,8 +402,8 @@ interval = 10000
 [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
 [`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
-[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les)
-and 15 more.
+[`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake)
+and 16 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot

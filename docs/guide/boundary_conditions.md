@@ -690,7 +690,7 @@ type = "wall_adiabatic"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`heated_wall`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-wall)
-and 9 more.
+and 10 more.
 
 **Imposes** zero heat flux and, in viscous runs, the wall velocity (through a
 mirrored ghost velocity, `2 u_w - u`); density and pressure come from the
@@ -1134,7 +1134,7 @@ T = 1.0
 [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder)
-and 1 more.
+and 2 more.
 
 **Imposes** a characteristic free stream: the outgoing Riemann invariant
 comes from the interior and the incoming one from the free stream, entropy and
