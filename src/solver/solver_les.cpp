@@ -804,7 +804,7 @@ void Solver::update_thickened_flame() {
         // The vorticity of outer halo cells misses neighbors: take the owners' before differentiating it again
         exchange_cell_vectors(tfles_vorticity);
         gated::parallel_for("tfles_vorticity_gradient", mesh->n_cells,
-                             VorticityGradientFunctor{viscous_gradient, tfles_vorticity, tfles_gradients});
+                             VorticityGradientFunctor{viscous_gradient(), tfles_vorticity, tfles_gradients});
     }
     const bool reaction = thickened_flame.sensor_type == ThickenedFlame::Sensor::REACTION;
     if (reaction) update_reaction_sensor();
@@ -840,11 +840,11 @@ void Solver::update_reaction_sensor() {
         const double rate = -static_cast<double>(w(c, tf.sensor_species));
         sensor(c, 0) = static_cast<rtype>(flame.flammable ? ThickenedFlame::reaction_sensor(rate, flame.omega_max) : 0.0);
     });
-    gated::parallel_for("tfles_flame_index", n_owned, FlameIndexFunctor{viscous_gradient, sensor});
+    gated::parallel_for("tfles_flame_index", n_owned, FlameIndexFunctor{viscous_gradient(), sensor});
     exchange_cell_vectors(sensor);
     for (uint32_t pass = 0; pass < ThickenedFlame::SENSOR_PASSES; pass++) {
         gated::parallel_for("tfles_sensor_filter", n_owned,
-                            TestFilterFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
+                            TestFilterFunctor{viscous_gradient().offsets_cells_of_cell, viscous_gradient().cells_of_cell,
                                               mesh->cell_volume, sensor, filtered});
         // The fields read the last pass on owned cells only
         if (pass + 1 < ThickenedFlame::SENSOR_PASSES) exchange_cell_vectors(filtered);
@@ -867,16 +867,16 @@ void Solver::update_dynamic_efficiency() {
                              static_cast<double>(scalars(c, G::C)))
                 : tf.progress(static_cast<double>(values(c, N_DIM))));
     });
-    gated::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 1});
+    gated::parallel_for("tfles_progress_gradient", n_owned, GradientNormFunctor{viscous_gradient(), progress, 0, 1});
     exchange_cell_vectors(progress);
     for (uint32_t pass = 0; pass < tfles_test_passes; pass++) {
         gated::parallel_for("tfles_test_filter", n_owned,
-                            TestFilterFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
+                            TestFilterFunctor{viscous_gradient().offsets_cells_of_cell, viscous_gradient().cells_of_cell,
                                               mesh->cell_volume, progress, filtered});
         exchange_cell_vectors(filtered);
         std::swap(progress, filtered);
     }
-    gated::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient, progress, 0, 2});
+    gated::parallel_for("tfles_filtered_gradient", n_owned, GradientNormFunctor{viscous_gradient(), progress, 0, 2});
     gated::parallel_for("tfles_dynamic_terms", n_owned,
                          DynamicEfficiencyFunctor{tf, les_delta, mesh->cell_volume, tfles_test_width2, progress,
                                                   tfles_test_passes, tfles_dynamic_terms});
@@ -897,8 +897,8 @@ void Solver::init_dynamic_efficiency() {
     const uint32_t n_owned = mesh->n_owned();
     tfles_test_width2 = Kokkos::View<rtype *>("tfles_test_width2", n_owned);
     gated::parallel_for("tfles_test_width", n_owned,
-                        TestFilterWidthFunctor{viscous_gradient.offsets_cells_of_cell, viscous_gradient.cells_of_cell,
-                                               viscous_gradient.cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
+                        TestFilterWidthFunctor{viscous_gradient().offsets_cells_of_cell, viscous_gradient().cells_of_cell,
+                                               viscous_gradient().cells_of_cell_shift, mesh->shifts, mesh->cell_coords,
                                                mesh->cell_volume, tfles_test_width2});
     tfles_dynamic_terms = Kokkos::View<double *[4]>("tfles_dynamic_terms", n_owned);
     tfles_dynamic_sums = ExactSums(4, n_owned, is_distributed(), halo.uses_nccl());
@@ -994,8 +994,8 @@ void Solver::update_dynamic_constant() {
     gated::parallel_for("dynamic_stresses", mesh->n_cells,
                          DynamicModelStressFunctor{les.model, flow, g, les_width, dynamic_stresses});
     gated::parallel_for("dynamic_terms", n_owned,
-                        DynamicProcedureFunctor{les.model, viscous_gradient.offsets_cells_of_cell,
-                                                viscous_gradient.cells_of_cell, viscous_gradient.cells_of_cell_shift,
+                        DynamicProcedureFunctor{les.model, viscous_gradient().offsets_cells_of_cell,
+                                                viscous_gradient().cells_of_cell, viscous_gradient().cells_of_cell_shift,
                                                 mesh->periodic_maps(), mesh->cell_coords,
                                                 mesh->cell_volume, les_width, flow, g, dynamic_stresses,
                                                 dynamic_terms});
@@ -1039,6 +1039,8 @@ void Solver::thicken_transport() {
 
 void Solver::init_les() {
     if (!les_on) return;
+    // TFLES's setup reads the vertex neighbors
+    init_vertex_gradient();
     les = LES::from_input(input);
     if (axisymmetric) throw InputError("[les] is not available for axisymmetric runs.");
     les_delta = Kokkos::View<rtype *>("les_delta", mesh->n_cells);
@@ -1193,7 +1195,7 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
         with_rotations(mesh->periodic_maps(), [&](auto rotations) {
             gated::parallel_for("mixture_gradients", n,
                                  MixtureGradientFunctor<decltype(rotations)::value>{
-                                     viscous_gradient, transport_values, transport_gradients, bc_transport_values,
+                                     viscous_gradient(), transport_values, transport_gradients, bc_transport_values,
                                      mixture.n_species, cell_transport, mixture.flamelet});
         });
     } else {
@@ -1206,7 +1208,7 @@ void Solver::eddy_viscosity_of_state(const uint32_t n) {
             phys.compute_W_from_conservatives(W_c, cons);
             FOR_I_CONSERVATIVE W(c, i) = W_c[i];
         });
-        gated::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient);
+        gated::parallel_for("les_gradients", HeavyRange<>(0, n), viscous_gradient());
     }
     // The right-hand side's reconstruction writes the polynomials' gradients of its stage, and may be running;
     // here, those of this state

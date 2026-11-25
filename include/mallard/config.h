@@ -2243,9 +2243,10 @@ class Run : public Table {
          *        preset sets `cfl`.
          */
         Run & cfl(double v) { put("cfl", v); return *this; }
-        /** @brief Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0:
-         *        never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step
-         *        reduction reads the request, within `step_queue` steps of the step the host had reached.
+        /** @brief Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory
+         *        (default 0: never; `--set control_file_interval=N` turns them on from the command line). A file found
+         *        acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads
+         *        the request, within `step_queue` steps of the step the host had reached.
          */
         Run & control_file_interval(std::int64_t v) { put("control_file_interval", v); return *this; }
         /** @brief Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`).

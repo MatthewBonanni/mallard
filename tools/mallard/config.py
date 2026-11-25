@@ -1909,10 +1909,10 @@ class Run(Table):
             `cfl`. Exactly one of `cfl` and `dt` is required, except that with a numerics preset (also the default
             `high_order`, which applies when the input sets neither `[numerics] preset` nor
             `[numerics.face_reconstruction]`) and neither of them the preset sets `cfl`.
-        control_file_interval: Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working
-            directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first
-            step whose time-step reduction reads the request, within `step_queue` steps of the step the host had
-            reached.
+        control_file_interval: Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the
+            working directory (default 0: never; `--set control_file_interval=N` turns them on from the command
+            line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose
+            time-step reduction reads the request, within `step_queue` steps of the step the host had reached.
         control_socket: Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`).
         cuda_graphs: CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step
             (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches
