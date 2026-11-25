@@ -798,7 +798,7 @@ class NumericsFaceReconstruction(Table):
         troubled_capacity: (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a
             time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round
             recomputes its cells' central coefficients, so results do not depend on which cells share a round.
-            Default 0.25 in 3D (1 in 2D).
+            Default 0.125 in 3D (1 in 2D).
         troubled_threshold: (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3.
         troubled_upper: (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most
             dissipative), default 1e-2.

@@ -940,7 +940,7 @@ class NumericsFaceReconstruction : public Table {
         NumericsFaceReconstruction & stencil_factor(double v) { put("stencil_factor", v); return *this; }
         /** @brief (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes
          *        their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells'
-         *        central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in
+         *        central coefficients, so results do not depend on which cells share a round. Default 0.125 in 3D (1 in
          *        2D).
          */
         NumericsFaceReconstruction & troubled_capacity(double v) { put("troubled_capacity", v); return *this; }
