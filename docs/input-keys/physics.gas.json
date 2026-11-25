@@ -29,6 +29,7 @@
   "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
   "tools/dev/catalog_inputs/2d/flamelet_transported.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/named_liquid.toml",
   "tools/dev/catalog_inputs/3d/flamelet.toml",
   "tools/dev/catalog_inputs/3d/flamelet_tfles.toml",
   "tools/dev/catalog_inputs/3d/flamelet_transported.toml"

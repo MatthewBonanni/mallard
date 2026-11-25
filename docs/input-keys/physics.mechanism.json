@@ -25,7 +25,8 @@
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml",
   "tools/dev/catalog_inputs/2d/droplets.toml",
-  "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
+  "tools/dev/catalog_inputs/2d/mixture_sponges.toml",
+  "tools/dev/catalog_inputs/2d/named_liquid.toml"
  ],
  "type": "string"
 }
