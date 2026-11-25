@@ -662,12 +662,11 @@ them at the step's start and, with `deposition_width` $\sigma > 0$, spread
 over a Gaussian of standard deviation $\sigma$
 (`particles::Deposition`):
 
-1. **Exact sums per cell.** Each cell sums its particles' sources in fixed
-    point, in units of its largest term over $2^{62 - \lceil\log_2(n + 1)\rceil}$
-    for $n$ particles in the cell (`exact_sums.h`), with integer atomics:
-    each sum is exact to $2^{-60}$ of its largest term, whatever the order of
-    the slots, which differs between rank counts and migrations. The start
-    cell is always owned, so no deposit lands in a halo.
+1. **Exact sums per cell.** Each cell sums its particles' sources exactly,
+    in integer limbs (`exact_sums.h`), and rounds each sum once to the
+    nearest double: the result does not depend on the order of the slots,
+    which differs between rank counts and migrations. The start cell is
+    always owned, so no deposit lands in a halo.
 2. **First and second moments** (with a width). Spreading from the cell
     centers would place every particle at its cell's center, an error of half
     a cell in the kernel's center. The cells also sum each source's first and
