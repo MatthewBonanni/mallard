@@ -139,7 +139,8 @@ count = 1000
 ```
 
 2 g of 50 µm droplets at random in a disk at the start (`mass` is the total;
-per meter of depth in 2D), as parcels of 1000 droplets:
+per meter of depth in 2D), as parcels of 1000 droplets, each at the gas
+velocity where it lands:
 
 ```toml
 [particles]
@@ -151,7 +152,6 @@ weight = 1e3
 name = "cloud"
 region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
 mass = 2e-3
-velocity = [0.0, 0.0]
 diameter = 50e-6
 ```
 
@@ -168,7 +168,9 @@ end = 0.1
 `region` is any filled region (shapes of
 [Geometry](geometry.md), `"domain"`, a cell zone) or boundary zones, and
 `point` a single point; solid particles also take a velocity and a diameter
-or size distribution ([Injectors](#injectors)). Random places are the same on
+or size distribution ([Injectors](#injectors)), and start at the gas velocity
+(and temperature, with heat transfer) where they enter unless given one, as
+seeds do. Random places are the same on
 any number of ranks and after restarts.
 
 Ids follow the seeds: the `points` first, in order, then the lattice with `x`
@@ -616,8 +618,11 @@ Where:
 
 Solid particles leave with `velocity`, or `speed` along `direction`, spread
 uniformly over a cone of half angle `cone_angle` about it (in angle in 2D, in
-solid angle in 3D). `diameter` is a diameter or a size distribution, and
-`weight` and `temperature` default to those of `[particles]`. Tracers take
+solid angle in 3D); with neither, each takes the gas velocity where it enters,
+in equilibrium with the flow (`velocity = [0.0, 0.0]` starts them at rest).
+`diameter` is a diameter or a size distribution, `weight` defaults to that of
+`[particles]`, and `temperature` to that of `[particles]`, else the gas
+temperature where each enters. Tracers take
 none of these: they move with the gas.
 
 ![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-light.svg#gh-light-mode-only)
@@ -639,12 +644,12 @@ sends every particle along `direction`.*
 | `point`, `region` | one of them | Where it injects |
 | `count`, `mass`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, their total mass (solid particles; per meter of depth in 2D), parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
 | `start`, `end` | 0, never | When it injects (`count` and `mass`: `start` only) |
-| `velocity`, `speed` | one of them (solid particles) | The particles' velocity, or their speed along `direction` |
+| `velocity`, `speed` | the gas velocity where each enters | The particles' velocity, or their speed along `direction` (solid particles; at most one) |
 | `direction` | the inward normal of a zone | Direction of the velocity with `speed` |
 | `cone_angle` | 0 | Half angle of the cone of velocities, degrees |
 | `diameter` | `[particles] diameter` | A diameter or a size distribution |
 | `weight` | `[particles] weight` | Particles per parcel |
-| `temperature` | `[particles] temperature` | With heat transfer |
+| `temperature` | `[particles] temperature`, else the gas temperature where each enters | With heat transfer |
 
 ![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-light.svg#gh-light-mode-only)
 ![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-dark.svg#gh-dark-mode-only)
@@ -732,7 +737,10 @@ its rate or count, mass flow and parcels over the run) in its JSON
   volume fractions, which sample its edge: in cells it cuts, the density is
   as exact as the fractions. A shape that barely touches a cell (less than about
   a thousandth of it) may put that cell's few particles at one point of it.
-- Injectors do not take the gas's velocity or temperature: give them.
+- Particles that take the gas velocity or temperature get it from the gas
+  where they enter at the end of the step, which costs a pass over the
+  particles each step: give `velocity` (or `speed`) and `temperature` where
+  the values are known.
 
 ## Per-particle quantities
 

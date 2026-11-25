@@ -208,7 +208,12 @@ state. The run's start calls the injection once at its own time, after the
 particles that start at the gas velocity take it, so a burst at `start = 0`
 is there before the first step without its velocities being overwritten; a
 rate owes nothing over that empty interval. Restart files carry the injected
-count, so the burst is not repeated. A `mass` sets the count at setup,
+count, so the burst is not repeated. Particles given neither a velocity nor (with heat transfer) a temperature
+take the gas's: injection flags their slots, and right after it the
+solver brings the cell states up to date (halo, not the boundary states,
+which would advance the incoming waves) and samples the gas at every
+particle as `start_from_gas` does, for the flagged ones; on the step path,
+capturable. A `mass` sets the count at setup,
 rounded to the nearest parcel of the distribution's mean mass, as `mass_flow`
 sets a rate.
 

@@ -348,6 +348,8 @@ class Solver {
          *        primitives.
          */
         void update_cell_W();
+        /** @brief W_cells (and the primitives) from the conservatives as they are, halo and boundary states untouched. */
+        void compute_cell_W();
 
         /**
          * @brief The vorticity of each owned cell, into vortex_fields, after
@@ -371,6 +373,8 @@ class Solver {
          *        device, if the run has them (collective).
          */
         void update_particle_fields();
+        /** @brief Give injected particles without a velocity or temperature the gas's at their positions. */
+        void settle_injected_particles();
         /** @brief The dispersed-phase fields (cell, Particles::field_names()), as of the last output or update. */
         const Kokkos::View<rtype **, Kokkos::LayoutRight> & get_particle_fields() const { return particle_fields; }
         /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */

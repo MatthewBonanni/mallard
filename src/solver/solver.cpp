@@ -2552,6 +2552,14 @@ void Solver::update_particle_fields() {
                       [this](const State & s) { halo.exchange(s); }, particle_fields);
 }
 
+void Solver::settle_injected_particles() {
+    if (!particles || !particles->injects_at_gas()) return;
+    // The boundary states stay those of the step's last stage: updating them here would advance the incoming waves
+    halo.exchange(state());
+    compute_cell_W();
+    particles->settle_injected(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
+}
+
 void Solver::allocate_restart_mirrors() {
     if (step_controller.enabled() && h_step_control.data() == nullptr) h_step_control = pinned_mirrors(step_controller.slots());
     const size_t n_char = boundary_data.char_state.extent(0);
@@ -3009,6 +3017,7 @@ void Solver::start_run() {
                 particles->start_from_gas(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
             }
             if (particles) particles->start_injection(static_cast<double>(t));
+            settle_injected_particles();
             calc_dt();
             // Output before the progress row, which reports the monitors' values and counts the files
             if (step == 0) {
@@ -3821,6 +3830,7 @@ void Solver::take_step() {
         particles->relocate();
         particles->migrate();
         particles->inject(t + dt);
+        settle_injected_particles();
     }
     if (double_flux) {
         cells_frozen = false;
@@ -4300,6 +4310,10 @@ void Solver::update_velocity_gradients() {
 void Solver::update_cell_W() {
     halo.exchange(state());
     update_boundary_states(t);
+    compute_cell_W();
+}
+
+void Solver::compute_cell_W() {
     if (is_mixture()) {
         update_cell_states_and_primitives();
         return;

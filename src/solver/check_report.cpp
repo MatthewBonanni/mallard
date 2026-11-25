@@ -802,7 +802,7 @@ std::string check_json(const CheckReport & r) {
                   .raw("center", triple(j.center))
                   .raw("box", "[" + triple(j.box[0]) + ", " + triple(j.box[1]) + "]")
                   .add("measure", j.measure)
-                  .raw("direction", j.along_normal ? "\"inward_normal\"" : triple(j.direction))
+                  .raw("direction", j.gas_velocity ? "\"gas\"" : j.along_normal ? "\"inward_normal\"" : triple(j.direction))
                   .add("speed", j.speed)
                   .add("cone_angle", j.cone_angle)
                   .add("rate", j.rate)

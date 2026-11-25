@@ -550,15 +550,20 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 p.weight = static_cast<rtype>(positive_double(e, "weight", where, N_DIM == 3 ? dim::none : dim::of(0, -1, 0)));
             }
             const bool vector = contains_optional(e, "velocity"), speed = contains_optional(e, "speed");
-            if (vector == speed) {
+            if (vector && speed) {
                 throw InputError(Diagnostic{.key = where, .line = line_of(e),
-                                            .message = "needs exactly one of velocity and speed",
+                                            .message = "takes one of velocity and speed",
                                             .fix = "Give velocity = [u, v, ...], or speed (with direction, which "
                                                    "defaults to the inward normal on boundary zones)",
                                             .docs = DOCS});
             }
             double dir[N_DIM] = {};
-            if (vector) {
+            if (!vector && !speed) {
+                const std::string why = "sets the direction of speed; without velocity or speed particles take the gas velocity";
+                forbid("direction", why);
+                forbid("cone_angle", why);
+                p.gas_velocity = true;
+            } else if (vector) {
                 forbid("direction", "is given by velocity");
                 const std::vector<rtype> v = find_real_vector(e, "velocity", dim::velocity);
                 if (v.size() != N_DIM) throw invalid(e, "velocity", where, "must have " + std::to_string(N_DIM) + " components");
@@ -598,12 +603,14 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 } else if (defaults.temperature_given) {
                     p.temperature = defaults.temperature;
                 } else {
-                    throw missing_key(e, "temperature", "Give the temperature here or in [particles]");
+                    p.gas_temperature = true;
                 }
             } else {
                 forbid("temperature", "is the temperature of particles with heat transfer (specific_heat)");
             }
             info.along_normal = p.along_normal;
+            info.gas_velocity = p.gas_velocity;
+            info.gas_temperature = p.gas_temperature;
             FOR_I_DIM info.direction[i] = dir[i];
             info.speed = static_cast<double>(p.speed);
             info.cone_angle = cone_degrees;
@@ -852,6 +859,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     const uint32_t w = target.width, n_aux = static_cast<uint32_t>(target.aux.extent(1)), first_q = target.first_quantity;
     const bool solid = target.solid, heated = target.heated;
     const Solid sphere = target.sphere;
+    const auto settle = target.at_gas;
     gated::parallel_for("particle_injection_insert", capacity, KOKKOS_LAMBDA(const uint32_t m) {
         if (m >= info(LOCAL)) return;
         if (m >= info(FREE_SLOTS)) {
@@ -869,11 +877,14 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
         FOR_I_DIM values[i] = static_cast<rtype>(p[i]);
         uint32_t at = N_DIM;
         if (solid) {
+            const InjectorSpec & spec = sm.spec[j];
             rtype v[N_DIM];
             sm.velocity(j, e, r, v);
             FOR_I_DIM values[N_DIM + i] = v[i];
             at = 2 * N_DIM;
-            if (heated) values[at++] = sphere.thermal_value(v, sm.spec[j].temperature);
+            if (heated) values[at++] = sphere.thermal_value(v, spec.temperature);
+            settle(s) = static_cast<uint8_t>((spec.gas_velocity ? SETTLE_VELOCITY : 0) |
+                                             (heated && spec.gas_temperature ? SETTLE_TEMPERATURE : 0));
             props(s, 0) = static_cast<rtype>(sm.diameter(j, r));
             props(s, 1) = sm.spec[j].weight;
         }
@@ -925,8 +936,13 @@ std::vector<std::string> Injectors::summary() const {
             text += " from t = " + logging::real(info.start) + (std::isfinite(info.end) ? " to " + logging::real(info.end) : "");
         }
         if (std::isfinite(info.mean_diameter)) {
-            text += ", " + logging::real(info.speed) + " m/s " +
-                    (info.along_normal ? std::string("along the inward normal") : "along " + vector_text(info.direction.data(), N_DIM));
+            if (info.gas_velocity) {
+                text += ", at the gas velocity";
+            } else {
+                text += ", " + logging::real(info.speed) + " m/s " +
+                        (info.along_normal ? std::string("along the inward normal") : "along " + vector_text(info.direction.data(), N_DIM));
+            }
+            if (info.gas_temperature) text += ", at the gas temperature";
             if (info.cone_angle > 0.0) text += " in a cone of " + logging::real(info.cone_angle) + " deg";
             text += ", D10 " + logging::real(info.mean_diameter) + ", D32 " + logging::real(info.sauter_diameter);
         }

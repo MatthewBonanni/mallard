@@ -654,6 +654,7 @@ void Solver::check_particles(CheckReport & r) {
         j.box = info.box;
         j.measure = info.measure;
         j.along_normal = info.along_normal;
+        j.gas_velocity = info.gas_velocity;
         j.direction = info.direction;
         j.speed = info.speed;
         j.cone_angle = info.cone_angle;

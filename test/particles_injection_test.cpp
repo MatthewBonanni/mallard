@@ -399,6 +399,27 @@ TEST(ParticleInjectionTest, ACountInjectorReleasesItsParcelsOnceAtItsStart) {
     }
 }
 
+TEST(ParticleInjectionTest, InjectedParticlesWithoutVelocityOrTemperatureTakeTheGass) {
+    // Heated spheres released at the start and from a nozzle every step into gas at u = 1, T = 1, with no velocity
+    // or temperature given anywhere: each starts at the gas's, so drag and heat transfer leave it there
+    const std::string keys = HEAVY + "specific_heat = 1000.0\n"
+                             "[[particles.injectors]]\nname = \"cloud\"\nregion = \"domain\"\ncount = 40\n"
+                             "[[particles.injectors]]\nname = \"nozzle\"\npoint = " + numbers(0.3, 0.5, 0.25) +
+                             "\nrate = 400.0\n";
+    Solver solver;
+    solver.init(parse_toml(box(1.0, "n_steps = 4\ndt = 0.005\n", keys, "solid")));
+    solver.run();
+    const std::vector<particles::Record> records = solver.get_particles()->gather();
+    // Those of the cloud near the outlet leave
+    ASSERT_EQ(records.size() + solver.get_particles()->removed()[0], 48u);
+    ASSERT_GT(records.size(), 40u);
+    for (const auto & r : records) {
+        EXPECT_NEAR(r.v[0], 1.0, ROUND_OFF) << "particle " << r.id;
+        for (size_t i = 1; i < N_DIM; i++) EXPECT_NEAR(r.v[i], 0.0, ROUND_OFF) << "particle " << r.id;
+        EXPECT_NEAR(r.T, 1.0, ROUND_OFF) << "particle " << r.id;
+    }
+}
+
 TEST(ParticleInjectionTest, AMassReleasesItsMassToWithinHalfAParcel) {
     // 37.7 parcels' worth of HEAVY spheres, 2 per parcel: 38 parcels, 0.3 of a parcel over (a floor would be 0.7 under)
     const double w = 2.0, m = 1e6 * PI / 6.0 * 1e-9, parcel = w * m, mass = 37.7 * parcel;
@@ -419,7 +440,7 @@ namespace {
 
 /**
  * @brief Two-way coupled spheres of a Rosin-Rammler distribution from the inlet, a disk and a nozzle in a crossflow,
- *        and a cloud released at once at the start in the whole domain.
+ *        a cloud released at once at the start in the whole domain, and a nozzle at the gas velocity.
  */
 std::string mixed_injectors(const std::string & run) {
     const std::string keys =
@@ -433,7 +454,8 @@ std::string mixed_injectors(const std::string & run) {
         "[[particles.injectors]]\nname = \"nozzle\"\npoint = " + numbers(0.3, 0.8, 0.1) + "\nrate = 610.0\nspeed = 3.0\n"
         "direction = " + numbers(1.0, -1.0, 0.5) + "\ncone_angle = 45.0\nstart = 0.02\n"
         "[[particles.injectors]]\nname = \"burst\"\nregion = \"domain\"\ncount = 200\nvelocity = " +
-        numbers(0.5, 0.0, 0.0) + "\n";
+        numbers(0.5, 0.0, 0.0) + "\n"
+        "[[particles.injectors]]\nname = \"drift\"\npoint = " + numbers(0.2, 0.3, 0.2) + "\nrate = 300.0\n";
     return box(1.0, run, keys, "solid");
 }
 

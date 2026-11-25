@@ -1605,8 +1605,8 @@ Seeds on a lattice, after the `points` in id order (`x` varying fastest).
 
 Particles seeded at random, at a point, on boundary zones or in a filled
 region, at once or continuously ([Injectors](guide/particles.md#injectors)), at most 8. Give exactly one
-of `point` and `region`, and of `count`, `mass`, `rate` and `mass_flow`; solid particles also
-exactly one of `velocity` and `speed`.
+of `point` and `region`, and of `count`, `mass`, `rate` and `mass_flow`; solid particles
+take at most one of `velocity` and `speed`.
 
 | Key | Description |
 |---|---|
@@ -1618,13 +1618,13 @@ exactly one of `velocity` and `speed`.
 | `rate` | Parcels per second |
 | `mass_flow` | Mass per second (`"solid"`; per meter of depth in 2D): `rate` is `mass_flow / (weight m)`, `m` the mean particle mass of `diameter` |
 | `start`, `end` | Times it injects between, default 0 and for ever (`count` and `mass`: `start` only) |
-| `velocity` | Velocity of the particles (`"solid"`) |
-| `speed` | Their speed (`"solid"`), along `direction` |
+| `velocity` | Velocity of the particles (`"solid"`), default the gas velocity where each enters |
+| `speed` | Their speed (`"solid"`), along `direction`, default the gas velocity where each enters |
 | `direction` | Direction of their velocity with `speed`, default the inward normal on boundary zones (required elsewhere) |
 | `cone_angle` | Half angle in degrees, in [0, 90], of the cone about the direction the velocities fill (uniformly in angle in 2D, in solid angle in 3D), default 0 |
 | `diameter` | A diameter, or a size distribution `{distribution, basis, ...}` (`"solid"`), default `[particles] diameter` |
 | `weight` | Particles per parcel (`"solid"`), default `[particles] weight` |
-| `temperature` | Temperature of the particles (`"solid"` with `specific_heat`), default `[particles] temperature` |
+| `temperature` | Temperature of the particles (`"solid"` with `specific_heat`), default `[particles] temperature`, else the gas temperature where each enters |
 
 A size distribution is a table of:
 

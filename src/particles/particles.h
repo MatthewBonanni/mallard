@@ -366,6 +366,17 @@ class Particles {
          */
         void start_injection(double t) { injectors.start(t, injection_target()); }
 
+        /** @brief Whether injected solid particles take the gas velocity or temperature where they enter. */
+        bool injects_at_gas() const { return is_solid && injectors.at_gas(); }
+
+        /**
+         * @brief Give the particles just injected without a velocity or temperature those of the gas at their
+         *        positions, from the cell states W (halo included); on the device, capturable.
+         */
+        void settle_injected(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                             const LSQVertexGradientFunctor & gradient,
+                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
+
         /**
          * @brief After an accepted step, add the particles the injectors emitted up to time t_now, into the
          *        cells of this rank that hold them (particles::Injectors). On the device only: the device-time
@@ -463,6 +474,7 @@ class Particles {
         Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
         Kokkos::View<rtype **, Kokkos::LayoutRight> props;  // (slot, k): diameter, particles per parcel (solid)
         Kokkos::View<rtype *> initial_aux;  // (k): aux of a new particle
+        Kokkos::View<uint8_t *> at_gas;     // (slot): particles::SETTLE_* of injected particles awaiting the gas's values
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
         Kokkos::View<uint64_t[3]> n_removed;  // left the domain, lost, stuck
