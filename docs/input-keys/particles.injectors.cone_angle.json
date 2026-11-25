@@ -8,6 +8,6 @@
   "tools/dev/catalog_inputs/2d/particle_injector_expressions.toml",
   "tools/dev/catalog_inputs/2d/particle_injectors.toml"
  ],
- "type": "number",
+ "type": "number|string",
  "unit": "deg"
 }
