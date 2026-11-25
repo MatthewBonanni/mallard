@@ -1130,8 +1130,15 @@ Contents open_vtkhdf(const std::string & path) {
     if (series) {
         Handle steps(H5Gopen2(top, "Steps", H5P_DEFAULT), H5Gclose, "opening Steps");
         times = all<double>(steps, "Values");
+    } else if (exists(field_data, "TIME")) {
+        times = {all<double>(field_data, "TIME").at(0)};
+    } else if (c.kind == Kind::snapshot && c.fields.empty()) {
+        // The mesh file of a VTKHDF series, whose snapshots link its arrays
+        c.kind = Kind::mesh;
+        c.format = "VTKHDF mesh";
+        return c;
     } else {
-        times = {exists(field_data, "TIME") ? all<double>(field_data, "TIME").at(0) : 0.0};
+        times = {0.0};
     }
     for (size_t k = 0; k < times.size(); k++) {
         c.snapshots.push_back(snapshot_of(times[k], k < recorded_steps.size() ? recorded_steps[k] : -1, path, k,
@@ -1634,6 +1641,7 @@ Geometry read_geometry(const Contents & file, size_t snapshot) {
         case Kind::table: fail(file.path, "is a table, which holds no geometry: its coordinates are columns");
         case Kind::mesh: {
             if (file.format == "XDMF output mesh") return read_output_mesh_geometry(file.path);
+            if (file.format == "VTKHDF mesh") return read_vtkhdf_geometry(file.path);
             const MeshBlock block = read_mesh(file.path);
             Geometry g;
             for (const auto & x : block.node_coords) {
