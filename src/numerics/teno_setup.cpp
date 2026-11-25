@@ -2349,10 +2349,10 @@ struct CellTeam {
                 return c.g.offsets_cells_of_cell(cl + 1) - c.g.offsets_cells_of_cell(cl);
             },
             [&](const uint32_t k, const uint32_t offset) { cand_off[k] = offset; });
-        int truncated = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(tm, nf), [&](const uint32_t k, int & any) {
-            if (w.visit_cell[begin + k] >= c.g.n_complete) any = 1;
-        }, Kokkos::Max<int>(truncated));
+        bool truncated = false;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(tm, nf), [&](const uint32_t k, bool & any) {
+            any = any || w.visit_cell[begin + k] >= c.g.n_complete;
+        }, Kokkos::LOr<bool>(truncated));
         tm.team_barrier();
         if (truncated && tm.team_rank() == 0) ctl[TRUNCATED] = 1;
         if (total > layout.candidates) {
