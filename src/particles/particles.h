@@ -30,6 +30,7 @@
 #include "gradient.h"
 #include "input.h"
 #include "particle_coupling.h"
+#include "particle_evaporation.h"
 #include "particle_forces.h"
 #include "particle_injection.h"
 #include "particle_probes.h"
@@ -40,6 +41,7 @@
 
 class FaceReconstruction;
 class Mesh;
+class MixtureModel;
 using RestartArrays = std::vector<std::pair<std::string, std::vector<double>>>;
 struct Distribution;
 
@@ -165,8 +167,10 @@ struct Walker {
 
 /**
  * @brief A particle as output reports it: its id, position, velocity (solid
- *        particles, else 0), temperature (with heat transfer, else NaN),
- *        diameter and particles per parcel (solid particles, else NaN) and quantities.
+ *        particles and droplets, else 0), temperature (with heat transfer and
+ *        for droplets, else NaN), diameter (NaN for tracers), particles per
+ *        parcel (solid particles and droplets, else NaN), mass (droplets, else
+ *        NaN) and quantities.
  */
 struct Record {
     uint64_t id;
@@ -175,6 +179,7 @@ struct Record {
     double T;
     double d;
     double w;
+    double m;
     std::vector<double> q;
 };
 
@@ -220,12 +225,15 @@ class Particles {
          *        null; the particles are seeded when it holds none.
          * @param regions The regions expressions and probes read.
          * @param gas The single gas (the temperature at a particle, the drag on solid particles), or null for a mixture.
+         * @param mixture The gas mixture, or null for a single gas.
+         * @param gas_scalars Per cell its mass fractions, then other columns (mixtures; the gas at droplets).
          * @param t_begin The run's start time, and t_end the latest it can stop (infinite if unknown): the
          *        default capacity holds every particle the injectors emit in between.
          */
         void init(const Input & input, std::shared_ptr<const Mesh> mesh, const BoundaryData & boundaries,
                   const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
-                  const Euler * gas, double t_begin = 0.0,
+                  const Euler * gas, const MixtureModel * mixture = nullptr,
+                  Kokkos::View<rtype **, Kokkos::LayoutRight> gas_scalars = {}, double t_begin = 0.0,
                   double t_end = std::numeric_limits<double>::infinity());
 
         /** @brief The values of the particle block of a State: width() per slot. */
@@ -247,8 +255,19 @@ class Particles {
         /** @brief Whether the right-hand side reads the stage time (set_stage_time before velocity()). */
         bool reads_time() const { return quantities.reads_time(); }
 
-        /** @brief Whether the particles are solid, with a velocity of their own. */
+        /** @brief Whether the particles are solid or droplets, with a velocity of their own. */
         bool inertial() const { return is_solid; }
+
+        /** @brief Whether the particles are evaporating droplets (type = "droplet"). */
+        bool droplets() const { return is_droplet; }
+
+        /**
+         * @brief After a step, before relocate(): remove the droplets below the minimum diameter, and with
+         *        two-way coupling give the gas state their remaining mass (as vapor), momentum and energy,
+         *        deposited as couple() deposits (capturable).
+         * @param exchange Fills the halo cells of a State from their owners.
+         */
+        void remove_evaporated(const State & state, const std::function<void(const State &)> & exchange);
 
         /** @brief Whether the particles act on the gas (coupling = "two-way"): couple() after velocity(). */
         bool two_way() const { return coupled; }
@@ -257,7 +276,7 @@ class Particles {
          * @brief Add to the gas rates rhs (per volume, owned cells) what the particles gave the gas at the stage
          *        velocity() last evaluated: per particle the opposite of its momentum and energy change less
          *        gravity's, times the particles per parcel, summed into the particles' cells and spread over
-         *        the deposition width (particles::Deposition).
+         *        the deposition width (particles::Deposition); droplets also their mass, as vapor.
          * @param x_stage The stage positions velocity() evaluated.
          * @param exchange Fills the halo cells of a State from their owners.
          */
@@ -268,8 +287,9 @@ class Particles {
 
         /**
          * @brief The dispersed-phase cell fields a run with this input has, in the columns of fields():
-         *        PARTICLE_VOLUME_FRACTION, PARTICLE_NUMBER_DENSITY, PARTICLE_U_<axis> (solid particles), then
-         *        PARTICLE_SOURCE_<conservative> (two-way coupling).
+         *        PARTICLE_VOLUME_FRACTION, PARTICLE_NUMBER_DENSITY, PARTICLE_U_<axis> (solid particles and
+         *        droplets), then PARTICLE_SOURCE_<conservative> (two-way coupling) and for droplets
+         *        PARTICLE_SOURCE_RHOY_<vapor>.
          */
         static std::vector<std::string> field_names(const Input & input);
 
@@ -403,6 +423,9 @@ class Particles {
         /** @brief Particles that left the domain, that were lost, and that stuck to walls, on all ranks (collective). */
         std::array<uint64_t, 3> removed() const;
 
+        /** @brief Droplets removed below the minimum diameter, on all ranks (collective). */
+        uint64_t evaporated() const;
+
         /** @brief Every particle, by increasing id, on every rank (collective). */
         std::vector<particles::Record> gather() const;
 
@@ -413,9 +436,10 @@ class Particles {
          * @brief The particles as stage_output() last staged them, by
          *        increasing id, on every rank (collective): PARTICLE_ID,
          *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle),
-         *        PARTICLE_V (solid particles, likewise), PARTICLE_T (with heat
-         *        transfer), PARTICLE_Q_<name> (per
-         *        quantity) and PARTICLE_REMOVED (left the domain, lost, stuck).
+         *        PARTICLE_V (solid particles and droplets, likewise), PARTICLE_T (with heat
+         *        transfer and droplets), PARTICLE_E (energies of two-way coupled solid particles and of
+         *        droplets), PARTICLE_P and PARTICLE_M (momenta and masses of droplets), PARTICLE_Q_<name> (per
+         *        quantity) and PARTICLE_REMOVED (left the domain, lost, stuck, evaporated).
          */
         RestartArrays restart_arrays() const;
 
@@ -434,9 +458,12 @@ class Particles {
                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients);
 
     private:
+        /** @brief The velocity of the particle in slot values y (from the velocity on) into v, on the host. */
+        void host_velocity(const rtype * y, rtype * v) const;
+
         /**
          * @brief The values a restart file or migration carries per particle after its id and cell: block, aux, then
-         *        the properties (diameter and weight of solid particles).
+         *        the properties (diameter and weight of solid particles and droplets).
          */
         uint32_t persistent() const { return width + quantities.n_aux() + n_props; }
 
@@ -457,8 +484,13 @@ class Particles {
         bool start_v_at_gas = false;
         bool start_T_at_gas = false;
         bool coupled = false;
+        bool is_droplet = false;
         rtype weight = 1.0_r;  // particles per parcel
         particles::Solid solid;
+        particles::Droplet droplet;
+        std::string vapor_name;
+        Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;  // (cell, k): mass fractions of the gas (mixtures)
+        Kokkos::View<double **, Kokkos::LayoutRight> work;    // (slot, species): droplets' work memory
         particles::Deposition deposition;
         particles::Quantities quantities;
         particles::ParticleProbes probes;
@@ -477,7 +509,7 @@ class Particles {
         Kokkos::View<uint8_t *> at_gas;     // (slot): particles::SETTLE_* of injected particles awaiting the gas's values
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
-        Kokkos::View<uint64_t[3]> n_removed;  // left the domain, lost, stuck
+        Kokkos::View<uint64_t[4]> n_removed;  // left the domain, lost, stuck, evaporated
         Kokkos::View<rtype *[2]> restitution;  // (face): normal and tangential, at walls solid particles rebound off
         Kokkos::View<rtype **, Kokkos::LayoutRight> step_start;  // (slot, k): solid particles at the step's start (Solid::Start)
 
@@ -494,7 +526,7 @@ class Particles {
         ParticleView::host_mirror_type h_x;
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_aux;
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_props;
-        Kokkos::View<uint64_t[3]>::host_mirror_type h_removed;
+        Kokkos::View<uint64_t[4]>::host_mirror_type h_removed;
 
         // Migration (host)
         std::vector<int> halo_owner;        // (halo cell - n_owned): owner rank, -1 if unknown

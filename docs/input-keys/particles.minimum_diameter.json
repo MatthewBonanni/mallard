@@ -1,0 +1,11 @@
+{
+ "default": "5.000000000000001e-07",
+ "dimension": "length (m)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/droplets.toml"
+ ],
+ "type": "number"
+}

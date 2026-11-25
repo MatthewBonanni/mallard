@@ -85,6 +85,7 @@
   "examples/wedge/input.toml",
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml",
   "tools/dev/catalog_inputs/2d/flamelet.toml",
   "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",
   "tools/dev/catalog_inputs/2d/flamelet_transported.toml",
