@@ -792,6 +792,43 @@ TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     EXPECT_EQ(run_case("probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
+TEST(StepQueueTest, ProbesOfReductionsAloneAreReducedOnTheDevice) {
+    // No samples written: the step graph reduces them and stages the reductions alone, which the host writes as it
+    // writes its own; the wall's extrema alone still take its measure
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             point_of("0.4", "0.5", "0.2") + ", radius = 0.3}";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"line\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 9\nfields = [\"RHO\", \"P\"]\nsamples = false\n"
+              "sampling = \"point\"\nreductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+              "reductions_file = \"{dir}/line.csv\"\n"
+              "[[probes]]\nname = \"wall\"\ninterval = 2\nboundary = \"bottom\"\nfields = [\"P\", \"MASS_FLUX\"]\n"
+              "samples = false\nreductions = [\"max\"]\nreductions_file = \"{dir}/wall.csv\"\n"
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"T\"]\ninterval = 4\n"
+              "reductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/disk.csv\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("reduced_probes", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"line.csv", "wall.csv", "disk.csv"}) {
+            const std::string & rows = o.files.at(file);
+            EXPECT_GE(std::count(rows.begin(), rows.end(), '\n'), 5) << file;
+        }
+        // The wall's measure: its length (2D) or area (3D)
+        const std::string & rows = o.files.at("wall.csv");
+        std::istringstream row(rows.substr(rows.find("\n2,") + 1));
+        std::string step, t, measure;
+        std::getline(row, step, ',');
+        std::getline(row, t, ',');
+        std::getline(row, measure, ',');
+        EXPECT_NEAR(std::stod(measure), N_DIM == 2 ? 1.0 : 0.4, 1e-6);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("reduced_probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
 TEST(StepQueueTest, RowsOfRunsWithBoundariesOfTRunAhead) {
     // A row every step, with an outlet pressure of t: its range is checked on the device at each row
     Case c;

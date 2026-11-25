@@ -777,9 +777,9 @@ TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsLines) {
                 EXPECT_EQ(files[file]["x"], "m") << file;
                 EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
             }
-            EXPECT_EQ(files["/line_reductions.csv"]["length"], "m");
+            EXPECT_EQ(files["/line_reductions.csv"]["LENGTH"], "m");
             EXPECT_EQ(files["/extract/line_reductions.csv"], files["/line_reductions.csv"]);
-            EXPECT_EQ(files["/forces.csv"]["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
+            EXPECT_EQ(files["/forces.csv"]["F_X_PRESSURE"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
             EXPECT_EQ(spectra["mean P"], "kg m-1 s-2");
         }
     }

@@ -181,7 +181,7 @@ void Solver::update_flamelet_variance(const State & s) {
     // Owned cells have complete stencils; halo cells take their owners' variances
     const uint32_t n_owned = mesh->n_owned();
     gated::parallel_for("flamelet_variance", halo.active() ? n_owned : mesh->n_cells,
-                         AlgebraicVarianceFunctor{viscous_gradient, s.flow, s.species, bc_transport_values, les_width,
+                         AlgebraicVarianceFunctor{viscous_gradient(), s.flow, s.species, bc_transport_values, les_width,
                                                   mixture_model->flamelet().variance_constant(), flamelet_variance});
     if (!halo.active()) return;
     const SpeciesView packed = flamelet_halo.species;

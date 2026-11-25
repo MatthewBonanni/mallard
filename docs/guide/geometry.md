@@ -132,7 +132,7 @@ of a boolean.
 | `half_space` | `{type = "half_space", point = [1, 0, 0], normal = [1, 0, 0]}`: the side `x < 1` |
 | `polygon` (2D) | `{type = "polygon", vertices = [[0, 0], [1, 0], [0.5, 1]]}` |
 | `implicit` | `{type = "implicit", f = "x^4 + y^4 + z^4 - 0.41"}`: where `f < 0` |
-| `stl`, `obj` | `{type = "stl", file = "nozzle.stl", units = "mm"}`: inside a closed CAD surface ([Regions from CAD surfaces](#regions-from-cad-surfaces)) |
+| `stl`, `obj` | `{type = "stl", file = "nozzle.stl", units = "mm"}`: inside a closed CAD surface ([Regions from CAD surfaces](#regions-from-cad-surfaces)); with `filled = false`, an open one itself ([Open surfaces from CAD](#open-surfaces-from-cad)) |
 
 Each type has one dimension, the same in every run: `circle` and `ellipse`
 are curves; `disk`, `annulus`, `rectangle` and `polygon` are flat (areas in 2D,
@@ -237,7 +237,7 @@ place on the surface in meters, and the fix:
 
 | Error | Cause | Fix |
 |---|---|---|
-| is not closed: it has N edges of one triangle only | holes or gaps, or neighboring triangles whose shared corners differ in the file | close the holes in CAD or a mesh repair tool; corners must match exactly |
+| is not closed: it has N edges of one triangle only | holes or gaps, or neighboring triangles whose shared corners differ in the file | close the holes in CAD or a mesh repair tool; corners must match exactly. A sheet meant to be open is a surface region with `filled = false` ([Open surfaces from CAD](#open-surfaces-from-cad)) |
 | it has N edges of more than two triangles | bodies touching along an edge, or triangles given twice | remove the duplicates, or export each body to its own file and combine them with `union` |
 | triangles at a vertex do not form one fan | bodies touching at a point | separate them, or use `union` of separate files |
 | closed surfaces that cross or touch each other | overlapping bodies in one file | merge them in CAD, or use `union` of separate files |
@@ -246,13 +246,74 @@ place on the surface in meters, and the fix:
 
 Pitfalls:
 
-- Open surfaces, such as a sheet or a single face, are not regions yet.
+- Open surfaces, such as a sheet or a single face, are surface regions only,
+  with `filled = false` ([below](#open-surfaces-from-cad)): they enclose no
+  solid, so sources and sponges cannot take them.
 - A closed surface that crosses itself is not detected: its inside near the
   crossing is that of the nearest triangles. Repair self-intersections in CAD.
 - The file is read once per run, on every rank, and its triangles are held
   in device memory (about 270 bytes each): a million-triangle file takes
   about 270 MB. Coarsen the export where the region needs no detail.
 - Like the mesh file, `file` is relative to the directory the run starts in.
+
+#### Open surfaces from CAD
+
+```toml
+# The mean pressure and the mass flux through a curved baffle drawn in millimeters
+[[probes]]
+name = "baffle"
+fields = ["P", "MASS_FLUX"]
+region = {type = "stl", file = "baffle.stl", units = "mm", filled = false}
+reductions = ["mean", "integral"]
+```
+
+A sheet with edges of one triangle only, such as a baffle, a screen or a
+single face of a part, encloses no solid, so it is a surface region (in 2D a
+curve): give it `filled = false`. It works wherever a surface region does:
+probes, their reductions and fluxes, snapshots (`[[write_data]]`), `mallard post`
+and `mallard check --view`; where a filled region is needed (sources, sponges)
+it is an error that says it encloses nothing.
+The keys are those above: `file`, `units` (the unit the part was drawn in, as
+for closed surfaces), and the transforms, which act after the units.
+
+**Which cells it selects.** The surface is its own triangles, exactly: each
+triangle, clipped to the domain, is cut into patches about half a mean cell
+wide (from its first corner toward the second and the third), and each patch
+belongs to the one owned cell that holds its center (where a clipping region
+or the domain's boundary cuts the patch, its first kept Gauss point), with
+the patch's whole area and its Gauss points. So the selected cells are those
+holding a patch's center: every cell the surface crosses by more than about
+half a cell, and the area is exact to round-off in total, not split at cell
+faces. In 2D the region is the surface's section by the plane `z = 0`, a
+polyline of segments placed the same way. Neither depends on the number of
+ranks or the partition. Below, the section of a baffle drawn in millimeters,
+its segments with their normals, and the cells they select in a 2D run:
+
+![An open baffle surface from an STL file in millimeters, and its section in a 2D run: the segments with their normals and the cells that hold their centers](../images/guide/region-cad-open-surface-light.svg#gh-light-mode-only)
+![An open baffle surface from an STL file in millimeters, and its section in a 2D run: the segments with their normals and the cells that hold their centers](../images/guide/region-cad-open-surface-dark.svg#gh-dark-mode-only)
+
+**Which way it faces.** Each connected piece faces the side its first
+triangle in the file faces by the right-hand rule (counterclockwise corners
+seen from that side); Mallard turns its other triangles to match, whatever
+their order of corners. `flip = true` reverses it. Fluxes count positive
+toward that side.
+
+**What it must be.** The checks of closed surfaces that apply to sheets apply:
+no edge of more than two triangles, each corner's triangles one fan, and one
+side throughout (a Moebius strip is an error). A file holding both open and
+closed pieces is open, and each of its pieces faces as its first triangle.
+
+Pitfalls:
+
+- Without `filled = false` an open surface is the error `is not closed`, as
+  for a filled region: an open sheet has no inside.
+- Its edge curve (`{type = "boundary", of = ...}`) and clipping by
+  [regions of the solution](#regions-defined-by-the-solution) are not
+  supported yet, and are errors that say so; clipping by primitives and by
+  regions of the mesh works, as for any surface.
+- An open sheet does not move: moving surfaces are not supported yet.
+- A [curved zone](meshes.md#curved-boundaries) cannot lie on an open sheet
+  yet: it is an error.
 
 ### Regions of the mesh
 
@@ -415,7 +476,7 @@ or 1 for a point) and orientation. They are made in one of two ways, and
 `mallard check` reports which:
 
 - **Exact**: the surfaces of primitives (`sphere`, `ellipsoid`, `cylinder`,
-  `cone`, `box`, `torus`, the triangles of `stl` and `obj`; in 2D their
+  `cone`, `box`, `torus`, the triangles of `stl` and `obj`, closed or open; in 2D their
   circles, ellipses, polygons and sections) and the
   flat surfaces and curves of 3D runs follow their own parameters, cut into
   patches about half a cell wide and integrated with Gauss points, so an

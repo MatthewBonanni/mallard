@@ -538,6 +538,46 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
     }
 }
 
+TEST(ProbesTest, OpenSurfacesFromFilesAreTheSameOnAnyNumberOfRanks) {
+    // An open STL surface, a roof of two planes (2D: its section, a polyline): its exact area or length
+    const double z0 = N_DIM == 3 ? 0.2 : -0.5, z1 = N_DIM == 3 ? 0.8 : 0.5;
+    const double line[3][2] = {{0.15, 0.3}, {0.5, 0.75}, {0.85, 0.35}};
+    std::ostringstream stl;
+    stl.precision(17);
+    stl << "solid roof\n";
+    for (int i = 0; i < 2; i++) {
+        const double a0[3] = {line[i][0], line[i][1], z0}, b0[3] = {line[i + 1][0], line[i + 1][1], z0};
+        const double a1[3] = {line[i][0], line[i][1], z1}, b1[3] = {line[i + 1][0], line[i + 1][1], z1};
+        for (const auto & t : {std::array<const double *, 3>{a0, b0, b1}, std::array<const double *, 3>{a0, b1, a1}}) {
+            stl << "facet normal 0 0 0\nouter loop\n";
+            for (const double * x : t) stl << "vertex " << x[0] << " " << x[1] << " " << x[2] << "\n";
+            stl << "endloop\nendfacet\n";
+        }
+    }
+    stl << "endsolid roof\n";
+    const std::string path = write_temp_shared("mallard_probe_roof.stl", stl.str());
+    const std::string dir = fresh_dir("open_surface_ranks");
+    auto input = [&](const std::string & suffix) {
+        return box_case(10, SINE_RHO, "type = \"MUSCL\"\n",
+                        "[[probes]]\nname = \"roof\"\nfields = [\"RHO\", \"P\"]\nregion = {type = \"stl\", file = \"" +
+                            path + "\", units = \"m\", filled = false}\nreductions_file = \"" + dir + "/roof_" + suffix +
+                            ".csv\"\n",
+                        "n_steps = 2\ncfl = 0.4\n");
+    };
+    Solver distributed;
+    distributed.init(parse_toml(input("distributed")));
+    run(distributed);
+    Solver serial;
+    serial.set_distributed(false);
+    serial.init(parse_toml(input(serial_name("serial"))));
+    run(serial);
+    EXPECT_EQ(without_run_metadata(read_all(dir + "/roof_distributed.csv")), without_run_metadata(read_all(dir + "/roof_serial.csv")))
+        << "on " << comm::size() << " ranks";
+    const double length = std::hypot(0.35, 0.45) + std::hypot(0.35, 0.4);
+    const auto rows = read_csv(dir + "/roof_serial.csv");
+    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "LENGTH" : "AREA"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
+}
+
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
     const std::string region = "region = {type = \"sphere\", center = " + numbers3("0.5", "0.5", "0.5") +
                                ", radius = 0.2}\n";

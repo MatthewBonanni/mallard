@@ -350,7 +350,7 @@ outputs) and team scratch set a peak 30% above the steady state.
   (84 values at order 5, 165 at order 6) instead of stored (595 and 1540 values), with the setup's sequence of
   operations and roundings (no FMA): the selection runs one cell per team, whose threads form the matrix in team
   scratch, four entries per thread at a time.
-- The troubled passes' scratch holds a quarter of the cells (`troubled_capacity`); more troubled cells are done in
+- The troubled passes' scratch holds an eighth of the cells (`troubled_capacity`); more troubled cells are done in
   further rounds. Below a capacity of 1, every round, the first included, recomputes its cells' central coefficients with
   the smooth pass's arithmetic. Which cells fall in the first round follows the order of the queue's atomic
   increments, and two kernels need not contract the same arithmetic into the same FMAs (#612).
@@ -546,7 +546,7 @@ launches of the code a capture records gate every body.
 Triggers that read a probe's value are evaluated on the device too. The probes they read are staged, and at
 their writes, before the triggers (and after the statistics' samples, which the host's order puts first), the
 graph reduces them into the trigger variables with the host's arithmetic (`probe_reduction.h`): every sum's
-per-sample terms, each product rounded on its own, are summed exactly in fixed point (`ExactSums`, reduced
+per-sample terms, each product rounded on its own, are summed exactly and rounded once (`ExactSums`, reduced
 over the ranks with `comm::allreduce_device`, on NCCL in the graph), the extrema are reduced with `MIN` and
 `MAX`, and a one-point probe's values go to every rank as bit patterns summed with zeros, so the values equal
 the host's `Probe::reduce` bit for bit on any number of ranks. The host still writes the files from the staged
@@ -563,9 +563,7 @@ device's `BATCH_M2_<average>` and closed batches with the host's arithmetic (`ba
 Student's t quantile read from a window of 1024 the host fills on resuming once the batches closed have gone past
 half of it; the horizon stops the queue before the means' samples could close more batches than the window holds.
 Probes of moving and `where` regions reduce the cells covered at the write, the first `count()` of the
-selection, weighed by their `f V`; the fixed point's unit depends on the number of terms summed over the ranks,
-which only the device knows, so `ExactSums::sum(terms, count)` sums that count over the ranks and takes the unit
-from it in a kernel, as `exact_sums_unit` (integer arithmetic, the same on the host) gives it. Their time
+selection, weighed by their `f V` (`ExactSums::sum(terms, count)`, a count only the device knows). Their time
 averages are kept per owned cell, as the host's per global cell (`accumulate_cells`): each cell held or covered
 takes `mean += a (x - mean)` of `f V` and of `f V q`, `x` zero where the sample does not cover it, and the
 reduction compacts the cells held and divides as `Probe::mean_fields` does. The sums do not depend on the order
@@ -650,7 +648,13 @@ derived fields the due probes read are updated (the cell states, transport and g
 `write_probes` updates them), and under each probe's flag its samples are evaluated and copied into a pinned
 array per record slot; the columns of `[statistics]` means, covariances and phase averages are copied there
 from the device's averages at each sample's cell. The host gathers them over the ranks, reduces and writes them from that slot as it
-takes the record; the intervals are copied to the device whenever it resumes, so control commands that change
+takes the record. A probe whose writes need its reductions alone (no samples written, no time averages, spectra,
+motion or isosurface) is reduced in the graph instead, as the probes triggers read are, and only its measure and
+reduced values go to the record slot: copying a cut plane's 1.5M samples into pinned memory at each write made
+the perf set's `probes_3d` two to five times slower than `teno5_3d` on an A100 (#1402). Point values come from
+`FaceReconstruction::point_values` with `by_cell`: the probes' points come by cell, and TENO fits each run of
+one cell once, a team of threads sharing out its coefficients, each summed in the per-point fit's order, so the
+values are those of a fit per point bit for bit. The intervals are copied to the device whenever it resumes, so control commands that change
 them take effect at the host's next step.
 
 A moving region's fractions, and a `where` region's (from the levels of its conditions on the cell states, which
@@ -1026,6 +1030,24 @@ row below.
 
     On one node the difference stays within 25-50 us per step, as on one GPU; across two nodes it grows to 100-140
     us, the extra all-reduce's network latency, which shows only for the dynamic constant at 16k cells per GPU.
+
+    Since #1097 the sums need no maxima: each term is split into 32-bit limbs indexed by its exponent, added
+    exactly as integers, and the limbs go through one SUM all-reduce, after which the total is rounded once (so
+    sums are now exactly rounded, and their last bits differ from those of earlier versions). A window of four
+    limbs above the largest term of the rank, found without communication, stays in registers; the rest go to
+    the limbs by integer atomics. Alternated against main a7a5432e4 (old exact sums and plain sums), 400 steps,
+    median ms per step from step 300 with [min-max] over 5 reps on one node and 7 reps on 1 + 1 GPUs on two
+    nodes, old exact / new exact / plain:
+
+    | layout | `air_3d`, `les.dynamic`, 16k cells per GPU | `air_3d`, `les.dynamic`, 221k cells | `flame_3d`, `efficiency = "dynamic"` |
+    |---|---|---|---|
+    | 1 GPU | 1.022 [1.018-1.025] / 1.006 [1.003-1.016] / 1.001 | 5.265 [5.259-5.273] / 5.270 [5.266-5.276] / 5.243 | 27.65 [27.64-27.70] / 27.62 [27.57-27.64] / 27.57 |
+    | 2 GPUs | 1.193 [1.187-1.202] / 1.177 [1.173-1.184] / 1.170 | 3.248 [3.243-3.254] / 3.242 [3.236-3.254] / 3.216 | 21.08 [21.06-21.14] / 21.05 [21.03-21.09] / 21.03 |
+    | 1 + 1, two nodes | 1.336 [1.329-1.348] / 1.318 [1.291-1.330] / 1.296 | 3.477 [3.448-3.496] / 3.461 [3.443-3.483] / 3.452 | 21.80 [21.73-21.84] / 21.81 [21.08-21.99] / 21.75 |
+
+    New exact sums are faster than old ones in every alternated pair of the 16k case on two nodes (median -1.0%,
+    18 us per step) and by 16 us per step at 16k cells on one node; on the other cases the difference stays
+    within the run-to-run spread.
     The flame shows what the plain sums would cost: last
     bits of one scalar per step grow to percent-level differences within 100 steps, so a run on another rank count,
     or a restart on another partition, could no longer be checked against the original.
@@ -1138,6 +1160,22 @@ The smaller scratch adds two rounds of the five troubled kernels per stage, whic
 under 0.3 ms per step on an A100 (Taylor-Green $96^3$, about 105 ms per step), and a capacity of 0.125 is within
 1% of 0.25. In 2D a capacity of 0.25 costs 8% (Riemann problem, 14.2 to 15.4 ms per step), because every round
 recomputes the central coefficients, so 2D keeps 1.
+
+**An eighth of the cells.** `troubled_capacity` now defaults to 0.125 in 3D: 440 bytes less per cell at TENO5, results
+again bitwise unchanged. `mallard check --memory a100-80 --steps 1`, perfect gas, TENO5, cells per A100-80GB
+(the setup's peak, which holds the scratch too, binds in both):
+
+| | $32^3$ hexahedra | $16^3 \times 6$ tetrahedra |
+|---|---|---|
+| CPU (2 Threads), capacity 0.25 | 12,153,598 (6.47 kB per cell) | 12,232,604 (6.43 kB) |
+| CPU, capacity 0.125 | 13,040,617 (6.03 kB), +7.3% | 13,131,619 (5.99 kB), +7.4% |
+| A100 (CUDA 13.5) with #1306, capacity 0.25 | 13,324,340 (5.87 kB) | 12,616,797 (6.20 kB) |
+| A100 with #1306, capacity 0.125 | 14,403,365 (5.43 kB), +8.1% | 13,579,908 (5.76 kB), +7.6% |
+
+On one A100-80GB the time per step stays within the run-to-run spread (about 2% in the explosion, under 1% in
+the Taylor-Green vortex; the $96^3$ hexahedral and $48^3 \times 6$ tetrahedral Taylor-Green vortex and the $96^3$
+explosion, 5 alternated runs each, numbers in #978): the two extra rounds of five kernels per stage find no work
+where few cells are troubled.
 
 ### 20. TENO setup: one fit per stencil shape (#986)
 
