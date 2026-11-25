@@ -54,6 +54,8 @@ checks() {
         echo "== workflow triggers, support matrix, docs the tests read: skipped (no PyYAML; PYTHON= a python with it)"
     fi
     run "spelling" "$python" tools/dev/check_spelling.py
+    run "host copies of subviews contiguous on GPUs" "$python" tools/dev/check_subview_copies.py
+    run "subview copy check" "$python" tools/dev/check_subview_copies_test.py
     run "CI's test splitting" "$python" tools/dev/test_split_test.py
     run "release manifest" "$python" tools/dev/release_manifest_test.py
     run "documented input keys and defaults" "$python" tools/dev/input_catalog.py docs
