@@ -269,11 +269,11 @@ TEST(PostExtractTest, BoundaryProbesOfTheRecordedInputAreTheRunsBitForBit) {
         ASSERT_EQ(extract({run + "/restart_000004.restart", "--probe", name, "-o", out}), 0) << name;
     }
     auto at_step_4 = [](const std::string & file) {
-        std::vector<std::string> out;
+        std::vector<std::string> kept;
         for (const std::string & r : rows(file)) {
-            if (r.starts_with("4,")) out.push_back(r);
+            if (r.starts_with("4,")) kept.push_back(r);
         }
-        return out;
+        return kept;
     };
     for (const char * file : {"/probe_bottom.csv", "/probe_walls.csv", "/probe_walls_reductions.csv"}) {
         const std::vector<std::string> expected = at_step_4(run + file);
