@@ -704,7 +704,7 @@ Left: `region = "inner"`, the inner circle of an annulus, with `speed = 5.0`
 and no `direction`: particles enter uniformly along the circle and move along
 its inward normal (arrows), radially out, after 6 ms. Middle: a filled region,
 the union of a disk and a tilted rectangle, with `velocity = [0.0, 0.0]`:
-particles fill it uniformly in area, whatever cells (grey) it cuts. Right: two
+particles fill it uniformly in area, whatever cells (gray) it cuts. Right: two
 `point` injectors with `speed = 10.0` along x, after 5 ms: `cone_angle = 15`
 spreads the directions uniformly within ±15° (dotted), `cone_angle = 0`
 sends every particle along `direction`.*
