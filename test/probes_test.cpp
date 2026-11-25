@@ -575,7 +575,7 @@ TEST(ProbesTest, OpenSurfacesFromFilesAreTheSameOnAnyNumberOfRanks) {
         << "on " << comm::size() << " ranks";
     const double length = std::hypot(0.35, 0.45) + std::hypot(0.35, 0.4);
     const auto rows = read_csv(dir + "/roof_serial.csv");
-    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "length" : "area"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
+    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "LENGTH" : "AREA"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
 }
 
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
