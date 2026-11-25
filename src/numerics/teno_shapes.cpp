@@ -566,7 +566,7 @@ void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n,
 std::vector<std::vector<uint64_t>> ShapeKeys::records(const teno_setup::TableBatch & batch, const uint32_t n,
                                                       const Kokkos::View<uint32_t *[2]> & size) {
     const auto used = std::make_pair(0u, n);
-    auto h_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(size, used, Kokkos::ALL));
+    auto h_size = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), size);
     auto h_large = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(batch.large_size, used));
     auto h_small = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), Kokkos::subview(batch.small_total, used));
     const size_t nk = batch.nk;
