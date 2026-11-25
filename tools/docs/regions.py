@@ -1421,12 +1421,12 @@ region = {CAD_OPEN_REGION}
             b = f["VTKHDF"][block]
             pts, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
             segs = np.array([pts[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
-            normals, lengths = b["CellData"]["normal"][:, :2], b["CellData"]["length"][:]
+            normals, lengths = b["CellData"]["NORMAL"][:, :2], b["CellData"]["LENGTH"][:]
     else:  # builds without HDF5 write the case view's blocks as VTK files
         pts, conn, offs, _, data = read_vtu_cells(str(work / "view" / "case_blocks" / f"{block}.vtu"))
         starts = np.concatenate([[0], offs[:-1]])
         segs = np.array([pts[conn[a:b], :2] for a, b in zip(starts, offs)])
-        normals, lengths = data["normal"][:, :2], data["length"]
+        normals, lengths = data["NORMAL"][:, :2], data["LENGTH"]
     mesh_pts, cells, _ = fractions(mallard, mesh.name, '"domain"', work, "dom", 2)
     return tris, segs, normals, lengths, mesh_pts, cells
 
