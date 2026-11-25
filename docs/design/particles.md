@@ -386,16 +386,16 @@ exponential integration is exact for linear forcing. Restart files carry e as
 `PARTICLE_E` beside `PARTICLE_T`, so restarts are bitwise.
 
 **Deposition** (`particles::Deposition`) runs after the particle rates of a
-stage, before the rates are divided into the gas's. Three plain kernels:
+stage, before the rates are divided into the gas's. Four plain kernels:
 
-- per slot, an atomic count of the particles in its cell and atomic maxima of
-  each term's magnitude per cell (order independent);
-- per slot, an atomic sum of each term in fixed point, in units of the cell's
-  largest term over 2^(62 - ceil(log2(n + 1))), n the cell's count
-  (`exact_sums.h`);
-- per owned cell, the totals back in floating point.
+- per slot, an atomic count of the particles in its cell;
+- per cell, the start of its slots (a prefix sum of the counts);
+- per slot, its place among its cell's slots (an atomic increment, so in any
+  order);
+- per owned cell, each term summed over its slots exactly in integer limbs and
+  rounded once (`exact_sums.h`).
 
-Each cell's sum is thus exact (errors of 2^-60 of its largest term), whatever
+Each cell's sum is thus the exact sum rounded to the nearest double, whatever
 the slot order, which differs between rank counts and migrations: no sort, no
 global reduction, nothing on the host. The start cell is always owned, so
 deposits never land in a halo.
@@ -432,7 +432,7 @@ the particle sat in its cell. Across rotational periodic faces the
 neighbor's mu turns into the cell's frame as in `Walker::cross`. With width 0
 neither moments nor spreading run.
 
-**Cost.** Per stage, three kernels over the slots and one over the cells, then
+**Cost.** Per stage, two kernels over the slots, a prefix sum over the cells and one kernel over the owned cells, then
 with a width one moment pass and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
 the owned cells and (distributed) a halo exchange. A width of two cells is
 16 steps in 2D and 24 in 3D.
