@@ -66,7 +66,7 @@ n = [670, 200]
 
 # Particle Reynolds number and slip, along each path
 [[particles.quantities]]
-name = "Re_p_max"
+name = "RE_P_MAX"
 max = "hypot(U_X - V_X, U_Y - V_Y) * RHO * 9.486832980505138e-3 / 0.002"
 
 # Particles in the near wake, every 200 steps
