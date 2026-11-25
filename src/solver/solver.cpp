@@ -2548,7 +2548,7 @@ void Solver::output_arrays_to_host() {
 void Solver::update_particle_fields() {
     if (!particles || !particle_fields.is_allocated()) return;
     update_cell_fields(state());
-    particles->fields(W_cells, *face_reconstruction, viscous_gradient, viscous_gradients,
+    particles->fields(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients,
                       [this](const State & s) { halo.exchange(s); }, particle_fields);
 }
 

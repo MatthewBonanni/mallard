@@ -33,6 +33,22 @@ KOKKOS_INLINE_FUNCTION double cell_unit(const uint32_t n) {
     return static_cast<double>(uint64_t(1) << (62 - bits));
 }
 
+/** @brief A term's magnitude for the largest of its cell's column: a non-finite term makes the cell's sum NaN. */
+KOKKOS_INLINE_FUNCTION double cell_magnitude(const double term) {
+    return Kokkos::isfinite(term) ? Kokkos::fabs(term) : Kokkos::Experimental::infinity_v<double>;
+}
+
+/** @brief A term in fixed point, in units of largest / unit. */
+KOKKOS_INLINE_FUNCTION int64_t cell_fixed(const double term, const double unit, const double largest) {
+    return largest > 0.0 && Kokkos::isfinite(largest) ? static_cast<int64_t>(Kokkos::round(term * (unit / largest))) : 0;
+}
+
+/** @brief The sum of a cell's fixed-point terms. */
+KOKKOS_INLINE_FUNCTION double cell_total(const int64_t fixed, const double unit, const double largest) {
+    if (!Kokkos::isfinite(largest)) return Kokkos::Experimental::quiet_NaN_v<double>;
+    return largest > 0.0 ? static_cast<double>(fixed) / (unit / largest) : 0.0;
+}
+
 /** @brief Column k of a cell of a State: the flow block's, then the species'. */
 KOKKOS_INLINE_FUNCTION rtype & column(const StateView & flow, const SpeciesView & species, const uint32_t c,
                                       const uint32_t k) {
@@ -169,13 +185,13 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
         if (ids(s) == EMPTY) return;
         const uint32_t c = cells(s);
         Kokkos::atomic_inc(&counts(c));
-        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_max(&m(c, k), exact_sums_magnitude(term(s, c, k)));
+        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_max(&m(c, k), cell_magnitude(term(s, c, k)));
     });
     gated::parallel_for("particle_deposit_fixed", n_slots, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         const uint32_t c = cells(s);
         const double unit = cell_unit(counts(c));
-        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_add(&f(c, k), exact_sums_fixed(term(s, c, k), unit, m(c, k)));
+        for (uint32_t k = 0; k < n_sums; k++) Kokkos::atomic_add(&f(c, k), cell_fixed(term(s, c, k), unit, m(c, k)));
     });
     const StateView flow = sums.flow;
     const SpeciesView species = sums.species;
@@ -186,7 +202,7 @@ void Deposition::deposit(const Kokkos::View<uint64_t *> & ids, const Kokkos::Vie
     gated::parallel_for("particle_deposit_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
         const double unit = cell_unit(counts(c));
         for (uint32_t k = 0; k < n_sums; k++) {
-            const rtype total = static_cast<rtype>(exact_sums_total(f(c, k), unit, m(c, k)));
+            const rtype total = static_cast<rtype>(cell_total(f(c, k), unit, m(c, k)));
             if (k < n) {
                 column(flow, species, c, k) = total;
             } else {
