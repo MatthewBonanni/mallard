@@ -25,6 +25,7 @@
 #include "check.h"
 #include "input.h"
 #include "json.h"
+#include "provenance.h"
 
 class MeshFileCache;
 class SetupCache;
@@ -48,7 +49,12 @@ inline constexpr int INVALID_PARAMS = -32602;
 inline constexpr int INTERNAL = -32603;
 inline constexpr int CANCELED = -32800;
 inline constexpr int NO_CASE = -32001;
+inline constexpr int NOT_SET_UP = -32002;
 inline constexpr int UNREADABLE = -32003;
+inline constexpr int TIMEOUT = -32004;
+inline constexpr int NO_RUN = -32005;
+inline constexpr int UNREACHABLE = -32006;
+inline constexpr int UNSAVED = -32010;
 } // namespace code
 
 /** @brief A request that failed: a JSON-RPC error, with Mallard's data (a JSON object, or empty). */
@@ -68,7 +74,8 @@ struct Canceled {};
 /** @brief What mallard check finds of a case: its report, and the key catalog of its setup. */
 struct CheckResult {
     CheckReport report;
-    std::string catalog;  // key_catalog, as mallard check --catalog writes it
+    std::string catalog;                      // key_catalog, as mallard check --catalog writes it
+    std::vector<provenance::FileRead> files;  // what the setup read, also when it stopped at an error
 };
 
 /** @brief The case a session holds, and what its setups keep between requests. */
@@ -98,6 +105,8 @@ class Context {
         /** @brief The stages of earlier setups, which a check sets up again only where its reads changed; nullptr
          *         for a one-shot. */
         SetupCache * setup_cache() const { return setups.get(); }
+        /** @brief Whether the case's text (case.update) differs from its file on disk. */
+        bool unsaved() const;
 
         /** @brief Results of requests on the current text, by request and parameters (resident only). */
         std::optional<std::string> remembered(const std::string & key) const;
@@ -139,6 +148,9 @@ struct Method {
 /** @brief Every method, in the order of docs/guide/session.md. */
 std::span<const Method> methods();
 
+/** @brief Every method with its one-shot command and result schema, as JSON (mallard-capabilities' methods). */
+std::string methods_json();
+
 /** @brief The method of this name, or nullptr. */
 const Method * method(std::string_view name);
 
@@ -150,6 +162,13 @@ const Method * method(std::string_view name);
 int serve(std::istream & in, std::ostream & out, Context & context);
 
 /** @brief A string member of params, else fallback. @throws Error for a member of another type */
+/**
+ * @brief The JSON of mallard files INPUT --format json and of case.files (mallard-case-files): the input and every
+ *        file its setup read, with its role, path as given and resolved, whether it exists, its size and, with
+ *        sha256, its SHA-256.
+ */
+std::string case_files_json(const std::string & input, const CheckResult & result, bool sha256);
+
 std::string string_param(const json::Value & params, const std::string & name, const std::string & fallback = "");
 
 /** @brief A boolean member of params, else fallback. @throws Error for a member of another type */

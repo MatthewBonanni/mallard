@@ -48,7 +48,9 @@ A few things hold for every command:
 | Snapshot block | every snapshot and restart file | `mallard-snapshot` |
 | Probe sampling block | probe files | `mallard-probe-sampling` |
 | Run directory | `mallard info RUN_DIR --format json` | `mallard-run-directory` |
-| Run control | `mallard ctl`, control files ([Running](running.md)) | `mallard-run-control` |
+| Run control | `mallard ctl`, the control socket ([Running](running.md#controlling-a-run-from-anywhere)) | `mallard-run-control` |
+| Run endpoint | `mallard.run.json` and the run registry ([Running](running.md#the-endpoint-record)) | `mallard-run-endpoint` |
+| Run launch | `mallard -i INPUT --detach` | `mallard-run-launch` |
 | Grid convergence | `mallard post convergence --format json` | `mallard-convergence` |
 | Pack manifest | `manifest.json` of `mallard pack` | `mallard-pack` |
 
@@ -119,7 +121,7 @@ Commands:
   Run
     mallard -i input.toml     Run a case
     mallard ctl               Ask a running case for its status, a restart file
-                              or a stop, or change its settings
+                              or a stop, or change its settings, from anywhere
     mallard reactor           Integrate a 0D reactor, or benchmark the chemistry
   Set up
     mallard new               Create a ready-to-run case from a template
@@ -137,6 +139,10 @@ Commands:
     mallard list species      The species of a case
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
+    mallard files             The files a case reads, for copying it to another
+                              machine
+    mallard list units        The units quantities in input files take, with
+                              their dimensions and exact SI values
     mallard list templates    The case templates of mallard new
     mallard session           Hold a case and answer JSON-RPC requests on stdin
                               and stdout: the interface for the GUI and scripts
@@ -183,6 +189,13 @@ Options:
                            rows. Default: the progress table's written column
                            counts them, and mallard.jsonl and the summary name
                            them.
+  --detach                 Start the run in the background, in a session of its
+                           own, and return once it has written its endpoint
+                           record mallard.run.json: prints the launch as one
+                           JSON object (run ID, directory, PID). The run's
+                           output goes to mallard.out; mallard ctl controls it.
+                           Not under mpirun: the session's run.launch starts
+                           runs on several ranks.
   --log-format text|jsonl  text: the setup, the progress table and the summary
                            on stdout; jsonl: on stdout only the run record's
                            progress records, one JSON object per line as
@@ -227,11 +240,18 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard
 ### mallard ctl
 
 ```text
-Usage: mallard ctl <run-dir> status | checkpoint | stop
-       mallard ctl <run-dir> set <key>=<value> [<key>=<value> ...]
+Usage: mallard ctl <run-dir|run-id> status | checkpoint | stop [options]
+       mallard ctl <run-dir|run-id> set <key>=<value> [<key>=<value> ...] [options]
 
-Sends a request to the run started in run-dir, through its control socket
-mallard.sock, and prints the reply. It must run on the node of the run's rank 0.
+Sends a request to a run and prints its reply. The run is named by its directory
+or by its run ID (the run registry finds it); its endpoint record,
+mallard.run.json, says where it runs, and ctl takes the first route that reaches
+it: the control socket mallard.sock on the same host, srun --overlap into its
+Slurm job, kubectl exec into its pod, ssh to the node of a PBS or LSF job, then,
+for stop and checkpoint, a signal (SIGUSR2, SIGUSR1) by kill, scancel, qsig or
+bkill. Control files only with --allow-files. Each request has an ID; the run
+acknowledges it (accepted), then answers once it has acted (done), and records
+both in its run log as control records.
 
 status: step, t, dt, CFL number, progress, wall time per step, cells per second,
 ETA, memory and the state of each trigger. checkpoint: write a restart file now;
@@ -240,21 +260,39 @@ set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
 t_wall_stop=2h), check_interval, control_file_interval, write_data.<prefix or
 index>.interval or .time_interval, probes.<name>.interval or .time_interval,
-forces.<zone>.interval, integrals.interval. Other keys are refused. A SET file
-in run-dir does the same from anywhere the directory is visible, with [run]
-control_file_interval: lines of key = value, the run log the reply.
+forces.<zone>.interval, integrals.interval. ctl refuses other keys, and values
+of the wrong type, before sending (mallard version --format json lists the keys
+under control.settings). A SET file in run-dir does the same from anywhere the
+directory is visible, with [run] control_file_interval: lines of key = value,
+the run log the reply.
 
 Options:
-  -h, --help  Show this page.
+  --wait accepted|done  accepted: return once the run has queued the request;
+                        done: once it has acted on it (the restart written, the
+                        settings applied). Default: done.
+  --timeout SECONDS     Give up after this long. Default: 30 s for accepted,
+                        none for done (a step of a large run can take minutes).
+  --format text|json    text: the run's reply; json: the result as one JSON
+                        object (schema mallard-run-control), errors as {"error":
+                        {...}}. Default: text.
+  --id ID               The request's ID, to find its control records in the run
+                        log. Default: a new UUID.
+  --allow-files         If no other route reaches the run, write a STOP or
+                        CHECKPOINT file in its directory (the run must poll for
+                        them: [run] control_file_interval).
+  --direct              Only the socket in RUN_DIR, on this host: what the
+                        remote end of a route runs.
+  -h, --help            Show this page.
 
 Examples:
   $ mallard ctl runs/cylinder status
   $ mallard ctl runs/cylinder set t_stop=3.0 write_data.flow.time_interval=0.05
-  $ mallard ctl . stop
+  $ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop --format json
+  $ mallard ctl . checkpoint --wait accepted
 
 Exit status:
-  0  the run carried out the request
-  1  no run answers in run-dir, or the run refused the request
+  0  the run accepted or carried out the request
+  1  no route reached the run, the run ended or refused the request, or the timeout passed
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-ctl
@@ -536,8 +574,26 @@ Options:
                             its name, a legend, axes, a scale bar and the
                             domain's extent in its units. Every block carries
                             its metadata (kind, key, element, element_index,
-                            zone) as field data, and the JSON report's view
-                            lists them. Default: none.
+                            zone) as field data. With --format json, the
+                            report's view lists the files, every block with its
+                            metadata and condition, and the frame of each
+                            boundary's local coordinates: where u starts, which
+                            way it grows, the inward normal and the length.
+                            Default: none.
+  --boundary-values DIR     Write each [[boundaries]] entry's values at its
+                            faces, as the boundary evaluates them at the initial
+                            time: DIR/boundaries_<index>_<zone>.csv with each
+                            face's center, inward normal, the local coordinates
+                            its expressions read, every key it prescribes (u, p,
+                            T, p0, T0, mass_flux, q) and the velocity it
+                            prescribes; for inlet_stagnation and
+                            inlet_mass_flow, the density, velocity, speed, mass
+                            flux into the domain (rho_u_n) and pressure it
+                            settles at against the initial pressure inside,
+                            estimated (the first steps' transient differs). With
+                            --format json, the report's boundary_values gives
+                            each file and each column's min, area mean and max.
+                            Default: none.
   --geometry-only           Set up and check only what the case view draws: the
                             mesh, its zones, the boundaries' conditions, the
                             regions, probes, snapshot regions and periodic
@@ -594,7 +650,9 @@ FILE is a snapshot (.vtkhdf, .vtu, .pvtu, .h5), a series file (.vtkhdf) or index
 file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 mesh).
 Output files are read by any build, of any dimension and precision; a mesh file
 by the solver of its dimension, which also reports its quality as mallard check
-does.
+does. For a restart file it says whether this build continues from it, and if
+not why (precision, dimension, flow variables, compression without zlib):
+continuable and incompatibilities in --format json (mallard-file-info).
 
 RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from
 the same records as its report.html, its outcome, health (lowest values,
@@ -662,7 +720,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list <command> [options]
 
-Catalogs: the fields, species, input keys and case templates there are.
+Catalogs: the fields, species, input keys, units and case templates there are.
 
 Commands:
   mallard list fields         The output fields there are, or exactly those of
@@ -670,6 +728,8 @@ Commands:
   mallard list species        The species of a case
   mallard list keys           The input keys there are, or exactly those of one
                               case: type, units, default, values
+  mallard list units          The units quantities in input files take, with
+                              their dimensions and exact SI values
   mallard list templates      The case templates of mallard new
 
 mallard list <command> --help shows the page of a command.
@@ -792,6 +852,72 @@ Exit status:
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
 ```
 
+### mallard files
+
+```text
+Usage: mallard files INPUT [--sha256] [--format text|json]
+
+Sets the case up as mallard check does (writing nothing) and lists the input and
+every file its setup read: the mesh, mechanisms, tables and profiles, probe
+points, surfaces, the restart or remap source it starts from. Each with its
+role, its path as written and resolved, whether it exists and its size; --sha256
+adds its SHA-256. The list comes from what the setup read, so a file named by a
+new key is never missed. An input still being written lists the files the setup
+read before it stopped.
+
+Options:
+  --sha256            Also each file's SHA-256 (reads every file).
+  --format text|json  text: a table; json: one JSON object (mallard-case-files),
+                      for scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard files input.toml
+  $ mallard files input.toml --sha256 --format json
+
+Exit status:
+  0  listed, also of an input whose only errors are missing pieces
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-files
+```
+
+### mallard list units
+
+```text
+Usage: mallard list units [--format text|json]
+
+Lists every unit a quantity such as "1 atm" or "5 mm" may carry: its dimension,
+as the key catalog's units name it, its SI value as defined (a decimal, or an
+exact quotient such as 101325/760 or pi/180), the offset of an absolute
+temperature, and whether it takes an SI prefix; then the prefixes. --format json
+adds the exponents of each dimension and its double value, and the named
+dimensions with example units.
+
+Options:
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list units
+  $ mallard list units --format json
+
+Exit status:
+  0  listed
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-units
+```
+
 ### mallard list templates
 
 ```text
@@ -822,10 +948,11 @@ Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON
 object per line, on standard input; responses and notifications go to standard
 output, one per line, and nothing else does (the setup's text goes to standard
 error). Requests: initialize, case.open, case.update, case.close, case.check,
-case.keys, keys.catalog and shutdown; $/cancel stops a request at its next setup
-phase. Each request that has a one-shot command runs the same code: case.check
-is mallard check INPUT --format json, case.keys and keys.catalog are mallard
-list keys --format json.
+case.keys, keys.catalog, run.launch, run.control and shutdown; $/cancel stops a
+request at its next setup phase. Each request that has a one-shot command runs
+the same code: case.check is mallard check INPUT --format json, case.keys and
+keys.catalog are mallard list keys --format json, run.launch is mallard -i INPUT
+--detach, run.control is mallard ctl RUN ... --format json.
 
 The session keeps what its setups built: a check after an edit (case.update with
 the whole text, which the session never writes back) sets up again only the
@@ -1711,9 +1838,15 @@ uses (dependencies), the dimensions of the solvers installed with it (mallard
 interfaces the schema name and version of every machine-readable output: the key
 catalog, the check report, the run log, the run, snapshot and probe sampling
 blocks of output files, the run directory report, run control (with its commands
-and control files), the grid convergence report and the pack manifest. Each of
-these carries the same schema and version fields; an addition keeps the version,
-a change that breaks a reader increments it.
+and control files), the run endpoint record, run launch results, the grid
+convergence report and the pack manifest. Each of these carries the same schema
+and version fields; an addition keeps the version, a change that breaks a reader
+increments it. Also: the session's requests with the one-shot command of each
+(methods), the backend's devices (each GPU visible with its name and memory, and
+the host's CPU and threads), and what run control takes (control: the socket's
+commands, every key ctl set accepts with its type, units and the element it
+names, the control files, and the routes ctl can take from here). The session's
+initialize answers the same object, with the open case.
 
 Options:
   --format text|json  text: the version alone, as mallard --version prints it;

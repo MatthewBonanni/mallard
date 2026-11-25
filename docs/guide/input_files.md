@@ -180,6 +180,11 @@ error E-INPUT: input.toml: line 14: boundaries.p: "300 K" has the dimension of t
 | Energy, power, force, frequency | `J`, `cal`, `W`, `N`, `lbf`, `Hz` (and `kJ`, `kcal`, `kW`, `kHz`, ...) |
 | Volume | `L` (and `mL`) |
 
+`mallard list units` lists every unit with its dimension and its SI value as
+defined (`101325/760` for `Torr`, `pi/180` for `deg`), and `--format json`
+gives the same for tools, with each dimension's exponents (schema
+`mallard-unit-catalog`, the session's `units.catalog`).
+
 **Temperatures.** `degC` and `degF` are absolute temperatures: `"20 degC"`
 is 293.15 K. They stand alone (`"20 degC/s"` is an error; use K) and are an
 error for the one key that is a temperature difference, `sutherland_S`.
@@ -302,9 +307,20 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
   docs/guide/input_files.md#e-key-unused
 ```
 
-When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings. `mallard reactor` checks its input
-the same way.
+When another error stops the setup first, a run lists the keys with a
+suggestion under it as possible misspellings (`mallard reactor` checks its
+input the same way). `mallard check` then reports
+only the keys Mallard does not know: not in the key catalog
+(`docs/input-keys/`, which `mallard list keys` lists), named like none of its
+keys, and not a species or data column of a table such as `Y` or `units`, so
+that the valid keys of the sections the setup did not reach are not reported.
+
+When the errors that stop the setup are all of independent entries (a
+`[[boundaries]]` or `[[write_data]]` entry, or zones no entry covers),
+`mallard check` sets up again without them (a failed boundary entry, or an
+uncovered zone, as a symmetry plane), until the setup ends or stops on another
+error, and reports the errors of the sections after them too. If it ends, the
+keys it did not read are reported as after a complete setup.
 
 ## Error messages
 
@@ -492,9 +508,9 @@ An input still being written fails on what it does not have yet: a required key 
 
 | Code | What it means | What to do |
 |---|---|---|
-| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to |
+| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to, past the failed entries (see [Unknown and unused keys](#unknown-and-unused-keys)) |
 | <a id="e-setup"></a>`E-SETUP` | The setup stopped on another error: a file it cannot read, a mesh it cannot partition, memory it cannot allocate | The message says what failed |
-| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up | Fix or remove it. A run rejects the same keys |
+| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up. After a setup stopped by an error, only the keys Mallard does not know ([Unknown and unused keys](#unknown-and-unused-keys)) | Fix or remove it. A run rejects the same keys |
 | <a id="w-key-deprecated"></a>`W-KEY-DEPRECATED` | A key renamed or replaced in a later release, still read for now | `mallard input upgrade input.toml` rewrites it ([Inputs from older releases](#inputs-from-older-releases)) |
 | <a id="e-catalog-write"></a>`E-CATALOG-WRITE` | `--catalog FILE` cannot be written | Check the path and its permissions |
 | <a id="e-ranks"></a>`E-RANKS` | `--ranks N` in a check run under `mpirun` on another number of ranks | Check serially (memory is then scaled to N ranks) or on N ranks |
@@ -533,10 +549,11 @@ An input still being written fails on what it does not have yet: a required key 
 | `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
-| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
+| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone); if the setup stopped before the boundaries, once it read the mesh, the zones no entry names |
+| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh). Given whenever the setup read the mesh, also if it stopped later |
 | `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
-| `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; the case view with every block's metadata, `null` without `--view` ([Block metadata](#block-metadata)) |
+| `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; with `--view`, the case view's files, every block's metadata and each boundary's frame (`mallard-case-view`, the [session](session.md)'s `case.view`), `null` without it ([Block metadata](#block-metadata)) |
+| `boundary_values` | With `--boundary-values`: each entry's file and the range of each column (`mallard-boundary-values`; [Boundary values](#boundary-values)), else `null` |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
@@ -694,9 +711,13 @@ that every key this reference documents is in it and that the defaults it states
 match it.
 
 `mallard list keys` shows that catalog as tables, one per input table, with
-each key's type, units, default and accepted values; `mallard list keys
+each key's type, units, default and accepted values, and each table's form:
+a `table`, an `array` of tables (`[[boundaries]]`) or `named` entries under
+names the input chooses (`[regions]`, `X`), the `form` of its JSON; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
-whether the input sets each key), and a section keeps one table or key path.
+whether the input sets each key; an optional table the input does not set,
+as `[boundaries.turbulence]`, has the `type` and `form` of the general
+catalog), and a section keeps one table or key path.
 For an input still being written it lists the keys the setup read before it
 stopped, with exit status 0 when the only errors are
 [missing pieces](#diagnostics); its JSON then has `complete: false`, `missing`
@@ -778,9 +799,19 @@ in the ParaView file, and the `view` of the JSON reports (`mallard check
 | `index` | The element's index in its array of tables (`[[probes]]`: 0 for the first), `null` for a table that is in none; a zone with several conditions (`where`) gives its first |
 | `zone` | Boundary and cell zones: the mesh's zone, as the mesh names it |
 | `cells` | The block's cells, over every rank: cells, faces, segments or points |
+| `condition` | Boundary zones: the type of their condition; `null` for other blocks |
+| `label` | The block's label in the images (its name if it has none) |
 
-The JSON's `view` also has `files` (the ParaView file, then the images) and
-`geometry_only`. In the ParaView file, each block's field data has `kind`,
+The JSON's `view` also has `files` (the ParaView file, then the images),
+`geometry_only` and `frames`. `mallard check --view DIR --format json`'s `view`
+is the result of the [session](session.md)'s `case.view`, and its `frames` say
+where each `[[boundaries]]` entry's [local coordinates](boundary_conditions.md#local-coordinates)
+start: its `shape` (`curve` in 2D; `four-sided`, `ring` or `disk` in 3D),
+`origin` (2D: the end where u = 0; 3D: the face center nearest to u = v = 0),
+`u_direction` (the unit vector along which u grows there), `normal` (the
+inward unit normal at the origin), `length` and, in 3D, `width` (the largest u_m and v_m).
+An entry whose faces have no u (a closed curve, a zone of several pieces) has
+`shape` `null` and says why in `error`. `mallard info`'s view has no frames. In the ParaView file, each block's field data has `kind`,
 `key`, `element` and `zone` as strings (empty for `null`), `element_index`
 (-1 for `null`) and `metadata_version`.
 
@@ -806,6 +837,35 @@ Pitfalls:
   in; a nondimensional case shows no units.
 
 Figures: [`tools/docs/case_view.py`](../../tools/docs/case_view.py).
+
+### Boundary values
+
+`--boundary-values values` writes what each `[[boundaries]]` entry prescribes
+at each of its faces, evaluated by the boundary condition itself at the
+initial time, so that a profile can be checked before the run without
+evaluating its expression elsewhere:
+
+```bash
+mallard check input.toml --boundary-values values --format json
+```
+
+`values/boundaries_<index>_<zone>.csv` has one row per face: `face` (a key
+every partition agrees on), its center (`x`, `y`, `z`), its inward unit normal
+(`n_x`, ...), the [local coordinates](boundary_conditions.md#local-coordinates)
+its expressions read (`u`, `u_m`, `n`, ...), every key the entry prescribes
+(`u`, `p`, `T`, `p0`, `T0`, `mass_flux`, `q`, by component as `u[0]`) and,
+for `inlet_state`, `farfield` and moving walls, the velocity it prescribes
+(`u_x`, ...). An `inlet_stagnation` or `inlet_mass_flow` sets its velocity
+from the state inside, so for those the file has the inflow it settles at
+once the initial pressure inside reaches it: `rho`, `u_x`, ..., `speed`,
+`rho_u_n` (the mass flux into the domain) and `p`, the cell's pressure (a
+stagnation inlet's state on its isentrope there, at rest where the pressure
+inside is above `p0`; a mass-flow inlet's density at its `T`). These are
+estimates: the transient of the first steps differs, and a cell flowing
+supersonically through a stagnation inlet keeps the state the flux makes of it. The JSON report's `boundary_values` (schema
+`mallard-boundary-values`, the result of the [session](session.md)'s
+`case.boundary_values`) names each file and gives each column's `units`,
+`estimated`, `min`, area-weighted `mean` and `max`.
 
 ### The initial state before a run
 
@@ -861,6 +921,7 @@ Every command's options, examples and exit status: [Command line](cli.md).
 |---|---|---|
 | `mallard input upgrade old.toml` | Rewrites renamed, moved and removed keys of an input from an older release | [Inputs from older releases](#inputs-from-older-releases) |
 | `mallard input resolve input.toml` | The input as the run uses it, every key explicit | [The resolved input](#the-resolved-input) |
+| `mallard files input.toml` | The input and every file its setup reads (mesh, mechanisms, tables, probe points, restart), with sizes and, with `--sha256`, hashes: what to copy to run the case elsewhere | [Command line](cli.md#mallard-files) |
 | `mallard reactor -i input.toml` | 0D constant-volume reactor with the solver's chemistry; chemistry benchmarks | [Thermochemistry](thermochemistry.md#0d-reactors-mallard-reactor) |
 | `mallard mesh convert IN OUT.h5` | Gmsh file, or the mesh of an input file, to Mallard's HDF5 mesh format (builds with HDF5) | [Meshes](meshes.md#hdf5-meshes-for-large-runs) |
 | `mallard test` | The unit and regression tests: `mallard-test2d` and `mallard-test3d` (`build/test/mallard-test2d`), from a build or an install tree; `--dim 2\|3` runs one | [Installation](https://matthewbonanni.github.io/mallard/docs/installation/) |

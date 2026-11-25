@@ -7,6 +7,7 @@
 
 #include "input.h"
 
+#include "build_info.h"
 #include "common_io.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -418,6 +420,7 @@ struct Resolver {
             std::optional<Input> resolved;
             if (const auto entry = entries.find(key); entry != entries.end()) {
                 record.set = true;
+                record.iterated = entry->second.is_table() && entry->second.as_table().lookups_made().all;
                 resolved = value(entry->second, record.path, record.use.dimension);
                 if (!resolved->is_table() && !table_array(*resolved)) record.value = inline_text(*resolved);
             } else if (!record.use.type.empty() && !record.use.required && !record.use.fallback.empty()) {
@@ -466,12 +469,53 @@ ResolvedInput resolve_input(const Input & input) {
     return resolved;
 }
 
+namespace {
+
+/**
+ * @brief Each table's form, from the paths of the keys read in it: "array" (of tables, [[boundaries]]),
+ *        "named" (entries under names of the input's choosing: setup iterates it and reads no key it lacks, as
+ *        X, or the catalog names its entries <name>, as [regions]) or "table".
+ */
+std::map<std::string, std::string> section_forms(const std::vector<KeyRecord> & records) {
+    std::map<std::string, std::string> forms;
+    std::map<std::string, bool> named;  // by table path, with indices
+    for (const KeyRecord & record : records) {
+        const std::string & path = record.path;
+        for (size_t i = 0; i < path.size(); i++) {
+            if (path[i] == '[' && path.find("].", i) == path.find(']', i)) forms[catalog_path(path.substr(0, i))] = "array";
+            if (path[i] == '.' && path[i - 1] != ']') forms.emplace(catalog_path(path.substr(0, i)), "table");
+        }
+        if (record.iterated) named.emplace(path, true);
+    }
+    for (const KeyRecord & record : records) {
+        const size_t dot = record.path.rfind('.');
+        if (dot == std::string::npos) continue;
+        if (const auto table = named.find(record.path.substr(0, dot)); table != named.end() && !record.set) {
+            table->second = false;
+        }
+    }
+    std::map<std::string, bool> all_named;  // by catalog path: named in every instance
+    for (const auto & [path, is_named] : named) {
+        const auto [it, added] = all_named.emplace(catalog_path(path), is_named);
+        if (!added) it->second = it->second && is_named;
+    }
+    for (auto & [path, form] : forms) {
+        const auto all = all_named.find(path);
+        // The catalog's own <name> (regions.<name>) marks a table read by the names its entries are given
+        if (form == "table" && ((all != all_named.end() && all->second) || forms.count(path + ".<name>"))) form = "named";
+    }
+    return forms;
+}
+
+} // namespace
+
 std::string key_catalog(const ResolvedInput & resolved) {
     struct Entry {
         KeyUse use;
         std::vector<std::string> values;
         bool set = false;
     };
+    const std::map<std::string, std::string> forms = section_forms(resolved.keys);
     std::map<std::string, Entry> keys;
     for (const auto & record : resolved.keys) {
         if (!record.by_name) continue;
@@ -498,6 +542,7 @@ std::string key_catalog(const ResolvedInput & resolved) {
                 out += ", \"default\": " + json_string(entry.use.fallback);
             }
         }
+        if (const auto form = forms.find(path); form != forms.end()) out += ", \"form\": " + json_string(form->second);
         if (!entry.values.empty()) {
             out += ", \"values\": [";
             for (size_t i = 0; i < entry.values.size(); i++) out += (i ? ", " : "") + json_string(entry.values[i]);
@@ -583,6 +628,112 @@ std::vector<Diagnostic> unused_keys(const Input & input) {
     collect_lookups(input, "", lookups);
     std::vector<Diagnostic> out;
     collect_unused(input, "", lookups, out);
+    std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
+    return out;
+}
+
+std::string catalog_key_of_file(const std::string & stem) {
+    std::string key;
+    for (size_t i = 0; i < stem.size(); i++) {
+        if (stem[i] == '%' && i + 2 < stem.size()) {
+            key += static_cast<char>(std::stoi(stem.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else {
+            key += stem[i];
+        }
+    }
+    return key;
+}
+
+const std::set<std::string> & catalog_keys() {
+    static const std::set<std::string> keys = [] {
+        std::set<std::string> out;
+        for (const std::filesystem::path & dir : data_dirs()) {
+            const std::filesystem::path catalog = dir / "docs" / "input-keys";
+            std::error_code ec;
+            if (!std::filesystem::is_directory(catalog, ec)) continue;
+            for (const auto & entry : std::filesystem::directory_iterator(catalog, ec)) {
+                if (entry.path().extension() == ".json") out.insert(catalog_key_of_file(entry.path().stem().string()));
+            }
+            break;
+        }
+        return out;
+    }();
+    return keys;
+}
+
+namespace {
+
+std::vector<std::string> dotted_parts(const std::string & path) {
+    std::vector<std::string> parts;
+    for (size_t start = 0; start <= path.size();) {
+        const size_t end = std::min(path.find('.', start), path.size());
+        parts.push_back(path.substr(start, end - start));
+        start = end + 1;
+    }
+    return parts;
+}
+
+/** @brief What unknown_keys knows of Mallard's keys. */
+struct Vocabulary {
+    const std::set<std::string> & catalog;
+    std::set<std::string> names;  // of every part of a catalog key, and of every key setup looked up
+    Lookups lookups;
+
+    bool known(const std::string & key) const {
+        static const std::set<std::string> free_form = {"X", "Y", "rhoY", "lewis", "units"};
+        const std::string path = catalog_path(key);
+        if (catalog.count(path)) return true;
+        const std::vector<std::string> parts = dotted_parts(path);
+        return names.count(parts.back()) ||
+               std::any_of(parts.begin(), parts.end() - 1, [](const std::string & p) { return free_form.count(p) > 0; });
+    }
+};
+
+/** @brief The unknown keys under v (at path); read: whether setup read v itself, so that its tables' lookups count. */
+void collect_unknown(const Input & v, const std::string & path, const bool read, const Vocabulary & vocabulary,
+                     std::vector<Diagnostic> & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        const auto & made = table.lookups_made();
+        for (const auto & [key, value] : table.entries()) {
+            const std::string at = join(path, key);
+            const bool looked_up = read && (made.all || made.keys.count(key));
+            if (looked_up || vocabulary.known(at)) {
+                collect_unknown(value, at, looked_up, vocabulary, out);
+                continue;
+            }
+            const auto location = value.location();
+            if (!location.is_ok()) continue;
+            Diagnostic d;
+            d.key = at;
+            d.line = location.first_line_number();
+            d.message = "unknown";
+            d.suggestion = suggest(table, path, key, vocabulary.lookups);
+            const std::string section = d.key.substr(0, d.key.find_first_of(".["));
+            d.docs = section == d.key ? "docs/input.md" : docs_of(d.key);
+            out.push_back(std::move(d));
+        }
+    } else if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) {
+            collect_unknown(array[i], path + "[" + std::to_string(i) + "]", read, vocabulary, out);
+        }
+    }
+}
+
+} // namespace
+
+std::vector<Diagnostic> unknown_keys(const Input & input, const std::set<std::string> & catalog) {
+    if (catalog.empty()) return {};
+    Vocabulary vocabulary{catalog, {}, {}};
+    for (const std::string & key : catalog) {
+        for (const std::string & part : dotted_parts(key)) vocabulary.names.insert(part);
+    }
+    collect_lookups(input, "", vocabulary.lookups);
+    for (const auto & entry : vocabulary.lookups) vocabulary.names.insert(entry.first);
+    std::vector<Diagnostic> out;
+    collect_unknown(input, "", true, vocabulary, out);
     std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
     return out;
 }

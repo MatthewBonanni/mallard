@@ -21,9 +21,14 @@
 #include "comm.h"
 #include "commands.h"
 #include "common_typedef.h"
+#include "interfaces.h"
 #include "log.h"
+#include "output_reader.h"
+#include "run_control.h"
+#include "run_ctl.h"
 #include "session.h"
 #include "solver/setup_cache.h"
+#include "units.h"
 
 namespace session {
 
@@ -69,19 +74,9 @@ std::string case_json(const Context & context, const std::vector<std::string> * 
 }
 
 std::string initialize(Context & context, const json::Value &) {
-    std::string list = "[";
-    for (const Method & m : methods()) {
-        json::Object entry;
-        entry.add("name", std::string(m.name));
-        entry.raw("command", m.command.empty() ? "null" : json::quote(m.command));
-        entry.raw("result", m.result.empty() ? "null" : json::quote(m.result));
-        list += (list.size() > 1 ? "," : "") + entry.str();
-    }
-    json::Object o;
-    o.add("schema", SCHEMA).add("version", VERSION).add("mallard", mallard_version()).add("dimension", N_DIM);
-    o.raw("methods", list + "]");
-    o.raw("case", context.is_open() ? case_json(context) : "null");
-    return o.str();
+    std::string result = capabilities_json();
+    result.pop_back();
+    return result + ",\"case\":" + (context.is_open() ? case_json(context) : "null") + "}";
 }
 
 std::string shutdown(Context &, const json::Value &) { return "null"; }
@@ -117,13 +112,54 @@ std::string case_check(Context & context, const json::Value & params) {
     if (const std::optional<std::string> known = context.remembered(key)) return *known;
     const cli::Args args =
         as_options(params, {"partial", "ranks", "memory", "throughput", "steps", "mesh_fields", "stencils", "cells",
-                            "region", "weights", "catalog", "view", "restart"});
+                            "region", "weights", "catalog", "view", "boundary_values", "restart"});
     CheckOptions options;
     options.input_file = context.path();
     if (const std::string error = check_options(args, options); !error.empty()) throw Error(code::INVALID_PARAMS, error);
     const std::string result = check_json(check_case(context, options, args.value_or("--restart", "")).report);
     context.remember(key, result);
     return result;
+}
+
+std::string case_view(Context & context, const json::Value & params) {
+    as_options(params, {"dir", "frames_only"});
+    const std::string dir = string_param(params, "dir");
+    const bool frames_only = bool_param(params, "frames_only", false);
+    if (frames_only == !dir.empty()) {
+        throw Error(code::INVALID_PARAMS, "case.view takes dir, the directory to write the view in, or frames_only");
+    }
+    const std::string key = "case.view " + json::dump(params);
+    if (const std::optional<std::string> known = context.remembered(key)) return *known;
+    CheckOptions options;
+    options.input_file = context.path();
+    options.view_dir = dir;
+    options.view_frames = frames_only;
+    const CheckReport report = check_case(context, options).report;
+    const std::string view = case_view_json(report);
+    if (!report.setup_done || view == "null") {
+        throw Error(code::NOT_SET_UP, "the case cannot be set up, so it has no view",
+                    json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
+    }
+    context.remember(key, view);
+    return view;
+}
+
+std::string case_boundary_values(Context & context, const json::Value & params) {
+    as_options(params, {"dir"});
+    const std::string dir = string_param(params, "dir");
+    if (dir.empty()) throw Error(code::INVALID_PARAMS, "case.boundary_values takes dir, the directory to write them in");
+    const std::string key = "case.boundary_values " + json::dump(params);
+    if (const std::optional<std::string> known = context.remembered(key)) return *known;
+    CheckOptions options;
+    options.input_file = context.path();
+    options.boundary_values_dir = dir;
+    const CheckReport report = check_case(context, options).report;
+    if (report.boundary_values.empty()) {
+        throw Error(code::NOT_SET_UP, "the case cannot be set up, so its boundaries have no values",
+                    json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
+    }
+    context.remember(key, report.boundary_values);
+    return report.boundary_values;
 }
 
 std::string listing(const json::Value & catalog, const json::Value & params, const KeyCase * per_case) {
@@ -146,12 +182,37 @@ std::string case_keys(Context & context, const json::Value & params) {
     key_case.complete = result.report.setup_done;
     key_case.diagnostics = result.report.diagnostics;
     if (result.catalog.empty()) {
-        throw Error(code::INVALID_PARAMS, "the case cannot be set up",
+        throw Error(code::NOT_SET_UP, "the case cannot be set up",
                     json::Object().raw("diagnostics", diagnostics_json(result.report.diagnostics)).str());
     }
-    const std::string listed = listing(json::parse(result.catalog), params, &key_case);
+    json::Value catalog = json::parse(result.catalog);
+    add_unset_table_forms(catalog);
+    const std::string listed = listing(catalog, params, &key_case);
     context.remember(key, listed);
     return listed;
+}
+
+std::string case_files(Context & context, const json::Value & params) {
+    as_options(params, {"sha256"});
+    const bool sha256 = bool_param(params, "sha256", false);
+    // The setup's reads are remembered until the input changes; the files' sizes and hashes are read each time
+    CheckResult read;
+    if (const std::optional<std::string> known = context.remembered("case.files")) {
+        const json::Value r = json::parse(*known);
+        read.report.setup_done = r["complete"].boolean;
+        for (const json::Value & f : r["files"].array) read.files.push_back({f["role"].string, f["path"].string});
+    } else {
+        CheckOptions options;
+        options.input_file = context.path();
+        read = check_case(context, options, "", false);
+        json::Object r;
+        std::string list = "[";
+        for (const provenance::FileRead & f : read.files) {
+            list += (list.size() > 1 ? "," : "") + json::Object().add("role", f.kind).add("path", f.path).str();
+        }
+        context.remember("case.files", r.add("complete", read.report.setup_done).raw("files", list + "]").str());
+    }
+    return case_files_json(context.path(), read, sha256);
 }
 
 std::string keys_catalog(Context &, const json::Value & params) {
@@ -164,20 +225,127 @@ std::string keys_catalog(Context &, const json::Value & params) {
     }
 }
 
+std::string file_info(Context &, const json::Value & params) {
+    as_options(params, {"file"});
+    const std::string file = string_param(params, "file");
+    if (file.empty()) throw Error(code::INVALID_PARAMS, "file.info takes file, the output or restart file to describe");
+    std::error_code error;
+    if (std::filesystem::is_directory(file, error) || output::is_mesh_file(file)) {
+        throw Error(code::INVALID_PARAMS, file + " is a run directory or a mesh file: file.info describes output and "
+                                                 "restart files (mallard info describes the others)");
+    }
+    try {
+        return file_info_json(file);
+    } catch (const std::exception & e) {
+        throw Error(code::UNREADABLE, e.what());
+    }
+}
+
+std::string units_catalog(Context &, const json::Value & params) {
+    as_options(params, {});
+    return units::catalog_json();
+}
+
+std::vector<std::string> strings_param(const json::Value & params, const std::string & name) {
+    std::vector<std::string> out;
+    const json::Value * v = params.find(name);
+    if (!v || v->is_null()) return out;
+    if (v->type != json::Value::Type::ARRAY) throw Error(code::INVALID_PARAMS, name + " takes an array of strings");
+    for (const json::Value & item : v->array) {
+        if (item.type != json::Value::Type::STRING) throw Error(code::INVALID_PARAMS, name + " takes an array of strings");
+        out.push_back(item.string);
+    }
+    return out;
+}
+
+double number_param(const json::Value & params, const std::string & name, double fallback) {
+    const json::Value * v = params.find(name);
+    if (!v || v->is_null()) return fallback;
+    if (v->type != json::Value::Type::NUMBER || v->number < 0) throw Error(code::INVALID_PARAMS, name + " takes a non-negative number");
+    return v->number;
+}
+
+void only(const json::Value & params, std::initializer_list<std::string_view> names) {
+    for (const std::string & name : params.names) {
+        if (std::find(names.begin(), names.end(), name) == names.end()) throw Error(code::INVALID_PARAMS, "no parameter " + name);
+    }
+}
+
+std::string control_run(Context &, const json::Value & params) {
+    only(params, {"run", "action", "settings", "id", "wait", "timeout", "allow_files"});
+    run_ctl::Request request;
+    request.run = string_param(params, "run");
+    if (request.run.empty()) throw Error(code::INVALID_PARAMS, "run.control takes run, a run directory or run ID");
+    request.action = string_param(params, "action");
+    if (const json::Value * settings = params.find("settings"); settings && settings->type == json::Value::Type::OBJECT) {
+        for (size_t i = 0; i < settings->names.size(); i++) {
+            const json::Value & v = settings->members[i];
+            request.settings.push_back(settings->names[i] + "=" + (v.type == json::Value::Type::STRING ? v.string : json::dump(v)));
+        }
+    } else if (settings && !settings->is_null()) {
+        throw Error(code::INVALID_PARAMS, "settings takes an object of key: value");
+    }
+    request.id = string_param(params, "id");
+    request.wait = string_param(params, "wait", "done");
+    request.timeout = number_param(params, "timeout", -1.0);
+    request.allow_files = bool_param(params, "allow_files", false);
+    return run_ctl::control(request);
+}
+
+std::string launch_run(Context & context, const json::Value & params) {
+    only(params, {"input", "run_dir", "restart", "launcher", "options", "timeout"});
+    run_ctl::Launch launch;
+    launch.input = string_param(params, "input");
+    if (launch.input.empty()) {
+        if (!context.is_open()) throw Error(code::INVALID_PARAMS, "run.launch takes input, or runs the open case");
+        if (context.unsaved()) {
+            throw Error(code::UNSAVED, "the case's text differs from " + context.path() + ": save it, so that the run runs a file",
+                        json::Object().add("path", context.path()).str());
+        }
+        launch.input = context.path();
+    }
+    launch.run_dir = string_param(params, "run_dir");
+    launch.restart = string_param(params, "restart");
+    launch.launcher = strings_param(params, "launcher");
+    launch.options = strings_param(params, "options");
+    launch.timeout = number_param(params, "timeout", 60.0);
+    return run_ctl::launch(launch);
+}
+
 constexpr Method METHODS[] = {
-    {"initialize", "", SCHEMA, false, initialize},
+    {"initialize", "mallard version --format json", interfaces::CAPABILITIES.name, false, initialize},
     {"shutdown", "", "", false, shutdown},
     {"case.open", "", CASE_SCHEMA, false, case_open},
     {"case.update", "", CASE_SCHEMA, true, case_update},
     {"case.close", "", "", false, case_close},
     {"case.check", "mallard check INPUT --format json", "mallard-check", true, case_check},
+    {"case.view", "mallard check INPUT --view DIR --format json", interfaces::CASE_VIEW.name, true, case_view},
+    {"case.boundary_values", "mallard check INPUT --boundary-values DIR --format json", interfaces::BOUNDARY_VALUES.name,
+     true, case_boundary_values},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
+    {"case.files", "mallard files INPUT --format json", interfaces::CASE_FILES.name, true, case_files},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
+    {"file.info", "mallard info FILE --format json", interfaces::FILE_INFO.name, false, file_info},
+    {"units.catalog", "mallard list units --format json", interfaces::UNIT_CATALOG.name, false, units_catalog},
+    {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},
+    {"run.control", "mallard ctl RUN ACTION [KEY=VALUE...] --format json", run_control::SCHEMA, false, control_run},
 };
 
 } // namespace
 
 std::span<const Method> methods() { return METHODS; }
+
+std::string methods_json() {
+    std::string list = "[";
+    for (const Method & m : methods()) {
+        json::Object entry;
+        entry.add("name", std::string(m.name));
+        entry.raw("command", m.command.empty() ? "null" : json::quote(m.command));
+        entry.raw("result", m.result.empty() ? "null" : json::quote(m.result));
+        list += (list.size() > 1 ? "," : "") + entry.str();
+    }
+    return list + "]";
+}
 
 const Method * method(std::string_view name) {
     for (const Method & m : METHODS) {

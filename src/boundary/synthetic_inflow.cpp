@@ -281,7 +281,7 @@ SyntheticInflow::SyntheticInflow(const Input & boundary, const std::string & whe
     static const std::vector<std::string> KEYS = {"reynolds_stress",     "profile",       "length_scale",
                                                   "seed",                "zero_net_flux", "points_per_length",
                                                   "convection_velocity"};
-    for (const auto & entry : turbulence.as_table()) {
+    for (const auto & entry : turbulence.as_table().entries()) {
         if (std::find(KEYS.begin(), KEYS.end(), entry.first) == KEYS.end()) {
             std::string list;
             for (const auto & k : KEYS) list += (list.empty() ? "" : ", ") + k;

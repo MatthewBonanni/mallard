@@ -66,6 +66,9 @@ void start_run();
 /** @brief The run's id (rank 0's once shared). */
 const std::string & run_id();
 
+/** @brief A new version 4 UUID (run and request IDs). */
+std::string new_uuid();
+
 /**
  * @brief The run this one restarted from: that run's id (empty where its
  *        file records none: written before Mallard 0.10), the restart file
@@ -114,6 +117,14 @@ std::vector<std::string> read_paths();
  *        and its SHA-256 or identity (collective; rank 0 hashes).
  */
 void set_read_files();
+
+/** @brief A file this rank's setup read: its kind (mesh, mechanism, profile, ...) and its path as given. */
+struct FileRead {
+    std::string kind, path;
+};
+
+/** @brief The files this rank's setup read since start_run: the mesh file, then the others, each once. */
+std::vector<FileRead> files_read();
 
 /** @brief The input with every key explicit, as setup used it (ResolvedInput::toml). */
 void set_resolved(const std::string & toml);

@@ -12,6 +12,9 @@
 #include "run_control.h"
 
 #include <atomic>
+#include <cmath>
+#include <chrono>
+#include <sstream>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -37,9 +40,72 @@
 #endif
 
 #include "diagnostic_code.h"
+#include "json.h"
 #include "log.h"
+#include "provenance.h"
+#include "run_log.h"
+#include "units.h"
 
 namespace run_control {
+
+std::string Setting::key() const {
+    if (table.empty()) return std::string(field);
+    return std::string(table) + (selector.empty() ? "" : ".<" + std::string(selector) + ">") + "." + std::string(field);
+}
+
+const Setting * setting(const std::string & key, std::string * element) {
+    for (const Setting & s : SETTINGS) {
+        if (s.selector.empty()) {
+            if (key != s.key()) continue;
+            if (element) element->clear();
+            return &s;
+        }
+        const std::string head = std::string(s.table) + ".", tail = "." + std::string(s.field);
+        if (key.size() <= head.size() + tail.size() || key.rfind(head, 0) != 0 ||
+            key.compare(key.size() - tail.size(), tail.size(), tail) != 0) {
+            continue;
+        }
+        if (element) *element = key.substr(head.size(), key.size() - head.size() - tail.size());
+        return &s;
+    }
+    return nullptr;
+}
+
+std::string settable() {
+    std::string text;
+    for (const Setting & s : SETTINGS) text += (text.empty() ? "" : ", ") + s.key();
+    return text;
+}
+
+bool parse_count(const std::string & text, uint64_t & value) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
+    try {
+        value = std::stoull(text);
+    } catch (const std::exception &) {
+        return false;
+    }
+    return true;
+}
+
+bool parse_time(const std::string & text, double & seconds) {
+    try {
+        const Quantity q = parse_quantity(text);
+        seconds = q.value;
+        return (!q.has_unit || q.dimension.same_as(dim::time)) && std::isfinite(seconds);
+    } catch (const UnitError &) {
+        return false;
+    }
+}
+
+std::string check_setting(const std::string & key, const std::string & value) {
+    const Setting * s = setting(key);
+    if (!s) return key + ": cannot be changed while the run goes on; settable: " + settable();
+    uint64_t n = 0;
+    double x = 0.0;
+    if (s->type == "count" && !parse_count(value, n)) return key + ": expected a non-negative integer, not " + value;
+    if (s->type == "time" && !parse_time(value, x)) return key + ": expected a time in seconds or with a unit, not " + value;
+    return "";
+}
 
 namespace {
 
@@ -162,6 +228,67 @@ std::string memory_lines(int device) {
     return text;
 }
 
+/** @brief step and t of the last status published (0 before the time loop). */
+std::pair<uint64_t, double> published_step() {
+    std::lock_guard<std::mutex> lock(status_mutex);
+    return status_published ? std::make_pair(status.run.step, status.run.t) : std::make_pair(uint64_t(0), 0.0);
+}
+
+double now_seconds() {
+    return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::string status_text();
+
+/** @brief The reply of protocol version 2 to a status request: the text, and its lines as an object. */
+std::string status_json(const std::string & id) {
+    const std::string text = status_text();
+    json::Object values;
+    std::istringstream lines(text);
+    for (std::string line; std::getline(lines, line);) {
+        const size_t colon = line.find(": ");
+        if (colon != std::string::npos) values.add(line.substr(0, colon), line.substr(colon + 2));
+    }
+    const auto [step, t] = published_step();
+    return json::Object()
+        .add("id", id)
+        .add("status", "done")
+        .add("action", "status")
+        .add("step", step)
+        .add("t", t)
+        .add("message", text)
+        .raw("values", values.str())
+        .str();
+}
+
+std::string refused_json(const std::string & id, const std::string & action, const std::string & message, uint64_t step,
+                         double t, const std::string & result = "null") {
+    json::Object error;
+    error.add("severity", "error").add("code", diagnostic_code::CONTROL).add("message", message);
+    return json::Object()
+        .raw("id", id.empty() ? "null" : json::quote(id))
+        .add("status", "refused")
+        .raw("action", action.empty() ? "null" : json::quote(action))
+        .add("step", step)
+        .add("t", t)
+        .add("message", "error: " + message)
+        .raw("result", result)
+        .raw("error", error.str())
+        .str();
+}
+
+void write_control_record(const Command & command, const std::string & status_name, uint64_t step, double t,
+                          const std::string & result, const std::string & message) {
+    if (!run_log::is_open()) return;
+    json::Object r;
+    r.add("type", "control").raw("id", command.id.empty() ? "null" : json::quote(command.id));
+    r.add("action", command.action()).add("source", command.source).add("status", status_name);
+    r.add("step", step).add("t", t).add("time", now_seconds()).add("run_id", provenance::run_id());
+    r.raw("result", result);
+    if (!message.empty()) r.add("message", message);
+    run_log::write(r);
+}
+
 std::string status_text() {
     Status s;
     {
@@ -236,6 +363,84 @@ std::string signal_name(int signo) {
     }
 }
 
+std::string Command::action() const {
+    if (text.rfind("set ", 0) == 0) return "set";
+    return text;
+}
+
+Command parse_request(const std::string & line) {
+    const json::Value v = json::parse(line);
+    if (v.type != json::Value::Type::OBJECT) throw std::runtime_error("a request is a JSON object");
+    Command c;
+    c.json = true;
+    if (const json::Value * id = v.find("id"); id && id->type == json::Value::Type::STRING) c.id = id->string;
+    const json::Value * schema = v.find("schema");
+    const json::Value * version = v.find("version");
+    if (!schema || schema->string != SCHEMA || !version || version->number != VERSION) {
+        throw std::runtime_error(std::string("expected \"schema\": \"") + SCHEMA + "\", \"version\": " + std::to_string(VERSION));
+    }
+    if (c.id.empty()) throw std::runtime_error("no id: give each request an ID (a UUID)");
+    const json::Value * action = v.find("action");
+    const std::string a = action && action->type == json::Value::Type::STRING ? action->string : "";
+    if (a == "status" || a == "checkpoint" || a == "stop") {
+        c.text = a;
+    } else if (a == "set") {
+        const json::Value * settings = v.find("settings");
+        if (!settings || settings->type != json::Value::Type::OBJECT || settings->names.empty()) {
+            throw std::runtime_error("set takes settings, an object of key: value");
+        }
+        c.text = "set";
+        for (size_t i = 0; i < settings->names.size(); i++) {
+            const json::Value & value = settings->members[i];
+            const std::string text = value.type == json::Value::Type::STRING ? value.string : json::dump(value);
+            if (text.empty() || text.find_first_of(" \t\n=") != std::string::npos ||
+                settings->names[i].find_first_of(" \t\n=") != std::string::npos) {
+                throw std::runtime_error("setting " + settings->names[i] + ": a key and value without spaces or =");
+            }
+            c.text += " " + settings->names[i] + "=" + text;
+        }
+    } else {
+        throw std::runtime_error("unknown action '" + a + "' (status, checkpoint, stop, set)");
+    }
+    return c;
+}
+
+void finish(Command & command, const Done & done) {
+    // The run log is rank 0's alone
+    write_control_record(command, done.ok ? "done" : "refused", done.step, done.t, done.result,
+                         done.ok ? "" : done.message);
+    if (command.fd < 0) return;
+    if (!command.json) {
+        reply(command, done.message);
+        return;
+    }
+    std::string text;
+    if (done.ok) {
+        text = json::Object()
+                   .add("id", command.id)
+                   .add("status", "done")
+                   .add("action", command.action())
+                   .add("step", done.step)
+                   .add("t", done.t)
+                   .add("message", done.message)
+                   .raw("result", done.result)
+                   .str();
+    } else {
+        std::string message = done.message;
+        if (message.rfind("error: ", 0) == 0) message.erase(0, 7);
+        text = refused_json(command.id, command.action(), message, done.step, done.t, done.result);
+    }
+    reply(command, text);
+}
+
+std::string restart_result(const std::string & file) {
+    return json::Object().raw("restart", file.empty() ? "null" : json::Object().add("path", file).str()).str();
+}
+
+void record_accepted(const Command & command, uint64_t step, double t) {
+    write_control_record(command, "accepted", step, t, "null", "");
+}
+
 std::vector<Command> take_commands() {
     std::lock_guard<std::mutex> lock(queue_mutex);
     requests.fetch_and(~COMMAND);
@@ -244,7 +449,10 @@ std::vector<Command> take_commands() {
 
 void submit(const std::string & text, const std::string & source) {
     std::lock_guard<std::mutex> lock(queue_mutex);
-    queue.push_back(Command{text, -1, source});
+    Command command;
+    command.text = text;
+    command.source = source;
+    queue.push_back(command);
     requests.fetch_or(COMMAND);
 }
 
@@ -319,7 +527,10 @@ void Server::stop() {
     close(wake[1]);
     listen_fd = -1;
     unlink(SOCKET_NAME);
-    for (auto & command : take_commands()) reply(command, "error: the run ended before acting on the command");
+    const auto [step, t] = published_step();
+    for (auto & command : take_commands()) {
+        finish(command, Done{.ok = false, .message = "error: the run ended before acting on the command", .step = step, .t = t, .result = "null"});
+    }
 }
 
 void Server::serve() {
@@ -349,7 +560,46 @@ void Server::serve() {
             line.append(buffer, static_cast<size_t>(n));
         }
         line = trim(line.substr(0, line.find('\n')));
-        Command command{.text = line, .fd = fd};
+        if (!line.empty() && line[0] == '{') {
+            Command command;
+            try {
+                command = parse_request(line);
+            } catch (const std::exception & e) {
+                std::string id;
+                try {
+                    const json::Value v = json::parse(line);
+                    if (const json::Value * i = v.find("id"); i && i->type == json::Value::Type::STRING) id = i->string;
+                } catch (const std::exception &) {
+                    // not JSON: no ID to answer with
+                }
+                const auto [step, t] = published_step();
+                write_all(fd, refused_json(id, "", e.what(), step, t) + "\n");
+                close(fd);
+                continue;
+            }
+            command.fd = fd;
+            if (command.text == "status") {
+                write_all(fd, status_json(command.id) + "\n");
+                close(fd);
+                continue;
+            }
+            const auto [step, t] = published_step();
+            write_all(fd, json::Object()
+                              .add("id", command.id)
+                              .add("status", "accepted")
+                              .add("action", command.action())
+                              .add("step", step)
+                              .add("t", t)
+                              .str() +
+                              "\n");
+            std::lock_guard<std::mutex> lock(queue_mutex);
+            queue.push_back(command);
+            requests.fetch_or(COMMAND);
+            continue;
+        }
+        Command command;
+        command.text = line;
+        command.fd = fd;
         if (line == "status") {
             reply(command, status_text());
         } else if (line == "checkpoint" || line == "stop" || line.rfind("set ", 0) == 0) {

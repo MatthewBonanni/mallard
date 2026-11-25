@@ -68,6 +68,8 @@ struct BlockInfo {
     std::string key, element, zone;
     int64_t index = -1;
     uint64_t cells = 0;
+    std::string condition;  // boundary zones: the type of their condition, or empty
+    std::string label;      // as the images label it
 };
 
 /** @brief The metadata of the blocks (this rank's parts), in their order. Collective. */
@@ -75,9 +77,11 @@ std::vector<BlockInfo> describe(const std::vector<Block> & blocks);
 
 /**
  * @brief The case view as the JSON reports give it (interfaces::CASE_VIEW): the
- *        files written, whether it is geometry only, and every block with its metadata.
+ *        files written, whether it is geometry only, every block with its metadata,
+ *        and frames (a JSON array: each boundary entry's frame, check_json's).
  */
-std::string json(const std::vector<std::string> & files, const std::vector<BlockInfo> & blocks, bool geometry_only);
+std::string json(const std::vector<std::string> & files, const std::vector<BlockInfo> & blocks, bool geometry_only,
+                 const std::string & frames = "[]");
 
 /**
  * @brief Write the blocks, gathered from every rank in rank order, as one

@@ -32,6 +32,7 @@
 #include "session/session.h"
 #include "solver/solver.h"
 #include "stencils.h"
+#include "units.h"
 
 namespace {
 
@@ -312,25 +313,72 @@ int list_species_main(const cli::Args & args) {
     return 0;
 }
 
-int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
-
-namespace {
-
-/** @brief A key path from its catalog file name, which percent-encodes it (tools/dev/input_catalog.py). */
-std::string key_of_file(const std::string & stem) {
-    std::string key;
-    for (size_t i = 0; i < stem.size(); i++) {
-        if (stem[i] == '%' && i + 2 < stem.size()) {
-            key += static_cast<char>(std::stoi(stem.substr(i + 1, 2), nullptr, 16));
-            i += 2;
-        } else {
-            key += stem[i];
-        }
+int list_units_main(const cli::Args & args) {
+    if (const int e = format_error(args, "list units")) return e;
+    const std::string catalog = units::catalog_json();
+    if (json_format(args)) {
+        std::cout << catalog << "\n";
+        return 0;
     }
-    return key;
+    const json::Value c = json::parse(catalog);
+    std::vector<std::vector<std::string>> rows;
+    for (const json::Value & u : c["units"].array) {
+        rows.push_back({u["symbol"].string, u["dimension"].string, u["factor"].string,
+                        u["offset"].is_null() ? "" : u["offset"].string, u["prefixable"].boolean ? "yes" : ""});
+    }
+    logging::section("Units", logging::count(rows.size(), "unit"));
+    logging::table({"unit", "dimension", "SI value", "offset", "prefixes"}, rows);
+    std::vector<std::string> prefixes;
+    for (const json::Value & p : c["prefixes"].array) prefixes.push_back(p["symbol"].string + " " + p["factor"].string);
+    std::cout << "\nPrefixes: " << joined(prefixes) << ".\nAn absolute temperature in SI is (value + offset) * SI "
+                 "value; pi/180 and 5/9 are exact quotients. docs/input.md describes the syntax of quantities.\n";
+    return 0;
 }
 
-}  // namespace
+int files_main(const cli::Args & args) {
+    int argc = args.argc;
+    char ** argv = args.argv;
+    comm::Session session(argc, argv);
+    if (const int e = format_error(args, "files")) return e;
+    const std::string & input_file = args.positional[0];
+    session::CheckResult result;
+    const CaseFields failed = quietly(input_file, args, [&](Solver &, CaseFields &) {
+        session::Context context;
+        context.open(input_file);
+        CheckOptions options;
+        options.input_file = input_file;
+        result = session::check_case(context, options, "", false);
+    });
+    if (!failed.errors.empty()) return report_errors(failed);
+    const std::string files = session::case_files_json(input_file, result, args.has("--sha256"));
+    const int status = result.report.setup_done || result.report.only_missing() ? 0 : 1;
+    if (json_format(args)) {
+        std::cout << files << "\n";
+        return status;
+    }
+    std::vector<std::vector<std::string>> rows;
+    const json::Value listed = json::parse(files);
+    for (const json::Value & f : listed["files"].array) {
+        rows.push_back({f["role"].string, f["path"].string, f["exists"].boolean ? "yes" : "no",
+                        f["bytes"].is_null() ? "-" : json::number(f["bytes"].number),
+                        f["sha256"].is_null() ? "" : f["sha256"].string});
+    }
+    logging::section(input_file + ": files", logging::count(rows.size(), "file"));
+    if (args.has("--sha256")) {
+        logging::table({"role", "path", "exists", "bytes", "SHA-256"}, rows);
+    } else {
+        for (auto & row : rows) row.pop_back();
+        logging::table({"role", "path", "exists", "bytes"}, rows);
+    }
+    if (!result.report.setup_done) {
+        std::cout << "\nThe files the setup read before it stopped at the errors below; more apply once they are "
+                     "fixed.\n";
+        for (const auto & e : result.report.errors()) logging::error(diagnostic_code::LIST, "mallard files: " + e);
+    }
+    return status;
+}
+
+int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
 json::Value general_key_catalog() {
     for (const std::filesystem::path & dir : data_dirs()) {
@@ -339,7 +387,7 @@ json::Value general_key_catalog() {
         std::vector<std::pair<std::string, std::filesystem::path>> files;
         for (const auto & entry : std::filesystem::directory_iterator(catalog)) {
             if (entry.path().extension() != ".json") continue;
-            files.emplace_back(key_of_file(entry.path().stem().string()), entry.path());
+            files.emplace_back(catalog_key_of_file(entry.path().stem().string()), entry.path());
         }
         std::sort(files.begin(), files.end());
         json::Value out;
@@ -355,6 +403,26 @@ json::Value general_key_catalog() {
     }
     throw std::runtime_error("the key catalog docs/input-keys is in none of Mallard's data directories (set "
                              "MALLARD_DATA_DIR to the source tree, or to the install tree's share/mallard)");
+}
+
+void add_unset_table_forms(json::Value & catalog) {
+    json::Value general;
+    try {
+        general = general_key_catalog();
+    } catch (const std::runtime_error &) {
+        return;
+    }
+    for (size_t i = 0; i < catalog.names.size(); i++) {
+        json::Value & k = catalog.members[i];
+        const json::Value * g = general.find(catalog.names[i]);
+        if (k.has("type") || k.has("form") || !g || !g->has("form")) continue;
+        for (const char * field : {"type", "form"}) {
+            if (const json::Value * v = g->find(field)) {
+                k.names.emplace_back(field);
+                k.members.push_back(*v);
+            }
+        }
+    }
 }
 
 namespace {
@@ -479,6 +547,7 @@ int list_keys_main(const cli::Args & args) {
         listed = set_up_keys(input_file, args);
         if (listed.keys.empty()) return report_errors(listed);
         catalog = json::parse(listed.keys);
+        add_unset_table_forms(catalog);
     }
     const bool per_case = !input_file.empty();
     const KeyCase key_case{.input = input_file, .complete = listed.complete, .diagnostics = listed.diagnostics};
@@ -499,8 +568,12 @@ int list_keys_main(const cli::Args & args) {
     for (size_t i = 0; i < keys.size(); i++) {
         const json::Value & k = catalog[keys[i]];
         const json::Value * type = k.find("type");
-        std::vector<std::string> row = {keys[i] + only_dim(k), type ? type->string : "", key_units(k), key_default(k),
-                                        key_values(k)};
+        const json::Value * form = k.find("form");
+        const std::string kind = form ? (form->string == "array" ? "array of tables"
+                                         : form->string == "named" ? "named entries"
+                                                                   : "table")
+                                      : type ? type->string : "";
+        std::vector<std::string> row = {keys[i] + only_dim(k), kind, key_units(k), key_default(k), key_values(k)};
         if (per_case) row.insert(row.begin() + 1, k.find("set") && k["set"].boolean ? "yes" : "");
         rows.push_back(row);
         if (i + 1 == keys.size() || section_of(keys[i + 1]) != section_of(keys[i])) {

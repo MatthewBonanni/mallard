@@ -53,6 +53,7 @@
 #include "region_motion.h"
 #include "partition.h"
 #include "provenance.h"
+#include "run_endpoint.h"
 #include "run_log.h"
 #include "snapshot_block.h"
 #include "run_report.h"
@@ -96,6 +97,11 @@ std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed
 int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
     std::ifstream in(input_file_name, std::ios::binary);
     provenance::start_run();
+    // Before the setup, so that a run stuck in it is found too; signals end it at once until it runs
+    if (control_enabled && comm::is_root()) {
+        run_endpoint::write(provenance::run_id(), comm::size(), {.state = "setup", .outcome = "", .socket = false,
+                                                                  .control_file_interval = 0, .run_log = ""});
+    }
     provenance::set_input(input_file_name, std::string(std::istreambuf_iterator<char>(in), {}));
     input_from_file = true;
     Input parsed = parse_input(input_file_name);
@@ -233,12 +239,14 @@ void Solver::setup_from_input() {
     logging::section("Setup");
     independently("", [&] { init_run_parameters(); });
     SetupStages stages(setup_cache, *this);
+    // A resumed setup keeps mesh_read from when it ran
     if (stages.resume()) {
         stop_if_failed();
         return;
     }
+    mesh_read = false;
     timed_phase("mesh", [&] {
-        independently("", [&] {
+        mesh_read = independently("", [&] {
             if (stages.restore_mesh()) return;
             init_mesh();
             record_mesh_provenance();
@@ -937,6 +945,28 @@ std::vector<CheckUnassigned> Solver::zones_without_condition(const std::vector<i
     return out;
 }
 
+void Solver::check_frames(CheckReport & r) const {
+    const std::vector<Input> entries =
+        contains_optional(input, "boundaries") ? find_value<std::vector<Input>>(input, "boundaries") : std::vector<Input>{};
+    for (size_t i = 0; i < boundary_summary.size() && i < entries.size(); i++) {
+        CheckFrame f;
+        f.zone = boundary_summary[i].zone;
+        f.entry = "boundaries[name = \"" + f.zone + "\"]";
+        try {
+            const BoundaryFrame b = boundary_frame(*mesh, boundary_entry_faces[i], entries[i], f.entry, is_distributed());
+            f.shape = b.shape;
+            f.origin = b.origin;
+            f.u_direction = b.u_direction;
+            f.normal = b.normal;
+            f.length = b.length;
+            f.width = b.width;
+        } catch (const InputError & e) {
+            f.error = e.diagnostic.message.empty() ? e.what() : e.diagnostic.message;
+        }
+        r.frames.push_back(f);
+    }
+}
+
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
     const std::vector<Input> input_boundaries =
@@ -945,6 +975,7 @@ void Solver::init_boundaries() {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    boundary_entry_faces.clear();
     wall_model_specs.clear();
     std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
@@ -1266,6 +1297,7 @@ void Solver::init_boundaries() {
             profiled_flux.push_back(flux.empty() ? std::nan("") : flux[k]);
         }
         if (bcs.back().type == BoundaryType::INLET_STATE && bcs.back().is_characteristic()) inlets.emplace_back(i_bc, dirichlet.faces);
+        boundary_entry_faces.push_back(dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
         } else if (bcs.back().type == BoundaryType::OUTLET_PRESSURE && bcs.back().has(BoundaryCondition::AVERAGE)) {
@@ -1416,7 +1448,8 @@ void Solver::init_boundaries() {
     init_inlets(input_boundaries, inlets);
     const bool timed = !timed_fields.empty() || !dirichlet_states.empty() || !timed_inlets.empty();
     timed_boundaries = comm::allreduce(static_cast<int>(timed), comm::Op::MAX) > 0;
-    boundary_points.clear();
+    // A check keeps them for the boundaries' values at their faces
+    if (!check_only) boundary_points.clear();
 }
 
 FacePoint Solver::boundary_point(const uint32_t f) const {
@@ -2128,6 +2161,7 @@ void Solver::init_output(region::Regions & regions) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
         run_log::open(run_log_file, resume, report_file);
+        endpoint_run_log = run_log_file;
     } else {
         run_log::close();
     }
@@ -3022,6 +3056,12 @@ void Solver::start_run() {
             print_progress();
             unflush_chemistry();
             publish_status();
+            // Running once its status is published: a client that finds the run answers to status with its step
+            if (control_enabled && comm::is_root()) {
+                run_endpoint::write(provenance::run_id(), comm::size(),
+                                    {.state = "running", .outcome = "", .socket = publishing,
+                                     .control_file_interval = control_file_interval, .run_log = endpoint_run_log});
+            }
             // Strang splitting with the half steps of consecutive steps fused into one chemistry call
             defer_chemistry = reacting && fuse_chemistry;
             use_device_steps = device_steps_unsupported().empty();
@@ -3136,12 +3176,16 @@ int Solver::finish_run() {
         if (checkpoint_writer) checkpoint_writer->finish();
         t_wall_output += output_timer.seconds();
         print_summary(stop);
-        write_end_record(stop);
         for (auto & command : stop_replies) {
-            run_control::reply(command, "stopped at step " + std::to_string(step) + ", t = " +
-                                            logging::real(double(t)) + "; restart: " + restart_file);
+            run_control::finish(command, {.ok = true,
+                                          .message = "stopped at step " + std::to_string(step) + ", t = " +
+                                                     logging::real(double(t)) + "; restart: " + restart_file,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = run_control::restart_result(restart_file)});
         }
         stop_replies.clear();
+        write_end_record(stop);
         run_hold.reset();
         return control_stop.empty() ? 0 : EXIT_STOPPED;
     });
@@ -3544,6 +3588,7 @@ void Solver::print_summary(const RunEnd & end) const {
 
 void Solver::write_end_record(const RunEnd & how) {
     end_recorded = true;
+    if (comm::is_root()) run_endpoint::end(how.outcome);
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
     std::optional<DataWriter::Recorded> snapshot, restart;

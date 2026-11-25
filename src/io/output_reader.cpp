@@ -25,6 +25,7 @@
 #include "compression.h"
 #include "field_units.h"
 #include "file_format.h"
+#include "interfaces.h"
 #include "json.h"
 #include "log.h"
 #include "mesh_block.h"
@@ -1682,6 +1683,7 @@ std::string strings_json(const std::vector<std::string> & list) {
 
 std::string to_json(const Contents & c) {
     json::Object o;
+    o.add("schema", interfaces::FILE_INFO.name);
     o.add("path", c.path).add("kind", std::string(kind_name(c.kind))).add("format", c.format);
     o.raw("version", c.version >= 0 ? std::to_string(c.version) : "null");
     o.raw("dim", c.dim ? std::to_string(c.dim) : "null");
@@ -1727,6 +1729,10 @@ std::string to_json(const Contents & c) {
                              .raw("arrays", strings_json(arrays))
                              .add("boundary_faces", c.restart.n_faces)
                              .str());
+        const std::vector<std::string> why = restart_incompatibilities(c.restart, c.path);
+        o.add("continuable", why.empty()).raw("incompatibilities", strings_json(why));
+    } else {
+        o.raw("continuable", "null").raw("incompatibilities", "[]");
     }
     if (c.run.empty()) {
         o.raw("run", "null");

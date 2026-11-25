@@ -10,8 +10,10 @@
 #include <condition_variable>
 #include <deque>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -19,6 +21,7 @@
 
 #include "commands.h"
 #include "diagnostic_code.h"
+#include "interfaces.h"
 #include "log.h"
 #include "mesh_block.h"
 #include "solver/setup_cache.h"
@@ -124,6 +127,12 @@ void Context::close() {
 
 Input Context::fresh_input() const { return text ? parse_input_string(*text, input_path) : parse_input(input_path); }
 
+bool Context::unsaved() const {
+    if (!text) return false;
+    std::ifstream in(input_path, std::ios::binary);
+    return !in || std::string(std::istreambuf_iterator<char>(in), {}) != *text;
+}
+
 uint64_t Context::mesh_files_read() const { return mesh_files ? mesh_files->files_read() : 0; }
 
 std::optional<std::string> Context::remembered(const std::string & key) const {
@@ -172,8 +181,33 @@ CheckResult check_case(Context & context, const CheckOptions & options, const st
         }
         if (repeatable) context.remember_check(key, out);
     }
+    out.files = provenance::files_read();
     if (environment) check_environment(out.report);
     return out;
+}
+
+std::string case_files_json(const std::string & input, const CheckResult & result, const bool sha256) {
+    namespace fs = std::filesystem;
+    std::vector<provenance::FileRead> files = {{"input", input}};
+    files.insert(files.end(), result.files.begin(), result.files.end());
+    std::string list = "[";
+    for (const provenance::FileRead & f : files) {
+        std::error_code error;
+        const bool exists = fs::is_regular_file(f.path, error);
+        const std::uintmax_t bytes = exists ? fs::file_size(f.path, error) : 0;
+        json::Object o;
+        o.add("role", f.kind).add("path", f.path).add("resolved", fs::absolute(f.path, error).lexically_normal().string());
+        o.add("exists", exists).raw("bytes", exists && !error ? std::to_string(bytes) : "null");
+        o.raw("sha256", sha256 && exists ? json::quote(provenance::sha256_file(f.path)) : "null");
+        list += (list.size() > 1 ? "," : "") + o.str();
+    }
+    return json::Object()
+        .add("schema", interfaces::CASE_FILES.name)
+        .add("version", interfaces::CASE_FILES.version)
+        .add("input", input)
+        .add("complete", result.report.setup_done)
+        .raw("files", list + "]")
+        .str();
 }
 
 std::string string_param(const json::Value & params, const std::string & name, const std::string & fallback) {

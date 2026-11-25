@@ -736,6 +736,25 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
     });
 }
 
+std::string case_view_json(const CheckReport & r) {
+    if (r.view_file.empty() && !r.view_frames) return "null";
+    const auto vec = [](const std::array<double, 3> & v) {
+        return "[" + json::number(v[0]) + ", " + json::number(v[1]) + ", " + json::number(v[2]) + "]";
+    };
+    std::vector<std::string> files;
+    if (!r.view_file.empty()) files.push_back(r.view_file);
+    files.insert(files.end(), r.view_images.begin(), r.view_images.end());
+    const std::string frames = array_json(r.frames, [&](const CheckFrame & f) {
+        json::Object o;
+        o.add("entry", f.entry).add("zone", f.zone);
+        if (!f.error.empty()) return o.raw("shape", "null").add("error", f.error).str();
+        o.add("shape", f.shape).raw("origin", vec(f.origin)).raw("u_direction", vec(f.u_direction));
+        o.raw("normal", vec(f.normal)).add("length", f.length);
+        return o.raw("width", N_DIM == 3 ? json::number(f.width) : "null").raw("error", "null").str();
+    });
+    return case_view::json(files, r.view_blocks, r.geometry_only, frames);
+}
+
 std::string check_json(const CheckReport & r) {
     json::Object o;
     o.add("schema", interfaces::CHECK_REPORT.name).add("version", interfaces::CHECK_REPORT.version);
@@ -813,9 +832,8 @@ std::string check_json(const CheckReport & r) {
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
     o.add("geometry_only", r.geometry_only);
-    std::vector<std::string> view_files = r.view_images;
-    if (!r.view_file.empty()) view_files.insert(view_files.begin(), r.view_file);
-    o.raw("view", r.view_file.empty() ? "null" : case_view::json(view_files, r.view_blocks, r.geometry_only));
+    o.raw("view", case_view_json(r));
+    o.raw("boundary_values", r.boundary_values.empty() ? "null" : r.boundary_values);
     o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));

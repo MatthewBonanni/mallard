@@ -2,6 +2,7 @@
  "dims": [
   3
  ],
+ "form": "table",
  "set_in": [
   "examples/flame_turbulence/input.toml"
  ]

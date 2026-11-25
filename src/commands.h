@@ -41,11 +41,24 @@ int reactor_main(const cli::Args & args);
 /** @brief `mallard info FILE|RUN_DIR`: what a file or a run directory holds. */
 int info_main(const cli::Args & args);
 
+/**
+ * @brief The JSON of mallard info FILE --format json and of the session's file.info, for an output or restart
+ *        file: what it holds (mallard-file-info), and for a restart whether this build continues from it.
+ * @throws std::runtime_error for a file that cannot be read
+ */
+std::string file_info_json(const std::string & path);
+
 /** @brief `mallard list fields [INPUT]`: the output fields there are, or those of a case. */
 int list_fields_main(const cli::Args & args);
 
 /** @brief `mallard list species INPUT`: the species of a case. */
 int list_species_main(const cli::Args & args);
+
+/** @brief `mallard list units`: the units quantities in input files take. */
+int list_units_main(const cli::Args & args);
+
+/** @brief `mallard files INPUT`: the files a case reads, for staging it elsewhere. */
+int files_main(const cli::Args & args);
 
 /** @brief `mallard list keys [SECTION] [INPUT]`: the input keys there are, or those of a case. */
 int list_keys_main(const cli::Args & args);
@@ -55,6 +68,12 @@ int list_keys_main(const cli::Args & args);
  *        it), from Mallard's data directories. @throws std::runtime_error if none has it
  */
 json::Value general_key_catalog();
+
+/**
+ * @brief A case's catalog with the type and form of each table it has no key of (an optional table not set, as
+ *        boundaries.turbulence) from the general catalog, if a data directory has it.
+ */
+void add_unset_table_forms(json::Value & catalog);
 
 /** @brief A case's side of a key listing: whether its setup read every key, and what stopped it. */
 struct KeyCase {
@@ -85,6 +104,9 @@ std::string section_argument(std::string section);
  *        options. @return a usage error, or empty
  */
 std::string check_options(const cli::Args & args, CheckOptions & options);
+
+/** @brief What this build supports (mallard-capabilities): `mallard version --format json`, the session's initialize. */
+std::string capabilities_json();
 
 /** @brief `mallard session [INPUT]`: answers JSON-RPC requests on stdin and stdout (session.h). */
 int session_main(const cli::Args & args);

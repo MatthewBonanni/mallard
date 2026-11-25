@@ -196,6 +196,30 @@ TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
     }
 }
 
+TEST(CheckKeys, TheCatalogGivesEachTablesForm) {
+    const Input input = parse_input_string("[[b]]\nx = 1\n[[b]]\nx = 2\n[t]\nn = 1\n[X]\nH2 = 1.0\nO2 = 2.0\n"
+                                           "[f]\na = 1\n[regions.box]\ntype = \"box\"\n");
+    for (const Input & item : input.at("b").as_array()) find_value<int>(item, "x");
+    const Input & t = input.at("t");
+    find_value<int>(t, "n");
+    t.contains("m");
+    // Iterated and read by the names it holds: named; iterated but read by fixed keys, one absent: a table
+    for (const auto & [species, value] : input.at("X").as_table()) find_real(input, "X", species, dim::none);
+    const Input & f = input.at("f");
+    for (const auto & entry : f.as_table()) static_cast<void>(entry);
+    find_value<int>(f, "a");
+    f.contains("b");
+    find_value<std::string>(input.at("regions").at("box"), "type");
+    const json::Value catalog = json::parse(key_catalog(resolve_input(input)));
+    for (const auto & [key, form] : {std::pair{"b", "array"}, std::pair{"t", "table"}, std::pair{"X", "named"},
+                                     std::pair{"f", "table"}, std::pair{"regions", "named"},
+                                     std::pair{"regions.<name>", "table"}}) {
+        ASSERT_TRUE(catalog.has(key)) << key;
+        EXPECT_EQ(catalog[key]["form"].string, form) << key;
+    }
+    EXPECT_FALSE(catalog["b.x"].has("form"));
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");
@@ -271,6 +295,25 @@ TEST(CheckBoundaries, PeriodicPairsGiveTheirMapFacesAreaAndHowWellTheyMatch) {
     EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 8u);
     EXPECT_NEAR(p.area, N_DIM == 3 ? 0.25 : 1.0, 1e-12);
     EXPECT_LT(p.node_offset_relative, roundoff(1e-10));
+}
+
+TEST(CheckBoundaries, ZonesWithoutAConditionAndPeriodicPairsAreGivenWheneverTheMeshWasRead) {
+    std::vector<std::string> zones = {"bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[periodic]]\nzones = [\"left\", \"right\"]\n", zones);
+    std::string before = input;
+    before.replace(before.find("type = \"euler\""), 14, "type = \"eulerr\"");
+    // Stopped by the zone itself, and by [physics], before the boundaries
+    for (const std::string & text : {input, before}) {
+        const CheckReport r = check(text);
+        EXPECT_FALSE(r.setup_done);
+        ASSERT_EQ(r.unassigned.size(), 1u) << first_error(r);
+        EXPECT_EQ(r.unassigned[0].zone, "top");
+        EXPECT_EQ(r.unassigned[0].faces, N_DIM == 3 ? 32u : 16u);
+        ASSERT_EQ(r.periodic.size(), 1u) << first_error(r);
+        EXPECT_EQ(r.periodic[0].zone_a, "left");
+        EXPECT_EQ(r.periodic[0].faces, N_DIM == 3 ? 16u : 8u);
+    }
 }
 
 TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {

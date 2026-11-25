@@ -190,6 +190,20 @@ struct Diagnostic {
  */
 std::vector<Diagnostic> unused_keys(const Input & input);
 
+/** @brief A key path from its file name in the key catalog, which percent-encodes it (tools/dev/input_catalog.py). */
+std::string catalog_key_of_file(const std::string & stem);
+
+/** @brief The key paths of the key catalog (docs/input-keys/: no indices, regions.<name>); empty if not found. */
+const std::set<std::string> & catalog_keys();
+
+/**
+ * @brief The keys of the input unknown to Mallard, for a setup that stopped before it read them all: keys setup did
+ *        not read, also within tables it did not read, that are not in catalog, named like no part of its keys nor
+ *        any key setup looked up, and not in a table of species or data columns (X, Y, rhoY, lewis, units). None if
+ *        catalog is empty.
+ */
+std::vector<Diagnostic> unknown_keys(const Input & input, const std::set<std::string> & catalog);
+
 /** @brief "line 12: mesh.Nxx (did you mean mesh.Nx?)". */
 std::string describe(const Diagnostic & key);
 
@@ -279,6 +293,7 @@ struct KeyRecord {
     std::vector<std::string> values;  // accepted values, if a closed set
     bool set = false;                 // in the input, or written into it by the program (a preset, --restart)
     bool by_name = true;              // looked up by its name, not only read by iterating its table
+    bool iterated = false;            // a table whose entries setup iterated
     std::string value;                // as TOML: the input's (in the key's plain units) or the default; empty
                                       // for a table, an array of tables, or a key with neither
 };

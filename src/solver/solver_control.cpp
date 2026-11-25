@@ -20,6 +20,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
@@ -29,7 +30,6 @@
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
-#include "units.h"
 
 namespace {
 
@@ -43,25 +43,8 @@ std::vector<std::string> split(const std::string & text, char separator) {
     return parts;
 }
 
-bool parse_uint(const std::string & text, uint64_t & value) {
-    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
-    try {
-        value = std::stoull(text);
-    } catch (const std::exception &) {
-        return false;
-    }
-    return true;
-}
-
-bool parse_time(const std::string & text, double & seconds) {
-    try {
-        const Quantity q = parse_quantity(text);
-        seconds = q.value;
-        return (!q.has_unit || q.dimension.same_as(dim::time)) && std::isfinite(seconds);
-    } catch (const UnitError &) {
-        return false;
-    }
-}
+using run_control::parse_count;
+using run_control::parse_time;
 
 std::string trim(const std::string & text) {
     const size_t begin = text.find_first_not_of(" \t\r");
@@ -97,10 +80,6 @@ std::string set_file_assignments(const std::string & text) {
     }
     return words;
 }
-
-const char * SETTABLE =
-    "n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, write_data.<prefix or index>.interval, "
-    "write_data.<prefix or index>.time_interval, probes.<name>.interval, probes.<name>.time_interval, forces.<zone>.interval, integrals.interval";
 
 } // namespace
 
@@ -223,8 +202,9 @@ void Solver::diverged() {
     message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
                                             : " " + evidence.report_file + " has the evidence and other causes.";
     message += " See docs/guide/running.md#divergence.";
-    for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
-    for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
+    const run_control::Done refused{.ok = false, .message = "error: " + message, .step = step, .t = double(t), .result = "null"};
+    for (auto & command : checkpoint_replies) run_control::finish(command, refused);
+    for (auto & command : stop_replies) run_control::finish(command, refused);
     checkpoint_replies.clear();
     stop_replies.clear();
     // Collective, as is the divergence: every rank's part of the last files is written and recorded first
@@ -242,17 +222,29 @@ void Solver::act_on_requests() {
     if (acted & run_control::COMMAND) apply_commands();
     if (acted & run_control::CHECKPOINT) {
         checkpoint_requested = true;
+        run_control::Command command;
+        command.text = "checkpoint";
+        command.source = std::exchange(checkpoint_file_seen, false) ? "file" : "signal";
+        run_control::record_accepted(command, step, double(t));
+        checkpoint_replies.push_back(command);
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
         // The signal that reached any rank, so that rank 0 records it
         const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        const bool file = !signo && !stop_file_note.empty();
         if (signo) {
             const std::string name = run_control::signal_name(signo);
             control_stop = {"signal", name, name + " received"};
         } else {
-            const bool file = !stop_file_note.empty();
             control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        if (signo || file) {
+            run_control::Command command;
+            command.text = "stop";
+            command.source = signo ? "signal" : "file";
+            run_control::record_accepted(command, step, double(t));
+            stop_replies.push_back(command);
         }
         logging::event(step, double(t), "stop", control_stop.reason);
     }
@@ -280,19 +272,26 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), command.source);
+            // The run log's set events name the route as the user knows it
+            const std::string source = command.source == "file" ? "SET file" : "mallard ctl";
+            std::string settings;
+            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), source, &settings);
             // Without a connection to reply to (the SET file), the run log is the reply
             if (!ok && command.fd < 0 && comm::is_root()) {
-                logging::warning(diagnostic_code::SET_REFUSED, command.source + ": not all settings were applied\n" + reply);
+                logging::warning(diagnostic_code::SET_REFUSED, source + ": not all settings were applied\n" + reply);
             }
-            run_control::reply(command, ok ? reply : "error: not all settings were applied\n" + reply);
+            run_control::finish(command, {.ok = ok,
+                                          .message = ok ? reply : "error: not all settings were applied\n" + reply,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = json::Object().raw("settings", settings).str()});
         }
     }
 }
 
 std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::string> & assignments,
-                                                    const std::string & source) {
-    std::string reply;
+                                                    const std::string & source, std::string * results) {
+    std::string reply, settings = "[";
     bool ok = true;
     for (const std::string & assignment : assignments) {
         const size_t eq = assignment.find('=');
@@ -305,7 +304,15 @@ std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::strin
             logging::event(step, double(t), "set", what,
                            {{"source", json::quote(source)}, {"setting", json::quote(assignment)}});
         }
+        settings += std::string(settings.size() > 1 ? "," : "") +
+                    json::Object()
+                        .add("key", assignment.substr(0, eq))
+                        .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
+                        .add("applied", accepted)
+                        .add("message", what)
+                        .str();
     }
+    if (results) *results = settings + "]";
     return {ok, reply};
 }
 
@@ -314,7 +321,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
     double x = 0.0;
-    const bool is_uint = parse_uint(value, n), is_time = parse_time(value, x);
+    const bool is_uint = parse_count(value, n), is_time = parse_time(value, x);
     if (key == "n_steps" || key == "t_stop" || key == "t_wall_stop") {
         const uint64_t old_n_steps = n_steps;
         const rtype old_t_stop = t_stop, old_t_wall_stop = t_wall_stop;
@@ -361,7 +368,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     if (table == "write_data" && !name.empty() && (field == "interval" || field == "time_interval")) {
         DataWriter * writer = nullptr;
         uint64_t index = 0;
-        if (parse_uint(name, index) && index < data_writers.size()) writer = data_writers[index].get();
+        if (parse_count(name, index) && index < data_writers.size()) writer = data_writers[index].get();
         for (const auto & w : data_writers) {
             if (!writer && w->get_prefix() == name) writer = w.get();
         }
@@ -397,7 +404,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (apply) integral_monitor.interval = n;
         return {true, key + " = " + value};
     }
-    return rejected(std::string("cannot be changed while the run goes on; settable: ") + SETTABLE);
+    return rejected("cannot be changed while the run goes on; settable: " + run_control::settable());
 }
 
 std::string Solver::write_restarts() {
@@ -428,8 +435,12 @@ void Solver::write_checkpoint() {
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {
-        run_control::reply(command, "checkpoint at step " + std::to_string(step) + ", t = " +
-                                        logging::real(double(t)) + ": " + file);
+        run_control::finish(command, {.ok = true,
+                                      .message = "checkpoint at step " + std::to_string(step) + ", t = " +
+                                                 logging::real(double(t)) + ": " + file,
+                                      .step = step,
+                                      .t = double(t),
+                                      .result = run_control::restart_result(file)});
     }
     checkpoint_replies.clear();
 }
@@ -446,9 +457,12 @@ void Solver::poll_control_files() {
         in.close();
         std::filesystem::remove("SET", error);
         const std::string assignments = set_file_assignments(text.str());
-        if (!assignments.empty()) run_control::submit("set " + assignments, "SET file");
+        if (!assignments.empty()) run_control::submit("set " + assignments, "file");
     }
-    if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
+    if (std::filesystem::remove("CHECKPOINT", error)) {
+        checkpoint_file_seen = true;
+        run_control::request(run_control::CHECKPOINT);
+    }
     if (std::filesystem::remove("STOP", error)) {
         stop_file_note = "STOP file found";
         run_control::request(run_control::STOP);

@@ -24,6 +24,13 @@ std::string mallard_version();
 std::string device_name();
 
 /**
+ * @brief The devices this build's backend sees (mallard-capabilities' devices): {"backend": "Cuda", "count": 2,
+ *        "visible": [{"id": 0, "name": ..., "memory": bytes}], "host": {"cpu": ..., "threads": N}}. Kokkos need
+ *        not be initialized.
+ */
+std::string devices_json();
+
+/**
  * @brief Prints the logo and build/run information (rank 0). Call after Kokkos::initialize.
  */
 void print_header(const std::string & input_file);

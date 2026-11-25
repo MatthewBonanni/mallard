@@ -10,6 +10,7 @@
 #include <string>
 
 #include "build_info.h"
+#include "common_typedef.h"
 #include "case_template.h"
 #include "cli.h"
 #include "commands.h"
@@ -20,6 +21,8 @@
 #include "provenance.h"
 #include "run_control.h"
 #include "run_log.h"
+#include "session/run_ctl.h"
+#include "session/session.h"
 #include "snapshot_block.h"
 #include "diagnostic_code.h"
 #include "log.h"
@@ -41,6 +44,11 @@ constexpr Option RUN_OPTIONS[] = {
     {"--verbose", "", "",
      "A line for every file written, between the progress rows. Default: the progress table's written column "
      "counts them, and mallard.jsonl and the summary name them."},
+    {"--detach", "", "",
+     "Start the run in the background, in a session of its own, and return once it has written its endpoint "
+     "record mallard.run.json: prints the launch as one JSON object (run ID, directory, PID). The run's output "
+     "goes to mallard.out; mallard ctl controls it. Not under mpirun: the session's run.launch starts runs on "
+     "several ranks."},
     {"--log-format", "", "text|jsonl",
      "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
      "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
@@ -113,8 +121,19 @@ constexpr Option CHECK_OPTIONS[] = {
      "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
      "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
-     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
-     "lists them. Default: none."},
+     "carries its metadata (kind, key, element, element_index, zone) as field data. With --format json, the "
+     "report's view lists the files, every block with its metadata and condition, and the frame of each "
+     "boundary's local coordinates: where u starts, which way it grows, the inward normal and the length. "
+     "Default: none."},
+    {"--boundary-values", "", "DIR",
+     "Write each [[boundaries]] entry's values at its faces, as the boundary evaluates them at the initial "
+     "time: DIR/boundaries_<index>_<zone>.csv with each face's center, inward normal, the local coordinates "
+     "its expressions read, every key it prescribes (u, p, T, p0, T0, mass_flux, q) and the velocity it "
+     "prescribes; for inlet_stagnation and inlet_mass_flow, the density, velocity, speed, mass flux into the domain (rho_u_n) and "
+     "pressure it settles at against the initial pressure inside, estimated (the first steps' transient "
+     "differs). With "
+     "--format json, the report's boundary_values gives each file and each column's min, area mean and "
+     "max. Default: none."},
     {"--geometry-only", "", "",
      "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
      "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
@@ -122,6 +141,22 @@ constexpr Option CHECK_OPTIONS[] = {
      "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
      "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
+};
+
+constexpr Option CTL_OPTIONS[] = {
+    {"--wait", "", "accepted|done",
+     "accepted: return once the run has queued the request; done: once it has acted on it (the restart written, "
+     "the settings applied). Default: done."},
+    {"--timeout", "", "SECONDS",
+     "Give up after this long. Default: 30 s for accepted, none for done (a step of a large run can take minutes)."},
+    {"--format", "", "text|json",
+     "text: the run's reply; json: the result as one JSON object (schema mallard-run-control), errors as "
+     "{\"error\": {...}}. Default: text."},
+    {"--id", "", "ID", "The request's ID, to find its control records in the run log. Default: a new UUID."},
+    {"--allow-files", "", "",
+     "If no other route reaches the run, write a STOP or CHECKPOINT file in its directory (the run must poll for "
+     "them: [run] control_file_interval)."},
+    {"--direct", "", "", "Only the socket in RUN_DIR, on this host: what the remote end of a route runs."},
 };
 
 constexpr Option SESSION_OPTIONS[] = {
@@ -132,6 +167,12 @@ constexpr Option LIST_OPTIONS[] = {
     {"--format", "", "text|json",
      "text: one table per group (of fields) or table (of keys), with units; json: the same as one JSON "
      "object, for scripts. Default: text."},
+    KOKKOS,
+};
+
+constexpr Option FILES_OPTIONS[] = {
+    {"--sha256", "", "", "Also each file's SHA-256 (reads every file)."},
+    {"--format", "", "text|json", "text: a table; json: one JSON object (mallard-case-files), for scripts. Default: text."},
     KOKKOS,
 };
 
@@ -476,7 +517,7 @@ constexpr Option GLOBAL_OPTIONS[] = {
 
 constexpr std::string_view CHECK_ARGUMENTS[] = {"[INPUT]"};
 constexpr std::string_view NEW_ARGUMENTS[] = {"[TEMPLATE]", "[DIRECTORY]"};
-constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
+constexpr std::string_view CTL_ARGUMENTS[] = {"RUN_DIR|RUN_ID", "status|checkpoint|stop|set", "[KEY=VALUE...]"};
 constexpr std::string_view FILE_ARGUMENTS[] = {"FILE"};
 constexpr std::string_view DIFF_ARGUMENTS[] = {"FILE_A", "FILE_B"};
 constexpr std::string_view FILES_ARGUMENTS[] = {"FILE", "[FILE...]"};
@@ -503,17 +544,76 @@ int new_main(const Args & args) {
 }
 
 int ctl_main(const Args & args) {
-    const std::string & verb = args.positional[1];
-    std::string request = verb;
-    if (verb == "set") {
-        if (args.positional.size() < 3) return usage_error(*command("ctl"), "set needs KEY=VALUE");
-        for (size_t i = 2; i < args.positional.size(); i++) request += " " + args.positional[i];
-    } else if (verb != "status" && verb != "checkpoint" && verb != "stop") {
-        return usage_error(*command("ctl"), "unknown command " + verb + " (status, checkpoint, stop, set)");
-    } else if (args.positional.size() > 2) {
-        return usage_error(*command("ctl"), "unexpected argument " + args.positional[2]);
+    run_ctl::Request request;
+    request.run = args.positional[0];
+    request.action = args.positional[1];
+    request.settings.assign(args.positional.begin() + 2, args.positional.end());
+    if (request.action != "status" && request.action != "checkpoint" && request.action != "stop" &&
+        request.action != "set") {
+        return usage_error(*command("ctl"), "unknown command " + request.action + " (status, checkpoint, stop, set)");
     }
-    return run_control::ctl(args.positional[0], request);
+    if (request.action == "set" && request.settings.empty()) return usage_error(*command("ctl"), "set needs KEY=VALUE");
+    if (request.action != "set" && !request.settings.empty()) {
+        return usage_error(*command("ctl"), "unexpected argument " + request.settings[0]);
+    }
+    request.id = args.value_or("--id", "");
+    request.wait = args.value_or("--wait", "done");
+    if (request.wait != "accepted" && request.wait != "done") {
+        return usage_error(*command("ctl"), "--wait takes accepted or done, not " + request.wait);
+    }
+    if (args.has("--timeout")) {
+        try {
+            request.timeout = std::stod(args.value_or("--timeout", ""));
+        } catch (const std::exception &) {
+            return usage_error(*command("ctl"), "--timeout takes seconds");
+        }
+        if (request.timeout < 0.0) return usage_error(*command("ctl"), "--timeout takes seconds");
+    }
+    request.direct = args.has("--direct");
+    request.allow_files = args.has("--allow-files");
+    const std::string format = args.value_or("--format", "text");
+    if (format != "text" && format != "json") return usage_error(*command("ctl"), "--format takes text or json");
+    try {
+        const std::string result = run_ctl::control(request);
+        const json::Value r = json::parse(result);
+        const std::string status = r["status"].string;
+        if (format == "json") {
+            std::cout << result << std::endl;
+        } else if (status == "sent") {
+            std::cout << "sent by " << r["route"].string << "; the run log is not visible here to confirm it\n";
+        } else if (!r["replies"].array.empty()) {
+            const json::Value & last = r["replies"].array.back();
+            if (const json::Value * message = last.find("message"); message && !message->string.empty()) {
+                std::cout << message->string << (message->string.back() == '\n' ? "" : "\n");
+            } else {
+                std::cout << last["status"].string << " at step " << json::number(last["step"].number) << ", t = "
+                          << json::number(last["t"].number) << "\n";
+            }
+        }
+        std::cout << std::flush;
+        return status == "refused" ? 1 : 0;
+    } catch (const session::Error & e) {
+        if (format == "json") {
+            json::Object error;
+            error.add("code", e.code).add("message", std::string(e.what()));
+            if (!e.data.empty()) error.raw("data", e.data);
+            std::cout << json::Object().raw("error", error.str()).str() << std::endl;
+        } else {
+            std::cerr << "mallard ctl: " << e.what() << "\n";
+            if (!e.data.empty()) {
+                const json::Value data = json::parse(e.data);
+                if (const json::Value * hint = data.find("route_hint")) {
+                    std::string line;
+                    for (const json::Value & word : (*hint)["argv"].array) line += (line.empty() ? "" : " ") + word.string;
+                    std::cerr << "  run where " << (*hint)["argv"].array[0].string << " reaches the run: " << line << "\n";
+                }
+                if (const json::Value * tried = data.find("tried")) {
+                    for (const json::Value & t : tried->array) std::cerr << "  tried " << t.string << "\n";
+                }
+            }
+        }
+        return 1;
+    }
 }
 
 int upgrade_main(const Args & args) {
@@ -536,56 +636,13 @@ int completion_main(const Args & args) {
     return 0;
 }
 
-std::string strings_json(std::span<const char * const> items) {
-    std::string out = "[";
-    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
-    return out + "]";
-}
-
-std::string schema_json(const char * schema, int version) {
-    return json::Object().add("schema", schema).add("version", version).str();
-}
-
-std::string capabilities_json() {
-    std::string dimensions = "[";
-    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
-    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
-    control.pop_back();
-    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
-    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
-    const std::string list = json::Object()
-                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
-                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
-                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
-                                 .raw("case_view", entry(interfaces::CASE_VIEW))
-                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
-                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
-                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
-                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
-                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
-                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
-                                 .raw("run_control", control)
-                                 .raw("convergence", entry(interfaces::CONVERGENCE))
-                                 .raw("pack", entry(interfaces::PACK))
-                                 .str();
-    return json::Object()
-        .add("schema", interfaces::CAPABILITIES.name)
-        .add("version", interfaces::CAPABILITIES.version)
-        .raw("mallard", provenance::code())
-        .raw("build", provenance::build())
-        .raw("dependencies", provenance::dependencies())
-        .raw("dimensions", dimensions + "]")
-        .raw("interfaces", list)
-        .str();
-}
-
 int version_main(const Args & args) {
     const std::string format = args.value_or("--format", "text");
     if (format != "text" && format != "json") {
         return usage_error(*command("version"), "--format takes text or json, not " + format);
     }
     if (format == "json") {
-        std::cout << capabilities_json() << std::endl;
+        std::cout << ::capabilities_json() << std::endl;
     } else {
         std::cout << "Mallard " << mallard_version() << std::endl;
     }
@@ -631,12 +688,17 @@ constexpr Command COMMANDS[] = {
     {
         .name = "ctl",
         .group = "Run",
-        .summary = "Ask a running case for its status, a restart file or a stop, or change its settings",
-        .synopsis = "mallard ctl <run-dir> status | checkpoint | stop\n"
-                    "mallard ctl <run-dir> set <key>=<value> [<key>=<value> ...]",
+        .summary = "Ask a running case for its status, a restart file or a stop, or change its settings, from anywhere",
+        .synopsis = "mallard ctl <run-dir|run-id> status | checkpoint | stop [options]\n"
+                    "mallard ctl <run-dir|run-id> set <key>=<value> [<key>=<value> ...] [options]",
         .description =
-            "Sends a request to the run started in run-dir, through its control socket mallard.sock, and "
-            "prints the reply. It must run on the node of the run's rank 0.\n"
+            "Sends a request to a run and prints its reply. The run is named by its directory or by its run ID "
+            "(the run registry finds it); its endpoint record, mallard.run.json, says where it runs, and ctl "
+            "takes the first route that reaches it: the control socket mallard.sock on the same host, srun "
+            "--overlap into its Slurm job, kubectl exec into its pod, ssh to the node of a PBS or LSF job, then, "
+            "for stop and checkpoint, a signal (SIGUSR2, SIGUSR1) by kill, scancel, qsig or bkill. Control files "
+            "only with --allow-files. Each request has an ID; the run acknowledges it (accepted), then answers "
+            "once it has acted (done), and records both in its run log as control records.\n"
             "\n"
             "status: step, t, dt, CFL number, progress, wall time per step, cells per second, ETA, memory "
             "and the state of each trigger. "
@@ -644,16 +706,18 @@ constexpr Command COMMANDS[] = {
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
             "check_interval, control_file_interval, write_data.<prefix or index>.interval or .time_interval, "
-            "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
-            "are refused. A SET file in run-dir does the same from anywhere the directory is visible, with "
-            "[run] control_file_interval: lines of key = value, the run log the reply.",
-        .options = {},
+            "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. ctl refuses "
+            "other keys, and values of the wrong type, before sending (mallard version --format json lists the "
+            "keys under control.settings). A SET file in run-dir does the same from anywhere the directory is "
+            "visible, with [run] control_file_interval: lines of key = value, the run log the reply.",
+        .options = CTL_OPTIONS,
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"
                     "$ mallard ctl runs/cylinder set t_stop=3.0 write_data.flow.time_interval=0.05\n"
-                    "$ mallard ctl . stop",
-        .exit_status = "0  the run carried out the request\n"
-                       "1  no run answers in run-dir, or the run refused the request\n"
+                    "$ mallard ctl 3a256c99-a024-4845-8b46-5848d430e28b stop --format json\n"
+                    "$ mallard ctl . checkpoint --wait accepted",
+        .exit_status = "0  the run accepted or carried out the request\n"
+                       "1  no route reached the run, the run ended or refused the request, or the timeout passed\n"
                        "2  usage error",
         .run = ctl_main,
     },
@@ -818,7 +882,9 @@ constexpr Command COMMANDS[] = {
             ".xmf), a restart file (compressed too), a probe file (.csv, .h5, .vtkhdf, .vtp, .pvd), a CSV file of forces "
             "or integrals, or a mesh file (Gmsh or Fluent .msh, .cas, .cgns, an OpenFOAM case, a Mallard HDF5 "
             "mesh). Output files are read by any build, of any dimension and precision; a mesh file by the solver "
-            "of its dimension, which also reports its quality as mallard check does.\n"
+            "of its dimension, which also reports its quality as mallard check does. For a restart file it says "
+            "whether this build continues from it, and if not why (precision, dimension, flow variables, "
+            "compression without zlib): continuable and incompatibilities in --format json (mallard-file-info).\n"
             "\n"
             "RUN_DIR is a directory a run wrote to: its start from mallard.jsonl and, from the same records as its "
             "report.html, its outcome, health (lowest values, repairs, conservation), cost and warnings, each with "
@@ -922,6 +988,46 @@ constexpr Command COMMANDS[] = {
         .run = list_keys_main,
     },
     {
+        .name = "files",
+        .group = "Inspect",
+        .summary = "The files a case reads, for copying it to another machine",
+        .synopsis = "mallard files INPUT [--sha256] [--format text|json]",
+        .description =
+            "Sets the case up as mallard check does (writing nothing) and lists the input and every file its setup "
+            "read: the mesh, mechanisms, tables and profiles, probe points, surfaces, the restart or remap source it "
+            "starts from. Each with its role, its path as written and resolved, whether it exists and its size; "
+            "--sha256 adds its SHA-256. The list comes from what the setup read, so a file named by a new key is "
+            "never missed. An input still being written lists the files the setup read before it stopped.",
+        .options = FILES_OPTIONS,
+        .arguments = INPUT_ARGUMENT,
+        .examples = "$ mallard files input.toml\n"
+                    "$ mallard files input.toml --sha256 --format json",
+        .exit_status = "0  listed, also of an input whose only errors are missing pieces\n"
+                       "1  the case cannot be set up (the errors are printed)\n"
+                       "2  usage error",
+        .dim = Case::input,
+        .run = files_main,
+    },
+    {
+        .name = "list units",
+        .group = "Inspect",
+        .summary = "The units quantities in input files take, with their dimensions and exact SI values",
+        .synopsis = "mallard list units [--format text|json]",
+        .description =
+            "Lists every unit a quantity such as \"1 atm\" or \"5 mm\" may carry: its dimension, as the key "
+            "catalog's units name it, its SI value as defined (a decimal, or an exact quotient such as 101325/760 "
+            "or pi/180), the offset of an absolute temperature, and whether it takes an SI prefix; then the "
+            "prefixes. --format json adds the exponents of each dimension and its double value, and the named "
+            "dimensions with example units.",
+        .options = LIST_OPTIONS,
+        .arguments = {},
+        .examples = "$ mallard list units\n"
+                    "$ mallard list units --format json",
+        .exit_status = "0  listed\n"
+                       "2  usage error",
+        .run = list_units_main,
+    },
+    {
         .name = "list templates",
         .group = "Inspect",
         .summary = "The case templates of mallard new",
@@ -943,9 +1049,11 @@ constexpr Command COMMANDS[] = {
             "Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON object per line, on "
             "standard input; responses and notifications go to standard output, one per line, and nothing else "
             "does (the setup's text goes to standard error). Requests: initialize, case.open, case.update, "
-            "case.close, case.check, case.keys, keys.catalog and shutdown; $/cancel stops a request at its next "
-            "setup phase. Each request that has a one-shot command runs the same code: case.check is mallard check "
-            "INPUT --format json, case.keys and keys.catalog are mallard list keys --format json.\n"
+            "case.close, case.check, case.keys, keys.catalog, run.launch, run.control and shutdown; $/cancel stops a "
+            "request at its next setup phase. Each request that has a one-shot command runs the same code: "
+            "case.check is mallard check INPUT --format json, case.keys and keys.catalog are mallard list keys "
+            "--format json, run.launch is mallard -i INPUT --detach, run.control is mallard ctl RUN ... --format "
+            "json.\n"
             "\n"
             "The session keeps what its setups built: a check after an edit (case.update with the whole text, "
             "which the session never writes back) sets up again only the stages whose reads changed. An edit that "
@@ -1356,10 +1464,14 @@ constexpr Command COMMANDS[] = {
             "versions of the libraries it uses (dependencies), the dimensions of the solvers installed with it "
             "(mallard --dim 3 version --format json describes the 3D one's build), and under interfaces the "
             "schema name and version of every machine-readable output: the key catalog, the check report, the "
-            "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run control (with "
-            "its commands and control files), the grid convergence report and the pack manifest. Each of these "
-            "carries the same schema and version fields; an addition keeps the version, a change that breaks "
-            "a reader increments it.",
+            "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run "
+            "control (with its commands and control files), the run endpoint record, run launch results, the grid "
+            "convergence report and the pack manifest. Each of these carries the same schema and version fields; an addition keeps the version, a change that breaks "
+            "a reader increments it. Also: the session's requests with the one-shot command of each (methods), "
+            "the backend's devices (each GPU visible with its name and memory, and the host's CPU and threads), "
+            "and what run control takes (control: the socket's commands, every key ctl set accepts with its "
+            "type, units and the element it names, the control files, and the routes ctl can take from here). "
+            "The session's initialize answers the same object, with the open case.",
         .options = VERSION_OPTIONS,
         .arguments = {},
         .examples = "$ mallard --version\n"
@@ -1373,7 +1485,7 @@ constexpr Command COMMANDS[] = {
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"install", "Commands on this install of Mallard."},
-    {"list", "Catalogs: the fields, species, input keys and case templates there are."},
+    {"list", "Catalogs: the fields, species, input keys, units and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
 };
@@ -1388,3 +1500,86 @@ std::span<const std::string_view> groups() { return GROUPS; }
 std::span<const Option> global_options() { return GLOBAL_OPTIONS; }
 
 } // namespace cli
+
+namespace {
+
+std::string strings_json(std::span<const char * const> items) {
+    std::string out = "[";
+    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
+    return out + "]";
+}
+
+std::string schema_json(const char * schema, int version) {
+    return json::Object().add("schema", schema).add("version", version).str();
+}
+
+} // namespace
+
+std::string capabilities_json() {
+    std::string dimensions = "[";
+    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
+    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
+    control.pop_back();
+    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
+    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
+    const std::string list = json::Object()
+                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
+                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("unit_catalog", entry(interfaces::UNIT_CATALOG))
+                                 .raw("case_files", entry(interfaces::CASE_FILES))
+                                 .raw("file_info", entry(interfaces::FILE_INFO))
+                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
+                                 .raw("boundary_values", entry(interfaces::BOUNDARY_VALUES))
+                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
+                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
+                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
+                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
+                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
+                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
+                                 .raw("run_control", control)
+                                 .raw("run_endpoint", entry(interfaces::RUN_ENDPOINT))
+                                 .raw("run_launch", entry(interfaces::RUN_LAUNCH))
+                                 .raw("convergence", entry(interfaces::CONVERGENCE))
+                                 .raw("pack", entry(interfaces::PACK))
+                                 .str();
+    std::string settings = "[";
+    for (const run_control::Setting & s : run_control::SETTINGS) {
+        json::Object o;
+        o.add("key", s.key()).add("type", std::string(s.type));
+        o.raw("units", s.type == "time" ? "\"s\"" : "null");
+        o.raw("selector", s.selector.empty() ? "null" : json::quote(s.selector));
+        settings += (settings.size() > 1 ? "," : "") + o.add("help", std::string(s.help)).str();
+    }
+    const std::string control_member = json::Object()
+                                           .add("schema", interfaces::RUN_CONTROL.name)
+                                           .add("version", interfaces::RUN_CONTROL.version)
+                                           .raw("commands", strings_json(run_control::COMMANDS))
+                                           .raw("settings", settings + "]")
+                                           .raw("files", strings_json(run_control::FILES))
+                                           .raw("routes", run_ctl::routes_json(run_ctl::here()))
+                                           .str();
+    std::string check_options = "[", gpus = "[";
+    for (const cli::Option & o : cli::command("check")->options) {
+        if (!o.name.ends_with('*')) check_options += (check_options.size() > 1 ? "," : "") + json::quote(std::string(o.name));
+    }
+    for (const MemoryGpu & g : memory_gpus()) {
+        gpus += (gpus.size() > 1 ? "," : "") +
+                json::Object().add("key", std::string(g.key)).add("name", std::string(g.name)).add("bytes", g.bytes).str();
+    }
+    const std::string check = json::Object().raw("options", check_options + "]").raw("memory_gpus", gpus + "]").str();
+    return json::Object()
+        .add("schema", interfaces::CAPABILITIES.name)
+        .add("version", interfaces::CAPABILITIES.version)
+        .raw("mallard", provenance::code())
+        .raw("build", provenance::build())
+        .raw("dependencies", provenance::dependencies())
+        .raw("dimensions", dimensions + "]")
+        .add("dimension", N_DIM)
+        .raw("interfaces", list)
+        .raw("methods", session::methods_json())
+        .raw("devices", devices_json())
+        .raw("control", control_member)
+        .raw("check", check)
+        .str();
+}

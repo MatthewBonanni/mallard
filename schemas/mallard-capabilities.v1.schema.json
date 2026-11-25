@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-capabilities.v1.schema.json",
+  "title": "What a Mallard build supports: mallard version --format json, and the session's initialize (with case)",
+  "type": "object",
+  "required": ["schema", "version", "mallard", "build", "dependencies", "dimensions", "dimension", "interfaces", "methods", "devices", "control", "check"],
+  "properties": {
+    "schema": {"const": "mallard-capabilities"},
+    "version": {"const": 1},
+    "mallard": {"type": "object", "required": ["version"], "properties": {"version": {"type": "string"}}, "additionalProperties": true},
+    "build": {"type": "object", "required": ["dim", "precision", "backend"], "additionalProperties": true},
+    "dependencies": {"type": "object", "additionalProperties": true},
+    "dimensions": {"type": "array", "items": {"enum": [2, 3]}, "description": "the dimensions of the solvers installed with this one"},
+    "dimension": {"enum": [2, 3], "description": "this solver's"},
+    "interfaces": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "by interface: the schema name and major version of its JSON"
+    },
+    "methods": {
+      "type": "array",
+      "description": "the session's requests",
+      "items": {
+        "type": "object",
+        "required": ["name", "command", "result"],
+        "properties": {
+          "name": {"type": "string"},
+          "command": {"type": ["string", "null"], "description": "the one-shot command that runs the same handler"},
+          "result": {"type": ["string", "null"], "description": "schema name of the result"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "devices": {
+      "type": "object",
+      "required": ["backend", "count", "visible", "host"],
+      "properties": {
+        "backend": {"type": "string", "description": "Kokkos's default execution space: Cuda, HIP, SYCL, OpenMP, Threads, Serial"},
+        "count": {"type": "integer", "minimum": 0, "description": "GPUs this process sees; 0 for host backends"},
+        "visible": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "memory"],
+            "properties": {
+              "id": {"type": "integer", "minimum": 0},
+              "name": {"type": "string"},
+              "memory": {"type": "integer", "minimum": 0, "description": "bytes"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "host": {
+          "type": "object",
+          "required": ["cpu", "threads"],
+          "properties": {"cpu": {"type": "string"}, "threads": {"type": "integer", "minimum": 0}},
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "control": {
+      "type": "object",
+      "required": ["schema", "version", "commands", "settings", "files", "routes"],
+      "properties": {
+        "schema": {"const": "mallard-run-control"},
+        "version": {"type": "integer", "minimum": 1},
+        "commands": {"type": "array", "items": {"type": "string"}, "description": "what the control socket takes"},
+        "settings": {
+          "type": "array",
+          "description": "the keys set takes while the run goes on; mallard ctl checks them against this table",
+          "items": {
+            "type": "object",
+            "required": ["key", "type", "units", "selector", "help"],
+            "properties": {
+              "key": {"type": "string", "description": "as written, with <selector> for the element's name: write_data.<prefix_or_index>.interval"},
+              "type": {"enum": ["count", "time"]},
+              "units": {"type": ["string", "null"], "description": "SI unit of a time; a value may carry another time unit"},
+              "selector": {"enum": ["prefix_or_index", "name", "zone", null]},
+              "help": {"type": "string"}
+            },
+            "additionalProperties": true
+          }
+        },
+        "files": {"type": "array", "items": {"type": "string"}, "description": "control files the run looks for"},
+        "routes": {
+          "type": "array",
+          "description": "the routes mallard ctl tries, in order, and whether a program of each is on PATH here",
+          "items": {
+            "type": "object",
+            "required": ["kind", "programs", "available"],
+            "properties": {
+              "kind": {"enum": ["socket", "srun", "kubectl", "ssh", "signal", "file"]},
+              "programs": {"type": "array", "items": {"type": "string"}},
+              "available": {"type": "boolean"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "check": {
+      "type": "object",
+      "required": ["options", "memory_gpus"],
+      "properties": {
+        "options": {"type": "array", "items": {"type": "string"}, "description": "every option mallard check takes (\"--memory\", \"--view\", ...): whether this build has one"},
+        "memory_gpus": {
+          "type": "array",
+          "description": "the GPUs --memory (case.check's memory) takes by name",
+          "items": {
+            "type": "object",
+            "required": ["key", "name", "bytes"],
+            "properties": {
+              "key": {"type": "string", "description": "the name --memory takes (\"a100-80\")"},
+              "name": {"type": "string", "description": "the GPU (\"A100-80GB\")"},
+              "bytes": {"type": "integer", "minimum": 0, "description": "its memory, as the driver reports it"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "case": {
+      "description": "initialize only: the open case",
+      "oneOf": [{"type": "null"}, {"$ref": "mallard-case.v1.schema.json"}]
+    }
+  },
+  "additionalProperties": true
+}

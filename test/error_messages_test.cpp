@@ -642,3 +642,70 @@ TEST(ErrorMessages, MissingPiecesAreTheOnlyErrorsOfAnInputStillBeingWritten) {
     Solver wrong;
     EXPECT_FALSE(wrong.check(parse_input_string(replaced(mesh, "Nx = 16", "Nx = 16.0")), {}).only_missing());
 }
+
+namespace {
+
+/** @brief The keys of the diagnostics of a check of the input with the code, in order. */
+std::vector<std::string> keys_of(const CheckReport & report, const std::string & code) {
+    std::vector<std::string> keys;
+    for (const CheckDiagnostic & d : report.diagnostics) {
+        if (d.code == code) keys.push_back(d.key);
+    }
+    return keys;
+}
+
+CheckReport check_of(const std::string & input) {
+    Solver solver;
+    return solver.check(parse_input_string(input), {});
+}
+
+std::string listed(const CheckReport & report) {
+    std::string out;
+    for (const CheckDiagnostic & d : report.diagnostics) out += d.code + " " + d.key + ": " + d.message + "\n";
+    return out;
+}
+
+} // namespace
+
+TEST(ErrorMessages, CheckThatStopsEarlyReportsOnlyKeysUnknownToMallardAsUnused) {
+    // [physics] stops the setup before it reads the initial state, the boundaries and the writers
+    std::string input = replaced(box("t_stop = 0.5\ncfl = 0.8\ncfll = 0.9\n"), "type = \"euler\"", "type = \"eulerr\"");
+    input = replaced(input, "T = 1.0\n", "T = 1.0\nrhoo = 1.0\n[initialize.Y]\nC3H8 = 1.0\n");
+    input += "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 5\n";
+    const CheckReport report = check_of(input);
+    ASSERT_FALSE(report.setup_done);
+    EXPECT_EQ(keys_of(report, diagnostic_code::INPUT), std::vector<std::string>{"physics.type"}) << listed(report);
+    EXPECT_EQ(keys_of(report, diagnostic_code::KEY_UNUSED), (std::vector<std::string>{"run.cfll", "initialize.rhoo"}))
+        << listed(report);
+}
+
+TEST(ErrorMessages, CheckReportsTheErrorsOfSectionsPastTheIndependentEntriesThatStopTheSetup) {
+    std::string input = replaced(box("t_stop = 0.5\ncfl = 0.8\ncfll = 0.9\ngamma = 1.4\n"),
+                                 "name = \"left\"\ntype = \"symmetry\"", "name = \"left\"\ntype = \"wal\"");
+    input += "[[write_data]]\nprefix = \"a\"\nfields = [\"P\"]\ninterval = 5\n"
+             "[[write_data]]\nprefix = \"b\"\nfields = [\"P\"]\ninterval = 0\nprefixx = \"c\"\n";
+    const CheckReport report = check_of(input);
+    EXPECT_FALSE(report.setup_done);
+    const std::vector<std::string> errors = keys_of(report, diagnostic_code::INPUT);
+    ASSERT_EQ(errors.size(), 2u) << listed(report);
+    EXPECT_EQ(errors[0].rfind("boundaries[", 0), 0u) << listed(report);
+    EXPECT_EQ(errors[1], "write_data[1].interval") << listed(report);
+    for (const CheckDiagnostic & d : report.diagnostics) {
+        if (d.severity == report::Status::ERROR) {
+            EXPECT_GT(d.line, 0u) << d.message;
+        }
+    }
+    // Past them the setup ended: keys it did not read are unused, and in the failed entries the unknown ones
+    EXPECT_EQ(keys_of(report, diagnostic_code::KEY_UNUSED),
+              (std::vector<std::string>{"run.cfll", "run.gamma", "write_data[1].prefixx"}))
+        << listed(report);
+
+    // A zone without a condition, as a symmetry plane
+    std::vector<std::string> zones = {"left", "right", "bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const std::string uncovered =
+        box("t_stop = 0.5\ncfl = 0.8\n", "", zones) + "[[write_data]]\nprefix = \"b\"\nfields = [\"P\"]\ninterval = 0\n";
+    const CheckReport past = check_of(uncovered);
+    EXPECT_EQ(keys_of(past, diagnostic_code::INPUT), (std::vector<std::string>{"boundaries", "write_data[0].interval"}))
+        << listed(past);
+}

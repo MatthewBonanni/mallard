@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-case-files.v1.schema.json",
+  "title": "The files a case reads, for staging: case.files, and mallard files INPUT --format json",
+  "type": "object",
+  "required": ["schema", "version", "input", "complete", "files"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "mallard-case-files"},
+    "version": {"const": 1},
+    "input": {"type": "string"},
+    "complete": {"type": "boolean", "description": "whether the setup ran to its end; if not, files are those it read before it stopped"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "description": "the input first, then the mesh file and every other file the setup read, each once",
+      "items": {
+        "type": "object",
+        "required": ["role", "path", "resolved", "exists", "bytes", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {"type": "string", "description": "input, mesh, mechanism, table, probe_points, surface, restart, remap_source, remap_mesh"},
+          "path": {"type": "string", "description": "as the input writes it, relative to the working directory"},
+          "resolved": {"type": "string", "description": "absolute"},
+          "exists": {"type": "boolean"},
+          "bytes": {"type": ["integer", "null"]},
+          "sha256": {"type": ["string", "null"], "description": "with sha256 (--sha256), else null"}
+        }
+      }
+    }
+  }
+}

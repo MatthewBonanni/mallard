@@ -8,10 +8,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <numbers>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -21,12 +26,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "check.h"
 #include "cli.h"
 #include "comm.h"
 #include "common_typedef.h"
 #include "data_paths.h"
 #include "json.h"
 #include "json_schema.h"
+#include "provenance.h"
+#include "run_control.h"
 #include "session/session.h"
 
 extern char ** environ;
@@ -57,10 +65,10 @@ std::string mallard() {
 }
 
 /** @brief Runs mallard with these arguments and this standard input, outside any MPI launcher; killed after two
- *         minutes. hold_input: the input stays open until mallard exits. */
-Result run(std::vector<std::string> args, const std::string & input = "", bool hold_input = false) {
+ *         minutes. hold_input: the input stays open until mallard exits; kokkos: with one thread. */
+Result run(std::vector<std::string> args, const std::string & input = "", bool hold_input = false, bool kokkos = true) {
     args.insert(args.begin(), mallard());
-    args.push_back("--kokkos-num-threads=1");
+    if (kokkos) args.push_back("--kokkos-num-threads=1");
     std::vector<std::string> env;
     for (char ** e = environ; *e; e++) {
         const std::string var = *e;
@@ -151,7 +159,15 @@ const json_schema::Schemas & schemas() {
     return s;
 }
 
-std::string schema_file(const std::string & name) { return name + ".v1.schema.json"; }
+const json_schema::Schemas & schemas();
+
+/** @brief The file of the schema named, of whatever version schemas/ has. */
+std::string schema_file(const std::string & name) {
+    for (const std::string & file : schemas().files()) {
+        if (file.rfind(name + ".v", 0) == 0) return file;
+    }
+    return name + ".v1.schema.json";
+}
 
 const std::string MESSAGE = "mallard-session.v1.schema.json#/$defs/message";
 
@@ -240,7 +256,7 @@ TEST(SessionTest, AnswersAsItsOneShotCommandsDo) {
     const json::Value init = response(list, 1)["result"];
     EXPECT_EQ(init["dimension"].number, Mallard_DIM);
     EXPECT_EQ(init["case"]["input"].string, "case.toml");
-    std::vector<std::pair<int, std::string>> results = {{1, "mallard-session"}};
+    std::vector<std::pair<int, std::string>> results = {{1, "mallard-capabilities"}};
     for (const json::Value & m : init["methods"].array) {
         if (m["name"].string == "case.check") results.emplace_back(2, m["result"].string);
         if (m["name"].string == "case.keys") results.emplace_back(3, m["result"].string);
@@ -264,6 +280,363 @@ TEST(SessionTest, AnswersAsItsOneShotCommandsDo) {
     bool progress = false;
     for (const json::Value & m : list) progress = progress || (m.has("method") && m["method"].string == "$/progress" && m["params"]["id"].number == 2);
     EXPECT_TRUE(progress) << session.out;
+}
+
+TEST(SessionTest, CaseKeysGiveTheTablesACaseDoesNotSetTheirTypeAndForm) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"}, request(1, "case.keys", "{\"section\":\"boundaries\"}") +
+                                                             request(2, "keys.catalog", "{\"section\":\"boundaries\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    const json::Value keys = response(list, 1)["result"]["keys"], general = response(list, 2)["result"]["keys"];
+    ASSERT_TRUE(keys.has("boundaries.turbulence")) << json::dump(keys);
+    EXPECT_FALSE(keys["boundaries.turbulence"]["set"].boolean);
+    size_t unset = 0;
+    for (const std::string & key : keys.keys()) {
+        const json::Value * form = general.has(key) ? general[key].find("form") : nullptr;
+        if (!form || keys[key]["set"].boolean) continue;
+        unset++;
+        ASSERT_TRUE(keys[key].has("form")) << key << ": " << json::dump(keys[key]);
+        EXPECT_EQ(keys[key]["form"].string, form->string) << key;
+        if (const json::Value * type = general[key].find("type")) {
+            EXPECT_EQ(json::dump(keys[key]["type"]), json::dump(*type)) << key;
+        }
+    }
+    EXPECT_GT(unset, 0u);
+}
+
+TEST(SessionTest, InitializeAnswersAsVersionJsonWithTheDevicesAndTheSettingsOfControl) {
+    SKIP_UNDER_MPI();
+    const Result session = run({"session"}, request(1, "initialize") + request(2, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    json::Value init = response(messages(session.out), 1)["result"];
+    EXPECT_EQ(violations("mallard-capabilities", init), "");
+    EXPECT_TRUE(init["case"].is_null());
+    const Result version = run({"--dim", std::to_string(Mallard_DIM), "version", "--format", "json"}, "", false, false);
+    ASSERT_EQ(version.status, 0) << version.err;
+    const json::Value one_shot = json::parse(version.out);
+    EXPECT_EQ(violations("mallard-capabilities", one_shot), "");
+    for (size_t i = 0; i < init.names.size(); i++) {
+        if (init.names[i] != "case") continue;
+        init.names.erase(init.names.begin() + static_cast<std::ptrdiff_t>(i));
+        init.members.erase(init.members.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+    EXPECT_EQ(json::dump(init), json::dump(one_shot));
+
+    const json::Value & devices = one_shot["devices"];
+    EXPECT_FALSE(devices["backend"].string.empty());
+    EXPECT_EQ(devices["count"].number, static_cast<double>(devices["visible"].array.size()));
+    // ctl checks set against the table the run applies, and capabilities list that table
+    std::vector<std::string> listed, table;
+    for (const json::Value & s : one_shot["control"]["settings"].array) listed.push_back(s["key"].string);
+    for (const run_control::Setting & s : run_control::SETTINGS) table.push_back(s.key());
+    EXPECT_EQ(listed, table);
+    std::vector<std::string> methods;
+    for (const json::Value & m : one_shot["methods"].array) methods.push_back(m["name"].string);
+    EXPECT_EQ(methods.size(), session::methods().size());
+    // check's options as its help lists them, and the GPUs --memory sizes a run for by name
+    const Result help = run({"check", "--help"});
+    std::vector<std::string> options;
+    for (const json::Value & o : one_shot["check"]["options"].array) {
+        options.push_back(o.string);
+        EXPECT_NE(help.out.find(o.string), std::string::npos) << o.string;
+    }
+    EXPECT_NE(std::find(options.begin(), options.end(), "--memory"), options.end()) << version.out;
+    ASSERT_FALSE(one_shot["check"]["memory_gpus"].array.empty()) << version.out;
+    for (const json::Value & gpu : one_shot["check"]["memory_gpus"].array) {
+        CheckOptions sized;
+        EXPECT_EQ(set_memory_target(gpu["key"].string, sized), "") << gpu["key"].string;
+        EXPECT_EQ(sized.memory, static_cast<uint64_t>(gpu["bytes"].number)) << gpu["key"].string;
+        EXPECT_EQ(sized.memory_name, gpu["name"].string);
+    }
+}
+
+TEST(SessionTest, CaseViewAnswersAsCheckViewWithTheFrameOfEachBoundary) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"},
+                               request(1, "case.view", "{\"dir\":\"view\"}") + request(2, "case.view") +
+                                   request(3, "case.view", "{\"frames_only\":true,\"dir\":\"view\"}") +
+                                   request(4, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-case-view"}});
+    EXPECT_EQ(response(list, 2)["error"]["code"].number, session::code::INVALID_PARAMS);
+    EXPECT_EQ(response(list, 3)["error"]["code"].number, session::code::INVALID_PARAMS);
+    const json::Value view = response(list, 1)["result"];
+    // The frames alone: the same frames, nothing written
+    const Result frames_only = run({"session", "case.toml"}, request(1, "case.view", "{\"frames_only\":true}"));
+    ASSERT_EQ(frames_only.status, 0) << frames_only.err;
+    const std::vector<json::Value> only = messages(frames_only.out);
+    expect_conforms(only, {{1, "mallard-case-view"}});
+    const json::Value framed = response(only, 1)["result"];
+    EXPECT_TRUE(framed["files"].array.empty() && framed["blocks"].array.empty()) << json::dump(framed);
+    EXPECT_EQ(json::dump(framed["frames"]), json::dump(view["frames"]));
+    const Result check = run({"check", "case.toml", "--view", "view", "--format", "json"});
+    ASSERT_EQ(check.status, 0) << check.err;
+    EXPECT_EQ(json::dump(view), json::dump(json::parse(check.out)["view"]));
+    EXPECT_EQ(violations("mallard-check", json::parse(check.out)), "");
+    for (const json::Value & f : view["files"].array) EXPECT_TRUE(fs::exists(f.string)) << f.string;
+
+    std::map<std::string, json::Value> frames;
+    for (const json::Value & f : view["frames"].array) frames[f["zone"].string] = f;
+    ASSERT_EQ(frames.size(), Mallard_DIM == 3 ? 6u : 4u) << json::dump(view);
+    for (const auto & [zone, f] : frames) {
+        if (!f["error"].is_null()) continue;
+        double along = 0.0, u2 = 0.0, n2 = 0.0;
+        for (size_t d = 0; d < 3; d++) {
+            along += f["u_direction"].array[d].number * f["normal"].array[d].number;
+            u2 += f["u_direction"].array[d].number * f["u_direction"].array[d].number;
+            n2 += f["normal"].array[d].number * f["normal"].array[d].number;
+        }
+        EXPECT_NEAR(u2, 1.0, 1e-5) << zone;
+        EXPECT_NEAR(n2, 1.0, 1e-5) << zone;
+        EXPECT_NEAR(along, 0.0, 1e-5) << zone;  // u runs along the boundary
+        EXPECT_GT(f["length"].number, 0.0) << zone;
+    }
+    // The inlet, at the domain's low x, faces +x
+    ASSERT_TRUE(frames["inlet"]["error"].is_null()) << json::dump(frames["inlet"]);
+    EXPECT_NEAR(frames["inlet"]["normal"].array[0].number, 1.0, 1e-5);
+    EXPECT_FALSE(frames["cylinder"]["error"].is_null() && Mallard_DIM == 2) << "a closed curve has no start";
+
+    if (Mallard_DIM == 2) {
+        // origin sets the end u starts from
+        std::string flipped = cylinder_input("cyl.msh");
+        const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = [0.2, 0.0]\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+        ASSERT_NE(flipped.find(inlet), std::string::npos);
+        flipped.replace(flipped.find(inlet), inlet.size(),
+                        "name = \"inlet\"\ntype = \"farfield\"\nu = [0.2, 0.0]\np = 0.7142857142857143\n"
+                        "T = \"0.7142857142857143 * (1 + 0.1 * u)\"\norigin = [0.0, 1.0]\n");
+        const Result edited = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
+                                                                request(2, "case.update", "{\"text\":" + json::quote(flipped) + "}") +
+                                                                request(3, "case.view", "{\"dir\":\"view\"}"));
+        ASSERT_EQ(edited.status, 0) << edited.err;
+        const std::vector<json::Value> edits = messages(edited.out);
+        const auto inlet_frame = [&](int id) {
+            const json::Value r = response(edits, id);
+            for (const json::Value & f : r["result"]["frames"].array) {
+                if (f["zone"].string == "inlet") return f;
+            }
+            return json::Value();
+        };
+        const json::Value before = inlet_frame(1), after = inlet_frame(3);
+        ASSERT_FALSE(before.is_null() || after.is_null()) << edited.out;
+        EXPECT_EQ(json::dump(after["normal"]), json::dump(before["normal"]));
+        EXPECT_NEAR(after["u_direction"].array[1].number, -before["u_direction"].array[1].number, 1e-6);
+        EXPECT_NEAR(after["origin"].array[1].number - before["origin"].array[1].number,
+                    before["u_direction"].array[1].number * before["length"].number, 1e-5);
+    }
+}
+
+TEST(SessionTest, ACaseThatCannotBeSetUpIsItsOwnError) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    text.replace(text.find("type = \"symmetry\""), 17, "type = \"symetry\"");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.view", "{\"dir\":\"view\"}") +
+                                                             request(2, "case.view", "{\"frames_only\":true}") +
+                                                             request(3, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    for (int id : {1, 2, 3}) {
+        const json::Value r = response(list, id);
+        ASSERT_TRUE(r.has("error")) << json::dump(r);
+        EXPECT_EQ(r["error"]["code"].number, session::code::NOT_SET_UP) << id;
+        EXPECT_FALSE(r["error"]["data"]["diagnostics"].array.empty()) << id;
+        EXPECT_EQ(violations(MESSAGE, r), "");
+    }
+}
+
+/** @brief A CSV file as columns by name. */
+std::map<std::string, std::vector<double>> csv_columns(const std::string & path) {
+    std::ifstream in(path);
+    std::string line, cell;
+    std::getline(in, line);
+    std::vector<std::string> names;
+    for (std::istringstream header(line); std::getline(header, cell, ',');) names.push_back(cell);
+    std::map<std::string, std::vector<double>> columns;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        for (const std::string & name : names) {
+            std::getline(row, cell, ',');
+            columns[name].push_back(cell == "null" ? std::nan("") : std::stod(cell));
+        }
+    }
+    return columns;
+}
+
+TEST(SessionTest, BoundaryValuesAreTheBoundariesOwnWithTheInflowOfMassFlowInlets) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    const std::string u = Mallard_DIM == 3 ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
+    const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    const std::string outlet = "name = \"outlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    ASSERT_NE(text.find(inlet), std::string::npos);
+    text.replace(text.find(inlet), inlet.size(),
+                 "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\n"
+                 "T = \"0.7142857142857143 * (1 + 0.1 * u)\"\n");
+    ASSERT_NE(text.find(outlet), std::string::npos);
+    text.replace(text.find(outlet), outlet.size(),
+                 "name = \"outlet\"\ntype = \"inlet_mass_flow\"\nmass_flux = 0.15\nT = 0.7142857142857143\n");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-boundary-values"}});
+    const json::Value values = response(list, 1)["result"];
+    const Result check = run({"check", "case.toml", "--boundary-values", "values", "--format", "json"});
+    ASSERT_EQ(check.status, 0) << check.err;
+    EXPECT_EQ(json::dump(values), json::dump(json::parse(check.out)["boundary_values"]));
+    EXPECT_EQ(violations("mallard-check", json::parse(check.out)), "");
+
+    std::map<std::string, json::Value> entries;
+    for (const json::Value & e : values["entries"].array) entries[e["zone"].string] = e;
+    ASSERT_EQ(entries.size(), Mallard_DIM == 3 ? 6u : 4u) << json::dump(values);
+    for (const auto & [zone, e] : entries) {
+        const auto columns = csv_columns(e["file"].string);
+        ASSERT_EQ(columns.size(), e["columns"].array.size() + 1) << zone;
+        EXPECT_EQ(columns.at("face").size(), static_cast<size_t>(e["faces"].number)) << zone;
+    }
+    // The profile, as the boundary evaluates it at each face from its own u
+    const auto in = csv_columns(entries["inlet"]["file"].string);
+    ASSERT_TRUE(in.count("T") && in.count("u")) << json::dump(entries["inlet"]);
+    for (size_t k = 0; k < in.at("T").size(); k++) {
+        EXPECT_NEAR(in.at("T")[k], 0.7142857142857143 * (1 + 0.1 * in.at("u")[k]), 1e-6);
+    }
+    // The mass-flow inlet's flux makes the prescribed mass flux of the initial state
+    const auto out = csv_columns(entries["outlet"]["file"].string);
+    ASSERT_TRUE(out.count("rho_u_n") && out.count("speed")) << json::dump(entries["outlet"]);
+    for (size_t k = 0; k < out.at("rho_u_n").size(); k++) {
+        EXPECT_NEAR(out.at("rho_u_n")[k], 0.15, 1e-6);
+        EXPECT_GT(out.at("speed")[k], 0.0);
+        EXPECT_NEAR(out.at("p")[k], 0.7142857142857143, 1e-6);
+    }
+    for (const json::Value & c : entries["outlet"]["columns"].array) {
+        EXPECT_EQ(c["estimated"].boolean, c["name"].string == "rho_u_n" || c["name"].string == "speed" ||
+                                              c["name"].string == "rho" || c["name"].string == "p" ||
+                                              c["name"].string.rfind("u_", 0) == 0) << c["name"].string;
+    }
+}
+
+TEST(SessionTest, UnitsCatalogAnswersAsListUnitsWithEachFactorAsDefined) {
+    SKIP_UNDER_MPI();
+    const Result session = run({"session"}, request(1, "units.catalog") + request(2, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-unit-catalog"}});
+    const Result one_shot = run({"list", "units", "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value catalog = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(catalog));
+    EXPECT_EQ(violations("mallard-unit-catalog", catalog), "");
+    // The exact definition is the factor Mallard converts with
+    const auto decimal = [](const std::string & text) { return text == "pi" ? std::numbers::pi : std::stod(text); };
+    for (const json::Value & u : catalog["units"].array) {
+        const std::string & factor = u["factor"].string;
+        const size_t slash = factor.find('/');
+        const double exact = slash == std::string::npos
+                                 ? decimal(factor)
+                                 : decimal(factor.substr(0, slash)) / decimal(factor.substr(slash + 1));
+        EXPECT_DOUBLE_EQ(exact, u["value"].number) << u["symbol"].string << " = " << factor;
+    }
+    const Result text = run({"list", "units"});
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_NE(text.out.find("101325/760"), std::string::npos) << text.out;
+}
+
+TEST(SessionTest, FileInfoAnswersAsInfoJsonWithWhetherThisBuildContinuesARestart) {
+    SKIP_UNDER_MPI();
+    const std::string restart = source_dir() + "/test/data/formats/v0.8.0/gas_000002.restart";  // 2D, double
+    const Result session = run({"session"}, request(1, "file.info", "{\"file\":" + json::quote(restart) + "}") +
+                                                request(2, "file.info", "{\"file\":\"no_such.restart\"}") +
+                                                request(3, "file.info", "{\"file\":\".\"}") + request(4, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-file-info"}});
+    EXPECT_EQ(response(list, 2)["error"]["code"].number, session::code::UNREADABLE);
+    EXPECT_EQ(response(list, 3)["error"]["code"].number, session::code::INVALID_PARAMS);
+    const Result one_shot = run({"info", restart, "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value info = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(info));
+    EXPECT_EQ(violations("mallard-file-info", info), "");
+    // The reasons are those the run gives when it refuses the file
+    std::vector<std::string> expected;
+    if (sizeof(rtype) != 8) expected.push_back("Restart file " + restart + " was written with a different floating-point precision.");
+    if (Mallard_DIM == 3) expected.push_back("Restart file " + restart + " holds a 2D run, but Mallard was built with Mallard_DIM = 3.");
+    EXPECT_EQ(info["continuable"].boolean, expected.empty());
+    ASSERT_EQ(info["incompatibilities"].array.size(), expected.size()) << one_shot.out;
+    for (size_t k = 0; k < expected.size(); k++) EXPECT_EQ(info["incompatibilities"].array[k].string, expected[k]);
+    const Result text = run({"info", restart});
+    EXPECT_NE(text.out.find(expected.empty() ? "yes, by this build" : "no, by this build"), std::string::npos) << text.out;
+}
+
+TEST(SessionTest, CaseFilesAnswersAsFilesJsonWithEveryFileTheSetupRead) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    const Result session = run({"session", "case.toml"}, request(1, "case.files", "{\"sha256\":true}") +
+                                                             request(2, "case.files") + request(3, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-case-files"}, {2, "mallard-case-files"}});
+    const Result one_shot = run({"files", "case.toml", "--sha256", "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value files = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(files));
+    EXPECT_EQ(violations("mallard-case-files", files), "");
+    EXPECT_TRUE(files["complete"].boolean);
+    const auto & entries = files["files"].array;
+    ASSERT_EQ(entries.size(), 2u) << one_shot.out;
+    EXPECT_EQ(entries[0]["role"].string, "input");
+    EXPECT_EQ(entries[0]["path"].string, "case.toml");
+    EXPECT_EQ(entries[1]["role"].string, "mesh");
+    EXPECT_EQ(entries[1]["path"].string, "cyl.msh");
+    EXPECT_EQ(entries[1]["resolved"].string, fs::absolute("cyl.msh").lexically_normal().string());
+    EXPECT_EQ(entries[1]["bytes"].number, static_cast<double>(fs::file_size("cyl.msh")));
+    EXPECT_EQ(entries[1]["sha256"].string, provenance::sha256_file("cyl.msh"));
+    // Without sha256, the same files unhashed
+    const json::Value plain = response(list, 2)["result"];
+    EXPECT_TRUE(plain["files"].array[1]["sha256"].is_null());
+    EXPECT_EQ(plain["files"].array[1]["bytes"].number, entries[1]["bytes"].number);
+}
+
+TEST(SessionTest, BoundaryValuesOfAStagnationInletAreItsInflowAtTheInitialPressure) {
+    SKIP_UNDER_MPI();
+    write_cylinder_case();
+    std::string text = cylinder_input("cyl.msh");
+    const std::string u = Mallard_DIM == 3 ? "[0.2, 0.0, 0.0]" : "[0.2, 0.0]";
+    const std::string tangential = Mallard_DIM == 3 ? "[0.0, 0.2, 0.0]" : "[0.0, 0.2]";
+    const std::string initial = "[initialize]\ntype = \"constant\"\nu = " + u + "\n";
+    const std::string inlet = "name = \"inlet\"\ntype = \"farfield\"\nu = " + u + "\np = 0.7142857142857143\nT = 0.7142857142857143\n";
+    ASSERT_NE(text.find(initial), std::string::npos);
+    text.replace(text.find(initial), initial.size(), "[initialize]\ntype = \"constant\"\nu = " + tangential + "\n");
+    ASSERT_NE(text.find(inlet), std::string::npos);
+    text.replace(text.find(inlet), inlet.size(),
+                 "name = \"inlet\"\ntype = \"inlet_stagnation\"\np0 = 0.75\nT0 = 0.7142857142857143\n");
+    std::ofstream("case.toml") << text;
+    const Result session = run({"session", "case.toml"}, request(1, "case.boundary_values", "{\"dir\":\"values\"}"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const json::Value values = response(messages(session.out), 1)["result"];
+    const json::Value * entry = nullptr;
+    for (const json::Value & e : values["entries"].array) {
+        if (e["zone"].string == "inlet") entry = &e;
+    }
+    ASSERT_NE(entry, nullptr) << json::dump(values);
+    // Isentropic from (p0, T0) to the interior pressure, along the inward normal: R = 1, cp = 3.5
+    const double p = 0.7142857142857143, T0 = 0.7142857142857143;
+    const double T = T0 * std::pow(p / 0.75, 0.4 / 1.4);
+    const double speed = std::sqrt(7.0 * (T0 - T));
+    const auto in = csv_columns((*entry)["file"].string);
+    ASSERT_TRUE(in.count("speed") && in.count("p") && in.count("rho_u_n")) << json::dump(*entry);
+    for (size_t k = 0; k < in.at("speed").size(); k++) {
+        EXPECT_NEAR(in.at("speed")[k], speed, 1e-5);
+        EXPECT_NEAR(in.at("p")[k], p, 1e-5);
+        EXPECT_NEAR(in.at("rho_u_n")[k], p / T * speed, 1e-5);
+        EXPECT_NEAR(in.at("u_x")[k], speed * in.at("n_x")[k], 1e-5);
+    }
 }
 
 TEST(SessionTest, EditsRereadTheMeshOnlyWhenItChanges) {
@@ -394,7 +767,7 @@ TEST(SessionTest, EveryRequestNamesAOneShotCommandAndASchemaThatExist) {
         std::string word, name;
         words >> word;
         ASSERT_EQ(word, "mallard") << m.command;
-        while (words >> word && word.find_first_of("[]") == std::string::npos && word != "INPUT") {
+        while (words >> word && word.find_first_of("[]-") != 0 && !std::isupper(static_cast<unsigned char>(word[0]))) {
             name += (name.empty() ? "" : " ") + word;
         }
         EXPECT_NE(cli::command(name), nullptr) << m.name << ": " << m.command;

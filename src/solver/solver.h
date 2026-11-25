@@ -262,9 +262,11 @@ class Solver {
         /**
          * @brief Applies "key=value" settings with apply_setting, each accepted one recorded as a set event of
          *        the run log with its source ("mallard ctl", "SET file", "--set"): whether all were accepted, and
-         *        a line per setting.
+         *        a line per setting; results, if given, gets each setting's key, value, applied and message as a
+         *        JSON array.
          */
-        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source);
+        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source,
+                                                    std::string * results = nullptr);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -365,6 +367,12 @@ class Solver {
         void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /**
+         * @brief Each [[boundaries]] entry's values at its faces at the current time, as the boundary evaluates them,
+         *        and for stagnation and mass-flow inlets the inflow its flux makes of the cells' state: one CSV file
+         *        per entry in dir and the summary (mallard-boundary-values). Collective.
+         */
+        std::string boundary_values(const std::string & dir) const;
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
         void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
         /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
@@ -959,6 +967,8 @@ class Solver {
         void init_boundaries();
         std::vector<CheckUnassigned> zones_without_condition(const std::vector<int32_t> & face_bc) const;
         std::vector<CheckUnassigned> unassigned_zones;  // set by init_boundaries, for the check
+        /** @brief The boundary zones no [[boundaries]] entry of case_input names (all if it has none). Collective. */
+        std::vector<CheckUnassigned> zones_not_named(const Input & case_input) const;
         void setup_from_input();
         void check_mesh_quality(CheckReport & report, const CheckOptions & options, const CheckFields & extra) const;
         /** @brief The rank owning each local cell. */
@@ -986,6 +996,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
         void check_settings(CheckReport & report) const;
+        /** @brief The frame of each [[boundaries]] entry's local coordinates, for the case view. Collective. */
+        void check_frames(CheckReport & r) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
         void check_initial(CheckReport & report, const CheckOptions & options);
@@ -1217,6 +1229,8 @@ class Solver {
         bool wall_time_reached = false;          // on some rank, so on every rank at the same step
         bool end_recorded = false;
         std::string stop_file_note;
+        bool checkpoint_file_seen = false;
+        std::string endpoint_run_log;  // the run log's path, for the endpoint record
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
         bool publishing = false;
@@ -1345,6 +1359,16 @@ class Solver {
         void report_setup_error(CheckReport & r, const SetupError & e, const std::string & input_file) const;
         /** @brief Gives each diagnostic of the report its key (from its text if it has none), line and column. */
         void locate_diagnostics(CheckReport & r, const std::string & input_file) const;
+        /**
+         * @brief After a setup stopped on errors of independent entries ([[boundaries]], [[write_data]], or zones none
+         *        covers), sets up again from original without them (a failed boundary entry, or an uncovered zone, as
+         *        a symmetry plane) until a setup ends or stops on another error. Adds the errors and warnings of each
+         *        setup to report at their keys in original; returns the keys to report as unused: those the last
+         *        setup did not read if it ended, else those unknown to Mallard (unknown_keys), as in the failed entries.
+         */
+        std::vector<Diagnostic> check_past_errors(CheckReport & report, const Input & original,
+                                                  const std::string & input_file);
+        bool mesh_read = false;  // the mesh phase of the setup completed
         /** @brief Thrown by stop_if_failed: the errors are in setup_errors. */
         struct SetupStopped : std::runtime_error {
             SetupStopped() : std::runtime_error("the setup stopped at the errors of independent parts") {}
@@ -1372,6 +1396,7 @@ class Solver {
         // Run log
         MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
+        std::vector<std::vector<uint32_t>> boundary_entry_faces;  // this rank's faces of each, as boundary_summary
         report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;
