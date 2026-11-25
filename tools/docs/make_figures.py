@@ -22,6 +22,7 @@ import axisymmetric_curved
 import boundary_coordinates
 import boundary_data
 import case_view
+import check_resolution
 import chemistry
 import domains
 import effective_resolution
@@ -40,9 +41,11 @@ import python
 import regions
 import run_report
 import runs
+import scaling
 import schematics
 import structured_blocks
 import teno
+import thickened_flames
 import theory
 import time_integrators
 import triple_flame_sensor
@@ -59,6 +62,7 @@ def main():
     axisymmetric_curved.figures()
     boundary_coordinates.figures(args.mallard, args.mallard3d)
     boundary_data.figures()
+    check_resolution.figures()
     chemistry.figures()
     domains.figures()
     effective_resolution.figures()
@@ -71,9 +75,11 @@ def main():
     limiters.figures()
     particles.figures(args.mallard)
     post_flame.figures()
+    scaling.figures()
     schematics.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()
+    thickened_flames.figures()
     theory.figures()
     time_integrators.figures()
     triple_flame_sensor.figures()

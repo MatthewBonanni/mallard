@@ -77,6 +77,14 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, TENOPlacesPlanarFacePointsAlikeWithAndWithoutStepGraphs) {
+    // The kernels place the quadrature points of planar faces from the faces'
+    // nodes, in the step graph too: smooth and troubled cells, triangles and
+    // quadrilaterals, the troubled cells over several rounds
+    expect_matches_serial_with_and_without_step_graphs(
+        blast_input("cartesian_mixed", "type = \"TENO\"\norder = 5\ntroubled_capacity = 0.05\n"));
+}
+
 TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
     // With owner-computes partition faces no halo cell is reconstructed, and every
     // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
@@ -286,6 +294,12 @@ TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
       << "[les.combustion]\nmodel = \"tfles\"\ndelta_L = 3e-4\ns_L = 2.3\nT_unburnt = 300.0\nT_burnt = 2300.0\n"
       << "efficiency = \"dynamic\"\n";
     expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
+}
+
+TEST(MPI3DTest, TENOTroubledRoundsMatchSerialWithAndWithoutStepGraphs) {
+    // At the default capacity the blast's troubled cells take several rounds,
+    // which the step graph launches whether or not they find cells
+    expect_matches_serial_with_and_without_step_graphs(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {

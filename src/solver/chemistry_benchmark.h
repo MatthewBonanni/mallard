@@ -26,6 +26,7 @@ struct ChemistryBenchmarkStep {
     double dt = 0.0;
     double seconds = 0.0;
     uint64_t active = 0;
+    uint64_t explicit_cells = 0;  // active cells whose explicit step was accepted ([chemistry] explicit_step)
     double mean_substeps = 0.0;
     double max_substeps = 0.0;
     std::string histogram;  // cells per bin of sub-steps, e.g. "1:960 65-128:64"
@@ -37,15 +38,20 @@ struct ChemistryBenchmark {
     uint32_t threads = 0, lanes = 0;
     size_t shared_bytes = 0;
     uint32_t cells = 0, igniting = 0;
+    bool explicit_step = false;
     std::vector<ChemistryBenchmarkStep> steps;
 };
+
+/** @brief The [reactor] table of `mallard reactor`, of type constant_volume (the only one) and a gas mixture. */
+const Input & reactor_table(const Input & input);
 
 /**
  * @brief The [benchmark] mode of `mallard reactor`: states sampled along the
  *        trajectory of [reactor] (fresh, igniting and burnt), replicated
  *        over the cells and advanced over each splitting step dt, every call
  *        from the sampled states; logs and returns cells per second and the
- *        sub-step distribution.
+ *        sub-step distribution. Before the timed calls, an InputError for the
+ *        keys of input unread by then (by it or, before, by its caller: benchmark.output).
  */
 ChemistryBenchmark run_chemistry_benchmark(const Input & input);
 
