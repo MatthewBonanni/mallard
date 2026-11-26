@@ -1,0 +1,1 @@
+- `mallard new` cases no longer require PyVista for post-processing that does not use it: the Python package imports it only in `mallard.vtu.read_pyvista`.
