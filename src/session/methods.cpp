@@ -21,6 +21,7 @@
 #include "comm.h"
 #include "commands.h"
 #include "common_typedef.h"
+#include "interfaces.h"
 #include "log.h"
 #include "run_control.h"
 #include "run_ctl.h"
@@ -68,19 +69,9 @@ std::string case_json(const Context & context, const std::vector<std::string> * 
 }
 
 std::string initialize(Context & context, const json::Value &) {
-    std::string list = "[";
-    for (const Method & m : methods()) {
-        json::Object entry;
-        entry.add("name", std::string(m.name));
-        entry.raw("command", m.command.empty() ? "null" : json::quote(m.command));
-        entry.raw("result", m.result.empty() ? "null" : json::quote(m.result));
-        list += (list.size() > 1 ? "," : "") + entry.str();
-    }
-    json::Object o;
-    o.add("schema", SCHEMA).add("version", VERSION).add("mallard", mallard_version()).add("dimension", N_DIM);
-    o.raw("methods", list + "]");
-    o.raw("case", context.is_open() ? case_json(context) : "null");
-    return o.str();
+    std::string result = capabilities_json();
+    result.pop_back();
+    return result + ",\"case\":" + (context.is_open() ? case_json(context) : "null") + "}";
 }
 
 std::string shutdown(Context &, const json::Value &) { return "null"; }
@@ -230,7 +221,7 @@ std::string launch_run(Context & context, const json::Value & params) {
 }
 
 constexpr Method METHODS[] = {
-    {"initialize", "", SCHEMA, false, initialize},
+    {"initialize", "mallard version --format json", interfaces::CAPABILITIES.name, false, initialize},
     {"shutdown", "", "", false, shutdown},
     {"case.open", "", CASE_SCHEMA, false, case_open},
     {"case.update", "", CASE_SCHEMA, true, case_update},
@@ -245,6 +236,18 @@ constexpr Method METHODS[] = {
 } // namespace
 
 std::span<const Method> methods() { return METHODS; }
+
+std::string methods_json() {
+    std::string list = "[";
+    for (const Method & m : methods()) {
+        json::Object entry;
+        entry.add("name", std::string(m.name));
+        entry.raw("command", m.command.empty() ? "null" : json::quote(m.command));
+        entry.raw("result", m.result.empty() ? "null" : json::quote(m.result));
+        list += (list.size() > 1 ? "," : "") + entry.str();
+    }
+    return list + "]";
+}
 
 const Method * method(std::string_view name) {
     for (const Method & m : METHODS) {

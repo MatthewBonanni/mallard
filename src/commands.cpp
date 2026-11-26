@@ -10,6 +10,7 @@
 #include <string>
 
 #include "build_info.h"
+#include "common_typedef.h"
 #include "case_template.h"
 #include "cli.h"
 #include "commands.h"
@@ -622,58 +623,13 @@ int completion_main(const Args & args) {
     return 0;
 }
 
-std::string strings_json(std::span<const char * const> items) {
-    std::string out = "[";
-    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
-    return out + "]";
-}
-
-std::string schema_json(const char * schema, int version) {
-    return json::Object().add("schema", schema).add("version", version).str();
-}
-
-std::string capabilities_json() {
-    std::string dimensions = "[";
-    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
-    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
-    control.pop_back();
-    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
-    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
-    const std::string list = json::Object()
-                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
-                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
-                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
-                                 .raw("case_view", entry(interfaces::CASE_VIEW))
-                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
-                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
-                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
-                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
-                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
-                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
-                                 .raw("run_control", control)
-                                 .raw("run_endpoint", entry(interfaces::RUN_ENDPOINT))
-                                 .raw("run_launch", entry(interfaces::RUN_LAUNCH))
-                                 .raw("convergence", entry(interfaces::CONVERGENCE))
-                                 .raw("pack", entry(interfaces::PACK))
-                                 .str();
-    return json::Object()
-        .add("schema", interfaces::CAPABILITIES.name)
-        .add("version", interfaces::CAPABILITIES.version)
-        .raw("mallard", provenance::code())
-        .raw("build", provenance::build())
-        .raw("dependencies", provenance::dependencies())
-        .raw("dimensions", dimensions + "]")
-        .raw("interfaces", list)
-        .str();
-}
-
 int version_main(const Args & args) {
     const std::string format = args.value_or("--format", "text");
     if (format != "text" && format != "json") {
         return usage_error(*command("version"), "--format takes text or json, not " + format);
     }
     if (format == "json") {
-        std::cout << capabilities_json() << std::endl;
+        std::cout << ::capabilities_json() << std::endl;
     } else {
         std::cout << "Mallard " << mallard_version() << std::endl;
     }
@@ -737,9 +693,10 @@ constexpr Command COMMANDS[] = {
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
             "check_interval, control_file_interval, write_data.<prefix or index>.interval or .time_interval, "
-            "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
-            "are refused. A SET file in run-dir does the same from anywhere the directory is visible, with "
-            "[run] control_file_interval: lines of key = value, the run log the reply.",
+            "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. ctl refuses "
+            "other keys, and values of the wrong type, before sending (mallard version --format json lists the "
+            "keys under control.settings). A SET file in run-dir does the same from anywhere the directory is "
+            "visible, with [run] control_file_interval: lines of key = value, the run log the reply.",
         .options = CTL_OPTIONS,
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"
@@ -1456,7 +1413,11 @@ constexpr Command COMMANDS[] = {
             "run log, the run, snapshot and probe sampling blocks of output files, the run directory report, run "
             "control (with its commands and control files), the run endpoint record, run launch results, the grid "
             "convergence report and the pack manifest. Each of these carries the same schema and version fields; an addition keeps the version, a change that breaks "
-            "a reader increments it.",
+            "a reader increments it. Also: the session's requests with the one-shot command of each (methods), "
+            "the backend's devices (each GPU visible with its name and memory, and the host's CPU and threads), "
+            "and what run control takes (control: the socket's commands, every key ctl set accepts with its "
+            "type, units and the element it names, the control files, and the routes ctl can take from here). "
+            "The session's initialize answers the same object, with the open case.",
         .options = VERSION_OPTIONS,
         .arguments = {},
         .examples = "$ mallard --version\n"
@@ -1485,3 +1446,72 @@ std::span<const std::string_view> groups() { return GROUPS; }
 std::span<const Option> global_options() { return GLOBAL_OPTIONS; }
 
 } // namespace cli
+
+namespace {
+
+std::string strings_json(std::span<const char * const> items) {
+    std::string out = "[";
+    for (const char * item : items) out += (out.size() > 1 ? "," : "") + json::quote(item);
+    return out + "]";
+}
+
+std::string schema_json(const char * schema, int version) {
+    return json::Object().add("schema", schema).add("version", version).str();
+}
+
+} // namespace
+
+std::string capabilities_json() {
+    std::string dimensions = "[";
+    for (const int d : front_end::solvers()) dimensions += (dimensions.size() > 1 ? "," : "") + std::to_string(d);
+    std::string control = schema_json(interfaces::RUN_CONTROL.name, interfaces::RUN_CONTROL.version);
+    control.pop_back();
+    control += ",\"commands\":" + strings_json(run_control::COMMANDS) + ",\"files\":" + strings_json(run_control::FILES) + "}";
+    const auto entry = [](const interfaces::Schema & s) { return schema_json(s.name, s.version); };
+    const std::string list = json::Object()
+                                 .raw("capabilities", entry(interfaces::CAPABILITIES))
+                                 .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
+                                 .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
+                                 .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
+                                 .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
+                                 .raw("probe_sampling_block", schema_json(snapshot_block::PROBE_SAMPLING,
+                                                                          snapshot_block::PROBE_SAMPLING_VERSION))
+                                 .raw("run_directory", entry(interfaces::RUN_DIRECTORY))
+                                 .raw("run_control", control)
+                                 .raw("run_endpoint", entry(interfaces::RUN_ENDPOINT))
+                                 .raw("run_launch", entry(interfaces::RUN_LAUNCH))
+                                 .raw("convergence", entry(interfaces::CONVERGENCE))
+                                 .raw("pack", entry(interfaces::PACK))
+                                 .str();
+    std::string settings = "[";
+    for (const run_control::Setting & s : run_control::SETTINGS) {
+        json::Object o;
+        o.add("key", s.key()).add("type", std::string(s.type));
+        o.raw("units", s.type == "time" ? "\"s\"" : "null");
+        o.raw("selector", s.selector.empty() ? "null" : json::quote(s.selector));
+        settings += (settings.size() > 1 ? "," : "") + o.add("help", std::string(s.help)).str();
+    }
+    const std::string control_member = json::Object()
+                                           .add("schema", interfaces::RUN_CONTROL.name)
+                                           .add("version", interfaces::RUN_CONTROL.version)
+                                           .raw("commands", strings_json(run_control::COMMANDS))
+                                           .raw("settings", settings + "]")
+                                           .raw("files", strings_json(run_control::FILES))
+                                           .raw("routes", run_ctl::routes_json(run_ctl::here()))
+                                           .str();
+    return json::Object()
+        .add("schema", interfaces::CAPABILITIES.name)
+        .add("version", interfaces::CAPABILITIES.version)
+        .raw("mallard", provenance::code())
+        .raw("build", provenance::build())
+        .raw("dependencies", provenance::dependencies())
+        .raw("dimensions", dimensions + "]")
+        .add("dimension", N_DIM)
+        .raw("interfaces", list)
+        .raw("methods", session::methods_json())
+        .raw("devices", devices_json())
+        .raw("control", control_member)
+        .str();
+}

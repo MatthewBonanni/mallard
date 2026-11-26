@@ -30,7 +30,6 @@
 #include "log.h"
 #include "run_control.h"
 #include "snapshot_block.h"
-#include "units.h"
 
 namespace {
 
@@ -44,25 +43,8 @@ std::vector<std::string> split(const std::string & text, char separator) {
     return parts;
 }
 
-bool parse_uint(const std::string & text, uint64_t & value) {
-    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
-    try {
-        value = std::stoull(text);
-    } catch (const std::exception &) {
-        return false;
-    }
-    return true;
-}
-
-bool parse_time(const std::string & text, double & seconds) {
-    try {
-        const Quantity q = parse_quantity(text);
-        seconds = q.value;
-        return (!q.has_unit || q.dimension.same_as(dim::time)) && std::isfinite(seconds);
-    } catch (const UnitError &) {
-        return false;
-    }
-}
+using run_control::parse_count;
+using run_control::parse_time;
 
 std::string trim(const std::string & text) {
     const size_t begin = text.find_first_not_of(" \t\r");
@@ -98,10 +80,6 @@ std::string set_file_assignments(const std::string & text) {
     }
     return words;
 }
-
-const char * SETTABLE =
-    "n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, write_data.<prefix or index>.interval, "
-    "write_data.<prefix or index>.time_interval, probes.<name>.interval, probes.<name>.time_interval, forces.<zone>.interval, integrals.interval";
 
 } // namespace
 
@@ -343,7 +321,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     const auto rejected = [&](const std::string & why) { return std::make_pair(false, key + ": " + why); };
     uint64_t n = 0;
     double x = 0.0;
-    const bool is_uint = parse_uint(value, n), is_time = parse_time(value, x);
+    const bool is_uint = parse_count(value, n), is_time = parse_time(value, x);
     if (key == "n_steps" || key == "t_stop" || key == "t_wall_stop") {
         const uint64_t old_n_steps = n_steps;
         const rtype old_t_stop = t_stop, old_t_wall_stop = t_wall_stop;
@@ -390,7 +368,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
     if (table == "write_data" && !name.empty() && (field == "interval" || field == "time_interval")) {
         DataWriter * writer = nullptr;
         uint64_t index = 0;
-        if (parse_uint(name, index) && index < data_writers.size()) writer = data_writers[index].get();
+        if (parse_count(name, index) && index < data_writers.size()) writer = data_writers[index].get();
         for (const auto & w : data_writers) {
             if (!writer && w->get_prefix() == name) writer = w.get();
         }
@@ -426,7 +404,7 @@ std::pair<bool, std::string> Solver::apply_setting(const std::string & key, cons
         if (apply) integral_monitor.interval = n;
         return {true, key + " = " + value};
     }
-    return rejected(std::string("cannot be changed while the run goes on; settable: ") + SETTABLE);
+    return rejected("cannot be changed while the run goes on; settable: " + run_control::settable());
 }
 
 std::string Solver::write_restarts() {

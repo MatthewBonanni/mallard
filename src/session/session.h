@@ -135,6 +135,9 @@ struct Method {
 /** @brief Every method, in the order of docs/guide/session.md. */
 std::span<const Method> methods();
 
+/** @brief Every method with its one-shot command and result schema, as JSON (mallard-capabilities' methods). */
+std::string methods_json();
+
 /** @brief The method of this name, or nullptr. */
 const Method * method(std::string_view name);
 

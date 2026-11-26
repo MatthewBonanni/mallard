@@ -12,6 +12,7 @@
 #include "run_control.h"
 
 #include <atomic>
+#include <cmath>
 #include <chrono>
 #include <sstream>
 #include <cerrno>
@@ -43,8 +44,68 @@
 #include "log.h"
 #include "provenance.h"
 #include "run_log.h"
+#include "units.h"
 
 namespace run_control {
+
+std::string Setting::key() const {
+    if (table.empty()) return std::string(field);
+    return std::string(table) + (selector.empty() ? "" : ".<" + std::string(selector) + ">") + "." + std::string(field);
+}
+
+const Setting * setting(const std::string & key, std::string * element) {
+    for (const Setting & s : SETTINGS) {
+        if (s.selector.empty()) {
+            if (key != s.key()) continue;
+            if (element) element->clear();
+            return &s;
+        }
+        const std::string head = std::string(s.table) + ".", tail = "." + std::string(s.field);
+        if (key.size() <= head.size() + tail.size() || key.rfind(head, 0) != 0 ||
+            key.compare(key.size() - tail.size(), tail.size(), tail) != 0) {
+            continue;
+        }
+        if (element) *element = key.substr(head.size(), key.size() - head.size() - tail.size());
+        return &s;
+    }
+    return nullptr;
+}
+
+std::string settable() {
+    std::string text;
+    for (const Setting & s : SETTINGS) text += (text.empty() ? "" : ", ") + s.key();
+    return text;
+}
+
+bool parse_count(const std::string & text, uint64_t & value) {
+    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
+    try {
+        value = std::stoull(text);
+    } catch (const std::exception &) {
+        return false;
+    }
+    return true;
+}
+
+bool parse_time(const std::string & text, double & seconds) {
+    try {
+        const Quantity q = parse_quantity(text);
+        seconds = q.value;
+        return (!q.has_unit || q.dimension.same_as(dim::time)) && std::isfinite(seconds);
+    } catch (const UnitError &) {
+        return false;
+    }
+}
+
+std::string check_setting(const std::string & key, const std::string & value) {
+    const Setting * s = setting(key);
+    if (!s) return key + ": cannot be changed while the run goes on; settable: " + settable();
+    uint64_t n = 0;
+    double x = 0.0;
+    if (s->type == "count" && !parse_count(value, n)) return key + ": expected a non-negative integer, not " + value;
+    if (s->type == "time" && !parse_time(value, x)) return key + ": expected a time in seconds or with a unit, not " + value;
+    return "";
+}
 
 namespace {
 

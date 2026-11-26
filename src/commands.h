@@ -86,6 +86,9 @@ std::string section_argument(std::string section);
  */
 std::string check_options(const cli::Args & args, CheckOptions & options);
 
+/** @brief What this build supports (mallard-capabilities): `mallard version --format json`, the session's initialize. */
+std::string capabilities_json();
+
 /** @brief `mallard session [INPUT]`: answers JSON-RPC requests on stdin and stdout (session.h). */
 int session_main(const cli::Args & args);
 

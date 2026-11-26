@@ -20,7 +20,7 @@ Each request with a one-shot command runs the same code as that command, so its 
 
 | Method | Params | Result | Same as |
 |---|---|---|---|
-| `initialize` | | the session: `mallard` version, `dimension`, every method with its one-shot command and result schema, and the open case | |
+| `initialize` | | `mallard-capabilities`: the version, build and `dimension`, the schema of every interface, every method with its one-shot command and result schema, `devices` (the backend, each GPU visible with its `name` and `memory` in bytes, the host's `cpu` and `threads`), `control` (the socket's `commands`; under `settings` every key `mallard ctl set` takes, with its `type` (`count` or `time`), `units`, and `selector`, what names its element: `prefix_or_index`, `name` or `zone`; the control `files`; the `routes` `mallard ctl` tries, in order, each `available` if a program it runs is on `PATH` here), and the open case | `mallard version --format json` |
 | `case.open` | `input` (path), `text` (optional: the input's text, if it differs from the file) | the case (`mallard-case`) | |
 | `case.update` | `text`: the whole input | the case, with `changed`: the key paths whose values differ | |
 | `case.close` | | `null` | |
@@ -64,7 +64,8 @@ Every result has its schema's `version`, the session's own results also its name
 
 | Schema | Of |
 |---|---|
-| `mallard-session.v1` | the result of `initialize`; `$defs/message` is any message the session writes |
+| `mallard-capabilities.v1` | `mallard version --format json` and `initialize` (with `case`) |
+| `mallard-session.v1` | any message the session writes |
 | `mallard-case.v1` | the results of `case.open` and `case.update` |
 | `mallard-check.v1` | `mallard check --format json` and `case.check` |
 | `mallard-key-catalog.v1` | `mallard list keys --format json`, `case.keys` and `keys.catalog` |
