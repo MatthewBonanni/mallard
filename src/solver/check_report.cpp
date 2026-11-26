@@ -824,11 +824,12 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
 }
 
 std::string case_view_json(const CheckReport & r) {
-    if (r.view_file.empty()) return "null";
+    if (r.view_file.empty() && !r.view_frames) return "null";
     const auto vec = [](const std::array<double, 3> & v) {
         return "[" + json::number(v[0]) + ", " + json::number(v[1]) + ", " + json::number(v[2]) + "]";
     };
-    std::vector<std::string> files = {r.view_file};
+    std::vector<std::string> files;
+    if (!r.view_file.empty()) files.push_back(r.view_file);
     files.insert(files.end(), r.view_images.begin(), r.view_images.end());
     const std::string frames = array_json(r.frames, [&](const CheckFrame & f) {
         json::Object o;

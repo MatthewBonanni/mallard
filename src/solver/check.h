@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -49,6 +50,7 @@ struct CheckOptions {
     std::string initial;        // prefix of the initial state's snapshot (--initial), or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
+    bool view_frames = false;   // without view_dir: the view's boundary frames only, nothing written
     std::string boundary_values_dir;  // directory of the boundaries' values at their faces, or empty
     bool geometry_only = false;  // set up and check only what the case view draws (--geometry-only)
     std::string input_file;     // named before input errors, as a run names it, or empty
@@ -209,7 +211,8 @@ struct CheckReport {
     std::string view_file;     // the case view's ParaView file written, or empty
     std::vector<std::string> view_images;  // and its images
     std::vector<case_view::BlockInfo> view_blocks;  // and its blocks
-    std::vector<CheckFrame> frames;                 // of each [[boundaries]] entry, with the view
+    std::vector<CheckFrame> frames;                 // of each [[boundaries]] entry, with the view or view_frames
+    bool view_frames = false;                       // the frames without the view (CheckOptions::view_frames)
     bool geometry_only = false;  // the check of geometry alone (CheckOptions::geometry_only)
     std::string boundary_values;           // mallard-boundary-values, with boundary_values_dir; else empty
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
@@ -326,6 +329,16 @@ struct CheckReport {
  */
 std::string set_memory_target(const std::string & text, CheckOptions & options);
 
+/** @brief A GPU --memory accepts by its key, with its memory as the driver reports it. */
+struct MemoryGpu {
+    const char * key;
+    const char * name;
+    uint64_t bytes;
+};
+
+/** @brief The GPUs --memory accepts. */
+std::span<const MemoryGpu> memory_gpus();
+
 class Mesh;
 namespace region {
 struct MeshRegions;
@@ -368,7 +381,10 @@ std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics);
 /** @brief The report as one JSON object (docs/guide/input_files.md#the-report-as-json). */
 std::string check_json(const CheckReport & report);
 
-/** @brief The case view written (mallard-case-view): its files, blocks and boundary frames; null without one. */
+/**
+ * @brief The case view written (mallard-case-view): its files, blocks and boundary frames; only the frames (no
+ *        files or blocks) with view_frames; null without either.
+ */
 std::string case_view_json(const CheckReport & report);
 
 /**
