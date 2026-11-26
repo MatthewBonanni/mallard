@@ -973,6 +973,53 @@ OutputSummary PhaseAverage::summary() const {
     return {.kind = "phase averages", .file = "", .steps = interval, .contents = text};
 }
 
+namespace {
+
+using Point3 = std::array<double, 3>;
+using Tetrahedron = std::array<Point3, 4>;
+
+Point3 minus(const Point3 & a, const Point3 & b) { return {a[0] - b[0], a[1] - b[1], a[2] - b[2]}; }
+double dot3(const Point3 & a, const Point3 & b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+Point3 cross3(const Point3 & a, const Point3 & b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+
+/** @brief Whether a face of the 3D cell of these nodes leaves the plane through its vertex average by more than tol. */
+bool warped(const std::vector<Point3> & nodes, const double tol) {
+    for (const auto & face : cell_local_faces(static_cast<uint32_t>(nodes.size()))) {
+        const size_t n = face.size();
+        if (n == 3) continue;
+        Point3 c = {0.0, 0.0, 0.0}, a = {0.0, 0.0, 0.0};
+        for (const uint8_t k : face) {
+            for (size_t i = 0; i < 3; i++) c[i] += nodes[k][i] / static_cast<double>(n);
+        }
+        for (size_t k = 0; k < n; k++) {
+            const Point3 w = cross3(minus(nodes[face[k]], c), minus(nodes[face[(k + 1) % n]], c));
+            for (size_t i = 0; i < 3; i++) a[i] += w[i];
+        }
+        const double length = std::sqrt(dot3(a, a));
+        for (const uint8_t k : face) {
+            if (std::abs(dot3(minus(nodes[k], c), a)) > tol * length) return true;
+        }
+    }
+    return false;
+}
+
+/** @brief Whether x is within tol of tetrahedron t (either orientation; never if it is flat). */
+bool in_tetrahedron(const Tetrahedron & t, const Point3 & x, const double tol) {
+    static constexpr size_t FACES[4][4] = {{1, 2, 3, 0}, {0, 3, 2, 1}, {0, 1, 3, 2}, {0, 2, 1, 3}};  // and the opposite corner
+    for (const auto & f : FACES) {
+        const Point3 n = cross3(minus(t[f[1]], t[f[0]]), minus(t[f[2]], t[f[0]]));
+        const double opposite = dot3(minus(t[f[3]], t[f[0]]), n);
+        if (opposite == 0.0) return false;
+        const double side = dot3(minus(x, t[f[0]]), n);
+        if ((opposite > 0.0 ? side : -side) < -tol * std::sqrt(dot3(n, n))) return false;
+    }
+    return true;
+}
+
+} // namespace
+
 std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::array<double, N_DIM>> & points,
                                    std::vector<uint8_t> * contained) {
     const uint32_t n_points = static_cast<uint32_t>(points.size());
@@ -1022,6 +1069,8 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
     }
 
     const curved::Geometry * curves = mesh.curved_geometry.get();
+    std::vector<Point3> cell_nodes;
+    std::vector<Tetrahedron> tets;
     for (uint32_t c = 0; c < n_owned && n_points > 0; c++) {
         const uint32_t n_nodes = mesh.h_n_nodes_of_cell(c);
         const bool curved_cell = curves && curves->cell_is_curved(c);
@@ -1057,12 +1106,27 @@ std::vector<int32_t> locate_points(const Mesh & mesh, const std::vector<std::arr
             b0[d] = bin(c_lo[d], d);
             b1[d] = bin(c_hi[d], d);
         }
-        // Each face's plane through its centroid, with the normal out of c
+        // A cell with warped faces is the tetrahedra that define it (cell_tetrahedra), which its neighbors share;
+        // the planes of its faces would leave gaps along its edges
+        tets.clear();
+        if (N_DIM == 3 && !curved_cell) {
+            cell_nodes.resize(n_nodes);
+            for (uint32_t k = 0; k < n_nodes; k++) {
+                for (size_t d = 0; d < 3; d++) cell_nodes[k][d] = d < N_DIM ? node(c, k, d) : 0.0;
+            }
+            if (warped(cell_nodes, tol)) cell_tetrahedra(cell_nodes, tets);
+        }
+        // Else each face's plane through its centroid, with the normal out of c
         auto contains = [&](const std::array<double, N_DIM> & x) {
             if (curved_cell) {
                 curved::Vec3 y = {0.0, 0.0, 0.0};
                 for (size_t d = 0; d < N_DIM; d++) y[d] = x[d];
                 return curves->contains(c, y, relative_tol);
+            }
+            if (!tets.empty()) {
+                Point3 y = {0.0, 0.0, 0.0};
+                for (size_t d = 0; d < N_DIM; d++) y[d] = x[d];
+                return std::any_of(tets.begin(), tets.end(), [&](const Tetrahedron & t) { return in_tetrahedron(t, y, tol); });
             }
             for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
                 const uint32_t f = mesh.h_face_of_cell(c, k);
