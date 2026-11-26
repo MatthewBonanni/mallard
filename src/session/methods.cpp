@@ -183,6 +183,29 @@ std::string case_keys(Context & context, const json::Value & params) {
     return listed;
 }
 
+std::string case_files(Context & context, const json::Value & params) {
+    as_options(params, {"sha256"});
+    const bool sha256 = bool_param(params, "sha256", false);
+    // The setup's reads are remembered until the input changes; the files' sizes and hashes are read each time
+    CheckResult read;
+    if (const std::optional<std::string> known = context.remembered("case.files")) {
+        const json::Value r = json::parse(*known);
+        read.report.setup_done = r["complete"].boolean;
+        for (const json::Value & f : r["files"].array) read.files.push_back({f["role"].string, f["path"].string});
+    } else {
+        CheckOptions options;
+        options.input_file = context.path();
+        read = check_case(context, options, "", false);
+        json::Object r;
+        std::string list = "[";
+        for (const provenance::FileRead & f : read.files) {
+            list += (list.size() > 1 ? "," : "") + json::Object().add("role", f.kind).add("path", f.path).str();
+        }
+        context.remember("case.files", r.add("complete", read.report.setup_done).raw("files", list + "]").str());
+    }
+    return case_files_json(context.path(), read, sha256);
+}
+
 std::string keys_catalog(Context &, const json::Value & params) {
     as_options(params, {"section"});
     try {
@@ -291,6 +314,7 @@ constexpr Method METHODS[] = {
     {"case.boundary_values", "mallard check INPUT --boundary-values DIR --format json", interfaces::BOUNDARY_VALUES.name,
      true, case_boundary_values},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
+    {"case.files", "mallard files INPUT --format json", interfaces::CASE_FILES.name, true, case_files},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
     {"file.info", "mallard info FILE --format json", interfaces::FILE_INFO.name, false, file_info},
     {"units.catalog", "mallard list units --format json", interfaces::UNIT_CATALOG.name, false, units_catalog},

@@ -139,6 +139,8 @@ Commands:
     mallard list species      The species of a case
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
+    mallard files             The files a case reads, for copying it to another
+                              machine
     mallard list units        The units quantities in input files take, with
                               their dimensions and exact SI values
     mallard list templates    The case templates of mallard new
@@ -857,6 +859,40 @@ Exit status:
   2  usage error, or a section with no key
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
+```
+
+### mallard files
+
+```text
+Usage: mallard files INPUT [--sha256] [--format text|json]
+
+Sets the case up as mallard check does (writing nothing) and lists the input and
+every file its setup read: the mesh, mechanisms, tables and profiles, probe
+points, surfaces, the restart or remap source it starts from. Each with its
+role, its path as written and resolved, whether it exists and its size; --sha256
+adds its SHA-256. The list comes from what the setup read, so a file named by a
+new key is never missed. An input still being written lists the files the setup
+read before it stopped.
+
+Options:
+  --sha256            Also each file's SHA-256 (reads every file).
+  --format text|json  text: a table; json: one JSON object (mallard-case-files),
+                      for scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard files input.toml
+  $ mallard files input.toml --sha256 --format json
+
+Exit status:
+  0  listed, also of an input whose only errors are missing pieces
+  1  the case cannot be set up (the errors are printed)
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-files
 ```
 
 ### mallard list units

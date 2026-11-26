@@ -28,6 +28,7 @@ Each request with a one-shot command runs the same code as that command, so its 
 | `case.view` | `dir`: where to write it | `mallard-case-view`: the files written, every block, and the frame of each boundary's local coordinates ([The case view](input_files.md#the-case-view)) | `mallard check INPUT --view DIR --format json` (its `view`) |
 | `case.boundary_values` | `dir`: where to write them | `mallard-boundary-values`: per `[[boundaries]]` entry, the file of its values at each face and each column's range; estimated inflow of stagnation and mass-flow inlets ([Boundary values](input_files.md#boundary-values)) | `mallard check INPUT --boundary-values DIR --format json` (its `boundary_values`) |
 | `case.keys` | `section` (optional) | `mallard-key-catalog` | `mallard list keys [SECTION] INPUT --format json` |
+| `case.files` | `sha256` (optional, default `false`) | `mallard-case-files`: the input and every file its setup read, with role, path as written and resolved, `exists`, `bytes`, `sha256` ([The other commands](input_files.md#the-other-commands)) | `mallard files INPUT --format json [--sha256]` |
 | `keys.catalog` | `section` (optional) | `mallard-key-catalog`, with each table's `form` ([The key catalog](input_files.md#the-key-catalog)) | `mallard list keys [SECTION] --format json` |
 | `file.info` | `file`: an output or restart file | `mallard-file-info`: what it holds; for a restart, `continuable` by this build and its `incompatibilities` ([Restarts](initialization.md#restarts)) | `mallard info FILE --format json` |
 | `units.catalog` | none | `mallard-unit-catalog`: every unit with its dimension (as the key catalog's `dimension` names it), exponents and exact factor, the SI prefixes and the named dimensions ([Units](input_files.md#units)) | `mallard list units --format json` |
@@ -75,6 +76,7 @@ Every result has its schema's `version`, the session's own results also its name
 | `mallard-case-view.v1` | `case.view`, and the `view` of `mallard check --view DIR --format json` |
 | `mallard-boundary-values.v1` | `case.boundary_values`, and the `boundary_values` of `mallard check --boundary-values DIR --format json` |
 | `mallard-key-catalog.v1` | `mallard list keys --format json`, `case.keys` and `keys.catalog` |
+| `mallard-case-files.v1` | `mallard files INPUT --format json` and `case.files` |
 | `mallard-file-info.v1` | `mallard info FILE --format json` (an output or restart file) and `file.info`; its `version` is the file's format version, as it always was |
 | `mallard-unit-catalog.v1` | `mallard list units --format json` and `units.catalog` |
 | `mallard-diagnostic.v1` | one diagnostic, as the others list them |

@@ -263,6 +263,7 @@ struct State {
     std::string files;  // JSON array, or empty
     std::string input_file, input_text, resolved;
     std::string mesh;   // JSON object, or empty
+    std::string mesh_file;
     std::string preset; // JSON object or null, or empty
     std::string text;   // the block
     std::string placement = "[]";  // JSON array, one object per rank
@@ -643,7 +644,19 @@ void set_resolved(const std::string & toml) {
     rebuild();
 }
 
+std::vector<FileRead> files_read() {
+    const State & s = state();
+    std::vector<FileRead> out;
+    if (!s.mesh_file.empty()) out.push_back({"mesh", s.mesh_file});
+    for (const ReadFile & f : s.reads) {
+        const bool seen = std::any_of(out.begin(), out.end(), [&](const FileRead & r) { return r.path == f.path; });
+        if (!seen) out.push_back({f.kind, f.path});
+    }
+    return out;
+}
+
 void set_mesh(const std::string & type, const std::string & file, const std::string & hash) {
+    state().mesh_file = file;
     json::Object m;
     m.add("type", type);
     if (!file.empty()) m.add("file", file);
