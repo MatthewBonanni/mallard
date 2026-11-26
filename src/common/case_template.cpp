@@ -592,14 +592,20 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
     for (size_t i = 1; i < t.files.size(); ++i) {
         if (fs::path(t.files[i]).extension() == ".py") written.emplace_back(t.files[i], "the example's script");
     }
+    // The mallard package finds its library next to the mallard that run.sh runs
+    auto package_env = [&](const std::set<std::string> & step_tools) -> std::string {
+        const bool uses = std::any_of(step_tools.begin(), step_tools.end(),
+                                      [](const std::string & s) { return s.rfind("mallard/", 0) == 0; });
+        return uses ? "export MALLARD_EXECUTABLE=\"${MALLARD_EXECUTABLE:-${MALLARD:-" + mallard_path.string() + "}}\"\n" : "";
+    };
     if (!mesh.empty()) {
         write_file(dir / "mesh.sh", step_script("mesh.sh", "Generates the mesh, " + t.mesh_creates + ".", mesh,
-                                                mesh_packages), true);
+                                                mesh_packages, package_env(mesh_tools)), true);
         written.emplace_back("mesh.sh", "generates the mesh, " + t.mesh_creates);
     }
     if (!init.empty()) {
         write_file(dir / "init.sh", step_script("init.sh", "Generates the initial state, " + t.init_creates + ".",
-                                                init, init_packages), true);
+                                                init, init_packages, package_env(init_tools)), true);
         written.emplace_back("init.sh", "generates the initial state, " + t.init_creates);
     }
     write_file(dir / "run.sh", run_script(t, mallard_path, !mesh.empty(), !init.empty()), true);
@@ -614,7 +620,7 @@ int create(const Manifest & m, const Template & t, const fs::path & dir, bool qu
             "    ls \"$1\"_[0-9]*.\"${newest##*.}\" | grep -v '_p[0-9]*\\.vtu$' | tail -n 1\n"
             "}\n";
         write_file(dir / "post.sh", step_script("post.sh", "Post-processing: " + t.results + ".", post,
-                                                post_packages, last), true);
+                                                post_packages, package_env(post_tools) + last), true);
         written.emplace_back("post.sh", t.results);
     }
     write_file(dir / "README.md", readme(t, m, !mesh.empty(), !init.empty(), quick, packages));
