@@ -1,7 +1,7 @@
 /**
  * @file chemistry_benchmark_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
- * @brief The chemistry benchmark's timed calls start from the sampled states.
+ * @brief The chemistry benchmark: its timed calls start from the sampled states and take the [chemistry] options.
  * @version 0.3
  * @date 2026-10-03
  *
@@ -28,6 +28,15 @@ ChemistryBenchmark igniting_ndodecane_cell(const int repeats) {
         std::to_string(repeats) + "\n"));
 }
 
+/** @brief The h2o2 ignition of benchmarks/chemistry/h2o2.toml over 64 cells, with these [chemistry] keys. */
+ChemistryBenchmark h2o2_cells(const std::string & chemistry, const std::string & dt) {
+    return run_chemistry_benchmark(parse_toml(
+        "[physics]\ngas = \"mixture\"\nmechanism = \"" + source_dir() + "/mechanisms/h2o2.yaml\"\n"
+        "[reactor]\nT = 1200.0\np = 101325.0\nX = { H2 = 2.0, O2 = 1.0, N2 = 3.76 }\nend_time = 1.0e-4\n"
+        "[chemistry]\nrtol = 1.0e-6\natol = 1.0e-10\n" + chemistry +
+        "[benchmark]\ncells = 64\nsamples = 64\nrepeats = 1\ndt = [" + dt + "]\n"));
+}
+
 } // namespace
 
 // The first igniting state takes about a hundred sub-steps over 1e-6 s, the
@@ -42,4 +51,25 @@ TEST(ChemistryBenchmarkTest, EveryCallStartsFromTheSampledStates) {
     ASSERT_EQ(thrice.steps.size(), 1u);
     EXPECT_GT(once.steps[0].mean_substeps, 50.0);
     EXPECT_NEAR(thrice.steps[0].mean_substeps, once.steps[0].mean_substeps, 0.1 * once.steps[0].mean_substeps);
+}
+
+// [chemistry] explicit_step reaches the benchmarked kernels: over a short
+// step most cells are not stiff and take the explicit step (#1474)
+TEST(ChemistryBenchmarkTest, TakesTheExplicitStepsOfTheChemistryTable) {
+    const ChemistryBenchmark rodas = h2o2_cells("", "1.0e-8");
+    const ChemistryBenchmark explicit_steps = h2o2_cells("explicit_step = true\n", "1.0e-8");
+    EXPECT_FALSE(rodas.explicit_step);
+    EXPECT_EQ(rodas.steps[0].explicit_cells, 0u);
+    EXPECT_TRUE(explicit_steps.explicit_step);
+    EXPECT_EQ(explicit_steps.steps[0].active, rodas.steps[0].active);
+    EXPECT_GT(explicit_steps.steps[0].explicit_cells, explicit_steps.steps[0].active / 2);
+}
+
+// [chemistry] T_frozen reaches the benchmarked kernels: the fresh cells, at
+// 1200 K, are frozen below 1250 K
+TEST(ChemistryBenchmarkTest, FreezesTheCellsBelowTFrozenOfTheChemistryTable) {
+    const ChemistryBenchmark all = h2o2_cells("", "1.0e-6");
+    const ChemistryBenchmark warm = h2o2_cells("T_frozen = 1250.0\n", "1.0e-6");
+    EXPECT_GT(warm.steps[0].active, 0u);
+    EXPECT_LT(warm.steps[0].active, all.steps[0].active);
 }

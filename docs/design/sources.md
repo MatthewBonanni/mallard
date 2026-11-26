@@ -153,8 +153,8 @@ and the host would not, and for a `c` that is not a power of two (SSPRK54,
 RDPK3Sp35, CK45) the stage times, and so the solutions, would differ in the
 last bits. A step with time-dependent sources is a CUDA
 graph like any other, also with domain averages (`mean_*`): their global sum
-per stage is an `ExactSums` on the device, reduced over the ranks with NCCL on
-the step's stream.
+per stage is an `ExactSums` on the device, reduced over the ranks in one NCCL
+all-reduce on the step's stream.
 
 ## Evaluation
 
