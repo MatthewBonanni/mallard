@@ -209,9 +209,13 @@ TEST(OutputReaderTest, EverySnapshotFormatHoldsTheCellsOfTheMesh) {
     }
     std::vector<std::string> files = snapshot_files(run.dir, "000004");
     files.push_back(run.dir + "/flow.pvd");
-    if (have_hdf5()) files.insert(files.end(), {run.dir + "/flow.xmf", run.dir + "/series.vtkhdf"});
+    if (have_hdf5()) {
+        files.insert(files.end(), {run.dir + "/flow.xmf", run.dir + "/series.vtkhdf", run.dir + "/series_mesh.vtkhdf"});
+    }
     for (const std::string & name : files) {
         const output::Contents file = output::open(name);
+        // A series' mesh file is a mesh, not a snapshot without fields: mallard diff and info treat it as one
+        EXPECT_EQ(file.kind == output::Kind::mesh, name.ends_with("_mesh.vtkhdf")) << name;
         const output::Geometry g = output::read_geometry(file, file.snapshots.size() - 1);
         ASSERT_EQ(g.types.size(), run.rho.size()) << name;
         ASSERT_EQ(g.offsets.size(), run.rho.size() + 1) << name;

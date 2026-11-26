@@ -407,9 +407,8 @@ follow the mesh: `integral` is `sum f V q` (the mass in the region for `RHO`, it
 total energy and species masses for `RHOU_*`, `RHOE` and `RHOY_<species>`),
 `mean` that over `sum f V`, `favre` the density-weighted mean, `rms` the root
 mean square, and `min`, `max` the extremes over the cells with `f > 0`. Every
-sum adds its terms exactly in fixed point, each rounded to a multiple of 2^-62 n
-times the largest (n the number of terms rounded up to a power of two), so it is
-the same bit for bit on any number of ranks. The region may be one of the mesh's
+sum adds its terms exactly, in integers of 2^-1074, and rounds the total once
+to the nearest double, so it is the same bit for bit on any number of ranks. The region may be one of the mesh's
 own: `region = "domain"` gives the totals of the whole domain (the mass, for `RHO`), a cell zone those of its
 cells ([regions of the mesh](geometry.md#regions-of-the-mesh)). A surface,
 curve or set of points weighs each cell by its area, length or count in the
@@ -665,7 +664,7 @@ interval = 10        # default 1
 [`sphere_axisymmetric`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-axisymmetric),
 [`cylinder`](https://matthewbonanni.github.io/mallard/docs/examples/#cylinder),
 [`sphere_re300`](https://matthewbonanni.github.io/mallard/docs/examples/#sphere-re300)
-and 3 more.
+and 4 more.
 
 Writes `step, t` and the pressure and viscous force components of the fluid
 on the zone, per unit depth in 2D (per radian in axisymmetric runs). Divide by
