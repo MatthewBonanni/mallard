@@ -340,7 +340,7 @@ mallard check --format json | python3 -c "import json, sys; print(json.load(sys.
 ```
 
 ```text
-$ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fields mesh --view view
+$ mallard check input.toml --ranks 4 --memory a100-80 --mesh-fields mesh --view view
 ...
 == Check ================================================================================ ok
   Result: ok, 0 errors and 0 warnings (exit status 0)
@@ -447,15 +447,32 @@ $ mallard check input.toml --ranks 4 --throughput 5e7 --memory a100-80 --mesh-fi
                                                                                   cells, predicted peak 5.56 GB (from
                                                                                   the partitioner)
           most GPUs with halo < 10% of owned          4     GPUs                  doubling from the fewest
-          wall time per unit simulated time          21.0   s                     on 4 GPUs at 50.0M cells/s each
+          wall time per unit simulated time          30.0   s                     on 4 GPUs, by the cost model (Cost)
 
 == Cost ===================================================================================
-  On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
-  ranks times wall hours.
-  period                   simulated time [s]  steps   wall time  rank-hours
-  per unit simulated time  1                    9,109  21.0 s     0.0233
-  per flow-through time    1.135               10,340  23.8 s     0.0265
-  to run.t_stop            0.2                  1,822   4.20 s    0.00466
+  Throughput of one rank alone: 53.5M cells/s (measured: 2D TENO-E 5, Euler on
+  A100-SXM4-80GB (teno5_2d, 2026-11-09; +-20% between cases of one key)).
+  Step time of the largest part: s (owned cells) + 1.14 ms + 37.7 ns per halo cell owned on
+  another node, s the seconds per cell of one rank alone; NVIDIA A100-SXM4-80GB, 2026-11-22,
+  fitted to 22 measured step times of 5 cases (1.9% rms; 20.1% on cases left out:
+  es-air_dyn-plain@9da4ab1 41.3%, ws64-main@9da4ab1 1.5%, ws128-main@a7a5432 5.6%,
+  ws64-main@a7a5432 1.2%, st128-main@a7a5432 2.9%). Ranks per node: 8 GPUs per node.
+  On 4 ranks, at the initial time step: efficiency 74%; wall times +-28% (one standard
+  deviation of the throughput and the step-time model); GPU-hours: GPUs times wall hours.
+  period                   simulated time [s]  steps   wall time  GPU-hours
+  per unit simulated time  1                    9,109  30.0  s    0.0334
+  per flow-through time    1.135               10,340  34.1  s    0.0379
+  to run.t_stop            0.2                  1,822   6.00 s    0.00667
+
+  By rank count, to run.t_stop: the largest part the run's partitioner makes (owned cells;
+  halo over owned; parts its halo comes from) and its step time; efficiency: one rank's step
+  time over ranks times this one's.
+  ranks         nodes  owned cells  halo / owned  neighbors  efficiency  wall time  GPU-hours
+   1            1      460,800       0.0%         0          100%        17.8  s    0.00494
+   2            1      230,400       1.7%         1           90%         9.93 s    0.00551
+   4 (--ranks)  1      115,200       6.7%         2           74%         6.00 s    0.00667
+   8            1       57,600      13.3%         2           55%         4.04 s    0.00898
+  16            2       28,800      20.7%         5           36%         3.06 s    0.0136
 
 == Diagnostics ========================================================================== ok
   None.
@@ -478,7 +495,7 @@ The report opens and closes with the result, and the exit status is 1 if there i
 | Resolution | Cell sizes, and the physical scales the case sets against them. Kolmogorov and Taylor lengths, wall units, cells across the flame, and TFLES's thickening, each with its basis and its regime's target ([Resolution](#resolution)) |
 | Memory | Kokkos allocations per rank (device memory on GPUs) of the rank with the largest peak: after setup, once the data only the setup reads is freed (what the time steps hold), and at the peak (the setup's, and the timed steps' with `--steps`), with that rank's owned and halo cells. With `--ranks N` in a serial check, a second row is scaled to the owned and halo cells of the largest part the run's partitioner would make. On a GPU, the peak as a share of the device's memory. Then the same rank by category, at the setup's peak and after setup (at the steps' peak with `--steps`), in total and per owned and halo cell; the setup's workspace and work memory sized by the device are not proportional to the cells. On GPUs, also the device memory outside Kokkos: CUDA's context and the local memory of kernels with large stacks, 1.5 GB (2D) to 2.1 GB (3D) on an A100 |
 | GPU sizing | With `--memory SIZE` or `--memory GPU` (by default the GPU's own memory in GPU builds; `Rank sizing` in CPU builds): the memory, the 5% kept free and the memory outside Kokkos per GPU, the most owned and halo cells per GPU (the fewer of those that fit in the memory and those that fit in the most entries a Kokkos View of rank 2 or more addresses, from its most entries per cell; the basis says which limits them), the fewest GPUs the mesh fits on (from the parts the run's partitioner makes, in a serial check) with the largest part's predicted peak, up to how many GPUs the halo stays below 10% of the owned cells, and the wall time per unit simulated time there. The peak is the larger of the setup's and the steady state's; a CPU build sizing a GPU leaves out of the steady state the mesh's node lists, which GPU runs free after setup and CPU builds keep (`freed after setup on GPUs`). The memory outside Kokkos is measured on the GPU with `--steps` (the step kernels reserve their local memory at their first launch), else it is the typical 1.6 GB (2D) or 2.2 GB (3D). On an A100 the prediction is within -1.0% to +3.3% of the measured peak, extrapolating CPU checks of 4 to 16 times fewer cells ([performance](../design/performance.md#8-memory-sizing-in-mallard-check-550)) |
-| Cost | With `--throughput R` (cells/s per rank, the `Throughput` of a run's summary divided by its ranks) or `--steps N` (timed over N steps after an untimed one): simulated time, steps, wall time and GPU-hours (rank-hours on CPUs) per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude), to `run.t_stop` and for `run.n_steps`. It assumes the throughput per rank and the initial time step hold on N ranks |
+| Cost | Wall time, compute hours (GPU-hours; on CPUs core-hours, ranks times threads) and parallel efficiency, with their uncertainty (one standard deviation). The throughput of one rank alone is, in order: `--throughput R` (cells/s of a single-rank run), `--steps N` (timed here over N steps after an untimed one, on this check's ranks), or the throughput measured on the device class (`--memory`'s GPU when nothing is timed, else this device) for the case's dimension, reconstruction and physics, else fitted to those measurements; the step time on N ranks is that of the largest part the run's partitioner makes, from its owned and halo cells, neighbors and halo on other nodes (`--ranks-per-node`), by a model fitted to measured runs ([the cost estimate](parallel.md#the-cost-estimate)). Rows: per unit simulated time, per flow-through time (domain length along the mean initial velocity over its magnitude), to `run.t_stop` and for `run.n_steps`, on `--ranks`; then, from a serial check, a row per rank count (powers of two up to four times `--ranks`, at least 8, parts of at least 1,000 cells) with its largest part, efficiency, wall time and hours. It assumes the initial time step holds |
 | Environment | What the run runs on, with or without an input: the build (dimension, precision, build type, compiler, from the same `build` block as every output file's [run block](output.md#run-block)) and the solvers installed with it; Kokkos and its execution spaces; MPI (the library, ranks, hosts, the most ranks on one host); GPU-aware MPI (built or not, whether the MPI library says it reads device memory, whether this run uses it); NCCL (built or not, whether halo exchanges use it: `[parallel] halo_exchange`, on several ranks); HDF5 (serial or parallel), CGNS, zlib and KaMinPar. Then a row per rank: host, device (GPU and memory, else the CPU), the GPU's index among those it sees, its CPUs, threads and whether OpenMP binds them. The placement checks are the run's own (`Ranks` at the start of a run on several ranks) |
 | Diagnostics | Every error, then every warning: its code, what is wrong with its numbers and the fix, then the anchor below that explains it |
 
@@ -539,7 +556,7 @@ Each error and warning has a stable code that scripts can match. Errors (`E-`) m
 | `memory` | Bytes of the largest rank: `bytes`, `bytes_peak`, `local_cells`, `local_owned`, the `target_*` of `--ranks`, `device_capacity`, `outside_kokkos`, `view_entries_per_cell` and `view_max_local_cells` (0: no View limits the cells), and by category `at_setup_peak`, `steady` and `released_on_devices` (of `steady`, what GPU runs free after setup and this CPU build keeps) |
 | `sizing` | `name`, `gpu`, `memory`, `margin`, `outside_kokkos`, `bytes_per_cell`, `fixed_bytes`, `max_local_cells`, `limit` (`memory` or `view_entries`: what limits `max_local_cells`), `min_ranks`, `min_owned`, `min_halo`, `min_peak`, `halo_ranks`, ... |
 | `environment` | `build` and `dependencies` (the run block's), `solvers` (the dimensions installed), `ranks`, `hosts`, `ranks_per_host`, `gpu_aware_mpi` (`library`: what the MPI library says, `null` if it does not; `used`), `nccl` (`used`), `placement`: `[{rank, host, device, threads, cpus, omp_bind, gpu, gpu_index, gpu_numa, gpus_visible}]` |
-| `cost` | `cells`, `ranks`, `throughput` (cells/s per rank), `wall_per_time` (wall seconds per unit simulated time), `flow_through_time`, `t_stop`, `n_steps` |
+| `cost` | `cells`, `ranks`, `throughput` (cells/s of one rank alone), `wall_per_time` (wall seconds per unit simulated time on `ranks`), `flow_through_time`, `t_stop`, `n_steps`; `throughput_source` (`option`, `steps`, `model`, or empty without an estimate), `throughput_basis`, `throughput_uncertainty`, `measured_throughput` (`--steps`: cells/s per rank on this check's ranks), the workload (`device`, `hardware`, `threads`, `reconstruction`, `physics`, `species`, `particles`), `ranks_per_node`, `efficiency`, `uncertainty` (relative, of the wall times), `model` (the step-time coefficients `t0`, `beta`, `gamma`, `delta`, `particle`, `particle_mpi`, with `runs`, `cases`, `fit_error`, `held_out_error`, `held_out` and `basis`; null without one) and `scaling`: per rank count `ranks`, `nodes`, the largest part's `owned`, `halo`, `neighbors`, `remote_neighbors` and `halo_remote`, `step` (s), `efficiency`, `wall_per_time` and `hours_per_time` |
 
 ```sh
 mallard check input.toml --format json | python3 -c "import json, sys; r = json.load(sys.stdin); print(r['status'], [d['code'] for d in r['diagnostics']])"
@@ -720,7 +737,8 @@ at a glance. It writes, without running the case:
   curved by [curved boundaries](meshes.md#curved-boundaries) are drawn on
   their curved geometry, in the ParaView file too.
 - `view/case.vtkhdf` (builds without HDF5: `view/case.vtm` with its `.vtu`
-  files) for ParaView 5.12 or later: one named block each for the mesh's cells
+  files, each named after its block with the characters Windows forbids as
+  `_` and made unique, the `.vtm` keeping the block's name) for ParaView 5.12 or later: one named block each for the mesh's cells
   (`domain`), every boundary zone and cell zone, every region the case uses
   (as [Checking regions](geometry.md#checking-regions) describes), every probe
   on points, lines or surfaces of its own, and every periodic pair (each face
