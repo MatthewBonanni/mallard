@@ -34,6 +34,7 @@
 #include "example_inputs.h"
 #include "json.h"
 #include "particles.h"
+#include "run_log.h"
 #include "solver.h"
 #include "step_graph_guard.h"
 #include "test_fixtures.h"
@@ -356,6 +357,8 @@ Outcome run_case(const std::string & name, const Case & c, int depth) {
         o.rejected = solver.get_rejected_steps();
         o.queued = solver.get_queued_steps();
     }
+    // Rank 0 keeps a distributed run's log open, and NFS shows other nodes an open file's old contents
+    run_log::close();
     comm::barrier();
     if (comm::is_root()) fs::remove("STOP");
     // Messages name the run's files
@@ -787,6 +790,43 @@ TEST(StepQueueTest, ProbesAreStagedWithoutStoppingTheDevice) {
     Case bare = c;
     bare.extra = "check_interval = 1000\n";
     EXPECT_EQ(run_case("probes", c, 3).queued, run_case("bare", bare, 3).queued);
+}
+
+TEST(StepQueueTest, ProbesOfReductionsAloneAreReducedOnTheDevice) {
+    // No samples written: the step graph reduces them and stages the reductions alone, which the host writes as it
+    // writes its own; the wall's extrema alone still take its measure
+    Case c;
+    c.run = "n_steps = 20\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             point_of("0.4", "0.5", "0.2") + ", radius = 0.3}";
+    c.extra = "check_interval = 1000\n"
+              "[[probes]]\nname = \"line\"\ninterval = 3\nstart = " + point_of("0.1", "0.3", "0.2") +
+              "\nend = " + point_of("0.9", "0.6", "0.2") + "\nn_points = 9\nfields = [\"RHO\", \"P\"]\nsamples = false\n"
+              "sampling = \"point\"\nreductions = [\"integral\", \"mean\", \"favre\", \"rms\", \"min\", \"max\"]\n"
+              "reductions_file = \"{dir}/line.csv\"\n"
+              "[[probes]]\nname = \"wall\"\ninterval = 2\nboundary = \"bottom\"\nfields = [\"P\", \"MASS_FLUX\"]\n"
+              "samples = false\nreductions = [\"max\"]\nreductions_file = \"{dir}/wall.csv\"\n"
+              "[[probes]]\nname = \"disk\"\nregion = " + disk + "\nfields = [\"RHO\", \"T\"]\ninterval = 4\n"
+              "reductions = [\"integral\", \"mean\"]\nreductions_file = \"{dir}/disk.csv\"\n";
+    c.distributed = comm::size() > 1;
+    const Outcome o = expect_queue_invariant("reduced_probes", c);
+    if (comm::is_root()) {
+        for (const std::string file : {"line.csv", "wall.csv", "disk.csv"}) {
+            const std::string & rows = o.files.at(file);
+            EXPECT_GE(std::count(rows.begin(), rows.end(), '\n'), 5) << file;
+        }
+        // The wall's measure: its length (2D) or area (3D)
+        const std::string & rows = o.files.at("wall.csv");
+        std::istringstream row(rows.substr(rows.find("\n2,") + 1));
+        std::string step, t, measure;
+        std::getline(row, step, ',');
+        std::getline(row, t, ',');
+        std::getline(row, measure, ',');
+        EXPECT_NEAR(std::stod(measure), N_DIM == 2 ? 1.0 : 0.4, 1e-6);
+    }
+    Case bare = c;
+    bare.extra = "check_interval = 1000\n";
+    EXPECT_EQ(run_case("reduced_probes", c, 3).queued, run_case("bare", bare, 3).queued);
 }
 
 TEST(StepQueueTest, RowsOfRunsWithBoundariesOfTRunAhead) {
@@ -1744,6 +1784,43 @@ TEST(StepQueueTest, TriggersOfMovingRegionProbesAreReducedOnTheDevice) {
     Case at_step = c;
     at_step.extra = probes + triggers("step == 8", "step == " + std::to_string(back + 2));
     EXPECT_EQ(run_case("moving_reductions", c, 3).queued, run_case("moving_reductions_at_step", at_step, 3).queued);
+}
+
+TEST(StepQueueTest, TriggersOfTimeAveragesOfAMovingRegionAcrossTwoCellsAreReducedOnTheDevice) {
+    // A small disk going back and forth across the face of two cells: its time averages per cell are the host's and
+    // the device's means of f V and f V q, decaying in the cell it left, and sums of two terms of like size keep
+    // their last bits, so a trigger that equals the written means fires on the device only if each mean is updated
+    // with the same roundings on both
+    Case c;
+    c.run = "n_steps = 30\ncfl = 0.5\n";
+    const std::string disk = std::string("{type = \"") + (N_DIM == 2 ? "disk" : "sphere") + "\", center = " +
+                             vector_of("0.5 + 0.03 * sin(3000 * t)", "0.55", "0.2") + ", radius = 0.015}";
+    const std::string probes =
+        "check_interval = 1000\n" + RESTARTS +
+        "[[probes]]\nname = \"dot\"\nregion = " + disk + "\nfields = [\"P\"]\ninterval = 3\naverage = true\n"
+        "reductions = [\"integral\", \"mean\", \"min\", \"max\"]\nreductions_file = \"{dir}/dot_reductions.csv\"\n"
+        "[[probes]]\nname = \"pt\"\nfile = \"{dir}/pt.csv\"\ninterval = 3\nfields = [\"P\"]\n"
+        "point = " + point_of("0.6", "0.5", "0.2") + "\n";
+    c.extra = probes;
+    c.distributed = comm::size() > 1;
+    const Outcome reference = run_case("two_cells_reference", c, 0);
+    // At every write: each trigger checkpoints after its write's values, on the host and on the device alike
+    std::string triggers;
+    for (uint64_t step = 3; step < 30; step += 3) {
+        const std::string when =
+            written_at(reference, "dot", {"integral_MEAN_P", "mean_MEAN_P", "min_MEAN_P", "max_MEAN_P"}, "pt", "P", step) + " and step == " +
+            std::to_string(step + 2);
+        triggers += "[[triggers]]\nname = \"at_" + std::to_string(step) + "\"\nwhen = \"" + when + "\"\ndo = \"checkpoint\"\n";
+    }
+    c.extra = probes + triggers;
+    const Outcome o = expect_queue_invariant("two_cells", c);
+    if (comm::is_root()) {
+        for (uint64_t step = 5; step < 30; step += 3) {
+            std::ostringstream file;
+            file << "restart_" << std::setw(6) << std::setfill('0') << step << ".restart";
+            EXPECT_TRUE(o.files.count(file.str())) << file.str();
+        }
+    }
 }
 
 TEST(StepQueueTest, TriggersOfMovingRegionsStagedWhileTheyCoverNoCellAreReducedOnTheDevice) {

@@ -46,7 +46,6 @@ add_library(MallardCore STATIC
     mesh/cells_from_faces.cpp
     mesh/periodic.cpp
     mesh/structured_blocks.cpp
-    mesh/stencil_shapes.cpp
     mesh/mesh_3d.cpp
     mesh/mesh_block.cpp
     mesh/mesh_quality.cpp
@@ -99,6 +98,7 @@ add_library(MallardCore STATIC
     solver/solver_check.cpp
     solver/solver_mesh_fields.cpp
     solver/check_report.cpp
+    solver/cost_model.cpp
     solver/run_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
@@ -107,6 +107,7 @@ add_library(MallardCore STATIC
     solver/divergence_report.cpp
     solver/solver_graph.cpp
     solver/solver_health.cpp
+    solver/health_events.cpp
     solver/solver_step_control.cpp
     solver/solver_triggers.cpp
     solver/triggers.cpp
@@ -402,7 +403,7 @@ if(Mallard_ENABLE_CGNS)
 endif()
 
 # The commands of the mallard executable (cli.h), which the test suite also runs
-add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
+add_library(MallardCommands STATIC check_environment.cpp cli.cpp commands.cpp completion.cpp front_end.cpp install_verify.cpp run_main.cpp reactor_main.cpp mesh_convert.cpp info_main.cpp list_main.cpp diff_main.cpp extract_main.cpp convergence_main.cpp pack_main.cpp)
 target_link_libraries(MallardCommands PUBLIC MallardCore)
 mallard_target_warnings(MallardCommands)
 

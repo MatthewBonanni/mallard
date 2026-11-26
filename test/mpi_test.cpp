@@ -186,21 +186,25 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     const std::string balanced = "[chemistry]\nload_balance = true\n";
     const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
-    const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "explicit_step = true\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
-                                                "navier_stokes") + tfles};
-    for (const std::string & input : inputs) {
-        expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
+    const std::string explicit_step = "explicit_step = true\n", simpler = "coupling = \"simpler\"\n";
+    auto input = [&](const std::string & chemistry, const std::string & type = "navier_stokes") {
+        return mixture_input("", "type = \"MUSCL\"\n", balanced + chemistry, type);
+    };
+    const std::string inputs[] = {input("", "euler"),
+                                  input("fuse_half_steps = true\n"),
+                                  input(explicit_step),
+                                  input("") + tfles,
+                                  input(explicit_step) + tfles,
+                                  input(simpler),
+                                  input(simpler) + tfles,
+                                  input(simpler + explicit_step) + tfles};
+    for (const std::string & text : inputs) {
+        const bool explicit_steps = text.find(explicit_step) != std::string::npos;
+        expect_matches_serial_with_and_without_step_graphs(text, [&](const Solver & s) {
             if (s.is_distributed()) {
                 EXPECT_GT(s.chemistry_cells_sent(), 0.0);
             }
+            EXPECT_EQ(s.chemistry_explicit_steps() > 0.0, explicit_steps);
         });
     }
 }
@@ -262,6 +266,41 @@ TEST(MPITest, TENOOnTrianglesMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
                                         "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 15));
+}
+
+TEST(MPITest, TENOSigmaOfTheStartSnapshotMatchesSerial) {
+    // No stage has run at the start: its output has no troubled-cell measure on any rank count
+    const std::string input = box_input("cartesian_tri", "type = \"TENO\"\norder = 5\nbound_preserving = true\n", EULER,
+                                        bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                            "type = \"wall_adiabatic\"\n", "type = \"outlet_extrapolation\"\n"), 4);
+    auto start_sigma = [&](const bool distributed) {
+        Input text = parse_toml(input);
+        text["mesh"]["cell_order"] = distributed ? "hilbert" : "input";
+        Solver solver;
+        solver.set_distributed(distributed);
+        std::vector<Data> sigma;
+        solver.set_output_data([&](const Mesh &, std::vector<Data> & data) {
+            for (const Data & d : data) {
+                if (d.name() == "TENO_SIGMA") sigma.push_back(d);
+            }
+        });
+        solver.init(text);
+        solver.start_run();
+        solver.copy_device_to_host();
+        EXPECT_EQ(sigma.size(), 1u);
+        const Mesh & mesh = *solver.get_mesh();
+        const uint32_t n_owned = mesh.n_owned();
+        std::vector<double> by_global(distributed ? comm::allreduce(uint64_t(n_owned), comm::Op::SUM) : n_owned, 0.0);
+        for (uint32_t c = 0; c < n_owned; c++) {
+            const uint64_t g = solver.is_distributed() ? solver.get_distribution().global_cell[c] : mesh.h_global_cell(c);
+            by_global[g] = static_cast<double>(sigma[0][c]);
+        }
+        solver.finish_run();
+        if (distributed) comm::allreduce(std::span<double>(by_global), comm::Op::SUM);
+        return by_global;
+    };
+    const std::vector<double> serial = start_sigma(false), ranks = start_sigma(true);
+    EXPECT_EQ(ranks, serial) << "on " << comm::size() << " ranks";
 }
 
 TEST(MPITest, StreamsWaitForEachOtherWhenOneRunsLate) {
@@ -1559,13 +1598,45 @@ TEST(MPITest, CurvedWallsMatchSerial) {
                                       "[[boundaries]]\nname = \"outer\"\ntype = \"wall_adiabatic\"\n", 10);
         const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
         input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
-        expect_matches_serial(input, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & s) {
+            EXPECT_TRUE(s.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(s);
+        });
         if (order == 3 && have_hdf5() && (comm::size() == 1 || have_parallel_hdf5())) {
             const std::string h5 = (scratch_dir() / "mallard_mpi_annulus_3.h5").string();
             write_mesh_h5(h5, read_file_block(file));
             std::string from_h5 = input;
             from_h5.replace(from_h5.find(file), file.size(), h5);
             expect_matches_serial(from_h5, [](const Solver & s) { EXPECT_TRUE(s.get_mesh()->curved_geometry); });
+        }
+    }
+    comm::barrier();
+}
+
+TEST(MPITest, AxisymmetricCurvedWallsMatchSerial) {
+    // The meridian half-plane of a spherical shell, walls projected onto the
+    // circles or P2 lines of the file: revolved curved cells and faces, the
+    // r-weighted flux points and TENO's curved source rules of halo cells
+    const std::string closed = "[[mesh.curved]]\nzone = \"inner\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.0\n"
+                               "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 2.0\n";
+    const std::string boundaries = "[[boundaries]]\nname = \"axis\"\ntype = \"symmetry\"\n"
+                                   "[[boundaries]]\nname = \"inner\"\ntype = \"wall_adiabatic\"\n"
+                                   "[[boundaries]]\nname = \"outer\"\ntype = \"symmetry\"\n";
+    const std::string blast = "exp(-40 * ((x + 0.5)^2 + (y - 1.3)^2))";
+    for (const auto & [order, shapes] : {std::pair{1, closed}, std::pair{2, std::string()}}) {
+        const std::string file = write_temp_shared("mallard_mpi_half_annulus_" + std::to_string(order) + ".msh",
+                                                   half_annulus_gmsh(5, 15, 1.0, 2.0, order, order == 2));
+        for (const std::string recon : {"type = \"TENO\"\norder = 4\n", "type = \"MUSCL\"\n"}) {
+            std::string input = box_input("cartesian", recon, NS + "axisymmetric = true\n", boundaries, 10);
+            const size_t a = input.find("type = \"cartesian\""), b = input.find("[initialize]");
+            input.replace(a, b - a, "type = \"file\"\nfilename = \"" + file + "\"\n" + shapes);
+            const std::string centered = "exp(-40 * ((x - 0.35)^2 + (y - 0.45)^2))";
+            for (size_t at; (at = input.find(centered)) != std::string::npos;) input.replace(at, centered.size(), blast);
+            expect_matches_serial(input, [](const Solver & s) {
+                EXPECT_TRUE(s.get_mesh()->curved_geometry);
+                EXPECT_TRUE(s.get_mesh()->axisymmetric);
+                expect_halo_geometry_matches_owners(s);
+            });
         }
     }
     comm::barrier();

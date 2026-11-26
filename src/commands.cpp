@@ -45,6 +45,12 @@ constexpr Option RUN_OPTIONS[] = {
      "text: the setup, the progress table and the summary on stdout; jsonl: on stdout only the run record's "
      "progress records, one JSON object per line as mallard.jsonl has them, for live monitoring and plotting, "
      "and the text on stderr. Default: text."},
+    {"--set", "", "KEY=VALUE",
+     "Change a setting before the first step, as mallard ctl set does while the run goes on: the same keys "
+     "(n_steps, t_stop, t_wall_stop, check_interval, control_file_interval, an output's or probe's interval "
+     "or time_interval, ...) and checks; a setting it refuses is an error. Give it once per setting. Each "
+     "is a set event of mallard.jsonl, and mallard pack's rerun command repeats it. Default: the input's "
+     "settings."},
     KOKKOS,
 };
 
@@ -58,12 +64,16 @@ constexpr Option CHECK_OPTIONS[] = {
      "Memory and cost per rank for a run on N ranks; from a serial check, memory is scaled to the "
      "largest part the run's partitioner would make. Default: the ranks of this check."},
     {"--throughput", "", "CELLS_PER_S",
-     "Cost (wall time and GPU-hours per unit simulated time, per flow-through and to t_stop) at this "
-     "many cell updates per second per rank: the Throughput of a run's summary over its ranks. "
-     "Default: no cost."},
+     "Cost (wall time, GPU-hours and parallel efficiency per unit simulated time, per flow-through and to "
+     "t_stop) at this many cell updates per second of one rank alone: the Throughput of a single-rank run's "
+     "summary. Default: the throughput measured on this device class for this kind of case, or fitted to "
+     "those measurements."},
     {"--steps", "", "N",
-     "Cost at the throughput measured over N steps, after one untimed step; the memory then includes the "
-     "steps' peak. Default: no cost."},
+     "Cost at the throughput measured over N steps on this device, after one untimed step; the memory then "
+     "includes the steps' peak."},
+    {"--ranks-per-node", "", "N",
+     "Ranks on each node, for the cost's exchanges between nodes. Default: as in this check under its launcher, "
+     "else 8 per GPU node, and every CPU rank on one node."},
     {"--memory", "", "SIZE|GPU",
      "Size the run for this memory per rank: a size (40GB, 512MiB; host memory per rank in CPU builds) or a GPU "
      "(a100-40, a100-80, h100-80, h200, mi250x, mi300x): the most cells per rank (within the memory and the "
@@ -92,13 +102,25 @@ constexpr Option CHECK_OPTIONS[] = {
     {"--catalog", "", "KEYS.json",
      "Write every key the setup looked up, with its type, unit, default and accepted values, as JSON. "
      "Default: none."},
+    {"--initial", "", "PREFIX",
+     "Write the initial state, as the run would start from it (initialize, its regions and data, or a restart), "
+     "to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), the default snapshot format: RHO, U, P, "
+     "T and, for mixtures, Y_*. Default: none."},
     {"--view", "", "DIR",
      "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
-     "DIR/case.vtm), one block each for the mesh, every boundary zone, region the case uses (filled regions as "
+     "DIR/case.vtm), one block each for the mesh, every boundary zone (walls with their first cells' y+ as the field y_plus once it is estimated), region the case uses (filled regions as "
      "their cells with their fractions, surfaces and curves with their normals or tangents and measures), probe "
-     "and periodic pair; and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
+     "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
-     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Default: none."},
+     "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
+     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
+     "lists them. Default: none."},
+    {"--geometry-only", "", "",
+     "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
+     "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "
+     "and the checks of the run (time step, resolution, mesh quality, memory, cost); walls' y_plus and regions "
+     "defined by the solution, which need the initial state, are left out, and keys are not checked for use. For previews "
+     "that follow each edit of a large case. Default: the whole check."},
     KOKKOS,
 };
 
@@ -115,6 +137,17 @@ constexpr Option NEW_OPTIONS[] = {
      "A coarse, short version that runs in seconds to a minute: for trying the steps, not for the "
      "physical result."},
     {"--force", "", "", "Write into a directory that is not empty."},
+};
+
+constexpr Option VERIFY_OPTIONS[] = {
+    {"--format", "", "text|json",
+     "text: one row per check with its status, time and why; json: the verdict as one JSON object (schema "
+     "mallard-install-verify), for scripts and the GUI. Default: text."},
+    {"--launcher", "", "COMMAND",
+     "Run the checks under this command, split at spaces: the job's launcher (\"srun -n 2\", \"mpirun -n 2\"), "
+     "or a container runtime. Default: none, one process."},
+    {"--keep", "", "DIR", "Make the checks' cases in DIR and keep them, with their logs. Default: a temporary directory, removed."},
+    KOKKOS,
 };
 
 constexpr Option UPGRADE_OPTIONS[] = {
@@ -520,6 +553,7 @@ std::string capabilities_json() {
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
+                                 .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("run_log", schema_json(run_log::SCHEMA, run_log::VERSION))
                                  .raw("run_block", schema_json(provenance::SCHEMA, provenance::VERSION))
                                  .raw("snapshot_block", schema_json(snapshot_block::SCHEMA, snapshot_block::VERSION))
@@ -559,7 +593,7 @@ constexpr Command COMMANDS[] = {
         .name = "",
         .group = "Run",
         .summary = "Run a case",
-        .synopsis = "mallard -i input.toml [--restart FILE|latest] [Kokkos options]\n"
+        .synopsis = "mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]\n"
                     "mallard <command> [options]",
         .description =
             "Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations on unstructured "
@@ -605,9 +639,10 @@ constexpr Command COMMANDS[] = {
             "checkpoint: write a restart file now; the reply names it. stop: write a restart file and end the "
             "run (exit status 3). set: change settings from the next step on: n_steps, t_stop, t_wall_stop "
             "(0 removes a limit; one must remain; times in seconds or with a unit, e.g. t_wall_stop=2h), "
-            "check_interval, write_data.<prefix or index>.interval or .time_interval, "
+            "check_interval, control_file_interval, write_data.<prefix or index>.interval or .time_interval, "
             "probes.<name>.interval or .time_interval, forces.<zone>.interval, integrals.interval. Other keys "
-            "are refused.",
+            "are refused. A SET file in run-dir does the same from anywhere the directory is visible, with "
+            "[run] control_file_interval: lines of key = value, the run log the reply.",
         .options = {},
         .arguments = CTL_ARGUMENTS,
         .examples = "$ mallard ctl runs/cylinder status\n"
@@ -725,7 +760,10 @@ constexpr Command COMMANDS[] = {
             "Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial solution) without "
             "time stepping and without writing any file, then reports: unknown or unused keys, boundary zones "
             "without a condition, mesh quality with the worst cells, the stable time step and the cell that "
-            "sets it, memory per rank and, with --throughput or --steps, the cost. Each row has a status, each "
+            "sets it, memory per rank, and the cost: wall time, GPU- or core-hours and parallel efficiency over rank "
+            "counts, from the throughput measured on this device class for this kind of case (or --throughput, or "
+            "--steps timed here) and a step-time model of the largest part fitted to measured runs, with its "
+            "uncertainty. Each row has a status, each "
             "error or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that explain it. It lists "
             "every region the case uses and the mesh's own (domain, boundary zones, cell zones) with its dimension, measure and cells, "
             "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
@@ -742,10 +780,11 @@ constexpr Command COMMANDS[] = {
         .arguments = CHECK_ARGUMENTS,
         .examples = "$ mallard check input.toml\n"
                     "$ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job\n"
-                    "$ mallard check input.toml --ranks 64 --throughput 5e7\n"
+                    "$ mallard check input.toml --ranks 64 --memory a100-80   # cost on 64 A100s\n"
                     "$ mpirun -n 4 mallard check input.toml --mesh-fields mesh\n"
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
-                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView",
+                    "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView\n"
+                    "$ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time",
         .exit_status = "0  no errors (there may be warnings)\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
@@ -1188,6 +1227,33 @@ constexpr Command COMMANDS[] = {
         .run = pack_main,
     },
     {
+        .name = "install verify",
+        .group = "Maintain",
+        .summary = "Check that this install works here: its environment, and a quick run of every solver",
+        .synopsis = "mallard install verify [--format text|json] [--launcher COMMAND] [--keep DIR] [Kokkos options]",
+        .description =
+            "Checks an install where it is, for each solver it has (mallard2d, mallard3d): the environment, as "
+            "mallard check without an input reports it (the build, devices, MPI), with no error; and a quick run, "
+            "the Sod shock tube of mallard new sod --quick (a slab one cell thick in 3D) to t = 0.2, which must "
+            "finish and match the exact solution: the undisturbed state ahead of the shock (rho 0.125, p 0.1, within "
+            "2%) and the largest Mach number (0.929, within 0.05), from the run log's monitors.\n"
+            "\n"
+            "Run it where the install will run, as a short job on the partition the runs use: under --launcher, "
+            "each check runs on the job's ranks. The JSON verdict holds every check with its time and why it "
+            "failed, the version and the prefix; an installer records it with the install. A few seconds per "
+            "solver on a CPU.",
+        .options = VERIFY_OPTIONS,
+        .arguments = {},
+        .examples = "$ mallard install verify\n"
+                    "$ srun -n 1 -c 4 mallard install verify --format json --kokkos-num-threads=4\n"
+                    "$ mallard install verify --launcher \"mpirun -n 2\" --keep verify",
+        .exit_status = "0  every check passed\n"
+                       "1  a check failed, or no solver is installed\n"
+                       "2  usage error",
+        .dim = Case::front_end,
+        .run = install_verify_main,
+    },
+    {
         .name = "test",
         .group = "Maintain",
         .summary = "Run the unit and regression tests",
@@ -1221,7 +1287,7 @@ constexpr Command COMMANDS[] = {
             "print, so it knows every command, key and field of this build; templates come from mallard new when "
             "completing.\n"
             "\n"
-            "An install (cmake --install, Spack, the containers, the archives) puts the scripts where the shells look: "
+            "An install (cmake --install, Spack, the containers, the portable binaries) puts the scripts where the shells look: "
             "share/bash-completion/completions/mallard, share/zsh/site-functions/_mallard and "
             "share/fish/vendor_completions.d/mallard.fish under its prefix. For a build tree, or a prefix the "
             "shell does not search, load it from the shell's startup file, as the examples show.",
@@ -1269,6 +1335,7 @@ constexpr Command COMMANDS[] = {
 
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
+    {"install", "Commands on this install of Mallard."},
     {"list", "Catalogs: the fields, species, input keys and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},

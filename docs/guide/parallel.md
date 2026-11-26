@@ -64,7 +64,7 @@ curve, multi-jagged ones are slabs cut along each axis in turn.*
 
 - `multijagged` (the default since 0.8.0): equal slabs along x, each slab cut along y and, in 3D, along z, with the number of pieces per axis that leaves the least area between the blocks. A box of cuboid cells gets cuboid parts; the blocks are numbered along a Hilbert curve, so the ranks of a node hold a compact group.
 - `hilbert` (the default before 0.8.0): cells split along a Hilbert curve through their centroids.
-- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB).
+- `graph`: [dKaMinPar](https://github.com/KaHIP/KaMinPar) on the cell connectivity, which minimizes the number of faces between ranks; needs a build with `-DMallard_ENABLE_KAMINPAR=ON` (and oneTBB), or `spack install mallard +kaminpar`.
 
 On GPUs, build with `-DMallard_GPU_AWARE_MPI=ON` if your MPI is CUDA-aware: halo data then goes between GPUs directly instead of through host memory. On NVIDIA GPUs, `-DMallard_ENABLE_NCCL=ON` exchanges halos with NCCL on the GPU's stream, with no host synchronization per exchange (`[parallel] halo_exchange = "nccl"`, the default in such builds). CUDA builds also run each step as one CUDA graph (`[run] cuda_graphs`, on by default), every feature included, as long as halos go through NCCL: with MPI's exchanges (`halo_exchange = "mpi"`, or a build without NCCL) the steps run kernel by kernel, with the host synchronizing at every exchange.
 
@@ -199,9 +199,133 @@ the job's launcher (`srun mallard check`, `mpirun -n 8 mallard check`), as
 the run: GPU-aware MPI, NCCL, unbound OpenMP threads
 ([Checking an input](input_files.md#checking-an-input)).
 
+## The cost estimate
+
+`mallard check`'s cost section ([Checking an input](input_files.md#checking-an-input)) gives the wall time,
+the compute hours and the parallel efficiency of a run on `--ranks N`, and, from a serial check, on every power
+of two up to four times that (at least 8, parts of at least 1,000 cells). Two models make it, both fitted only to
+measured runs; `tools/perf/cost_model.py` regenerates their coefficients (`src/solver/cost_model_data.h`) from the
+measurements in `benchmarks/cost_model/`.
+
+**The throughput of one rank alone**, in cells per second, comes in this order from:
+
+1. `--throughput R`, the cells per second of a single-rank run, for example an earlier run's `Throughput`.
+2. `--steps N`: the check times N steps after an untimed one on its own ranks and device, and the step-time
+   model below turns that step back into the throughput of one rank alone.
+3. The measurements for the device class (`--memory`'s GPU when nothing is timed, else the check's device),
+   dimension, reconstruction and physics (the geometric mean of a key's measurements; on CPUs per thread, times
+   the threads). Keys without a measurement take a log-linear fit over every measurement: a base per device class
+   and dimension, a factor per reconstruction and per physics (separately for CPUs and GPUs) and, for reacting
+   cases, a power of the species count. Fourth-order TENO-E sits halfway between third and fifth order, and first
+   order takes MUSCL's figure. Devices without measurements (GPUs other than the A100) give no estimate: time a few
+   steps or give `--throughput`.
+
+**The step time on N ranks** is that of the largest part the run's partitioner makes (the rank with the most
+cells, from the same partition the run uses):
+
+t = s (o + β h) + t<sub>0</sub> + γ k + δ h<sub>remote</sub> + c<sub>p</sub> P
+
+where s is the seconds per cell of one rank alone (1/throughput), o and h the part's owned and halo cells, k its
+neighbor parts, h<sub>remote</sub> its halo cells owned by ranks on other nodes, and P its particle slots.
+t<sub>0</sub> is the time per step independent of the cells (kernel launches, reductions, synchronization), β the
+cost of a halo cell relative to an owned one, γ the cost per neighbor and δ that per halo cell exchanged between
+nodes. Ranks per node come from `--ranks-per-node`, else the placement of a parallel check, else 8 for GPUs, else
+one node for CPUs. The efficiency on N ranks is t(1) / (N t(N)).
+
+The fitted coefficients (Mallard 0.12.0):
+
+| device class | runs (cases) | t<sub>0</sub> | β | γ | δ | particles | fit error | held-out error |
+|---|---:|---:|---:|---:|---:|---|---:|---:|
+| A100 (other GPUs: none) | 22 (5) | 1.14 ms | 0 | 0 | 38 ns per cell | not measured | 1.9% | 20% |
+| Apple M CPU, one thread per rank (other CPUs take it) | 15 (4) | 23.6 ms | 1.52 | 0 | 0 (one node) | 11.7 ns per slot, +7.9 ms on several ranks | 9.2% | 33% |
+
+- **A100:** the 3D Taylor–Green vortex with TENO-E 5 (64³ cells per GPU on 1 to 14 GPUs over 1 and 2 nodes, 128³
+  on 1 to 8 GPUs and per GPU on 4) and a 221,000-cell MUSCL LES on 1 to 14 GPUs. Halo cells cost nothing
+  measurable within a node (owner-computes partition faces overlap their exchange with the interior; 128³ on 2
+  GPUs is faster than half of one); what is left is about 1.1 ms per step that does not shrink with the cells, and
+  the exchange between nodes. The held-out error is mostly the small LES case predicted from the large boxes alone,
+  which cannot show the fixed cost: 41% for it, 1 to 6% for the others.
+- **CPUs:** the Taylor–Green vortex with MUSCL and TENO-E 5 in 2D and 3D on 1 to 3 ranks of one thread on a shared
+  Apple M4 Pro (the fastest of 3 runs each), and tracer particles on 1 and 2 ranks. A halo cell costs about 1.5
+  owned cells, and the fixed cost per step is the ranks' synchronization through MPI.
+- **Throughput:** 40 measurements (A100 and Apple M4 Pro, 2D and 3D, MUSCL and TENO-E 3, 5 and 6, Euler, NS, LES
+  and reacting with 6 to 53 species); measurements of one key spread by 20%, and the fit predicts left-out
+  measurements to 44%. The fit is a rough guide outside the measured keys: time a few steps (`--steps`) for a
+  number of the case itself.
+
+**Uncertainty:** the report's one standard deviation combines the throughput's (the spread between cases of one
+key for a measured key, the leave-one-out error for a fitted one) with the step-time model's held-out error. The
+held-out error leaves out every case in turn, refits the rest and predicts each of its runs from its own
+single-rank step. Reacting runs are left out of the step-time fit: a flame's chemistry concentrates on the ranks
+it crosses, so their parts are not equally loaded and the largest part does not set the step.
+The estimate for a reacting case therefore assumes balanced ranks and is optimistic on many ranks (an A100
+flame on 8 GPUs measured 3.5 times the balanced prediction): time a few steps on the ranks you intend to use.
+
 ## Multi-GPU scaling
 
 The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/#scaling) plots the efficiencies below.
+
+### 3D Taylor–Green vortex, Mallard 0.11.0 {#scaling-3d-taylor-green}
+
+The viscous Taylor–Green vortex at Re = 1600 with fifth-order TENO-E, HLLC and SSPRK3, on hexahedra, from `examples/taylor_green_3d/scaling.toml`. The hardware is NVIDIA A100-SXM4-80GB GPUs, 8 per node, with NVLink within a node and HDR InfiniBand with GPUDirect RDMA between nodes. There is one rank per GPU (12 OpenMP host threads each), NCCL halo exchanges, multi-jagged partitions and the step's CUDA graph, all defaults. Each point is the median time per step from step 60 to 160 over two runs, setup excluded. Efficiency is T<sub>1</sub>/(n T<sub>n</sub>) for strong scaling and T<sub>1</sub>/T<sub>n</sub> for weak scaling.
+
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-light.svg#gh-light-mode-only)
+![Strong scaling of a 128³ box and weak scaling at 64³ hexahedra per GPU of the Taylor-Green vortex on A100s](../images/guide/scaling-taylor-green-3d-dark.svg#gh-dark-mode-only)
+
+**Strong scaling**, 128³ hexahedra (2,097,152 cells), main a7a5432e4:
+
+| GPUs | cells per GPU | time per step | efficiency |
+|---:|---:|---:|---:|
+| 1 | 2,097,152 | 244.9 ms | |
+| 2 | 1,048,576 | 119.6 ms | 102% |
+| 4 | 524,288 | 60.9 ms | 100.5% |
+| 8 | 262,144 | 32.0 ms | 95.7% |
+
+**Weak scaling**, 64³ hexahedra per GPU (Nx = 64 n), main 9da4ab1e7 (the solver's step is unchanged between the two commits):
+
+| GPUs | mesh | one node | efficiency | two nodes | efficiency |
+|---:|---|---:|---:|---:|---:|
+| 1 | 64³ | 30.58 ms | | | |
+| 2 | 128 × 64 × 64 | 30.79 ms | 99.3% | 31.10 ms (1 + 1) | 98.3% |
+| 4 | 256 × 64 × 64 | 31.10 ms | 98.3% | | |
+| 8 | 512 × 64 × 64 | 31.03 ms | 98.6% | 31.05 ms (4 + 4) | 98.5% |
+| 14 | 896 × 64 × 64 | | | 31.05 ms (7 + 7) | 98.5% |
+
+- **Strong scaling:** at or above 100% up to 4 GPUs. An A100 advances 8.77M cells per second with 1M cells, against 8.56M with 2.1M or 262,144 cells. At 8 GPUs each rank holds a 64³ cube with neighbors on all six sides, whereas the weak-scaling boxes are cut along x only. The larger partition surface is the likely cause of the extra 1 ms per step over the weak-scaling run with the same cells per GPU (32.0 against 31.0 ms).
+- **Crossing nodes costs nothing measurable:** 4 + 4 GPUs on two nodes run as fast as 8 on one, and the step stays a single CUDA graph across nodes.
+- **What weak scaling loses** is 0.2 ms per step at 2 GPUs and about 0.5 ms (1.5–1.7%) from 4 on: the halo-dependent cells' and NCCL's kernels share the device with the interior cells' reconstruction.
+
+**Measuring your own machine.** `scaling.py` in the example writes the inputs of the whole study. Run them one after the other, then reduce their run logs:
+
+```bash
+cd examples/taylor_green_3d
+python scaling.py --gpus 1 2 4 8          # writes strong/n1 ... weak/n8 and prints the command of each run
+# run the printed commands one at a time (on a cluster, from your job script), then:
+python ../../tools/docs/scaling.py --strong strong/n* --weak weak/n* --out scaling.json
+```
+
+The input is the example's flow, shortened to 160 steps with no output, so the time per step is all that is measured:
+
+```toml
+[run]
+n_steps = 160
+cfl = 0.4
+
+[mesh]
+type = "cartesian"
+Nx = 128   # weak scaling: Nx = 64 n and Lx = 2 pi n on n GPUs, Ny = Nz = 64
+Ny = 128
+Nz = 128
+Lx = 6.283185307179586
+Ly = 6.283185307179586
+Lz = 6.283185307179586
+```
+
+It adds no keys; `[output] check_interval = 20` sets how often the progress records that `tools/docs/scaling.py` reads are written. Pitfalls:
+
+- **Grow the box, not the cells.** The weak-scaling boxes keep cubic cells and grow along x. Refining in one direction changes TENO's stencils and their cost, so the time per step would no longer compare.
+- **Skip the first steps.** The first steps include capturing the step graph and warming up the GPU, so the times start at step 60 (`--from`).
+- **One run per GPU at a time.** Two runs sharing a GPU, or a rank count above the GPUs of the node without `--kokkos-map-device-id-by=mpi_rank`, measure contention rather than Mallard.
 
 ### 3D, Mallard 0.8.0 {#scaling-3d}
 

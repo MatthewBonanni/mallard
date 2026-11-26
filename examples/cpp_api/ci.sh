@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds run_case against an installed Mallard (find_package(Mallard)), runs examples/sod with it and
-# with the installed mallard, and checks that both write the same files bit for bit.
+# with the installed mallard, and checks that both write the same values bit for bit (mallard diff) and the
+# same meshes (mallard info).
 #
 #   examples/cpp_api/ci.sh PREFIX WORKDIR
 set -eu
@@ -17,9 +18,23 @@ for run in api executable; do
 done
 (cd "$work/api" && "$work/build/run_case" input.toml --kokkos-num-threads=2)
 (cd "$work/executable" && "$prefix/bin/mallard" -i input.toml --kokkos-num-threads=2)
+# A file's kind, and for a mesh file (a VTKHDF series keeps its mesh in one) its mesh summary
+summary() {
+    "$prefix/bin/mallard" info "$1" --format json |
+        python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["kind"], json.dumps(d["mesh"]) if d["kind"] == "mesh" else "")'
+}
 n=0
 for file in "$work/executable/solut/"*; do
     name=$(basename "$file")
+    a=$(summary "$file")
+    if [ "${a%% *}" = mesh ]; then
+        test "$a" = "$(summary "$work/api/solut/$name")" || {
+            echo "run_case and mallard -i wrote different meshes in solut/$name"
+            exit 1
+        }
+        n=$((n + 1))
+        continue
+    fi
     "$prefix/bin/mallard" diff "$file" "$work/api/solut/$name" > "$work/diff.txt" || {
         cat "$work/diff.txt"
         echo "run_case and mallard -i differ in solut/$name"
@@ -28,4 +43,4 @@ for file in "$work/executable/solut/"*; do
     n=$((n + 1))
 done
 test "$n" -gt 0 || { echo "mallard -i wrote no files in solut/"; exit 1; }
-echo "run_case and mallard -i wrote the same $n files bit for bit"
+echo "run_case and mallard -i wrote the same $n files: values bit for bit, meshes alike"
