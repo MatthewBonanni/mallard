@@ -196,6 +196,7 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
+    if (!options.boundary_values_dir.empty()) r.boundary_values = boundary_values(options.boundary_values_dir);
     check_initial(r, options);
     locate_diagnostics(r, options.input_file);
     return r;

@@ -919,6 +919,7 @@ std::string check_json(const CheckReport & r) {
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
     o.add("geometry_only", r.geometry_only);
     o.raw("view", case_view_json(r));
+    o.raw("boundary_values", r.boundary_values.empty() ? "null" : r.boundary_values);
     o.raw("initial_file", r.initial_file.empty() ? "null" : json::quote(r.initial_file));
     if (r.has_quality) {
         o.raw("mesh_quality", quality_json(r));

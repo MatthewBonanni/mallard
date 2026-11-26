@@ -49,6 +49,7 @@ struct CheckOptions {
     std::string initial;        // prefix of the initial state's snapshot (--initial), or empty
     std::string catalog_file;   // JSON of the keys setup read (key_catalog), or empty
     std::string view_dir;       // directory of the case view (case_view.h), or empty
+    std::string boundary_values_dir;  // directory of the boundaries' values at their faces, or empty
     bool geometry_only = false;  // set up and check only what the case view draws (--geometry-only)
     std::string input_file;     // named before input errors, as a run names it, or empty
     bool partial = false;       // an input still being written (--partial): only missing pieces is no failure
@@ -210,6 +211,7 @@ struct CheckReport {
     std::vector<case_view::BlockInfo> view_blocks;  // and its blocks
     std::vector<CheckFrame> frames;                 // of each [[boundaries]] entry, with the view
     bool geometry_only = false;  // the check of geometry alone (CheckOptions::geometry_only)
+    std::string boundary_values;           // mallard-boundary-values, with boundary_values_dir; else empty
     std::string mesh_fields_file;  // the mesh and stencil fields written, or empty
     std::string stencil_file;      // the stencils written, or empty
 

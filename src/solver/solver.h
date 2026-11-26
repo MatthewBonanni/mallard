@@ -365,6 +365,12 @@ class Solver {
         void update_derived_fields();
 
         // Public because nvcc rejects device lambdas in non-public member functions
+        /**
+         * @brief Each [[boundaries]] entry's values at its faces at the current time, as the boundary evaluates them,
+         *        and for stagnation and mass-flow inlets the inflow its flux makes of the cells' state: one CSV file
+         *        per entry in dir and the summary (mallard-boundary-values). Collective.
+         */
+        std::string boundary_values(const std::string & dir) const;
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
         void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
         /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */

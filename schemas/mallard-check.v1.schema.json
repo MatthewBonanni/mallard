@@ -51,6 +51,7 @@
     "case_view": {"type": ["string", "null"]},
     "case_view_images": {"type": "array", "items": {"type": "string"}},
     "view": {"description": "with --view: the view written", "oneOf": [{"type": "null"}, {"$ref": "mallard-case-view.v1.schema.json"}]},
+    "boundary_values": {"description": "with --boundary-values: each entry's values at its faces", "oneOf": [{"type": "null"}, {"$ref": "mallard-boundary-values.v1.schema.json"}]},
     "mesh_quality": {"type": ["object", "null"]},
     "mesh_fields_file": {"type": ["string", "null"]},
     "stencil_file": {"type": ["string", "null"]},

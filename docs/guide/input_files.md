@@ -554,6 +554,7 @@ An input still being written fails on what it does not have yet: a required key 
 | `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
 | `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
 | `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; with `--view`, the case view's files, every block's metadata and each boundary's frame (`mallard-case-view`, the [session](session.md)'s `case.view`), `null` without it ([Block metadata](#block-metadata)) |
+| `boundary_values` | With `--boundary-values`: each entry's file and the range of each column (`mallard-boundary-values`; [Boundary values](#boundary-values)), else `null` |
 | `mesh_quality`, `mesh_fields_file`, `stencil_file` | By field name (`NON_ORTHOGONALITY`, ...): `{name, min, max, mean, units, limit, above_limit, histogram: {edges, counts}, worst: [{value, cell, x}]}`, the histogram over every cell in 20 equal bins from `min` to `max` (one bin if they are equal); the files of `--mesh-fields` |
 | `time_step` | `t`, `dt`, `dt_cfl1`, `cfl`, `cfl_limit`, `integrator`, `set_by` (`CFL`, `fixed`, `sponge`), `limiting_cell`, `limiting_x`, `region_cells`, `region_lo`, `region_hi` |
 | `resolution` | By id (`cell_size_min`, `u_tau`, `y_plus_max`, `eta`, `delta_over_eta_mean`, `tfles_thickening_max`, ..., and `region.<name>.<id>` [per region](#values-per-region)): `{quantity, value, units, target, status, basis, x, region}` (`region`: `null` for the domain's) |
@@ -834,6 +835,35 @@ Pitfalls:
   in; a nondimensional case shows no units.
 
 Figures: [`tools/docs/case_view.py`](../../tools/docs/case_view.py).
+
+### Boundary values
+
+`--boundary-values values` writes what each `[[boundaries]]` entry prescribes
+at each of its faces, evaluated by the boundary condition itself at the
+initial time, so that a profile can be checked before the run without
+evaluating its expression elsewhere:
+
+```bash
+mallard check input.toml --boundary-values values --format json
+```
+
+`values/boundaries_<index>_<zone>.csv` has one row per face: `face` (a key
+every partition agrees on), its center (`x`, `y`, `z`), its inward unit normal
+(`n_x`, ...), the [local coordinates](boundary_conditions.md#local-coordinates)
+its expressions read (`u`, `u_m`, `n`, ...), every key the entry prescribes
+(`u`, `p`, `T`, `p0`, `T0`, `mass_flux`, `q`, by component as `u[0]`) and,
+for `inlet_state`, `farfield` and moving walls, the velocity it prescribes
+(`u_x`, ...). An `inlet_stagnation` or `inlet_mass_flow` sets its velocity
+from the state inside, so for those the file has the inflow it settles at
+once the initial pressure inside reaches it: `rho`, `u_x`, ..., `speed`,
+`rho_u_n` (the mass flux into the domain) and `p`, the cell's pressure (a
+stagnation inlet's state on its isentrope there, at rest where the pressure
+inside is above `p0`; a mass-flow inlet's density at its `T`). These are
+estimates: the transient of the first steps differs, and a cell flowing
+supersonically through a stagnation inlet keeps the state the flux makes of it. The JSON report's `boundary_values` (schema
+`mallard-boundary-values`, the result of the [session](session.md)'s
+`case.boundary_values`) names each file and gives each column's `units`,
+`estimated`, `min`, area-weighted `mean` and `max`.
 
 ### The initial state before a run
 

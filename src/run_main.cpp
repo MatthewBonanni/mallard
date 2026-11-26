@@ -258,7 +258,8 @@ int check_main(const cli::Args & args) {
         args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
     if (input_file.empty()) {
         for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--ranks-per-node", "--memory",
-                                    "--quality", "--catalog", "--view", "--partial", "--geometry-only"}) {
+                                    "--quality", "--catalog", "--view", "--boundary-values", "--partial",
+                                    "--geometry-only"}) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
@@ -275,11 +276,12 @@ std::string check_options(const cli::Args & args, CheckOptions & options) {
     options.catalog_file = args.value_or("--catalog", "");
     options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
+    options.boundary_values_dir = args.value_or("--boundary-values", "");
     options.geometry_only = args.has("--geometry-only");
     if (options.geometry_only) {
         for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--mesh-fields",
                                     "--quality", "--stencils", "--cells", "--region", "--weights", "--initial",
-                                    "--catalog"}) {
+                                    "--catalog", "--boundary-values"}) {
             if (args.has(option)) return std::string(option) + " needs the whole check, not --geometry-only";
         }
     }
