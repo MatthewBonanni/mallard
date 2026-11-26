@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "conservation_ledger.h"
+#include "health_events.h"
 #include "repair_audit.h"
 #include "run_health.h"
 #include "state.h"
@@ -49,6 +50,14 @@ struct HealthState {
     std::vector<std::pair<std::string, double>> setup_phases;
     std::set<std::string> warned;
     health::Report last;
+
+    // Run health events (health_events.h) and heartbeats, also with on = false
+    health_events::Monitor events;
+    double steady_residual = 0.0;      // [output] steady_residual, 0: none
+    uint64_t stall_steps = 0;          // [output] stall_steps
+    double heartbeat_interval = 0.0;   // [output] heartbeat_interval, seconds; 0: none
+    double heartbeat_next = 0.0;       // on the solver's wall clock
+    uint64_t heartbeat_step = 0;
 };
 
 #endif // HEALTH_STATE_H

@@ -18,6 +18,7 @@
 #include <numeric>
 #include <numbers>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,8 @@
 #include "case_image.h"
 #include "check.h"
 #include "comm.h"
+#include "cost_model.h"
+#include "cost_model_data.h"
 #include "common_io.h"
 #include "memory_tracker.h"
 #include "mesh_block.h"
@@ -310,16 +313,134 @@ TEST(CheckTimeStep, EveryIntegratorHasItsLimitAndWarnsAboveIt) {
     }
 }
 
-TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
+TEST(CheckCost, GivenThroughputCostsTheLargestPartOnEachRankCountBelowLinearScaling) {
     CheckOptions options;
     options.throughput = 1e6;
     options.ranks = comm::size() == 1 ? 2 : comm::size();  // estimates for other counts need a serial check
     const CheckReport r = check(box(), options);
     ASSERT_TRUE(r.ok());
+    ASSERT_NE(r.scaling, nullptr) << "every CPU and the A100 have a step-time model";
     const double n_cells = N_DIM == 3 ? 16 * 8 * 2 : 16 * 8;
     EXPECT_EQ(r.n_cells, uint64_t(n_cells));
-    EXPECT_NEAR(r.wall_per_time, n_cells / (options.ranks * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
+    EXPECT_EQ(r.throughput_source, "option");
+    // Overheads, neighbors and the halo make the run slower than ranks at the single rank's throughput
+    EXPECT_GT(r.wall_per_time, 1.01 * n_cells / (options.ranks * 1e6 * r.dt));
+    EXPECT_LT(r.efficiency, 0.99);
+    EXPECT_GT(r.target_part.halo, 0u);
+    EXPECT_NEAR(r.wall_per_time, check_step_seconds(r, r.target_part, options.ranks) / r.dt,
+                roundoff(1e-12) * r.wall_per_time);
     EXPECT_NEAR(r.flow_through_time, 2.0, roundoff(1e-12));  // Lx / u
+}
+
+TEST(CheckCost, StepTimeGrowsWithTheHaloNeighborsAndExchangesBetweenNodes) {
+    // Every term of the model, with coefficients that all count
+    static const cost_model::Scaling every{"test", 1.0e-4, 0.25, 1.0e-5, 1.0e-8, 1.0e-9, 1.0e-3, 1, 1, 0.0, 0.0, "", ""};
+    CheckReport r;
+    r.throughput = 1e7;
+    r.n_cells = 4'000'000;
+    r.scaling = &every;
+    const PartSize part{1'000'000, 50'000, 2, 0, 0};
+    const double base = check_step_seconds(r, part, 4);
+    PartSize more = part;
+    more.halo *= 4;
+    EXPECT_GT(check_step_seconds(r, more, 4), base);
+    more = part;
+    more.neighbors = 26;
+    EXPECT_GT(check_step_seconds(r, more, 4), base);
+    more = part;
+    more.remote_neighbors = 1;
+    more.halo_remote = 25'000;
+    EXPECT_GT(check_step_seconds(r, more, 16), base);
+    r.particles = 1e5;
+    EXPECT_GT(check_step_seconds(r, part, 4), base);
+    // The fitted models: the halo costs on every device class (CPUs compute it, A100s exchange it between nodes),
+    // and fewer owned cells cost less, but not proportionally less
+    for (const char * device : {"a100", "cpu-apple-m"}) {
+        r.particles = 0.0;
+        r.scaling = cost_model::scaling(device);
+        ASSERT_NE(r.scaling, nullptr) << device;
+        EXPECT_GT(r.scaling->beta + r.scaling->delta, 0.0) << device;
+        const double fitted = check_step_seconds(r, part, 4);
+        PartSize smaller = part;
+        smaller.owned /= 2;
+        EXPECT_GT(check_step_seconds(r, smaller, 8), 0.5 * fitted * 1.01) << device;
+    }
+}
+
+TEST(CheckCost, EachDeviceClassHasItsOwnModel) {
+    EXPECT_EQ(cost_model::device_class("NVIDIA A100-SXM4-80GB (85 GB)", true), "a100");
+    EXPECT_EQ(cost_model::device_class("A100-80GB", true), "a100");
+    EXPECT_EQ(cost_model::device_class("Apple M4 Pro", false), "cpu-apple-m");
+    EXPECT_EQ(cost_model::device_class("AMD EPYC 7763 64-Core Processor", false), "cpu");
+    EXPECT_EQ(cost_model::device_class("NVIDIA H100 80GB HBM3 (85 GB)", true), "gpu");
+    const cost_model::Scaling * gpu = cost_model::scaling("a100");
+    const cost_model::Scaling * cpu = cost_model::scaling("cpu-apple-m");
+    ASSERT_TRUE(gpu && cpu);
+    EXPECT_NE(gpu->t0, cpu->t0);
+    EXPECT_EQ(cost_model::scaling("cpu"), cpu);
+    EXPECT_EQ(cost_model::scaling("gpu"), nullptr);
+    // Throughput: an A100's measurement of the key, not a CPU's, and none for a GPU without measurements
+    cost_model::Workload w{"a100", "NVIDIA A100-SXM4-80GB", 1, 3, "teno5", "ns", 0};
+    const cost_model::Throughput a100 = cost_model::throughput(w);
+    w.device = "cpu-apple-m";
+    w.threads = 2;
+    const cost_model::Throughput apple = cost_model::throughput(w);
+    w.threads = 4;
+    EXPECT_NEAR(cost_model::throughput(w).cells_per_second, 2.0 * apple.cells_per_second, 1e-9 * apple.cells_per_second);
+    EXPECT_GT(a100.cells_per_second, 10.0 * apple.cells_per_second);
+    w.device = "gpu";
+    EXPECT_EQ(cost_model::throughput(w).cells_per_second, 0.0);
+}
+
+TEST(CheckCost, ThroughputIsTheKeysMeasurementsElseTheFitWithItsHeldOutError) {
+    // A measured key: the geometric mean of its measurements
+    const cost_model::Measurement & m = cost_model::MEASUREMENTS[0];
+    cost_model::Workload w{m.device, m.hardware, std::max(1, m.threads), m.dim, m.reconstruction, m.physics,
+                           m.species};
+    double log_sum = 0.0;
+    int n = 0;
+    for (const cost_model::Measurement & k : cost_model::MEASUREMENTS) {
+        if (w.device == k.device && w.dim == k.dim && w.reconstruction == k.reconstruction &&
+            w.physics == k.physics && (w.physics != "reacting" || w.species == k.species)) {
+            log_sum += std::log(k.cells_per_second);
+            n++;
+        }
+    }
+    const double per = std::string(m.device).rfind("cpu", 0) == 0 ? double(w.threads) : 1.0;
+    cost_model::Throughput t = cost_model::throughput(w);
+    EXPECT_NEAR(t.cells_per_second, per * std::exp(log_sum / n), 1e-9 * t.cells_per_second);
+    EXPECT_EQ(t.uncertainty, cost_model::SAME_KEY_ERROR);
+    // TENO-E of order 4 is measured nowhere: fitted halfway between orders 3 and 5 (none measured with LES)
+    w = {"a100", "A100", 1, 3, "teno4", "les", 0};
+    t = cost_model::throughput(w);
+    EXPECT_GT(t.cells_per_second, 0.0);
+    EXPECT_EQ(t.uncertainty, cost_model::MODEL_ERROR);
+    w.reconstruction = "teno3";
+    const cost_model::Throughput teno3 = cost_model::throughput(w);
+    w.reconstruction = "teno5";
+    const cost_model::Throughput teno5 = cost_model::throughput(w);
+    ASSERT_EQ(teno3.uncertainty, cost_model::MODEL_ERROR);
+    ASSERT_EQ(teno5.uncertainty, cost_model::MODEL_ERROR);
+    EXPECT_LT(teno5.cells_per_second, teno3.cells_per_second);
+    EXPECT_NEAR(t.cells_per_second, std::sqrt(teno3.cells_per_second * teno5.cells_per_second),
+                1e-9 * t.cells_per_second);
+}
+
+TEST(CheckCost, EvaluatesTheStepTimeAsTheFitDoesAndInvertsAMeasuredStep) {
+    for (const cost_model::StepCheck & c : cost_model::STEP_CHECKS) {
+        const cost_model::Scaling * s = cost_model::scaling(c.device);
+        ASSERT_NE(s, nullptr) << c.device;
+        cost_model::Part p;
+        p.owned = c.owned;
+        p.halo = c.halo;
+        p.neighbors = c.neighbors;
+        p.halo_remote = c.halo_remote;
+        p.particles = c.particles;
+        p.ranks = c.ranks;
+        const double step = cost_model::step_seconds(*s, c.seconds_per_cell, p);
+        EXPECT_NEAR(step, c.step, 1e-6 * c.step) << c.device;
+        EXPECT_NEAR(cost_model::seconds_per_cell(*s, p, step), c.seconds_per_cell, 1e-9 * c.seconds_per_cell);
+    }
 }
 
 TEST(CheckCost, StepsMeasureTheThroughput) {
@@ -835,6 +956,47 @@ TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
     EXPECT_NEAR(s[3].max, expected, roundoff(1e-10));
 }
 
+TEST(LargestPart, PeriodicSeamsNeighborsAndHaloOnOtherNodes) {
+    // 8 x 8 quads periodic in x, in slabs: each slab's first halo layer is the column on either side, across the
+    // seam too, owned by its neighbors
+    if (N_DIM != 2) GTEST_SKIP() << "2D block";
+    const MeshBlock block = cartesian_2d_block(8, 8, 1.0, 1.0, MeshType::CARTESIAN, 0, 1);
+    auto slabs = [&](const int n) {
+        std::vector<int> owner(block.n_cells());
+        for (uint64_t c = 0; c < block.n_cells(); c++) {
+            double x = 0.0;
+            for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                x += block.node_coords[block.cell_nodes[k] - block.first_node][0];
+            }
+            owner[c] = static_cast<int>(n * x / double(block.cell_offsets[c + 1] - block.cell_offsets[c]));
+        }
+        return owner;
+    };
+    // Nodes at x = 1 are keyed by those at x = 0
+    std::vector<uint64_t> keys(block.n_nodes());
+    for (uint64_t n = 0; n < block.n_nodes(); n++) {
+        keys[n] = n;
+        for (uint64_t m = 0; m < block.n_nodes() && block.node_coords[n][0] > 1.0 - 1e-12; m++) {
+            if (block.node_coords[m][0] < 1e-12 && std::fabs(block.node_coords[m][1] - block.node_coords[n][1]) < 1e-12) {
+                keys[n] = m;
+            }
+        }
+    }
+    EXPECT_EQ(largest_part(block, slabs(2), 2, 1).halo, 8u);
+    const PartSize two = largest_part(block, slabs(2), 2, 1, keys);
+    EXPECT_EQ(two.halo, 16u);
+    EXPECT_EQ(two.neighbors, 1);
+    const PartSize four = largest_part(block, slabs(4), 4, 1, keys);
+    EXPECT_EQ(four.owned, 16u);
+    EXPECT_EQ(four.halo, 16u);
+    EXPECT_EQ(four.neighbors, 2);
+    EXPECT_EQ(four.remote_neighbors, 0);
+    // Two ranks per node: slab 0 has slab 1 beside it, and slab 3, on the other node, across the seam
+    const PartSize nodes = largest_part(block, slabs(4), 4, 1, keys, 2);
+    EXPECT_EQ(nodes.remote_neighbors, 1);
+    EXPECT_EQ(nodes.halo_remote, 8u);
+}
+
 TEST(LargestPart, HaloLayersOfNodeNeighbors) {
     // 8 x 8 quads cut at x = 1/2: each half has 32 cells, a first halo layer of
     // the 8 cells across the cut (node neighbors) and a second of 8 more
@@ -1036,6 +1198,7 @@ TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitError
     EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
     EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
     EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    EXPECT_NE(check_text(placed, false).find("Regions from surface files"), std::string::npos);
     // Millimeters read as meters: 1000 times larger than it should be
     const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
     EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
@@ -1115,6 +1278,56 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
     }
 }
 
+#ifndef Mallard_HAS_HDF5
+TEST(CaseView, BlockFilesHaveDistinctNamesWindowsAccepts) {
+    const std::vector<std::string> names = {"inlet", "Inlet", "probes[name = \"wake\"]", "a:b", "a_b", "a/b",
+                                            "con", "Aux.region", "x<y>z|w?*\\v", "trailing. "};
+    std::vector<case_view::Block> blocks;
+    for (const std::string & name : names) {
+        case_view::Block b;
+        b.name = name;
+        b.add_cell(case_view::VERTEX, std::vector<std::array<double, 3>>{{0.0, 0.0, 0.0}});
+        blocks.push_back(b);
+    }
+    const std::filesystem::path dir = scratch_dir() / "mallard_case_view_names";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string vtm = case_view::write((dir / "case.vtkhdf").string(), blocks);
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const std::set<std::string> devices = {"CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4",
+                                           "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+                                           "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    std::set<std::string> seen;
+    for (const auto & entry : std::filesystem::directory_iterator(dir / "case_blocks")) {
+        const std::string file = entry.path().filename().string();
+        EXPECT_EQ(file.find_first_of("<>:\"/\\|?*"), std::string::npos) << file;
+        EXPECT_TRUE(std::none_of(file.begin(), file.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; }));
+        EXPECT_NE(file.back(), '.') << file;
+        EXPECT_NE(file.back(), ' ') << file;
+        std::string device = file.substr(0, file.find('.'));
+        while (!device.empty() && device.back() == ' ') device.pop_back();
+        std::transform(device.begin(), device.end(), device.begin(), [](char c) { return char(std::toupper(c)); });
+        EXPECT_FALSE(devices.count(device)) << file;
+        std::string folded = file;
+        std::transform(folded.begin(), folded.end(), folded.begin(), [](char c) { return char(std::tolower(c)); });
+        EXPECT_TRUE(seen.insert(folded).second) << file;
+    }
+    EXPECT_EQ(seen.size(), names.size());
+    // Readers follow file= to every block, which keeps its name; names Windows accepts are the files'
+    const std::string text = read_file(vtm);
+    for (const std::string & name : names) {
+        const std::string tag = "name=\"" + case_image::xml_text(name) + "\" file=\"";
+        const size_t at = text.find(tag);
+        ASSERT_NE(at, std::string::npos) << name;
+        const std::string file = text.substr(at + tag.size(), text.find('"', at + tag.size()) - at - tag.size());
+        EXPECT_TRUE(std::filesystem::exists(dir / file)) << name;
+        if (name == "inlet" || name == "a_b") {
+            EXPECT_EQ(file, "case_blocks/" + name + ".vtu");
+        }
+    }
+}
+#endif
 namespace {
 
 /** @brief view_case with a snapshot region and a sponge, whose blocks need their elements found by prefix and index. */
@@ -1205,7 +1418,7 @@ TEST(CheckRegions, CaseViewBlocksCarryTheirKindKeyElementAndZone) {
     EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/element_index"));
     EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/metadata_version"));
 #else
-    const std::string vtu = read_file(dir / "case_blocks" / (block + ".vtu"));
+    const std::string vtu = read_file(dir / "case_blocks" / "probes[name = _s_].region.vtu");  // Windows-safe file name
     auto bytes = [](const std::string & s) {
         std::string out;
         for (const char ch : s) out += std::to_string(int(static_cast<unsigned char>(ch))) + " ";
@@ -1576,6 +1789,26 @@ CheckReport report_case() {
     r.released_on_devices[size_t(memory::Category::MESH)] = 4'200;
     r.bytes = r.target_bytes = 70'000;
     r.bytes_peak = r.target_bytes_peak = 128'100;
+    // The cost on an A100 by a model of fixed coefficients
+    static const cost_model::Scaling scaling{"a100", 1.0e-4, 0.25, 1.0e-5, 1.0e-8, 0.0, 0.0, 40, 6, 0.03, 0.05,
+                                             "case a 4.0%, case b 6.0%", "NVIDIA A100-SXM4-80GB, 2026-11-22"};
+    r.workload = {"a100", "A100-80GB", 1, 2, "fo", "euler", 0};
+    r.scaling = &scaling;
+    r.ranks_per_node = 8;
+    r.ranks_per_node_basis = "8 GPUs per node";
+    r.uncertainty = scaling.held_out_error;
+    r.scalings.clear();
+    for (const PartSize & part : {PartSize{128, 0, 0, 0, 0}, PartSize{64, 16, 1, 0, 0}, PartSize{32, 24, 3, 0, 0}}) {
+        CheckScaling row;
+        row.ranks = static_cast<int>(128 / part.owned);
+        row.part = part;
+        row.step = check_step_seconds(r, part, row.ranks);
+        row.efficiency = r.scalings.empty() ? 1.0 : r.scalings[0].step / (row.ranks * row.step);
+        row.wall_per_time = row.step / r.dt;
+        r.scalings.push_back(row);
+    }
+    r.efficiency = 1.0;
+    r.wall_per_time = r.sizing_wall_per_time = r.scalings[0].wall_per_time;
     return r;
 }
 
@@ -1668,6 +1901,13 @@ TEST(CheckReportJson, ReadsBackTheReportsNumbersAndDiagnostics) {
     EXPECT_EQ(v["memory"]["bytes_peak"].number, double(r.bytes_peak));
     EXPECT_EQ(v["memory"]["at_setup_peak"]["setup"].number, 58'100.0);
     EXPECT_EQ(v["cost"]["wall_per_time"].number, r.wall_per_time);
+    EXPECT_EQ(v["cost"]["model"]["held_out_error"].number, 0.05);
+    ASSERT_EQ(v["cost"]["scaling"].array.size(), r.scalings.size());
+    for (size_t i = 0; i < r.scalings.size(); i++) {
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["ranks"].number, r.scalings[i].ranks);
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["halo"].number, double(r.scalings[i].part.halo));
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["efficiency"].number, r.scalings[i].efficiency);
+    }
     EXPECT_EQ(v["mesh_quality"]["ASPECT_RATIO"]["max"].number, r.quality[2].max);
 }
 
