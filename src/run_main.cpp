@@ -257,8 +257,9 @@ int check_main(const cli::Args & args) {
     const std::string input_file =
         args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
     if (input_file.empty()) {
-        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--quality",
-                                    "--catalog", "--view", "--boundary-values", "--partial", "--geometry-only"}) {
+        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--ranks-per-node", "--memory",
+                                    "--quality", "--catalog", "--view", "--boundary-values", "--partial",
+                                    "--geometry-only"}) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
@@ -289,7 +290,8 @@ std::string check_options(const cli::Args & args, CheckOptions & options) {
     if (error.empty() && args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
     if (!error.empty()) return error;
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
-        !number(args, "--steps", options.steps, error)) {
+        !number(args, "--steps", options.steps, error) ||
+        !number(args, "--ranks-per-node", options.ranks_per_node, error)) {
         return error;
     }
     return "";
