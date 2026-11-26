@@ -15,6 +15,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -259,15 +260,19 @@ class FaceReconstruction {
         std::vector<uint32_t> halo_image_cells() const;
 
         /**
-         * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
-         *        cells from the reconstruction polynomials, if the scheme has
-         *        higher-order ones than least squares on face neighbors.
-         * @return Whether gradients were written.
+         * @brief Whether cell_gradients gives gradients: the scheme has higher-order
+         *        polynomials than least squares on face neighbors.
          */
-        virtual bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+        virtual bool has_cell_gradients() const { return false; }
+
+        /**
+         * @brief Gradients of W = [rho, u, p] at the centroids of the first n_cells
+         *        cells from the reconstruction polynomials (has_cell_gradients() only).
+         */
+        virtual void cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> /*gradients*/,
                                     uint32_t /*n_cells*/) {
-            return false;
+            throw std::logic_error("cell_gradients: the reconstruction has no cell gradients");
         }
         
         /**
@@ -276,13 +281,14 @@ class FaceReconstruction {
          *        offset offsets(i) from its centroid, with m =
          *        offsets.extent(0) / cells.extent(0) points per cell, for cells
          *        the scheme deems smooth and where the value is admissible;
-         *        out(i) of other points is left as it is.
+         *        out(i) of other points is left as it is. by_cell: equal
+         *        cells come in runs, whose polynomials may then be fitted once.
          * @return Whether the scheme has polynomials of higher order than
          *         least squares on face neighbors (nothing written otherwise).
          */
         virtual bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
                                   Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
-                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/) {
+                                  Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/, bool /*by_cell*/) {
             return false;
         }
 
@@ -532,13 +538,15 @@ class TENO : public FaceReconstruction {
         void discard_cell_face_values() override;
         size_t scratch_bytes() const override;
         void place_scratch(void * storage) override;
-        bool cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
+        bool has_cell_gradients() const override { return true; }
+        void cell_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells) override;
         void axisymmetric_source(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                                  Kokkos::View<rtype *, Kokkos::LayoutStride> mu, Kokkos::View<rtype *> source,
                                  uint32_t n_cells) override;
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out) override;
+                          Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                          bool by_cell) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -635,7 +643,7 @@ class TENO : public FaceReconstruction {
         // Queued cells per round of the troubled passes, as a fraction of the
         // reconstructed cells (scratch slots); later rounds recompute the
         // central coefficients the smooth pass could not keep
-        rtype troubled_capacity = N_DIM == 3 ? 0.25 : 1.0;
+        rtype troubled_capacity = N_DIM == 3 ? 0.125 : 1.0;
         Kokkos::View<uint32_t *> troubled_cells;           // queue of troubled cells
         Kokkos::View<uint32_t> n_troubled;
         // Vertex-neighbor layers each table row's stencil search visited (host);
@@ -750,7 +758,8 @@ class TENO : public FaceReconstruction {
                            Kokkos::View<rtype *> source, uint32_t n_cells);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
-                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out);
+                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                           bool by_cell);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,
                               Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, uint32_t n_cells);

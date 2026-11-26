@@ -452,6 +452,14 @@ struct LSQVertexGradientFunctor {
         double L[NB][NB], L_lin[N_DIM][N_DIM];
         const bool fit_quadratic = quadratic && n_points >= NB && cholesky<NB>(A, L);
         if (!fit_quadratic) cholesky<N_DIM>(M, L_lin);
+        // The gradient takes the first N_DIM rows of A^-1 alone: solved for once, not once per point
+        double G[N_DIM][NB] = {};
+        if (fit_quadratic) {
+            FOR_I_DIM {
+                G[i][i] = 1.0;
+                cholesky_solve<NB>(L, G[i]);
+            }
+        }
         for_each_point(i_cell, [&](const rtype * dx_r, StencilPoint kind, uint32_t k) {
             double dx[N_DIM];
             const double w = widen(dx_r, dx);
@@ -459,8 +467,11 @@ struct LSQVertexGradientFunctor {
             if (fit_quadratic) {
                 double phi[NB];
                 monomials(dx, phi, kind, k);
-                cholesky_solve<NB>(L, phi);
-                FOR_I_DIM c[i] = w * scale * phi[i];
+                FOR_I_DIM {
+                    double g = 0.0;
+                    for (uint8_t p = 0; p < NB; p++) g += G[i][p] * phi[p];
+                    c[i] = w * scale * g;
+                }
             } else {
                 FOR_I_DIM c[i] = w * dx[i];
                 cholesky_solve<N_DIM>(L_lin, c);

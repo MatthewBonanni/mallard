@@ -102,6 +102,7 @@ json::Object Report::record() const {
     if (!repairs.empty()) r.raw("repairs", repairs_of(repairs)).raw("repairs_run", repairs_of(repairs_run));
     if (!balance.empty()) r.raw("balance", object_of(balance)).raw("balance_run", object_of(balance_run));
     if (element_drift >= 0.0) r.add("element_drift", element_drift);
+    if (!residuals.empty()) r.add_numbers("residuals", residuals);
     return r;
 }
 

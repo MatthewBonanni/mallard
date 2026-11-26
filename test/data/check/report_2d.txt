@@ -96,15 +96,29 @@
   ok      fewest GPUs                                  1     GPUs                  largest part 128 owned + 0 halo
                                                                                    cells, predicted peak 1.60 GB (from
                                                                                    the partitioner)
-          wall time per unit simulated time            2.30  ms                    on 1 GPU at 1.00M cells/s each
+          wall time per unit simulated time            4.09  ms                    on 1 GPU, by the cost model (Cost)
 
 == Cost ===================================================================================
-  On 1 rank at 1.00M cells/s per rank (--throughput), at the initial time step; rank-hours:
-  ranks times wall hours.
-  period                   simulated time [s]  steps   wall time  rank-hours
-  per unit simulated time  1                   17.95   2.30 ms    6.38e-07
-  per flow-through time    2                   35.91   4.60 ms    1.28e-06
-  to run.t_stop            0.5                  8.977  1.15 ms    3.19e-07
+  Throughput of one rank alone: 1.00M cells/s (--throughput).
+  Step time of the largest part: s (owned + 0.25 halo cells) + 100 us + 10.0 us per neighbor
+  part + 10 ns per halo cell owned on another node, s the seconds per cell of one rank
+  alone; NVIDIA A100-SXM4-80GB, 2026-11-22, fitted to 40 measured step times of 6 cases
+  (3.0% rms; 5.0% on cases left out: case a 4.0%, case b 6.0%). Ranks per node: 8 GPUs per
+  node.
+  On 1 rank, at the initial time step: efficiency 100%; wall times +-5% (one standard
+  deviation of the throughput and the step-time model); GPU-hours: GPUs times wall hours.
+  period                   simulated time [s]  steps   wall time  GPU-hours
+  per unit simulated time  1                   17.95   4.09 ms    1.14e-06
+  per flow-through time    2                   35.91   8.19 ms    2.27e-06
+  to run.t_stop            0.5                  8.977  2.05 ms    5.69e-07
+
+  By rank count, to run.t_stop: the largest part the run's partitioner makes (owned cells;
+  halo over owned; parts its halo comes from) and its step time; efficiency: one rank's step
+  time over ranks times this one's.
+  ranks        nodes  owned cells  halo / owned  neighbors  efficiency  wall time  GPU-hours
+  1 (--ranks)  1      128           0.0%         0          100%        2.05 ms    5.69e-07
+  2            1       64          25.0%         1           64%        1.60 ms    8.88e-07
+  4            1       32          75.0%         3           34%        1.51 ms    1.68e-06
 
 == Diagnostics ====================================================================== ERROR
   status  code              message, then the docs that explain it
