@@ -57,6 +57,15 @@ inline constexpr const char * ENV_THREAD_BINDING = "W-ENV-THREAD-BINDING";  // O
 inline constexpr const char * RUN = "E-RUN";            // the run stopped on an error after its setup
 inline constexpr const char * DIVERGED = "E-DIVERGED";  // the divergence report
 inline constexpr const char * HEALTH_MARGIN = "W-HEALTH-MARGIN";
+// Run health events, explained in the output guide
+inline constexpr const char * HEALTH_CFL_LIMIT = "W-HEALTH-CFL-LIMIT";
+inline constexpr const char * HEALTH_CFL_SPIKE = "W-HEALTH-CFL-SPIKE";
+inline constexpr const char * HEALTH_DT_COLLAPSE = "W-HEALTH-DT-COLLAPSE";
+inline constexpr const char * HEALTH_REJECTED_STEPS = "W-HEALTH-REJECTED-STEPS";
+inline constexpr const char * HEALTH_STALL = "W-HEALTH-STALL";
+inline constexpr const char * HEALTH_JOB_TIME = "W-HEALTH-JOB-TIME";
+inline constexpr const char * HEALTH_LEDGER = "W-HEALTH-LEDGER";
+inline constexpr const char * HEALTH_NONFINITE = "W-HEALTH-NONFINITE";
 inline constexpr const char * RESTART_SKIPPED = "W-RESTART-SKIPPED";  // --restart latest passed over a file
 inline constexpr const char * MESH_DIFFERS = "W-MESH-DIFFERS";        // a file written on a mesh of other contents
 inline constexpr const char * SNAPSHOT_INDEX = "W-SNAPSHOT-INDEX";
@@ -97,9 +106,10 @@ struct Entry {
 
 inline constexpr const char * CHECK_PAGE = "docs/guide/input_files.md";
 inline constexpr const char * RUN_PAGE = "docs/guide/running.md";
+inline constexpr const char * OUTPUT_PAGE = "docs/guide/output.md";
 
 /** @brief Every code. */
-inline constexpr std::array<Entry, 67> ALL = {{
+inline constexpr std::array<Entry, 75> ALL = {{
     {INPUT, CHECK_PAGE}, {SETUP, CHECK_PAGE}, {KEY_UNUSED, CHECK_PAGE}, {KEY_DEPRECATED, CHECK_PAGE},
     {CATALOG_WRITE, CHECK_PAGE}, {MESH_FIELDS, CHECK_PAGE}, {INITIAL_WRITE, CHECK_PAGE}, {RANKS, CHECK_PAGE}, {MEMORY_DEVICE, CHECK_PAGE},
     {VIEW_ENTRIES, CHECK_PAGE}, {REGION_EMPTY, CHECK_PAGE},
@@ -112,7 +122,10 @@ inline constexpr std::array<Entry, 67> ALL = {{
     {SIZING_PARTS, CHECK_PAGE}, {TRIGGER_NEVER, CHECK_PAGE},
     {ENV_GPU_AWARE_MPI, CHECK_PAGE}, {ENV_HOST_STAGING, CHECK_PAGE}, {ENV_PLACEMENT, CHECK_PAGE},
     {ENV_THREAD_BINDING, CHECK_PAGE},
-    {RUN, RUN_PAGE}, {DIVERGED, RUN_PAGE}, {HEALTH_MARGIN, RUN_PAGE}, {RESTART_SKIPPED, RUN_PAGE},
+    {RUN, RUN_PAGE}, {DIVERGED, RUN_PAGE}, {HEALTH_MARGIN, RUN_PAGE},
+    {HEALTH_CFL_LIMIT, OUTPUT_PAGE}, {HEALTH_CFL_SPIKE, OUTPUT_PAGE}, {HEALTH_DT_COLLAPSE, OUTPUT_PAGE},
+    {HEALTH_REJECTED_STEPS, OUTPUT_PAGE}, {HEALTH_STALL, OUTPUT_PAGE}, {HEALTH_JOB_TIME, OUTPUT_PAGE},
+    {HEALTH_LEDGER, OUTPUT_PAGE}, {HEALTH_NONFINITE, OUTPUT_PAGE}, {RESTART_SKIPPED, RUN_PAGE},
     {MESH_DIFFERS, RUN_PAGE}, {SNAPSHOT_INDEX, RUN_PAGE}, {FORMAT_VTU, RUN_PAGE}, {KEY_IGNORED, RUN_PAGE},
     {SPECTRA_RESTARTED, RUN_PAGE}, {CUDA_GRAPH, RUN_PAGE}, {TENO_CACHE, RUN_PAGE}, {QUADRATURE_WEIGHTS, RUN_PAGE},
     {SIGNAL_HANDLERS, RUN_PAGE}, {CONTROL_SOCKET, RUN_PAGE}, {SET_REFUSED, RUN_PAGE}, {RUN_REPORT, RUN_PAGE}, {EXTRACT_AVERAGED, RUN_PAGE},

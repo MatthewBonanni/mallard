@@ -1,0 +1,42 @@
+# For the key catalog only (tools/dev/input_catalog.py): a viscous periodic box
+# settling to rest, watched for its steady state by the run health events.
+
+[run]
+n_steps = 10
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 4
+Ny = 4
+Nz = 4
+Lx = 1.0
+Ly = 1.0
+Lz = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[[periodic]]
+zones = ["back", "front"]
+
+[initialize]
+type = "analytical"
+rho = "1.0 + 0.1 * sin(2 * pi * x)"
+p = "1.0"
+u = ["0.2", "0.0", "0.0"]
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+mu = 0.01
+
+[output]
+steady_residual = 1e-8
+stall_steps = 5000

@@ -15,10 +15,14 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <numeric>
 
 #include <Kokkos_Core.hpp>
 
+#include "binding.h"
+#include "build_info.h"
 #include "check.h"
+#include "cost_model.h"
 #include "common_io.h"
 #include "distributed_mesh.h"
 #include "gated.h"
@@ -51,6 +55,11 @@ std::string bytes(const double b) { return logging::si(b) + "B"; }
 // Sizing: the device memory outside Kokkos when not measured, CUDA's context and the local memory of
 // kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md)
 constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
+// The cost by rank count: powers of two up to 4 times the target (at least 8), parts of at least this many cells
+constexpr uint64_t MIN_CELLS_PER_RANK = 1000;
+constexpr int MAX_SCALING_RANKS = 4096;
+// Ranks per node of a GPU run without a placement to read: the measured A100 nodes' 8
+constexpr int GPUS_PER_NODE = 8;
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
 
@@ -378,7 +387,7 @@ double predicted_peak(const CheckReport & r, const double local_cells) {
     return peak;
 }
 
-PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) const {
+PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks, const int ranks_per_node) const {
     const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
     const std::vector<int> owner = method == "graph" && have_graph_partitioner() ? partition_graph(whole, n_ranks)
                                    : method == "hilbert" ? partition_hilbert(whole, n_ranks)
@@ -387,7 +396,16 @@ PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) co
     if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
         for (const uint8_t depth : teno->gather_depth) layers = std::max(layers, depth + 1);
     }
-    return largest_part(whole.mesh_block(), owner, n_ranks, layers);
+    const MeshBlock & block = whole.mesh_block();
+    std::vector<uint64_t> node_keys;
+    if (!whole.block_periodic_classes().empty()) {
+        node_keys.resize(block.n_nodes());
+        std::iota(node_keys.begin(), node_keys.end(), uint64_t(0));
+        for (const auto & [node, key] : whole.block_periodic_classes()) {
+            node_keys[node - block.first_node] = key.first - block.first_node;
+        }
+    }
+    return largest_part(block, owner, n_ranks, layers, node_keys, ranks_per_node);
 }
 
 void Solver::check_memory(CheckReport & r, const CheckOptions & options, const memory::Tracker & tracker) const {
@@ -516,13 +534,15 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     if (comm::size() > 1) {
         // Without the whole mesh at hand: parts keep this run's halo as a fraction of their cells
         const uint64_t owned = (n_cells_global + uint64_t(n) - 1) / uint64_t(n);
-        record(n, {owned, static_cast<uint64_t>(halo_ratio * double(owned))});
+        const PartSize p{owned, static_cast<uint64_t>(halo_ratio * double(owned)), 0, 0, 0};
+        record(n, p);
+        if (r.dt > 0.0) r.sizing_wall_per_time = check_step_seconds(r, p, n) / r.dt;
         return;
     }
     r.min_partitioned = true;
     const uint64_t max_ranks = std::max<uint64_t>(1, n_cells_global / 64);
     const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
-    PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
+    PartSize part = n == 1 ? PartSize{n_cells_global, 0, 0, 0, 0} : check_part(whole, n, r.ranks_per_node);
     for (int tries = 0; !fits(part); tries++) {
         if (tries == 16 || uint64_t(n) >= max_ranks) {
             r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n), "part") +
@@ -532,23 +552,25 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
         }
         const double over = double(part.owned + part.halo) / n_max;
         n = std::max(n + 1, static_cast<int>(std::ceil(n * std::min(over, 2.0))));
-        part = check_part(whole, n);
+        part = check_part(whole, n, r.ranks_per_node);
     }
     record(n, part);
     // Halo below 10% of the owned cells: doubling the ranks while it holds
+    PartSize at = part;
     for (int m = n; uint64_t(m) <= max_ranks; m *= 2) {
-        const PartSize p = m == n ? part : check_part(whole, m);
+        const PartSize p = m == n ? part : check_part(whole, m, r.ranks_per_node);
         if (double(p.halo) >= SIZING_HALO_FRACTION * double(p.owned)) break;
         r.halo_ranks = m;
+        at = p;
     }
+    if (r.dt > 0.0) r.sizing_wall_per_time = check_step_seconds(r, at, std::max(r.min_ranks, r.halo_ranks)) / r.dt;
 }
 
 void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::Tracker & tracker) {
     r.t_stop = static_cast<double>(t_stop);
     r.n_steps = n_steps;
-    if (options.throughput > 0.0) {
-        r.throughput = options.throughput;
-    } else if (options.steps > 0) {
+    double step_measured = 0.0;
+    if (options.steps > 0) {
         calc_dt();
         tracker.reset_peak();
         take_step();  // first-use allocations
@@ -560,7 +582,8 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
         }
         Kokkos::fence();
         const double seconds = comm::allreduce(timer_steps.seconds(), comm::Op::MAX);
-        r.throughput = static_cast<double>(n_cells_global * options.steps) / seconds / comm::size();
+        step_measured = seconds / static_cast<double>(options.steps);
+        r.measured_throughput = static_cast<double>(n_cells_global * options.steps) / seconds / comm::size();
         r.throughput_measured = true;
         r.steps_timed = options.steps;
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
@@ -578,8 +601,144 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
             r.bytes_peak = peak;
         }
     }
-    if (r.throughput > 0.0 && r.dt > 0.0) {
-        r.wall_per_time = static_cast<double>(r.n_cells) / (r.target_ranks * r.throughput * r.dt);
+
+    // What the estimate is for: --memory's GPU when nothing is timed here, else this device
+    cost_model::Workload & w = r.workload;
+    const bool target_gpu = options.memory_gpu && options.steps == 0;
+    w.hardware = target_gpu ? options.memory_name : device_name();
+    w.device = cost_model::device_class(w.hardware, target_gpu || r.device_memory);
+    w.threads = std::max(1, Kokkos::DefaultHostExecutionSpace().concurrency());
+    w.dim = static_cast<int>(N_DIM);
+    w.reconstruction = "fo";
+    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
+        w.reconstruction = "teno" + std::to_string(teno->degree + 1);
+    } else if (dynamic_cast<const MUSCL *>(face_reconstruction.get()) != nullptr) {
+        w.reconstruction = "muscl";
+    }
+    w.physics = reacting ? "reacting" : is_les() ? "les" : is_viscous() ? "ns" : "euler";
+    w.species = reacting ? static_cast<int>(mixture_model->n_species()) : 0;
+    r.particles = particles ? static_cast<double>(particles->get_capacity()) : 0.0;
+    r.scaling = cost_model::scaling(w.device);
+
+    // Ranks per node: this check's under its launcher, else the device's
+    if (options.ranks_per_node > 0) {
+        r.ranks_per_node = options.ranks_per_node;
+        r.ranks_per_node_basis = "--ranks-per-node";
+    } else if (comm::size() > 1) {
+        std::map<std::string, int> per_host;
+        for (const binding::Placement & p : binding::placements()) per_host[p.host]++;
+        int most = 0;
+        for (const auto & [host, n] : per_host) most = std::max(most, n);
+        r.ranks_per_node = comm::allreduce(most, comm::Op::MAX);
+        if (r.ranks_per_node >= comm::size()) r.ranks_per_node = 0;
+        r.ranks_per_node_basis = "as this check's ranks are placed";
+    } else if (w.device.rfind("cpu", 0) != 0) {
+        r.ranks_per_node = GPUS_PER_NODE;
+        r.ranks_per_node_basis = logging::format("%d GPUs per node", GPUS_PER_NODE);
+    } else {
+        r.ranks_per_node_basis = "every rank on one node";
+    }
+
+    // The largest part on each rank count
+    PartSize own;
+    own.owned = mesh->n_owned();
+    own.halo = mesh->n_cells - mesh->n_owned();
+    own.neighbors = static_cast<int>(distribution.neighbors.size());
+    for (size_t k = 0; k < distribution.neighbors.size(); k++) {
+        const int q = distribution.neighbors[k];
+        if (r.ranks_per_node > 0 && q / r.ranks_per_node != comm::rank() / r.ranks_per_node) {
+            own.remote_neighbors++;
+            own.halo_remote += distribution.recv_cells[k].size();
+        }
+    }
+    {
+        // The rank with the most owned and halo cells
+        const uint64_t local = own.owned + own.halo;
+        const uint64_t most = comm::allreduce(local, comm::Op::MAX);
+        const int rank = comm::allreduce(local == most ? comm::rank() : 0, comm::Op::MAX);
+        std::array<uint64_t, 5> v{};
+        if (comm::rank() == rank) {
+            v = {own.owned, own.halo, uint64_t(own.neighbors), uint64_t(own.remote_neighbors), own.halo_remote};
+        }
+        v = comm::allreduce(v, comm::Op::MAX);
+        own = {v[0], v[1], static_cast<int>(v[2]), static_cast<int>(v[3]), v[4]};
+    }
+
+    // Seconds per cell of one rank alone: --throughput, the timed steps, or the model
+    double seconds_per_cell = 0.0;
+    if (options.throughput > 0.0) {
+        seconds_per_cell = 1.0 / options.throughput;
+        r.throughput_source = "option";
+        r.throughput_basis = "--throughput";
+    } else if (step_measured > 0.0) {
+        const cost_model::Part p = cost_model::part(own, comm::size(), r.particles);
+        seconds_per_cell = r.scaling != nullptr ? cost_model::seconds_per_cell(*r.scaling, p, step_measured) : 0.0;
+        if (!(seconds_per_cell > 0.0)) {
+            seconds_per_cell = step_measured / static_cast<double>(r.scaling ? own.owned : n_cells_global / uint64_t(comm::size()));
+        }
+        r.throughput_source = "steps";
+        r.throughput_basis = logging::format("measured over %s on %s", logging::count(r.steps_timed, "step").c_str(),
+                                             logging::count(uint64_t(comm::size()), "rank").c_str());
+    } else {
+        const cost_model::Throughput modeled = cost_model::throughput(w);
+        r.throughput_basis = modeled.basis;
+        if (modeled.cells_per_second > 0.0) {
+            seconds_per_cell = 1.0 / modeled.cells_per_second;
+            r.throughput_source = "model";
+            r.throughput_uncertainty = modeled.uncertainty;
+        }
+    }
+    const bool estimate = seconds_per_cell > 0.0 && r.dt > 0.0;
+    if (estimate) {
+        r.throughput = 1.0 / seconds_per_cell;
+        const double held_out = r.scaling != nullptr ? r.scaling->held_out_error : 0.0;
+        r.uncertainty = std::sqrt(r.throughput_uncertainty * r.throughput_uncertainty + held_out * held_out);
+    } else {
+        r.throughput_source.clear();
+    }
+    {
+        std::vector<int> counts = {r.target_ranks};
+        if (estimate && comm::size() == 1) {
+            const int top = static_cast<int>(std::min<uint64_t>(
+                uint64_t(std::max(8, 4 * r.target_ranks)), std::max<uint64_t>(1, n_cells_global / MIN_CELLS_PER_RANK)));
+            for (int n = 1; n <= std::min(top, MAX_SCALING_RANKS); n *= 2) counts.push_back(n);
+        }
+        std::sort(counts.begin(), counts.end());
+        counts.erase(std::unique(counts.begin(), counts.end()), counts.end());
+        std::unique_ptr<DistributedMesh> whole;
+        const double t1 = estimate ? check_step_seconds(r, PartSize{n_cells_global, 0, 0, 0, 0}, 1) : 0.0;
+        for (const int n : counts) {
+            CheckScaling row;
+            row.ranks = n;
+            row.nodes = r.ranks_per_node > 0 ? (n + r.ranks_per_node - 1) / r.ranks_per_node : 1;
+            if (n == comm::size()) {
+                row.part = own;
+            } else if (n == 1) {
+                row.part = PartSize{n_cells_global, 0, 0, 0, 0};
+            } else if (comm::size() > 1) {
+                // Without the whole mesh at hand: this run's largest part, its halo kept as a fraction of its cells
+                row.part = own;
+                row.part.owned = (n_cells_global + uint64_t(n) - 1) / uint64_t(n);
+                const double scale = double(row.part.owned) / double(std::max<uint64_t>(1, own.owned));
+                row.part.halo = static_cast<uint64_t>(double(own.halo) * scale);
+                row.part.halo_remote = static_cast<uint64_t>(double(own.halo_remote) * scale);
+            } else {
+                if (!whole) {
+                    whole = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
+                }
+                row.part = check_part(*whole, n, r.ranks_per_node);
+            }
+            if (n == r.target_ranks) r.target_part = row.part;
+            if (!estimate) continue;
+            row.step = check_step_seconds(r, row.part, n);
+            row.efficiency = t1 / (static_cast<double>(n) * row.step);
+            row.wall_per_time = row.step / r.dt;
+            if (n == r.target_ranks) {
+                r.efficiency = row.efficiency;
+                r.wall_per_time = row.wall_per_time;
+            }
+            r.scalings.push_back(row);
+        }
     }
 
     // Flow-through time: the domain's length along the mean velocity over its magnitude
