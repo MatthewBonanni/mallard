@@ -147,6 +147,8 @@ struct Diagnostic {
     std::string expected{};           // what the key takes, e.g. "pressure (kg m^-1 s^-2): Pa, kPa, bar, atm, psi"
     std::string fix{};                // what to do, as a sentence, or empty
     std::string docs{};               // page and anchor of the docs; the key's section of docs/input.md if empty
+    std::size_t column = 0;           // of the key's value (or its table) on line, 0 if unknown
+    bool missing = false;             // a required key, table or file that is absent: incomplete, not wrong
 };
 
 /**
@@ -173,6 +175,20 @@ std::string docs_of(const std::string & key);
  *        "[mesh] angle ..."), followed by the docs of the key's table.
  */
 std::string with_docs(const std::string & text);
+
+/**
+ * @brief The key path an error or warning starts with, after an optional "line N: ": "mesh.Nx" of "mesh.Nx must
+ *        be positive", "boundaries[0].T" of "line 3: boundaries[0].T: missing", "mesh" of "[mesh] angle ...";
+ *        empty if it starts with none. A single name counts only followed by ':' or as [name].
+ */
+std::string key_in_text(const std::string & text);
+
+/**
+ * @brief Where d.key is in the input: its value's line and column, or those of the innermost table of its path
+ *        the input has. Keeps a line d has and takes the column only on that line. Returns whether d.key is a
+ *        key path whose first name the input has or setup looked up.
+ */
+bool locate(const Input & input, Diagnostic & d);
 
 /** @brief The line of a value in its input file, or 0 if the program set it. */
 std::size_t line_of(const Input & v);

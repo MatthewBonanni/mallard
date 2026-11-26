@@ -38,6 +38,9 @@ namespace {
 struct CaseFields {
     std::vector<std::string> fields, species, errors;
     std::string keys;  // key_catalog
+    std::vector<CheckDiagnostic> diagnostics;  // of the check that read the keys
+    bool complete = false;                     // the setup read every key the case reads
+    bool only_missing = false;                 // CheckReport::only_missing
 };
 
 /** @brief Runs body(solver, out) on a new Solver, with Kokkos, without its output, and collects its errors. */
@@ -70,14 +73,20 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
     });
 }
 
-/** @brief The keys the case's setup reads: sets it up as mallard check does, without its report. */
+/**
+ * @brief The keys the case's setup reads: sets it up as mallard check does, without its report. An input still
+ *        being written gives those of the setup as far as it got, and the diagnostics that stopped it.
+ */
 CaseFields set_up_keys(const std::string & input_file, const cli::Args & args) {
     return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
         CheckOptions options;
         options.input_file = input_file;
         const CheckReport report = solver.check(parse_input(input_file), options);
         out.errors = report.errors();
-        if (report.setup_done) out.keys = key_catalog(resolve_input(solver.resolved_input()));
+        out.diagnostics = report.diagnostics;
+        out.complete = report.setup_done;
+        out.only_missing = report.only_missing();
+        out.keys = key_catalog(resolve_input(solver.resolved_input()));
     });
 }
 
@@ -425,6 +434,7 @@ int list_keys_main(const cli::Args & args) {
     section.erase(section.find_last_not_of(']') + 1);
 
     json::Value catalog;
+    CaseFields listed;
     if (input_file.empty()) {
         try {
             catalog = general_key_catalog();
@@ -433,9 +443,9 @@ int list_keys_main(const cli::Args & args) {
             return 1;
         }
     } else {
-        const CaseFields c = set_up_keys(input_file, args);
-        if (c.keys.empty()) return report_errors(c);
-        catalog = json::parse(c.keys);
+        listed = set_up_keys(input_file, args);
+        if (listed.keys.empty()) return report_errors(listed);
+        catalog = json::parse(listed.keys);
     }
     std::vector<std::string> keys, sections;
     for (const std::string & key : catalog.keys()) {
@@ -444,25 +454,33 @@ int list_keys_main(const cli::Args & args) {
         }
         if (in_section(key, section)) keys.push_back(key);
     }
-    if (keys.empty()) {
+    if (keys.empty() && (input_file.empty() || listed.complete)) {
         const std::string near = suggest_value(section, sections);
         return cli::usage_error(command, (input_file.empty() ? "the catalog" : input_file) + " has no key in " +
                                              section + (near.empty() ? "" : " (did you mean " + near + "?)"));
     }
 
     const bool per_case = !input_file.empty();
+    // An input still being written lists the keys that apply so far, and fails only on errors not missing pieces
+    const bool failed = per_case && !listed.complete && !listed.only_missing;
+    std::vector<std::string> required;
+    for (const std::string & key : keys) {
+        const json::Value & k = catalog[key];
+        if (k.find("required") && k["required"].boolean && !(k.find("set") && k["set"].boolean)) required.push_back(key);
+    }
     if (json_format(args)) {
         json::Object selected;
         for (const std::string & key : keys) selected.raw(key, value_text(catalog[key]));
-        std::cout << json::Object()
-                         .add("schema", interfaces::KEY_CATALOG.name)
-                         .add("version", interfaces::KEY_CATALOG.version)
-                         .raw("input", null_or(input_file))
-                         .raw("section", null_or(section))
-                         .raw("keys", selected.str())
-                         .str()
-                  << "\n";
-        return 0;
+        json::Object out;
+        out.add("schema", interfaces::KEY_CATALOG.name).add("version", interfaces::KEY_CATALOG.version);
+        out.raw("input", null_or(input_file)).raw("section", null_or(section)).raw("keys", selected.str());
+        if (per_case) {
+            out.add("complete", listed.complete)
+                .raw("missing", json_array(required, [](const std::string & key) { return json::quote(key); }))
+                .raw("diagnostics", diagnostics_json(listed.diagnostics));
+        }
+        std::cout << out.str() << "\n";
+        return failed ? 1 : 0;
     }
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < keys.size(); i++) {
@@ -482,6 +500,13 @@ int list_keys_main(const cli::Args & args) {
             }
             rows.clear();
         }
+    }
+    if (per_case && !listed.complete) {
+        std::cout << "\nThe keys the setup of this case read before it stopped at the errors below; more apply once "
+                     "they are fixed.\n";
+        if (!required.empty()) std::cout << "Required and not set: " << joined(required) << ".\n";
+        report_errors(listed);
+        return failed ? 1 : 0;
     }
     std::cout << (per_case ? "\nThe keys the setup of this case reads; mallard input resolve " + input_file +
                                  " writes the values it uses.\n"
