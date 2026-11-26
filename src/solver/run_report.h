@@ -123,6 +123,8 @@ struct RunSummary {
     double chemistry = 0.0;
     double chemistry_slowest = 0.0, chemistry_mean = 0.0;  // per rank, 0 if not measured
     double chemistry_sent = -1.0;                          // fraction integrated on other ranks, -1 without balancing
+    double chemistry_explicit = -1.0;  // fraction advanced by an explicit step, -1 without explicit_step
+    double chemistry_marked = 0.0;     // cells whose last explicit step failed, at the end
     bool rejected_counted = false;
     uint64_t rejected = 0;
     bool writers = false;

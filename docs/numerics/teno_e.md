@@ -358,7 +358,7 @@ multiply-adds, so it equals the entry the setup would have stored.
 
 Each step, every reconstructed cell runs the smooth pass; the troubled cells
 it queues then run the troubled passes, in rounds of at most
-`troubled_capacity` of the cells (default 0.25 in 3D, 1 in 2D) to bound
+`troubled_capacity` of the cells (default 0.125 in 3D, 1 in 2D) to bound
 their scratch memory.
 
 ### Troubled-cell measure
@@ -687,6 +687,12 @@ sound speed over the box size, with the bound of 10 and of 4:
 | jittered prisms, aspect ratio 1.5, side walls, order 6 | 0.32 | 7e-6 |
 | Kuhn tetrahedra, aspect ratio 25, side walls, order 4 / 6 | 1.1 / 0.27 | 8e-8 / 0.022 |
 | mixed tilings (4³), walls, order 4 / 6 | 0.19 / 0.08 | 8e-4 / 1e-7 |
+
+The same growth rates on a log scale, with those of the pyramid lattice's odd
+degrees (below) against the central stencil size:
+
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-light.svg#gh-light-mode-only)
+![Largest growth rate of the linearized operator with Lebesgue bounds 10 and 4 for each 3D case, and on the pyramid lattice against the central stencil size at orders 4 and 6](../images/theory/teno_3d_stability-dark.svg#gh-dark-mode-only)
 
 Making only the near-degenerate cells first order removes these modes, and
 in the walled boxes the energy is produced at their wall faces. Bounds of 5

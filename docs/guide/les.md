@@ -258,6 +258,13 @@ python tools/setup/flame_table.py mechanisms/h2o2.yaml ohmech h2n2_air.csv \
     --fuel H2:0.5,N2:0.5 --oxidizer O2:1,N2:3.76 --T 300 --dz 0.01
 ```
 
+The table of `examples/triple_flame/tfles` (gray: outside its range, where
+nothing is thickened), and the largest thickening `F = max(1, n_res Delta /
+delta_L)` it gives on that example's cells of 0.128 mm with `n_res = 5`:
+
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-light.svg#gh-light-mode-only)
+![Laminar flame speed, thermal thickness and largest thickening against the mixture fraction, from the flame table of examples/triple_flame/tfles](../images/guide/tfles_flame_table-dark.svg#gh-dark-mode-only)
+
 | Key | Default | Meaning |
 |---|---|---|
 | `sensor` | `temperature` | `temperature` (the progress variable of `T_unburnt`, `T_burnt`) or `reaction` |
@@ -286,6 +293,18 @@ Validation (`efficiency = "none"`, H2:N2 = 1:1 against air, the
   (2.10 and 2.11 `s_L`); both miss the resolved 2.45 by the coarse mesh's flow
   divergence ahead of the tip, which converges at second order (2.24 and 2.25 at 4
   cells).
+
+The triple flame of `examples/triple_flame/tfles` (its mixtures, inflow and
+cells of 0.128 mm, on a channel 40 `delta_L` wide and 24 long) 0.96 ms, about 3
+flame times, after its planar start. The flame index is positive on the
+premixed tip and wings and negative on the diffusion flame that trails between
+them along `Z_st`; the sensor, filtered and doubled, covers the premixed
+branches with a cell or two to spare and so reaches into the diffusion flame
+just behind the tip, which `TF_F` thickens up to 1.88 there and not at all from
+about 4 mm behind the tip on:
+
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-light.svg#gh-light-mode-only)
+![Heat release, the sign of the flame index with the reaction sensor's contour, and the thickening factor of a triple flame with sensor = "reaction"](../images/guide/triple_flame_sensor-dark.svg#gh-dark-mode-only)
 
 Pitfalls: `efficiency = "dynamic"` needs the temperature sensor (an input
 error with `reaction`). Build the table with the streams, temperature and

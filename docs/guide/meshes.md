@@ -226,7 +226,7 @@ filename = "cylinder.msh"
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`nozzle`](https://matthewbonanni.github.io/mallard/docs/examples/#nozzle),
 [`mallard_logo`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard-logo)
-and 6 more.
+and 8 more.
 
 Mallard reads ASCII Gmsh meshes, format 2.2 or 4.1, of linear triangles and
 quadrilaterals (2D) or tetrahedra, pyramids, prisms and hexahedra (3D).
