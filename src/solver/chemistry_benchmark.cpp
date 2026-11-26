@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
@@ -71,6 +73,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
         for (const auto & dt : bench.at("dt").as_array()) dts.push_back(as_double(dt, "benchmark.dt", dim::time));
     }
     const chemistry::ReactorOptions options = reactor_options(input);
+    const Input * chemistry_table = input.contains("chemistry") ? &input.at("chemistry") : nullptr;
+    const bool explicit_step = chemistry_table && find_value_or<bool>(*chemistry_table, "explicit_step", false);
+    const double T_frozen = chemistry_table ? find_double_or(*chemistry_table, "T_frozen", dim::temperature, 0.0) : 0.0;
     const chemistry::Mechanism & mech = model.mechanism();
     const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
     const auto host_kinetics = chemistry::make_kinetics_table<Kokkos::HostSpace>(mech, options.C_reg);
@@ -129,6 +134,8 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
 
     CellChemistryOptions cell_options;
     cell_options.reactor = options;
+    cell_options.T_frozen = T_frozen;
+    cell_options.explicit_step = explicit_step;
     const int64_t lanes = find_value_or<int64_t>(bench, "lanes", 0);
     if (lanes < 0) throw InputError("benchmark.lanes must not be negative.");
     cell_options.lanes = static_cast<uint32_t>(lanes);
@@ -157,7 +164,9 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
                                                     : std::string()) +
                           (cells.sparse_entries() > 0 ? ", sparse LU (" + std::to_string(cells.sparse_entries()) + " entries)"
                                                       : ", dense LU")},
-        {"Integrator", options.method == chemistry::Integrator::BDF ? "BDF" : "RODAS"},
+        {"Integrator", std::string(options.method == chemistry::Integrator::BDF ? "BDF" : "RODAS") +
+                           (explicit_step ? ", explicit steps first" : "") +
+                           (T_frozen > 0.0 ? ", frozen below " + brief(T_frozen) + " K" : "")},
         {"Tolerances", "rtol = " + brief(options.integrator.rtol) + ", atol = " + brief(options.atol_Y)},
     });
     ChemistryBenchmark result;
@@ -169,22 +178,22 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
     result.shared_bytes = cells.shared_bytes();
     result.cells = n_cells;
     result.igniting = n_igniting;
+    result.explicit_step = explicit_step;
     using Kind = report::Column::Kind;
-    const report::Stream steps_table({{"dt", "s", 9},
-                                      {"throughput", "cells/s", 9},
-                                      {"wall", "ms", 10},
-                                      {"active", "cells", 9},
-                                      {"mean", "sub-steps", 9},
-                                      {"max", "sub-steps", 9},
-                                      {"cells by sub-steps", "sub-steps:cells", 0, Kind::TEXT}},
-                                     logging::color_stdout());
+    std::vector<report::Field> columns = {{"dt", "s", 9}, {"throughput", "cells/s", 9}, {"wall", "ms", 10},
+                                          {"active", "cells", 9}};
+    if (explicit_step) columns.push_back({"explicit", "cells", 9});
+    columns.insert(columns.end(), {{"mean", "sub-steps", 9},
+                                   {"max", "sub-steps", 9},
+                                   {"cells by sub-steps", "sub-steps:cells", 0, Kind::TEXT}});
+    const report::Stream steps_table(columns, logging::color_stdout());
     logging::line();
     for (const std::string & line : steps_table.header()) logging::line(line);
     const Kokkos::View<double> dt_device("chemistry_benchmark_dt");
     for (const double dt : dts) {
         Kokkos::deep_copy(dt_device, dt);
         double best = 1e300, mean_steps = 0.0, max_steps = 0.0;
-        uint64_t active = 0;
+        uint64_t active = 0, explicit_cells = 0;
         // Cells per bin of sub-steps (accepted and rejected): 0 (skipped), 1, 2, 3-4, 5-8, ..., more than 2^13
         std::vector<uint64_t> histogram(16, 0);
         Kokkos::deep_copy(chem_h, 0.0_r);
@@ -194,17 +203,20 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
             Kokkos::deep_copy(rhoY, h_rhoY);
             Kokkos::deep_copy(T_seed, h_T);
             Kokkos::deep_copy(chem_cost, 0.0_r);
-            const uint64_t failed = cells.statistics().failures;
+            const CellChemistry::Statistics before = cells.statistics();
             Kokkos::fence();
             const auto start = std::chrono::steady_clock::now();
             cells.advance(U, rhoY, T_seed, chem_h, chem_cost, n_cells, dt_device);
             Kokkos::fence();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             const CellChemistry::Statistics stats = cells.statistics();
-            if (stats.failures > failed) throw std::runtime_error("benchmark: the integrator failed in some cells.");
+            if (stats.failures > before.failures) {
+                throw std::runtime_error("benchmark: the integrator failed in some cells.");
+            }
             if (r == 0) continue;
             best = std::min(best, seconds);
             active = stats.last_active;
+            explicit_cells = stats.explicit_steps - before.explicit_steps;
             auto h_cost = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), chem_cost);
             double sum = 0.0, largest = 0.0;
             std::fill(histogram.begin(), histogram.end(), 0);
@@ -226,10 +238,12 @@ ChemistryBenchmark run_chemistry_benchmark(const Input & input) {
                     (high > low ? (b + 1 == histogram.size() ? "+" : "-" + std::to_string(high)) : "") + ":" +
                     std::to_string(histogram[b]);
         }
-        logging::line(steps_table.row({logging::format("%.2e", dt), logging::format("%.2e", n_cells / best),
-                                       logging::format("%.3f", best * 1e3), logging::count(active),
-                                       logging::format("%.2f", mean_steps), logging::format("%.0f", max_steps), bins}));
-        result.steps.push_back({dt, best, active, mean_steps, max_steps, bins});
+        std::vector<std::string> row = {logging::format("%.2e", dt), logging::format("%.2e", n_cells / best),
+                                        logging::format("%.3f", best * 1e3), logging::count(active)};
+        if (explicit_step) row.push_back(logging::count(explicit_cells));
+        row.insert(row.end(), {logging::format("%.2f", mean_steps), logging::format("%.0f", max_steps), bins});
+        logging::line(steps_table.row(row));
+        result.steps.push_back({dt, best, active, explicit_cells, mean_steps, max_steps, bins});
     }
     return result;
 }

@@ -10,13 +10,13 @@ name: CI
 # Two tiers. A branch runs the gate: the x86-64 suites of each backend, precision and
 # dimension, GCC 16 and Clang 23, and the CUDA, HIP and SYCL builds when it changes device
 # code. A push to main runs the gate again, unless its tree already passed the gate in a batch
-# (tools/dev/main_covered.sh); every 3 hours, if main has changed, main runs everything:
+# (tools/dev/main_covered.sh); nightly, if main has changed, main runs everything:
 # arm64, macOS, every compiler and CUDA version, Spack, the tutorials and the fuzzers. A
 # failure on main opens an issue. -f full=true runs everything on a branch.
 on:
-  # The full tier every 3 hours on main, if main has changed since its last full run
+  # The full tier nightly on main, if main has changed since its last full run
   schedule:
-    - cron: '17 */3 * * *'
+    - cron: '17 9 * * *'
   push:
     branches: [main]
     # Documentation alone needs no run, except the pages the tests read (the device job's
@@ -416,7 +416,7 @@ jobs:
         env:
           LLVM: ${{ matrix.backend.llvm }}
         run: |
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/resolute/ llvm-toolchain-resolute-$LLVM main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sh tools/dev/apt_install.sh clang-$LLVM
       # Kitware's build of the oldest CMake that Mallard supports (cmake_minimum_required)
@@ -426,7 +426,7 @@ jobs:
         env:
           VERSION: ${{ matrix.backend.cmake }}
         run: |
-          curl -fsSL "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
             tar -xz -C /opt
           echo "/opt/cmake-$VERSION-linux-$(uname -m)/bin" >> "$GITHUB_PATH"
       # Branches restore main's latest cache. The name ends with a slash: a bare prefix
@@ -1029,7 +1029,7 @@ jobs:
           ONEAPI: ${{ matrix.toolchain.oneapi }}
         run: |
           sh tools/dev/apt_install.sh --no-install-recommends gpg
-          curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB |
             gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
             > /etc/apt/sources.list.d/oneAPI.list

@@ -9,8 +9,10 @@ A running `mallard` takes requests from signals, from `mallard ctl` and, optiona
 | `mallard ctl <run-dir> status` | Step, `t`, `dt`, CFL number, progress, wall time per step, cells per second, ETA, memory of rank 0's process (and of its GPU), the diagnostics of the last progress row, and the state of each [trigger](#triggers) |
 | `mallard ctl <run-dir> checkpoint` | As `SIGUSR1`; replies with the restart file once it is written |
 | `mallard ctl <run-dir> stop` | As `SIGTERM`; replies with the restart file once the run has ended |
-| `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
+| `mallard ctl <run-dir> set <key>=<value> ...` | Change settings from the next step on: `n_steps`, `t_stop`, `t_wall_stop` (0 removes a limit; one must remain; times in seconds or with a unit, e.g. `t_wall_stop=2h`), `check_interval`, `control_file_interval`, `write_data.<prefix or index>.interval` or `.time_interval` (whichever the writer has), `probes.<name>.interval` or `.time_interval`, `forces.<zone>.interval`, `integrals.interval`. Other keys are refused |
 | `STOP`, `CHECKPOINT` files | With `[run] control_file_interval`, as `stop` and `checkpoint` (and at the same step as they would act); the file is removed once seen |
+| `SET` file | With `[run] control_file_interval`, as `set`: lines of `key = value`, the keys `set` takes; the file is removed once read, and the run log is the reply |
+| `mallard -i input.toml --set <key>=<value>` | As `set`, before the first step: the same keys and checks, a refused one an error. Repeat it for several |
 
 ```bash
 $ mallard ctl runs/cylinder status
@@ -27,6 +29,15 @@ stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 ```
 
 Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
+
+Control files work from anywhere the run directory is visible (a login node, a GUI, a job script), without a process on rank 0's node. Rank 0 looks for them in the directory the run was started from every `[run] control_file_interval` steps; with the default 0 it never does, and `--set control_file_interval=10` turns them on without editing the input. A `SET` file holds one setting per line, `#` starting a comment; write it under another name and rename it to `SET`, so the run never reads half of it:
+
+```bash
+$ mallard -i input.toml --set control_file_interval=10 --set t_wall_stop=11h
+$ printf 't_stop = 3.0\nwrite_data.flow.time_interval = 50 ms\n' > SET.new && mv SET.new SET
+```
+
+Each setting applied, from `mallard ctl set`, a `SET` file or `--set`, is a line of the log and an `event` record of kind `set` in [`mallard.jsonl`](output.md#run-record-mallardjsonl), with its `source` (`"mallard ctl"`, `"SET file"`, `"--set"`) and the `setting` as given (`"t_stop=3.0"`). A `SET` file's refused settings are a warning ([`W-SET-REFUSED`](#w-set-refused)) of the log and the run log; the others are applied. The run block keeps the input as the run read it: [`mallard pack`](output.md#sharing-a-run-mallard-pack) repeats `--set` in its rerun command, and lists the later changes in its notes.
 
 Exit statuses are 0 at a stop condition (`n_steps`, `t_stop`, `t_wall_stop`, a [trigger](#triggers)), 1 on errors (including divergence) and 3 when stopped on request. The run record's [end record](output.md#run-record-mallardjsonl) says which, as its `outcome`, with the last snapshot and restart file written; `mallard info <run-dir>` shows it. `t_wall_stop` is reached on whichever rank gets there first, and every rank stops after the same next step.
 
@@ -159,7 +170,7 @@ compares `t` with (a landing time), so prefer `>=`.
 
 ## MPI launchers and Slurm
 
-`mpirun` and `mpiexec` forward `SIGUSR1` and `SIGUSR2` to every rank, but Open MPI ends the job on `SIGTERM` and `SIGINT` without letting the ranks finish their step: send `SIGUSR2` to `mpirun` to stop, or use `mallard ctl`. Some MPI distributions start the real launcher from a wrapper that does not pass signals on: the NVIDIA HPC SDK's `mpirun` runs HPC-X's `ompi/bin/.bin/mpirun` from a script, and a signal to the wrapper ends the wrapper and leaves the run going. Signal the launcher it starts, or use `mallard ctl`. Slurm's `scancel` signals every task directly, so `scancel --signal=TERM` works, as does `#SBATCH --signal=USR2@120` for a restart two minutes before the time limit.
+`mpirun` and `mpiexec` forward `SIGUSR1` and `SIGUSR2` to every rank, but Open MPI ends the job on `SIGTERM` and `SIGINT` without letting the ranks finish their step: send `SIGUSR2` to `mpirun` to stop, or use `mallard ctl`. Some MPI distributions start the real launcher from a wrapper that does not pass signals on: the NVIDIA HPC SDK's `mpirun` runs HPC-X's `ompi/bin/.bin/mpirun` from a script, and a signal to the wrapper ends the wrapper and leaves the run going. Signal the launcher it starts, or use `mallard ctl`. Slurm's `scancel` signals every task directly, so `scancel --signal=TERM` works, as does `#SBATCH --signal=USR2@120` for a restart two minutes before the time limit. A run reads the job's end from `SLURM_JOB_END_TIME` and warns ([`W-HEALTH-JOB-TIME`](output.md#w-health-job-time)) when the job will end before the run does.
 
 ## Divergence
 
@@ -280,6 +291,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="e-run"></a>`E-RUN` | The run stopped on an error after its setup: a file it cannot write, memory it cannot allocate, a failure of a library | The message says what failed |
 | <a id="e-diverged"></a>`E-DIVERGED` | The solution diverged: cells with a non-finite value, or a non-positive density or pressure ([Divergence](#divergence)) | The [divergence report](#the-divergence-report) ranks the likely causes, each with what to try |
 | <a id="w-health-margin"></a>`W-HEALTH-MARGIN` | At a progress row, a density or pressure below 1e-3 of its mean, or a negative mass fraction: the run is close to failing there ([Run health](output.md#run-health)) | Look at the place the message gives; the remedies are those of a divergence |
+| `W-HEALTH-CFL-LIMIT`, `W-HEALTH-CFL-SPIKE`, `W-HEALTH-DT-COLLAPSE`, `W-HEALTH-REJECTED-STEPS`, `W-HEALTH-STALL`, `W-HEALTH-JOB-TIME`, `W-HEALTH-LEDGER`, `W-HEALTH-NONFINITE` | The [run health events](output.md#run-health-events): the CFL number above its limit or spiking, the stable time step collapsing, rejected steps, a steady run's residual stalling, the scheduler's job ending before the run, the conservation ledger, a monitored value that is not finite | What the table there says for each |
 | <a id="w-restart-skipped"></a>`W-RESTART-SKIPPED` | `--restart latest` passed over a restart file it cannot read, or one that is truncated | None needed: the run starts from the newest complete one |
 | <a id="w-mesh-differs"></a>`W-MESH-DIFFERS` | A restart file, or the snapshot `mallard post` reads, was written on a mesh file of other contents with as many cells | Check that the case's mesh is the run's |
 | <a id="w-snapshot-index"></a>`W-SNAPSHOT-INDEX` | A resumed run's snapshot index lists fewer snapshots than were written up to the restart time | None needed: the numbering continues after the snapshots on disk, which are never overwritten |
@@ -291,6 +303,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-quadrature-weights"></a>`W-QUADRATURE-WEIGHTS` | A quadrature rule with negative weights is in use, which can amplify rounding errors | Report it with the message |
 | <a id="w-signal-handlers"></a>`W-SIGNAL-HANDLERS` | A library replaced Mallard's signal handlers during setup; they are restored | None needed |
 | <a id="w-control-socket"></a>`W-CONTROL-SOCKET` | No control socket for `mallard ctl`: `mallard.sock` is not a socket, another run answers on it, or it cannot be made | Start each run in a directory of its own, or set `[run] control_socket = false` |
+| <a id="w-set-refused"></a>`W-SET-REFUSED` | A setting of a `SET` file was refused: a key `mallard ctl set` does not change, or a value it does not accept; the others of the file are applied | Fix the line the message names and write the file again ([Run control](#running-and-controlling-jobs)) |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
 | <a id="w-convergence-nonfinite"></a>`W-CONVERGENCE-NONFINITE` | A signal of `[statistics.convergence]` had a sample that is not finite (NaN or infinite, or so large its sums overflow): the run diverged. `converged` stays 0 for the rest of the run, `<signal>_nonfinite` counts such samples, and they are left out of the other values | Find why the monitored value is not finite: a diverging solution, a probe without a value at a write ([Convergence statistics](statistics.md#convergence-statisticsconvergence)) |
