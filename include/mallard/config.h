@@ -1406,9 +1406,8 @@ class Chemistry : public Table {
          *        RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of
          *        a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame:
          *        chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within
-         *        0.5%). Results change within the chemistry's tolerances (see the design notes) and stay bitwise
-         *        independent of ranks, partition, balancing and step graphs. The examples where it pays set it
-         *        (measurements).
+         *        1%). Results change within the chemistry's tolerances (see the design notes) and stay bitwise independent
+         *        of ranks, partition, balancing and step graphs. The examples where it pays set it (measurements).
          */
         Chemistry & explicit_step(bool v) { put("explicit_step", v); return *this; }
         /** @brief Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call
@@ -1835,6 +1834,11 @@ class Output : public Table {
          *        records and a summary at the end of the terminal output (details). Default `true`.
          */
         Output & health(bool v) { put("health", v); return *this; }
+        /** @brief Wall time between the run log's `heartbeat` records, which tell a hung run from a slow one; one is
+         *        written after the first step at least this long after the previous (run health events). `0` writes none.
+         *        Default `60` (seconds, or with a unit). Time (s), a number in SI units or a quantity with its unit.
+         */
+        Output & heartbeat_interval(Quantity v) { put("heartbeat_interval", v); return *this; }
         /** @brief Threads that copy out each snapshot and compress its files (default 1).
          */
         Output & io_threads(std::int64_t v) { put("io_threads", v); return *this; }
@@ -1860,6 +1864,16 @@ class Output : public Table {
          *        `"mallard.jsonl"`.
          */
         Output & run_log(std::string_view v) { put("run_log", v); return *this; }
+        /** @brief With `steady_residual`: steps within which the largest residual must halve, else `W-HEALTH-STALL`.
+         *        Default `10000`.
+         */
+        Output & stall_steps(std::int64_t v) { put("stall_steps", v); return *this; }
+        /** @brief A run to a steady state: the residual (the change of the state over a step relative to the state,
+         *        `health.residuals`) at which it is converged, a `converged` event of the run log at the first progress
+         *        row where every residual is at or below it, and `W-HEALTH-STALL` when it stops falling (run health
+         *        events). Needs `health`; the run goes on to its stop. Default none. Required.
+         */
+        Output & steady_residual(double v) { put("steady_residual", v); return *this; }
         /** @brief Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the
          *        setup (layout); `""` writes none. Needs HDF5. Default `""`.
          */
