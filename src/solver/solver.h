@@ -434,7 +434,8 @@ class Solver {
         void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
         void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
-        void calc_dt();
+        /** @brief The step's dt; with overlap, also starts the first stage's reconstruction where it can. */
+        void calc_dt(bool overlap = true);
         /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
         Kokkos::View<rtype> dt_reduce_slot();
         /** @brief The time step and run-control requests in step_reduce, reduced over the ranks. */
@@ -878,6 +879,13 @@ class Solver {
             const comm::SelfScope scope = communication_scope();
             return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
         }
+        /** @brief Cell integrations done by an accepted explicit step so far ([chemistry] explicit_step). */
+        double chemistry_explicit_steps() const {
+            const comm::SelfScope scope = communication_scope();
+            return comm::allreduce(double(cell_chemistry.statistics().explicit_steps), comm::Op::SUM);
+        }
+        /** @brief Owned cells whose last explicit step failed ([chemistry] explicit_step; collective). */
+        double chemistry_explicit_marked() const;
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -1004,7 +1012,7 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
         void check_sizing(CheckReport & report, const CheckOptions & options) const;
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
-        PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
+        PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
@@ -1095,6 +1103,12 @@ class Solver {
         void write_provenance();
         // Run health (solver_health.cpp)
         void init_health();
+        /** @brief At a run's start: the run health events' settings, the scheduler's end of the job, the heartbeat. */
+        void start_health_events();
+        /** @brief Rank 0, after each accepted step: the health events of its time step, and the heartbeat. */
+        void note_step_health();
+        /** @brief Rank 0, at a progress row: its health events, written to the log and the run log. */
+        void health_event_row(const RunStatus & status, std::vector<MonitorValues> monitored);
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
@@ -1280,7 +1294,7 @@ class Solver {
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
-        void exchange_for_first_stage();
+        void exchange_for_first_stage(bool overlap = true);
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /** @brief kinetic_energy_rate into *out on the device. */

@@ -90,6 +90,7 @@ struct Report {
     std::vector<Balance> balance;       // since the previous report
     std::vector<Balance> balance_run;   // since the ledger started
     double element_drift = -1.0;        // largest relative change of an element total over a chemistry call, -1: none
+    std::vector<std::pair<std::string, double>> residuals;  // RMS change of the step over its scale; empty: none
 
     bool empty() const;
     json::Object record() const;
