@@ -83,31 +83,42 @@ mpirun -n 2 mallard check input.toml --steps 20 --kokkos-num-threads=2
           this check  2      57,600       1,920       498 MB       506 MB  -
 ...
 == Cost ===================================================================================
-  On 2 ranks at 568k cells/s per rank (measured over 20 steps), at the initial time step;
-  rank-hours: ranks times wall hours.
-  period                   simulated time [s]  steps    wall time  rank-hours
-  per unit simulated time  1                   4,555    7m 42s     0.257
-  per flow-through time    1.06                4,828    8m 10s     0.272
-  to run.t_stop            0.2                   910.9  1m 32s     0.0514
+  Throughput of one rank alone: 241k cells/s (measured over 20 steps on 2 ranks).
+  Step time of the largest part: s (owned + 1.52 halo cells) + 23.6 ms + 11.7 ns per
+  particle slot (+ 7.88 ms with particles on several ranks), s the seconds per cell of one
+  rank alone; Apple M4 Pro, 2026-11-23, fitted to 15 measured step times of 4 cases (9.2%
+  rms; 32.6% on cases left out: cpu-ns2d-muscl-384@13327c0 30.0%, cpu-ns2d-teno5-256@13327c0
+  24.2%, cpu-ns3d-muscl-48@13327c0 24.2%, cpu-ns3d-teno5-32@13327c0 49.2%). Ranks per node:
+  as this check's ranks are placed.
+  On 2 ranks, at the initial time step: efficiency 91%; wall times +-33% (one standard
+  deviation of the throughput and the step-time model); core-hours: ranks times threads
+  times wall hours.
+  period                   simulated time [s]  steps    wall time  core-hours
+  per unit simulated time  1                   4,555    20m 50s    1.39
+  per flow-through time    1.06                4,828    22m 05s    1.47
+  to run.t_stop            0.2                   910.9  4m 10s     0.278
 ...
   Result: ok, 0 errors and 0 warnings (exit status 0)
 ```
 
 The cost comes from the time step of the initial state. Here the flow speeds
 up behind the reflected shock, and the run below takes 1,167 steps rather
-than 911 and 2m 46s of time stepping, about 1.8 times the estimate: ask the
-scheduler for a generous margin, and let the restarts catch the rest.
+than 911: ask the scheduler for a generous margin, and let the restarts catch
+the rest. Steps timed on a machine busy with other jobs also run slower than
+they will on the cluster's own nodes.
 
 You need not have the cluster at hand to size a run on it. `--ranks N`
-scales a serial check to N ranks (memory of the largest part the partitioner
-would make), and `--throughput R` takes the cells per second per rank from
-elsewhere: from the summary of an earlier run (its `Throughput` divided by its
-ranks) or from [Performance](../guide/performance.md). An A100 runs 2D TENO-E
-at about 5 × 10<sup>7</sup> cells/s ([Multi-GPU scaling](../guide/parallel.md#scaling-2d)),
-so the full-size example on 4 GPUs:
+scales a serial check to N ranks (memory, and the cost of the largest part
+the partitioner would make), and `--memory a100-80` sizes it for an A100:
+the cost then takes an A100's measured throughput for this case (2D TENO-E,
+Euler) and the parallel efficiency of its parts on each rank count from a
+model fitted to measured runs ([the cost estimate](../guide/parallel.md#the-cost-estimate)).
+`--throughput R` gives the cells per second of one rank yourself instead,
+for example from the summary of an earlier run (its `Throughput` divided by
+its ranks). The full-size example on 4 GPUs:
 
 ```bash
-mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e7 --memory a100-80
+mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --memory a100-80
 ```
 
 ```text
@@ -134,15 +145,32 @@ mallard check $MALLARD/examples/double_mach/input.toml --ranks 4 --throughput 5e
                                                                                   cells, predicted peak 5.56 GB (from
                                                                                   the partitioner)
           most GPUs with halo < 10% of owned          4     GPUs                  doubling from the fewest
-          wall time per unit simulated time          21.0   s                     on 4 GPUs at 50.0M cells/s each
+          wall time per unit simulated time          30.0   s                     on 4 GPUs, by the cost model (Cost)
 
 == Cost ===================================================================================
-  On 4 ranks at 50.0M cells/s per rank (--throughput), at the initial time step; rank-hours:
-  ranks times wall hours.
-  period                   simulated time [s]  steps   wall time  rank-hours
-  per unit simulated time  1                    9,109  21.0 s     0.0233
-  per flow-through time    1.135               10,340  23.8 s     0.0265
-  to run.t_stop            0.2                  1,822   4.20 s    0.00466
+  Throughput of one rank alone: 53.5M cells/s (measured: 2D TENO-E 5, Euler on
+  A100-SXM4-80GB (teno5_2d, 2026-11-09; +-20% between cases of one key)).
+  Step time of the largest part: s (owned cells) + 1.14 ms + 37.7 ns per halo cell owned on
+  another node, s the seconds per cell of one rank alone; NVIDIA A100-SXM4-80GB, 2026-11-22,
+  fitted to 22 measured step times of 5 cases (1.9% rms; 20.1% on cases left out:
+  es-air_dyn-plain@9da4ab1 41.3%, ws64-main@9da4ab1 1.5%, ws128-main@a7a5432 5.6%,
+  ws64-main@a7a5432 1.2%, st128-main@a7a5432 2.9%). Ranks per node: 8 GPUs per node.
+  On 4 ranks, at the initial time step: efficiency 74%; wall times +-28% (one standard
+  deviation of the throughput and the step-time model); GPU-hours: GPUs times wall hours.
+  period                   simulated time [s]  steps   wall time  GPU-hours
+  per unit simulated time  1                    9,109  30.0  s    0.0334
+  per flow-through time    1.135               10,340  34.1  s    0.0379
+  to run.t_stop            0.2                  1,822   6.00 s    0.00667
+
+  By rank count, to run.t_stop: the largest part the run's partitioner makes (owned cells;
+  halo over owned; parts its halo comes from) and its step time; efficiency: one rank's step
+  time over ranks times this one's.
+  ranks         nodes  owned cells  halo / owned  neighbors  efficiency  wall time  GPU-hours
+   1            1      460,800       0.0%         0          100%        17.8  s    0.00494
+   2            1      230,400       1.7%         1           90%         9.93 s    0.00551
+   4 (--ranks)  1      115,200       6.7%         2           74%         6.00 s    0.00667
+   8            1       57,600      13.3%         2           55%         4.04 s    0.00898
+  16            2       28,800      20.7%         5           36%         3.06 s    0.0136
 ```
 
 (From a CPU build; a GPU build counts GPU-hours and device memory.) Seconds
