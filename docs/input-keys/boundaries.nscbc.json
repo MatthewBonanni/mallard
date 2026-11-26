@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "table",
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",
   "examples/flame_outflow/input.toml",

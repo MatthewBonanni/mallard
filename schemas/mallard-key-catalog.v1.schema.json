@@ -11,7 +11,7 @@
     "section": {"type": ["string", "null"]},
     "keys": {
       "type": "object",
-      "description": "by key path",
+      "description": "by key path: type, dimension, unit, default or required, values, set (with an input), dims and set_in (without); a table's form: table, array (of tables, [[boundaries]]) or named (entries under names the input chooses, as [regions] and X)",
       "additionalProperties": true
     },
     "complete": {"type": "boolean", "description": "with an input: whether its setup read every key it reads"},

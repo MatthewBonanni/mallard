@@ -24,7 +24,7 @@ WallModelSpec WallModelSpec::from_input(const Input & table, const BoundaryCondi
                                         const std::string & where) {
     if (!table.is_table()) throw InputError(where + " must be a table.");
     if (!bc.is_wall()) throw InputError(where + ": wall models apply to walls only.");
-    for (const auto & [key, value] : table.as_table()) {
+    for (const auto & [key, value] : table.as_table().entries()) {
         (void)value;
         static const char * KEYS[] = {"model", "exchange_distance", "exchange_cells", "edge_distance",
                                       "kappa", "A_plus", "Pr_t", "s"};

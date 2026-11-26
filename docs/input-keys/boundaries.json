@@ -3,6 +3,7 @@
   2,
   3
  ],
+ "form": "array",
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

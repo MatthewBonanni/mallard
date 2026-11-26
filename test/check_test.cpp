@@ -199,6 +199,30 @@ TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
     }
 }
 
+TEST(CheckKeys, TheCatalogGivesEachTablesForm) {
+    const Input input = parse_input_string("[[b]]\nx = 1\n[[b]]\nx = 2\n[t]\nn = 1\n[X]\nH2 = 1.0\nO2 = 2.0\n"
+                                           "[f]\na = 1\n[regions.box]\ntype = \"box\"\n");
+    for (const Input & item : input.at("b").as_array()) find_value<int>(item, "x");
+    const Input & t = input.at("t");
+    find_value<int>(t, "n");
+    t.contains("m");
+    // Iterated and read by the names it holds: named; iterated but read by fixed keys, one absent: a table
+    for (const auto & [species, value] : input.at("X").as_table()) find_real(input, "X", species, dim::none);
+    const Input & f = input.at("f");
+    for (const auto & entry : f.as_table()) static_cast<void>(entry);
+    find_value<int>(f, "a");
+    f.contains("b");
+    find_value<std::string>(input.at("regions").at("box"), "type");
+    const json::Value catalog = json::parse(key_catalog(resolve_input(input)));
+    for (const auto & [key, form] : {std::pair{"b", "array"}, std::pair{"t", "table"}, std::pair{"X", "named"},
+                                     std::pair{"f", "table"}, std::pair{"regions", "named"},
+                                     std::pair{"regions.<name>", "table"}}) {
+        ASSERT_TRUE(catalog.has(key)) << key;
+        EXPECT_EQ(catalog[key]["form"].string, form) << key;
+    }
+    EXPECT_FALSE(catalog["b.x"].has("form"));
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");

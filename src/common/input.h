@@ -247,6 +247,7 @@ struct KeyRecord {
     std::vector<std::string> values;  // accepted values, if a closed set
     bool set = false;                 // in the input, or written into it by the program (a preset, --restart)
     bool by_name = true;              // looked up by its name, not only read by iterating its table
+    bool iterated = false;            // a table whose entries setup iterated
     std::string value;                // as TOML: the input's (in the key's plain units) or the default; empty
                                       // for a table, an array of tables, or a key with neither
 };
