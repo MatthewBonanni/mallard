@@ -3008,6 +3008,7 @@ void Solver::start_run() {
         if (control_file_interval > 0) control_files_polled = step / control_file_interval;
         wall_time_reached = false;
         checkpoint_requested = false;
+        start_health_events();
 
         try {
             // A restart's pending half step, where this run does not fuse it into its first step
@@ -3086,6 +3087,7 @@ void Solver::advance_once() {
         const step_queue::Record record = next_record();
         take_record(record);
         if (record.outcome != step_queue::ACCEPTED) return;
+        note_step_health();
         if (record.reasons != 0) {
             // The steps enqueued after this one do nothing
             drain_device_steps();
@@ -3119,6 +3121,7 @@ void Solver::advance_once() {
     Kokkos::Timer step_timer;
     calc_dt();
     take_step();
+    note_step_health();
     after_step(step_timer, nullptr);
 }
 
@@ -3345,18 +3348,23 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         report_health(locals, values);
         status.health = run_health.last;
     }
+    for (const auto & monitor : force_monitors) {
+        if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
+    }
+    if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+    status.probes = probes.recorded();
+    if (comm::is_root()) {
+        std::vector<MonitorValues> monitored = status.monitored;
+        monitored.insert(monitored.end(), status.probes.begin(), status.probes.end());
+        health_event_row(status, std::move(monitored));
+    }
     if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
         status.memory = {largest[0], largest[1], largest[2], largest[3]};
-        for (const auto & monitor : force_monitors) {
-            if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
-        }
-        if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         if (!convergence.last().name.empty()) status.monitored.push_back(convergence.last());
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
-        status.probes = probes.recorded();
         run_log::write_progress(status.record());
     }
 

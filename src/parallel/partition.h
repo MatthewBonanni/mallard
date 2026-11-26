@@ -62,17 +62,24 @@ bool have_graph_partitioner();
 
 struct MeshBlock;
 
-/** @brief Cells of the part with the most local (owned and halo) cells. */
+/** @brief Cells of the part with the most local (owned and halo) cells, and whom its halo comes from. */
 struct PartSize {
     uint64_t owned = 0;
     uint64_t halo = 0;
+    int neighbors = 0;         // parts owning its halo cells
+    int remote_neighbors = 0;  // of those, the parts on other nodes
+    uint64_t halo_remote = 0;  // halo cells owned by parts on other nodes
 };
 
 /**
  * @brief The largest part of a partition of a whole mesh (owner of each block
  *        cell), with halo layers of cells sharing a node as in a distributed
- *        run; neighbors across periodic seams are not counted.
+ *        run. node_keys (per block node, the block node its periodic class is
+ *        keyed by; empty without periodic pairs) joins cells across periodic
+ *        seams as the run does. Parts p and q are on the same node when
+ *        p / ranks_per_node == q / ranks_per_node (ranks_per_node 0: one node).
  */
-PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, int n_parts, int halo_layers);
+PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, int n_parts, int halo_layers,
+                      const std::vector<uint64_t> & node_keys = {}, int ranks_per_node = 0);
 
 #endif // PARTITION_H
