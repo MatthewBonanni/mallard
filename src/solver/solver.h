@@ -989,7 +989,7 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
         void check_sizing(CheckReport & report, const CheckOptions & options) const;
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
-        PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
+        PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */

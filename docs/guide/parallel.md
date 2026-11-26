@@ -199,6 +199,68 @@ the job's launcher (`srun mallard check`, `mpirun -n 8 mallard check`), as
 the run: GPU-aware MPI, NCCL, unbound OpenMP threads
 ([Checking an input](input_files.md#checking-an-input)).
 
+## The cost estimate
+
+`mallard check`'s cost section ([Checking an input](input_files.md#checking-an-input)) gives the wall time,
+the compute hours and the parallel efficiency of a run on `--ranks N`, and, from a serial check, on every power
+of two up to four times that (at least 8, parts of at least 1,000 cells). Two models make it, both fitted only to
+measured runs; `tools/perf/cost_model.py` regenerates their coefficients (`src/solver/cost_model_data.h`) from the
+measurements in `benchmarks/cost_model/`.
+
+**The throughput of one rank alone**, in cells per second, comes in this order from:
+
+1. `--throughput R`, the cells per second of a single-rank run, for example an earlier run's `Throughput`.
+2. `--steps N`: the check times N steps after an untimed one on its own ranks and device, and the step-time
+   model below turns that step back into the throughput of one rank alone.
+3. The measurements for the device class (`--memory`'s GPU when nothing is timed, else the check's device),
+   dimension, reconstruction and physics (the geometric mean of a key's measurements; on CPUs per thread, times
+   the threads). Keys without a measurement take a log-linear fit over every measurement: a base per device class
+   and dimension, a factor per reconstruction and per physics (separately for CPUs and GPUs) and, for reacting
+   cases, a power of the species count. Fourth-order TENO-E sits halfway between third and fifth order, and first
+   order takes MUSCL's figure. Devices without measurements (GPUs other than the A100) give no estimate: time a few
+   steps or give `--throughput`.
+
+**The step time on N ranks** is that of the largest part the run's partitioner makes (the rank with the most
+cells, from the same partition the run uses):
+
+t = s (o + β h) + t<sub>0</sub> + γ k + δ h<sub>remote</sub> + c<sub>p</sub> P
+
+where s is the seconds per cell of one rank alone (1/throughput), o and h the part's owned and halo cells, k its
+neighbor parts, h<sub>remote</sub> its halo cells owned by ranks on other nodes, and P its particle slots.
+t<sub>0</sub> is the time per step independent of the cells (kernel launches, reductions, synchronization), β the
+cost of a halo cell relative to an owned one, γ the cost per neighbor and δ that per halo cell exchanged between
+nodes. Ranks per node come from `--ranks-per-node`, else the placement of a parallel check, else 8 for GPUs, else
+one node for CPUs. The efficiency on N ranks is t(1) / (N t(N)).
+
+The fitted coefficients (Mallard 0.12.0):
+
+| device class | runs (cases) | t<sub>0</sub> | β | γ | δ | particles | fit error | held-out error |
+|---|---:|---:|---:|---:|---:|---|---:|---:|
+| A100 (other GPUs: none) | 22 (5) | 1.14 ms | 0 | 0 | 38 ns per cell | not measured | 1.9% | 20% |
+| Apple M CPU, one thread per rank (other CPUs take it) | 15 (4) | 23.6 ms | 1.52 | 0 | 0 (one node) | 11.7 ns per slot, +7.9 ms on several ranks | 9.2% | 33% |
+
+- **A100:** the 3D Taylor–Green vortex with TENO-E 5 (64³ cells per GPU on 1 to 14 GPUs over 1 and 2 nodes, 128³
+  on 1 to 8 GPUs and per GPU on 4) and a 221,000-cell MUSCL LES on 1 to 14 GPUs. Halo cells cost nothing
+  measurable within a node (owner-computes partition faces overlap their exchange with the interior; 128³ on 2
+  GPUs is faster than half of one); what is left is about 1.1 ms per step that does not shrink with the cells, and
+  the exchange between nodes. The held-out error is mostly the small LES case predicted from the large boxes alone,
+  which cannot show the fixed cost: 41% for it, 1 to 6% for the others.
+- **CPUs:** the Taylor–Green vortex with MUSCL and TENO-E 5 in 2D and 3D on 1 to 3 ranks of one thread on a shared
+  Apple M4 Pro (the fastest of 3 runs each), and tracer particles on 1 and 2 ranks. A halo cell costs about 1.5
+  owned cells, and the fixed cost per step is the ranks' synchronization through MPI.
+- **Throughput:** 40 measurements (A100 and Apple M4 Pro, 2D and 3D, MUSCL and TENO-E 3, 5 and 6, Euler, NS, LES
+  and reacting with 6 to 53 species); measurements of one key spread by 20%, and the fit predicts left-out
+  measurements to 44%. The fit is a rough guide outside the measured keys: time a few steps (`--steps`) for a
+  number of the case itself.
+
+**Uncertainty:** the report's one standard deviation combines the throughput's (the spread between cases of one
+key for a measured key, the leave-one-out error for a fitted one) with the step-time model's held-out error. The
+held-out error leaves out every case in turn, refits the rest and predicts each of its runs from its own
+single-rank step. Reacting runs are left out of the step-time fit: a flame's chemistry concentrates on the ranks
+it crosses, so their parts are not equally loaded and the largest part does not set the step.
+The estimate for a reacting case therefore assumes balanced ranks and is optimistic on many ranks (an A100
+flame on 8 GPUs measured 3.5 times the balanced prediction): time a few steps on the ranks you intend to use.
+
 ## Multi-GPU scaling
 
 The [performance dashboard](https://matthewbonanni.github.io/mallard/docs/dashboard/#scaling) plots the efficiencies below.
