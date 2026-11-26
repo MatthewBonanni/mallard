@@ -186,21 +186,25 @@ TEST(MPITest, ChemistryLoadBalancingMatchesSerialWithAndWithoutStepGraphs) {
     const std::string balanced = "[chemistry]\nload_balance = true\n";
     const std::string tfles = "[les]\nmodel = \"vreman\"\n[les.combustion]\nmodel = \"tfles\"\ndelta_L = 2e-3\n"
                               "s_L = 2.0\nT_unburnt = 300.0\nT_burnt = 2400.0\n";
-    const std::string inputs[] = {mixture_input("", "type = \"MUSCL\"\n", balanced, "euler"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "fuse_half_steps = true\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "explicit_step = true\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced, "navier_stokes") + tfles,
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
-                                                "navier_stokes"),
-                                  mixture_input("", "type = \"MUSCL\"\n", balanced + "coupling = \"simpler\"\n",
-                                                "navier_stokes") + tfles};
-    for (const std::string & input : inputs) {
-        expect_matches_serial_with_and_without_step_graphs(input, [](const Solver & s) {
+    const std::string explicit_step = "explicit_step = true\n", simpler = "coupling = \"simpler\"\n";
+    auto input = [&](const std::string & chemistry, const std::string & type = "navier_stokes") {
+        return mixture_input("", "type = \"MUSCL\"\n", balanced + chemistry, type);
+    };
+    const std::string inputs[] = {input("", "euler"),
+                                  input("fuse_half_steps = true\n"),
+                                  input(explicit_step),
+                                  input("") + tfles,
+                                  input(explicit_step) + tfles,
+                                  input(simpler),
+                                  input(simpler) + tfles,
+                                  input(simpler + explicit_step) + tfles};
+    for (const std::string & text : inputs) {
+        const bool explicit_steps = text.find(explicit_step) != std::string::npos;
+        expect_matches_serial_with_and_without_step_graphs(text, [&](const Solver & s) {
             if (s.is_distributed()) {
                 EXPECT_GT(s.chemistry_cells_sent(), 0.0);
             }
+            EXPECT_EQ(s.chemistry_explicit_steps() > 0.0, explicit_steps);
         });
     }
 }

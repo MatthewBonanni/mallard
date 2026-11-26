@@ -302,6 +302,12 @@ TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
     expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
 }
 
+TEST(MPI3DTest, TENOTroubledRoundsMatchSerialWithAndWithoutStepGraphs) {
+    // At the default capacity the blast's troubled cells take several rounds,
+    // which the step graph launches whether or not they find cells
+    expect_matches_serial_with_and_without_step_graphs(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
