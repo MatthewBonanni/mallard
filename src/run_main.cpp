@@ -27,6 +27,7 @@
 #include "parallel/comm.h"
 #include "run_control.h"
 #include "run_log.h"
+#include "session/session.h"
 #include "solver/solver.h"
 
 namespace {
@@ -102,18 +103,15 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
             Solver solver;
             if (check) {
                 CheckReport report;
-                try {
-                    if (!input_file.empty()) {
-                        Input input = parse_input(input_file);
-                        if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
-                        report = solver.check(input, *check);
-                    }
-                } catch (const InputError & e) {
-                    if (resolve) throw;
-                    report.input_file = input_file;
-                    report.error(diagnostic_code::INPUT, input_file + ": " + error_text(e));
+                if (resolve) {
+                    Input input = parse_input(input_file);
+                    if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                    report = solver.check(input, *check);
+                } else {
+                    session::Context context;
+                    if (!input_file.empty()) context.open(input_file);
+                    report = session::check_case(context, *check, restart_file).report;
                 }
-                if (!resolve) check_environment(report);
                 if (resolve && report.ok()) {
                     if (comm::is_root()) std::cout.rdbuf(out);
                     std::cout << report.resolved << std::flush;
@@ -239,8 +237,16 @@ int check_main(const cli::Args & args) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
+    if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
+        return cli::usage_error(command, "--format takes text or json, not " + f);
+    }
     CheckOptions options;
     options.input_file = input_file;
+    if (const std::string error = check_options(args, options); !error.empty()) return cli::usage_error(command, error);
+    return solve(args, input_file, &options);
+}
+
+std::string check_options(const cli::Args & args, CheckOptions & options) {
     options.catalog_file = args.value_or("--catalog", "");
     options.partial = args.has("--partial");
     options.view_dir = args.value_or("--view", "");
@@ -249,24 +255,19 @@ int check_main(const cli::Args & args) {
         for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--mesh-fields",
                                     "--quality", "--stencils", "--cells", "--region", "--weights", "--initial",
                                     "--catalog"}) {
-            if (args.has(option)) {
-                return cli::usage_error(command, std::string(option) + " needs the whole check, not --geometry-only");
-            }
+            if (args.has(option)) return std::string(option) + " needs the whole check, not --geometry-only";
         }
     }
     options.initial = args.value_or("--initial", "");
-    if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
-        return cli::usage_error(command, "--format takes text or json, not " + f);
-    }
     std::string error = mesh_field_options(args, options);
     if (error.empty() && args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
-    if (!error.empty()) return cli::usage_error(command, error);
+    if (!error.empty()) return error;
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
         !number(args, "--steps", options.steps, error) ||
         !number(args, "--ranks-per-node", options.ranks_per_node, error)) {
-        return cli::usage_error(command, error);
+        return error;
     }
-    return solve(args, input_file, &options);
+    return "";
 }
 
 int resolve_main(const cli::Args & args) {

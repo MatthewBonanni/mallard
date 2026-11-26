@@ -29,6 +29,7 @@
 #include "json.h"
 #include "log.h"
 #include "mesh_quality.h"
+#include "session/session.h"
 #include "solver/solver.h"
 #include "stencils.h"
 
@@ -78,15 +79,17 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
  *        being written gives those of the setup as far as it got, and the diagnostics that stopped it.
  */
 CaseFields set_up_keys(const std::string & input_file, const cli::Args & args) {
-    return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
+    return quietly(input_file, args, [&](Solver &, CaseFields & out) {
+        session::Context context;
+        context.open(input_file);
         CheckOptions options;
         options.input_file = input_file;
-        const CheckReport report = solver.check(parse_input(input_file), options);
-        out.errors = report.errors();
-        out.diagnostics = report.diagnostics;
-        out.complete = report.setup_done;
-        out.only_missing = report.only_missing();
-        out.keys = key_catalog(resolve_input(solver.resolved_input()));
+        const session::CheckResult result = session::check_case(context, options, "", false);
+        out.errors = result.report.errors();
+        out.diagnostics = result.report.diagnostics;
+        out.complete = result.report.setup_done;
+        out.only_missing = result.report.only_missing();
+        out.keys = result.catalog;
     });
 }
 
@@ -397,25 +400,56 @@ std::string only_dim(const json::Value & k) {
     return dims && dims->array.size() == 1 ? " (" + json::number(dims->array[0].number) + "D)" : "";
 }
 
-std::string value_text(const json::Value & v) {
-    switch (v.type) {
-        case json::Value::Type::BOOL: return v.boolean ? "true" : "false";
-        case json::Value::Type::NUMBER: return json::number(v.number);
-        case json::Value::Type::STRING: return json::quote(v.string);
-        case json::Value::Type::ARRAY: return json_array(v.array, value_text);
-        case json::Value::Type::OBJECT: {
-            json::Object o;
-            for (size_t i = 0; i < v.names.size(); i++) o.raw(v.names[i], value_text(v.members[i]));
-            return o.str();
-        }
-        case json::Value::Type::NUL: break;
-    }
-    return "null";
-}
-
 std::string null_or(const std::string & text) { return text.empty() ? "null" : json::quote(text); }
 
+std::vector<std::string> required_unset(const json::Value & catalog, const std::vector<std::string> & keys) {
+    std::vector<std::string> required;
+    for (const std::string & key : keys) {
+        const json::Value & k = catalog[key];
+        if (k.find("required") && k["required"].boolean && !(k.find("set") && k["set"].boolean)) required.push_back(key);
+    }
+    return required;
+}
+
 } // namespace
+
+std::vector<std::string> keys_in_section(const json::Value & catalog, const std::string & section,
+                                         const KeyCase * per_case) {
+    std::vector<std::string> keys, sections;
+    for (const std::string & key : catalog.keys()) {
+        if (std::find(sections.begin(), sections.end(), section_of(key)) == sections.end()) {
+            sections.push_back(section_of(key));
+        }
+        if (in_section(key, section)) keys.push_back(key);
+    }
+    if (keys.empty() && (!per_case || per_case->complete)) {
+        const std::string near = suggest_value(section, sections);
+        throw std::invalid_argument((per_case ? per_case->input : "the catalog") + " has no key in " + section +
+                                    (near.empty() ? "" : " (did you mean " + near + "?)"));
+    }
+    return keys;
+}
+
+std::string key_listing_json(const json::Value & catalog, const std::vector<std::string> & keys,
+                             const std::string & section, const KeyCase * per_case) {
+    json::Object selected;
+    for (const std::string & key : keys) selected.raw(key, json::dump(catalog[key]));
+    json::Object out;
+    out.add("schema", interfaces::KEY_CATALOG.name).add("version", interfaces::KEY_CATALOG.version);
+    out.raw("input", null_or(per_case ? per_case->input : "")).raw("section", null_or(section)).raw("keys", selected.str());
+    if (per_case) {
+        out.add("complete", per_case->complete)
+            .raw("missing", json_array(required_unset(catalog, keys), [](const std::string & key) { return json::quote(key); }))
+            .raw("diagnostics", diagnostics_json(per_case->diagnostics));
+    }
+    return out.str();
+}
+
+std::string section_argument(std::string section) {
+    section.erase(0, section.find_first_not_of('['));
+    section.erase(section.find_last_not_of(']') + 1);
+    return section;
+}
 
 int list_keys_main(const cli::Args & args) {
     int argc = args.argc;
@@ -430,8 +464,7 @@ int list_keys_main(const cli::Args & args) {
         if (!slot.empty()) return cli::usage_error(command, file ? "give one input file" : "give one section");
         slot = a;
     }
-    section.erase(0, section.find_first_not_of('['));
-    section.erase(section.find_last_not_of(']') + 1);
+    section = section_argument(section);
 
     json::Value catalog;
     CaseFields listed;
@@ -447,39 +480,19 @@ int list_keys_main(const cli::Args & args) {
         if (listed.keys.empty()) return report_errors(listed);
         catalog = json::parse(listed.keys);
     }
-    std::vector<std::string> keys, sections;
-    for (const std::string & key : catalog.keys()) {
-        if (std::find(sections.begin(), sections.end(), section_of(key)) == sections.end()) {
-            sections.push_back(section_of(key));
-        }
-        if (in_section(key, section)) keys.push_back(key);
-    }
-    if (keys.empty() && (input_file.empty() || listed.complete)) {
-        const std::string near = suggest_value(section, sections);
-        return cli::usage_error(command, (input_file.empty() ? "the catalog" : input_file) + " has no key in " +
-                                             section + (near.empty() ? "" : " (did you mean " + near + "?)"));
-    }
-
     const bool per_case = !input_file.empty();
+    const KeyCase key_case{.input = input_file, .complete = listed.complete, .diagnostics = listed.diagnostics};
+    std::vector<std::string> keys;
+    try {
+        keys = keys_in_section(catalog, section, per_case ? &key_case : nullptr);
+    } catch (const std::invalid_argument & e) {
+        return cli::usage_error(command, e.what());
+    }
     // An input still being written lists the keys that apply so far, and fails only on errors not missing pieces
     const bool failed = per_case && !listed.complete && !listed.only_missing;
-    std::vector<std::string> required;
-    for (const std::string & key : keys) {
-        const json::Value & k = catalog[key];
-        if (k.find("required") && k["required"].boolean && !(k.find("set") && k["set"].boolean)) required.push_back(key);
-    }
+    const std::vector<std::string> required = required_unset(catalog, keys);
     if (json_format(args)) {
-        json::Object selected;
-        for (const std::string & key : keys) selected.raw(key, value_text(catalog[key]));
-        json::Object out;
-        out.add("schema", interfaces::KEY_CATALOG.name).add("version", interfaces::KEY_CATALOG.version);
-        out.raw("input", null_or(input_file)).raw("section", null_or(section)).raw("keys", selected.str());
-        if (per_case) {
-            out.add("complete", listed.complete)
-                .raw("missing", json_array(required, [](const std::string & key) { return json::quote(key); }))
-                .raw("diagnostics", diagnostics_json(listed.diagnostics));
-        }
-        std::cout << out.str() << "\n";
+        std::cout << key_listing_json(catalog, keys, section, per_case ? &key_case : nullptr) << "\n";
         return failed ? 1 : 0;
     }
     std::vector<std::vector<std::string>> rows;

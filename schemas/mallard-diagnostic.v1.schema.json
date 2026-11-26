@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-diagnostic.v1.schema.json",
+  "title": "A diagnostic: an error, warning or note of a check, a key listing, a session request or a run",
+  "type": "object",
+  "required": ["severity", "code", "message"],
+  "properties": {
+    "severity": {"enum": ["error", "warning", "note"]},
+    "code": {"type": "string", "description": "E-... or W-..., explained in the docs page that docs names"},
+    "message": {"type": "string"},
+    "docs": {"type": "string", "description": "page and anchor that explain the code"},
+    "key": {"type": ["string", "null"], "description": "full key path with the element of an array of tables (boundaries[1].T), or null"},
+    "element": {"type": ["string", "null"], "description": "the element of an array of tables (boundaries[1]), or null"},
+    "line": {"type": ["integer", "null"], "minimum": 1},
+    "column": {"type": ["integer", "null"], "minimum": 1},
+    "missing": {"type": "boolean", "description": "a missing piece of an input still being written"}
+  },
+  "additionalProperties": true
+}

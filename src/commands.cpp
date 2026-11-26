@@ -128,6 +128,10 @@ constexpr Option CHECK_OPTIONS[] = {
     KOKKOS,
 };
 
+constexpr Option SESSION_OPTIONS[] = {
+    KOKKOS,
+};
+
 constexpr Option LIST_OPTIONS[] = {
     {"--format", "", "text|json",
      "text: one table per group (of fields) or table (of keys), with units; json: the same as one JSON "
@@ -936,6 +940,33 @@ constexpr Command COMMANDS[] = {
                     "$ mallard new cylinder",
         .exit_status = "0  listed",
         .run = list_templates_main,
+    },
+    {
+        .name = "session",
+        .group = "Inspect",
+        .summary = "Hold a case and answer JSON-RPC requests on stdin and stdout: the interface for the GUI and scripts",
+        .synopsis = "mallard session [INPUT] [Kokkos options]",
+        .description =
+            "Loads a case once and stays resident, answering JSON-RPC 2.0 requests, one JSON object per line, on "
+            "standard input; responses and notifications go to standard output, one per line, and nothing else "
+            "does (the setup's text goes to standard error). Requests: initialize, case.open, case.update, "
+            "case.close, case.check, case.keys, keys.catalog and shutdown; $/cancel stops a request at its next "
+            "setup phase. Each request that has a one-shot command runs the same code: case.check is mallard check "
+            "INPUT --format json, case.keys and keys.catalog are mallard list keys --format json.\n"
+            "\n"
+            "The session keeps the mesh file it read: a check after an edit outside [mesh] (case.update with the "
+            "whole text, which the session never writes back) reads the file again only if it changed. It listens "
+            "on no network port: run it on another machine through ssh or kubectl exec -i. It ends at shutdown or "
+            "when standard input closes.",
+        .options = SESSION_OPTIONS,
+        .arguments = OPTIONAL_INPUT,
+        .examples = "$ mallard session input.toml\n"
+                    "$ ssh hpc mallard session cases/cylinder/input.toml\n"
+                    "$ echo '{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"initialize\"}' | mallard session",
+        .exit_status = "0  shutdown, or standard input closed\n"
+                       "2  usage error",
+        .dim = Case::input_file,
+        .run = session_main,
     },
     {
         .name = "diff",
