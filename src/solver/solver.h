@@ -257,6 +257,13 @@ class Solver {
         std::pair<bool, std::string> apply_setting(const std::string & key, const std::string & value, bool apply = true);
 
         /**
+         * @brief Applies "key=value" settings with apply_setting, each accepted one recorded as a set event of
+         *        the run log with its source ("mallard ctl", "SET file", "--set"): whether all were accepted, and
+         *        a line per setting.
+         */
+        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source);
+
+        /**
          * @brief Advance the solution by one time step. With chemistry, the
          *        half step that ends it may be deferred (see run) and fused
          *        with the next step's first half (Strang splitting).
@@ -406,7 +413,8 @@ class Solver {
         void apply_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
         /** @brief Those of sponges in moving regions, weighted by their fractions at the stage time. */
         void apply_moving_sponges(const State & solution, const State & rhs, rtype t_stage, rtype c_stage);
-        void calc_dt();
+        /** @brief The step's dt; with overlap, also starts the first stage's reconstruction where it can. */
+        void calc_dt(bool overlap = true);
         /** @brief step_reduce(0), where calc_dt_cfl1 reduces this rank's time step (allocated at the first call). */
         Kokkos::View<rtype> dt_reduce_slot();
         /** @brief The time step and run-control requests in step_reduce, reduced over the ranks. */
@@ -848,6 +856,13 @@ class Solver {
             const comm::SelfScope scope = communication_scope();
             return comm::allreduce(double(cell_chemistry.statistics().sent), comm::Op::SUM);
         }
+        /** @brief Cell integrations done by an accepted explicit step so far ([chemistry] explicit_step). */
+        double chemistry_explicit_steps() const {
+            const comm::SelfScope scope = communication_scope();
+            return comm::allreduce(double(cell_chemistry.statistics().explicit_steps), comm::Op::SUM);
+        }
+        /** @brief Owned cells whose last explicit step failed ([chemistry] explicit_step; collective). */
+        double chemistry_explicit_marked() const;
         const Distribution & get_distribution() const { return distribution; }
 
         /** @brief Body force per unit volume, along the mass flow direction, of the last RHS ([source] mass_flow). */
@@ -974,7 +989,7 @@ class Solver {
         void check_cost(CheckReport & report, const CheckOptions & options, memory::Tracker & tracker);
         void check_sizing(CheckReport & report, const CheckOptions & options) const;
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
-        PartSize check_part(const DistributedMesh & whole, int n_ranks) const;
+        PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
@@ -1032,6 +1047,19 @@ class Solver {
          */
         void allocate_stage_scratch();
         void register_data();
+        /** @brief viscous_gradients, for the vertex gradient or the reconstruction's cell gradients. */
+        void allocate_viscous_gradients();
+        /**
+         * @brief The vertex gradient's weights, once every writer, probe and model is set up, if one of
+         *        them reads it (they take as much memory as the mesh's connectivity).
+         */
+        void init_vertex_gradient();
+        /** @brief The vertex gradient, which fills viscous_gradients from W_cells (init_vertex_gradient). */
+        const LSQVertexGradientFunctor & viscous_gradient() const;
+        /** @brief The host staging of Y_* and X_* that a writer or probe reads, once they are set up. */
+        void init_mixture_fractions();
+        /** @brief Stages Y_* (Y) and X_* (X) from now on, besides those staged already. */
+        void stage_mixture_fractions(bool Y, bool X);
         std::vector<std::string> restart_variables() const;  // Flow block, then RHOY_<species>
         RunEnd stop_reason() const;       // Empty while no stop condition holds
         rtype t_stop_reached() const;     // The run has reached t_stop once t is at least this
@@ -1052,6 +1080,12 @@ class Solver {
         void write_provenance();
         // Run health (solver_health.cpp)
         void init_health();
+        /** @brief At a run's start: the run health events' settings, the scheduler's end of the job, the heartbeat. */
+        void start_health_events();
+        /** @brief Rank 0, after each accepted step: the health events of its time step, and the heartbeat. */
+        void note_step_health();
+        /** @brief Rank 0, at a progress row: its health events, written to the log and the run log. */
+        void health_event_row(const RunStatus & status, std::vector<MonitorValues> monitored);
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
@@ -1234,7 +1268,7 @@ class Solver {
         /** @brief Abandon the reconstruction start_reconstruction() began (the state changed). */
         void discard_reconstruction();
         /** @brief calc_dt's exchange, which the first stage reuses; starts that stage's reconstruction where it can. */
-        void exchange_for_first_stage();
+        void exchange_for_first_stage(bool overlap = true);
         /** @brief sum over owned cells of u . R_m - |u|^2 / 2 R_rho for R the sum of face_flux over the cell's faces. */
         rtype kinetic_energy_rate() const;
         /** @brief kinetic_energy_rate into *out on the device. */
@@ -1402,7 +1436,7 @@ class Solver {
         memory::ScratchArena stage_scratch;
         Kokkos::View<rtype *[N_CONSERVATIVE]> face_flux;
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> viscous_gradients;
-        LSQVertexGradientFunctor viscous_gradient;  // Fills viscous_gradients from W_cells
+        LSQVertexGradientFunctor vertex_gradient;  // viscous_gradient(); without weights if nothing reads it
         Kokkos::View<rtype *> cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_cfl_local;
         Kokkos::View<rtype *>::host_mirror_type h_teno_sigma;
@@ -1485,7 +1519,7 @@ class Solver {
         Kokkos::View<rtype ***, Kokkos::LayoutRight> transport_gradients;  // (cell, variable, dimension)
         Kokkos::View<rtype **, Kokkos::LayoutRight> bc_transport_values;   // (condition, [T, X]) of inlet_state
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_D;  // output: D_k, then D^T_k (Soret)
-        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output
+        Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_Y, h_X;  // output, when read
 
         // Chemistry (Strang splitting around each flow step)
         bool reacting = false;

@@ -3,8 +3,9 @@ that Mallard computes on coarse unstructured meshes, read back from runs of
 one step whose source is 1 per unit volume over the region (SOURCE_RHOE is
 then the fraction), with the exact outline drawn over them; and the density
 of an initial state built layer by layer ([[initialize.data]] and
-[[initialize.regions]]) on the same mesh; and regions defined by the solution,
-with the probes' measures of them under refinement.
+[[initialize.regions]]) on the same mesh; regions defined by the solution,
+with the probes' measures of them under refinement; and regions from CAD
+surfaces, closed and open.
 
     python tools/docs/regions.py --mallard build/src/mallard [--mallard3d build-3d/src/mallard] [names...]
 
@@ -1366,6 +1367,113 @@ def cad_surface(P, args):
     return fig
 
 
+def baffle_surface(n_x=36, n_z=6):
+    """An open S-shaped baffle in mm: the curve y(x) across the square, extruded over |z| <= h(x); triangles."""
+    x = np.linspace(150.0, 850.0, n_x)
+    y = 500.0 + 190.0 * np.sin(2.0 * np.pi * (x - 150.0) / 700.0)
+    h = 140.0 + 50.0 * np.cos(np.pi * (x - 150.0) / 350.0)
+    rows = [np.column_stack([x, y, s * h]) for s in np.linspace(-1.0, 1.0, n_z + 1)]
+    tris = []
+    for j in range(n_z):
+        for i in range(n_x - 1):
+            a, b, c, d = rows[j][i], rows[j][i + 1], rows[j + 1][i + 1], rows[j + 1][i]
+            tris += [(a, b, c), (a, c, d)]
+    return np.array(tris), x, y
+
+
+CAD_OPEN_REGION = '{type = "stl", file = "baffle.stl", units = "mm", filled = false}'
+
+
+@functools.cache
+def data_cad_open_surface(mallard):
+    """The case view of a check whose probe is the baffle: its segments, normals and lengths, and the mesh."""
+    import h5py
+    work = Path(tempfile.mkdtemp())
+    mesh = work / "square.msh"
+    triangle_mesh(mesh, n=14)
+    tris, _, _ = baffle_surface()
+    write_stl(work / "baffle.stl", tris)
+    toml = f"""[run]
+n_steps = 1
+dt = 1e-9
+[mesh]
+type = "file"
+filename = "{mesh.name}"
+[initialize]
+type = "constant"
+u = [0.0, 0.0]
+p = 1.0
+T = 1.0
+[[boundaries]]
+name = "wall"
+type = "symmetry"
+[[probes]]
+name = "baffle"
+fields = ["P"]
+region = {CAD_OPEN_REGION}
+{PHYSICS}"""
+    (work / "case.toml").write_text(toml)
+    subprocess.run([str(mallard), "check", "case.toml", "--view", "view", "--kokkos-num-threads=2"], cwd=work,
+                   check=True, stdout=subprocess.DEVNULL)
+    block = 'probes[name = "baffle"].region'
+    if (work / "view" / "case.vtkhdf").exists():
+        with h5py.File(work / "view" / "case.vtkhdf") as f:
+            b = f["VTKHDF"][block]
+            pts, conn, offs = b["Points"][:, :2], b["Connectivity"][:], b["Offsets"][:]
+            segs = np.array([pts[conn[offs[k]:offs[k + 1]]] for k in range(len(offs) - 1)])
+            normals, lengths = b["CellData"]["normal"][:, :2], b["CellData"]["length"][:]
+    else:  # builds without HDF5 write the case view's blocks as VTK files
+        pts, conn, offs, _, data = read_vtu_cells(str(work / "view" / "case_blocks" / f"{block}.vtu"))
+        starts = np.concatenate([[0], offs[:-1]])
+        segs = np.array([pts[conn[a:b], :2] for a, b in zip(starts, offs)])
+        normals, lengths = data["normal"][:, :2], data["length"]
+    mesh_pts, cells, _ = fractions(mallard, mesh.name, '"domain"', work, "dom", 2)
+    return tris, segs, normals, lengths, mesh_pts, cells
+
+
+def cad_open_surface(P, args):
+    """The open baffle from an STL file, and in a 2D run its section: segments, normals and the cells they select."""
+    from matplotlib.path import Path as Outline
+    tris, segs, normals, lengths, pts, cells = data_cad_open_surface(args.mallard)
+    fig = plt.figure(figsize=(11.0, 4.4))
+    ax = fig.add_axes([0.0, 0.02, 0.48, 0.86], projection="3d", computed_zorder=False)
+    m = tris / 1000.0
+    n = np.cross(m[:, 1] - m[:, 0], m[:, 2] - m[:, 0])
+    n /= np.linalg.norm(n, axis=1)[:, None]
+    light = np.array([-0.4, 0.5, 0.75]) / np.linalg.norm([-0.4, 0.5, 0.75])
+    shade = 0.35 + 0.65 * np.abs(n @ light)
+    colors = np.clip(shade[:, None] * np.array(to_rgb(P["teal"]))[None, :], 0, 1)
+    ax.add_collection3d(Poly3DCollection(m[:, :, [0, 2, 1]], facecolors=colors, edgecolors=P["mesh"],
+                                         linewidths=0.15, rasterized=True))
+    _, x, y = baffle_surface()
+    ax.plot(x / 1000.0, np.zeros_like(x), y / 1000.0, color=P["flame"], lw=1.8, zorder=5)
+    ax.set_xlim(0.1, 0.9)
+    ax.set_ylim(-0.4, 0.4)
+    ax.set_zlim(0.2, 0.8)
+    ax.set_box_aspect((0.8, 0.8, 0.6), zoom=1.45)
+    ax.view_init(elev=24, azim=-58)
+    ax.set_axis_off()
+    ax.set_title("baffle.stl (mm), open; its section z = 0", fontsize=12)
+    ax2 = fig.add_axes([0.5, 0.06, 0.44, 0.82])
+    polys = [pts[c, :2] for c in cells]
+    centers = segs.mean(axis=1)
+    selected = np.array([Outline(q).contains_points(centers).any() for q in polys])
+    faces = [to_rgb(P["teal"]) + (0.35,) if s else (0, 0, 0, 0) for s in selected]
+    ax2.add_collection(PolyCollection(polys, facecolors=faces, edgecolors=P["mesh"], linewidths=0.5))
+    for sgm in segs:
+        ax2.plot(sgm[:, 0], sgm[:, 1], color=P["flame"], lw=1.8, solid_capstyle="round")
+    ax2.plot(centers[:, 0], centers[:, 1], "o", color=P["fg"], ms=1.6)
+    step = max(1, len(centers) // 18)
+    ax2.quiver(centers[::step, 0], centers[::step, 1], normals[::step, 0], normals[::step, 1], color=P["blue"],
+               angles="xy", scale_units="xy", scale=20.0, width=0.005)
+    bare(ax2)
+    ax2.set_xlim(0, 1)
+    ax2.set_ylim(0, 1)
+    ax2.set_aspect("equal")
+    ax2.set_title(f"2D run: {len(segs)} segments ({lengths.sum():.3f} m) in {selected.sum()} cells", fontsize=12)
+    return fig
+
+
 class Args(tuple):
     """Hashable options, so the runs are cached between the light and dark figures."""
 
@@ -1376,7 +1484,7 @@ class Args(tuple):
     mallard3d = property(lambda self: self[1])
 
 
-FIGURES = {"region_cad_surface": cad_surface, "region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
+FIGURES = {"region_cad_open_surface": cad_open_surface, "region_cad_surface": cad_surface, "region_primitives": primitives_2d, "region_booleans": booleans_2d, "region_smooth_edge": smooth_edge,
            "region_mesh_regions": mesh_regions, "region_orientation": orientation, "regions_3d": regions_3d,
            "initial_layers": initial_layers, "region_curved_wall": region_curved_wall,
            "region_control_surface": region_control_surface, "region_outside": region_outside,
