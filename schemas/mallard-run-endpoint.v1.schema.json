@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-run-endpoint.v1.schema.json",
+  "title": "A run's endpoint record, mallard.run.json in its directory and its copy in the run registry: where control requests reach it",
+  "type": "object",
+  "required": ["schema", "version", "run_id", "mallard", "host", "pid", "ranks", "directory", "socket", "scheduler", "started", "state"],
+  "properties": {
+    "schema": {"const": "mallard-run-endpoint"},
+    "version": {"const": 1},
+    "run_id": {"type": "string"},
+    "mallard": {
+      "type": "object",
+      "required": ["version", "executable"],
+      "properties": {"version": {"type": "string"}, "executable": {"type": "string"}}
+    },
+    "host": {"type": "string", "description": "the host of rank 0"},
+    "pid": {"type": "integer", "minimum": 1, "description": "rank 0's process"},
+    "ranks": {"type": "integer", "minimum": 1},
+    "directory": {"type": "string"},
+    "socket": {"type": ["string", "null"], "description": "the control socket, once it listens; null in setup, without one, and at the end"},
+    "control_file_interval": {"type": "integer", "minimum": 0},
+    "run_log": {"type": ["string", "null"], "description": "relative to directory"},
+    "scheduler": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["slurm", "pbs", "lsf", "kubernetes", "none"]},
+        "job_id": {"type": "string"},
+        "step_id": {"type": ["string", "null"]},
+        "node": {"type": ["string", "null"]},
+        "pod": {"type": "string"},
+        "namespace": {"type": ["string", "null"]}
+      }
+    },
+    "started": {"type": "string"},
+    "state": {"enum": ["setup", "running", "ended"]},
+    "outcome": {"type": "string", "description": "when ended: as the run log's end record, or error"},
+    "launch_id": {"type": "string", "description": "the ID of the launch that started it (run.launch, --detach)"}
+  },
+  "additionalProperties": true
+}

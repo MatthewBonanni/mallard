@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://matthewbonanni.github.io/mallard/schemas/mallard-run-control.v2.schema.json",
+  "title": "The result of mallard ctl --format json and of the session's run.control; $defs: the requests and replies of the control socket (protocol version 2) and the run log's control records",
+  "type": "object",
+  "required": ["schema", "version", "id", "run_id", "directory", "route", "status", "replies"],
+  "properties": {
+    "schema": {"const": "mallard-run-control"},
+    "version": {"const": 2},
+    "id": {"type": "string"},
+    "run_id": {"type": ["string", "null"]},
+    "directory": {"type": "string"},
+    "route": {"enum": ["socket", "srun", "kubectl", "ssh", "signal", "file"]},
+    "status": {"enum": ["accepted", "done", "refused", "sent"], "description": "sent: a signal or file, with no run log here to confirm it"},
+    "replies": {"type": "array", "items": {"anyOf": [{"$ref": "#/$defs/reply"}, {"$ref": "#/$defs/record"}]}}
+  },
+  "$defs": {
+    "action": {"enum": ["status", "checkpoint", "stop", "set"]},
+    "request": {
+      "type": "object",
+      "required": ["schema", "version", "id", "action"],
+      "properties": {
+        "schema": {"const": "mallard-run-control"},
+        "version": {"const": 2},
+        "id": {"type": "string"},
+        "action": {"$ref": "#/$defs/action"},
+        "settings": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "reply": {
+      "type": "object",
+      "required": ["id", "status", "action"],
+      "properties": {
+        "id": {"type": ["string", "null"]},
+        "status": {"enum": ["accepted", "done", "refused"]},
+        "action": {"oneOf": [{"$ref": "#/$defs/action"}, {"type": "null"}]},
+        "step": {"type": "integer", "minimum": 0},
+        "t": {"type": "number"},
+        "message": {"type": "string", "description": "the text reply of protocol version 1"},
+        "result": {"$ref": "#/$defs/result"},
+        "values": {"type": "object", "description": "status: the lines of message, by name"},
+        "error": {"$ref": "mallard-diagnostic.v1.schema.json"}
+      }
+    },
+    "result": {
+      "type": ["object", "null"],
+      "properties": {
+        "restart": {"type": ["object", "null"], "required": ["path"], "properties": {"path": {"type": "string"}}},
+        "settings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "value", "applied", "message"],
+            "properties": {"key": {"type": "string"}, "value": {"type": "string"}, "applied": {"type": "boolean"}, "message": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "required": ["type", "id", "action", "source", "status", "step", "t", "time", "run_id", "result"],
+      "properties": {
+        "type": {"const": "control"},
+        "id": {"type": ["string", "null"], "description": "null for a signal or control file"},
+        "action": {"$ref": "#/$defs/action"},
+        "source": {"enum": ["socket", "signal", "file"]},
+        "status": {"enum": ["accepted", "done", "refused"]},
+        "step": {"type": "integer", "minimum": 0},
+        "t": {"type": "number"},
+        "time": {"type": "number", "description": "seconds since 1970, UTC"},
+        "run_id": {"type": "string"},
+        "result": {"$ref": "#/$defs/result"},
+        "message": {"type": "string"}
+      }
+    }
+  },
+  "additionalProperties": true
+}

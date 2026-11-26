@@ -52,6 +52,7 @@
 #include "region_motion.h"
 #include "partition.h"
 #include "provenance.h"
+#include "run_endpoint.h"
 #include "run_log.h"
 #include "snapshot_block.h"
 #include "run_report.h"
@@ -107,6 +108,11 @@ std::vector<std::string> boundary_zone_names(Mesh & mesh, const bool distributed
 int Solver::init(const std::string & input_file_name, const std::string & restart_file) {
     std::ifstream in(input_file_name, std::ios::binary);
     provenance::start_run();
+    // Before the setup, so that a run stuck in it is found too; signals end it at once until it runs
+    if (control_enabled && comm::is_root()) {
+        run_endpoint::write(provenance::run_id(), comm::size(), {.state = "setup", .outcome = "", .socket = false,
+                                                                  .control_file_interval = 0, .run_log = ""});
+    }
     provenance::set_input(input_file_name, std::string(std::istreambuf_iterator<char>(in), {}));
     input_from_file = true;
     Input parsed = parse_input(input_file_name);
@@ -2127,6 +2133,7 @@ void Solver::init_output(region::Regions & regions) {
         const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart" &&
                             std::filesystem::exists(run_log_file);
         run_log::open(run_log_file, resume, report_file);
+        endpoint_run_log = run_log_file;
     } else {
         run_log::close();
     }
@@ -3022,6 +3029,12 @@ void Solver::start_run() {
             print_progress();
             unflush_chemistry();
             publish_status();
+            // Running once its status is published: a client that finds the run answers to status with its step
+            if (control_enabled && comm::is_root()) {
+                run_endpoint::write(provenance::run_id(), comm::size(),
+                                    {.state = "running", .outcome = "", .socket = publishing,
+                                     .control_file_interval = control_file_interval, .run_log = endpoint_run_log});
+            }
             // Strang splitting with the half steps of consecutive steps fused into one chemistry call
             defer_chemistry = reacting && fuse_chemistry;
             use_device_steps = device_steps_unsupported().empty();
@@ -3138,12 +3151,16 @@ int Solver::finish_run() {
         if (checkpoint_writer) checkpoint_writer->finish();
         t_wall_output += output_timer.seconds();
         print_summary(stop);
-        write_end_record(stop);
         for (auto & command : stop_replies) {
-            run_control::reply(command, "stopped at step " + std::to_string(step) + ", t = " +
-                                            logging::real(double(t)) + "; restart: " + restart_file);
+            run_control::finish(command, {.ok = true,
+                                          .message = "stopped at step " + std::to_string(step) + ", t = " +
+                                                     logging::real(double(t)) + "; restart: " + restart_file,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = run_control::restart_result(restart_file)});
         }
         stop_replies.clear();
+        write_end_record(stop);
         run_hold.reset();
         return control_stop.empty() ? 0 : EXIT_STOPPED;
     });
@@ -3557,6 +3574,7 @@ void Solver::print_summary(const RunEnd & end) const {
 
 void Solver::write_end_record(const RunEnd & how) {
     end_recorded = true;
+    if (comm::is_root()) run_endpoint::end(how.outcome);
     const double total = timer.seconds();
     const uint64_t steps = step - step_run_start;
     std::optional<DataWriter::Recorded> snapshot, restart;

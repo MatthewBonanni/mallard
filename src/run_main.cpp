@@ -5,6 +5,7 @@
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
 
+#include <cstdlib>
 #include <chrono>
 #include <exception>
 #include <iostream>
@@ -28,6 +29,8 @@
 #include "run_control.h"
 #include "run_log.h"
 #include "session/session.h"
+#include "run_endpoint.h"
+#include "session/run_ctl.h"
 #include "solver/solver.h"
 
 namespace {
@@ -150,6 +153,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
             error = error_text(e);
         }
         if (!error.empty()) {
+            if (comm::is_root()) run_endpoint::end("error");
             if (comm::size() > 1) abort_parallel(code, error);
             logging::error(code, error);
             status = 1;
@@ -222,6 +226,27 @@ int run_main(const cli::Args & args) {
     const std::string log_format = args.value_or("--log-format", "text");
     if (log_format != "text" && log_format != "jsonl") {
         return cli::usage_error(*cli::command(""), "--log-format takes text or jsonl, not " + log_format);
+    }
+    if (args.has("--detach")) {
+        for (const char * var : {"OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMIX_RANK", "SLURM_NTASKS"}) {
+            const char * value = std::getenv(var);
+            if (value && std::string(var) != "PMIX_RANK" && std::atoi(value) > 1) {
+                return cli::usage_error(*cli::command(""), "--detach starts the run itself: not under mpirun or srun");
+            }
+        }
+        run_ctl::Launch launch;
+        launch.input = args.value_or("-i", "");
+        launch.restart = args.value_or("--restart", "");
+        launch.options = args.passthrough;
+        if (args.has("--verbose")) launch.options.push_back("--verbose");
+        if (args.has("--log-format")) launch.options.insert(launch.options.end(), {"--log-format", log_format});
+        try {
+            std::cout << run_ctl::launch(launch) << std::endl;
+            return 0;
+        } catch (const session::Error & e) {
+            std::cerr << "mallard: " << e.what() << "\n";
+            return 1;
+        }
     }
     return solve(args, args.value_or("-i", ""), nullptr, false, log_format == "jsonl");
 }

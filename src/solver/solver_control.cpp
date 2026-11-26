@@ -20,6 +20,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 #include <Kokkos_Core.hpp>
 
@@ -223,8 +224,9 @@ void Solver::diverged() {
     message += evidence.report_file.empty() ? " The divergence report above has the evidence and other causes."
                                             : " " + evidence.report_file + " has the evidence and other causes.";
     message += " See docs/guide/running.md#divergence.";
-    for (auto & command : checkpoint_replies) run_control::reply(command, "error: " + message);
-    for (auto & command : stop_replies) run_control::reply(command, "error: " + message);
+    const run_control::Done refused{.ok = false, .message = "error: " + message, .step = step, .t = double(t), .result = "null"};
+    for (auto & command : checkpoint_replies) run_control::finish(command, refused);
+    for (auto & command : stop_replies) run_control::finish(command, refused);
     checkpoint_replies.clear();
     stop_replies.clear();
     // Collective, as is the divergence: every rank's part of the last files is written and recorded first
@@ -242,17 +244,29 @@ void Solver::act_on_requests() {
     if (acted & run_control::COMMAND) apply_commands();
     if (acted & run_control::CHECKPOINT) {
         checkpoint_requested = true;
+        run_control::Command command;
+        command.text = "checkpoint";
+        command.source = std::exchange(checkpoint_file_seen, false) ? "file" : "signal";
+        run_control::record_accepted(command, step, double(t));
+        checkpoint_replies.push_back(command);
         logging::event(step, double(t), "checkpoint", "requested");
     }
     if (acted & run_control::STOP) {
         // The signal that reached any rank, so that rank 0 records it
         const int signo = comm::allreduce(run_control::stop_signal(), comm::Op::MAX);
+        const bool file = !signo && !stop_file_note.empty();
         if (signo) {
             const std::string name = run_control::signal_name(signo);
             control_stop = {"signal", name, name + " received"};
         } else {
-            const bool file = !stop_file_note.empty();
             control_stop = {"stopped", file ? "stop_file" : "", file ? stop_file_note : "stop requested"};
+        }
+        if (signo || file) {
+            run_control::Command command;
+            command.text = "stop";
+            command.source = signo ? "signal" : "file";
+            run_control::record_accepted(command, step, double(t));
+            stop_replies.push_back(command);
         }
         logging::event(step, double(t), "stop", control_stop.reason);
     }
@@ -280,19 +294,26 @@ void Solver::apply_commands() {
             stop_replies.push_back(command);
             logging::event(step, double(t), "stop", control_stop.reason);
         } else if (line.rfind("set ", 0) == 0) {
-            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), command.source);
+            // The run log's set events name the route as the user knows it
+            const std::string source = command.source == "file" ? "SET file" : "mallard ctl";
+            std::string settings;
+            const auto [ok, reply] = apply_settings(split(line.substr(4), ' '), source, &settings);
             // Without a connection to reply to (the SET file), the run log is the reply
             if (!ok && command.fd < 0 && comm::is_root()) {
-                logging::warning(diagnostic_code::SET_REFUSED, command.source + ": not all settings were applied\n" + reply);
+                logging::warning(diagnostic_code::SET_REFUSED, source + ": not all settings were applied\n" + reply);
             }
-            run_control::reply(command, ok ? reply : "error: not all settings were applied\n" + reply);
+            run_control::finish(command, {.ok = ok,
+                                          .message = ok ? reply : "error: not all settings were applied\n" + reply,
+                                          .step = step,
+                                          .t = double(t),
+                                          .result = json::Object().raw("settings", settings).str()});
         }
     }
 }
 
 std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::string> & assignments,
-                                                    const std::string & source) {
-    std::string reply;
+                                                    const std::string & source, std::string * results) {
+    std::string reply, settings = "[";
     bool ok = true;
     for (const std::string & assignment : assignments) {
         const size_t eq = assignment.find('=');
@@ -305,7 +326,15 @@ std::pair<bool, std::string> Solver::apply_settings(const std::vector<std::strin
             logging::event(step, double(t), "set", what,
                            {{"source", json::quote(source)}, {"setting", json::quote(assignment)}});
         }
+        settings += std::string(settings.size() > 1 ? "," : "") +
+                    json::Object()
+                        .add("key", assignment.substr(0, eq))
+                        .add("value", eq == std::string::npos ? std::string() : assignment.substr(eq + 1))
+                        .add("applied", accepted)
+                        .add("message", what)
+                        .str();
     }
+    if (results) *results = settings + "]";
     return {ok, reply};
 }
 
@@ -428,8 +457,12 @@ void Solver::write_checkpoint() {
     checkpoint_requested = false;
     const std::string file = write_restarts();
     for (auto & command : checkpoint_replies) {
-        run_control::reply(command, "checkpoint at step " + std::to_string(step) + ", t = " +
-                                        logging::real(double(t)) + ": " + file);
+        run_control::finish(command, {.ok = true,
+                                      .message = "checkpoint at step " + std::to_string(step) + ", t = " +
+                                                 logging::real(double(t)) + ": " + file,
+                                      .step = step,
+                                      .t = double(t),
+                                      .result = run_control::restart_result(file)});
     }
     checkpoint_replies.clear();
 }
@@ -446,9 +479,12 @@ void Solver::poll_control_files() {
         in.close();
         std::filesystem::remove("SET", error);
         const std::string assignments = set_file_assignments(text.str());
-        if (!assignments.empty()) run_control::submit("set " + assignments, "SET file");
+        if (!assignments.empty()) run_control::submit("set " + assignments, "file");
     }
-    if (std::filesystem::remove("CHECKPOINT", error)) run_control::request(run_control::CHECKPOINT);
+    if (std::filesystem::remove("CHECKPOINT", error)) {
+        checkpoint_file_seen = true;
+        run_control::request(run_control::CHECKPOINT);
+    }
     if (std::filesystem::remove("STOP", error)) {
         stop_file_note = "STOP file found";
         run_control::request(run_control::STOP);

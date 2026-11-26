@@ -66,6 +66,9 @@ void start_run();
 /** @brief The run's id (rank 0's once shared). */
 const std::string & run_id();
 
+/** @brief A new version 4 UUID (run and request IDs). */
+std::string new_uuid();
+
 /**
  * @brief The run this one restarted from: that run's id (empty where its
  *        file records none: written before Mallard 0.10), the restart file

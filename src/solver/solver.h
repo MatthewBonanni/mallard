@@ -260,9 +260,11 @@ class Solver {
         /**
          * @brief Applies "key=value" settings with apply_setting, each accepted one recorded as a set event of
          *        the run log with its source ("mallard ctl", "SET file", "--set"): whether all were accepted, and
-         *        a line per setting.
+         *        a line per setting; results, if given, gets each setting's key, value, applied and message as a
+         *        JSON array.
          */
-        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source);
+        std::pair<bool, std::string> apply_settings(const std::vector<std::string> & assignments, const std::string & source,
+                                                    std::string * results = nullptr);
 
         /**
          * @brief Advance the solution by one time step. With chemistry, the
@@ -1224,6 +1226,8 @@ class Solver {
         bool wall_time_reached = false;          // on some rank, so on every rank at the same step
         bool end_recorded = false;
         std::string stop_file_note;
+        bool checkpoint_file_seen = false;
+        std::string endpoint_run_log;  // the run log's path, for the endpoint record
         std::vector<run_control::Command> checkpoint_replies, stop_replies;
         std::unique_ptr<DataWriter> checkpoint_writer;  // restarts on request if no [[write_data]] writes them
         bool publishing = false;
