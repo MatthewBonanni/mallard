@@ -18,11 +18,13 @@
 #include <numeric>
 #include <numbers>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
 #include "hdf5_output.h"
+#include "interfaces.h"
 #include "json.h"
 #include "mesh_block.h"
 #include "data_paths.h"
@@ -31,10 +33,13 @@
 #include "case_image.h"
 #include "check.h"
 #include "comm.h"
+#include "cost_model.h"
+#include "cost_model_data.h"
 #include "common_io.h"
 #include "memory_tracker.h"
 #include "mesh_block.h"
 #include "mesh_quality.h"
+#include "output_reader.h"
 #include "partition.h"
 #include "region_input.h"
 #include "report.h"
@@ -230,6 +235,45 @@ TEST(CheckBoundaries, ZonesWithoutAConditionAreNamed) {
     EXPECT_TRUE(mentions(r.errors(), "no condition for zone top (" + std::to_string(n_top) + " faces)"))
         << (first_error(r));
     EXPECT_FALSE(r.ok());
+    ASSERT_EQ(r.unassigned.size(), 1u);
+    EXPECT_EQ(r.unassigned[0].zone, "top");
+    EXPECT_EQ(r.unassigned[0].faces, n_top);
+}
+
+TEST(CheckBoundaries, ASetupStoppedByAZoneWithoutAConditionStillDrawsTheMesh) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_unassigned_view";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "", {"left", "right", "bottom"}), options);
+    EXPECT_FALSE(r.setup_done);
+    EXPECT_FALSE(r.view_file.empty());
+    comm::barrier();
+    if (!comm::is_root()) return;
+#ifndef Mallard_HAS_HDF5
+    std::ifstream vtm(r.view_file);
+    const std::string text((std::istreambuf_iterator<char>(vtm)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("name=\"top\""), std::string::npos);
+#endif
+}
+
+TEST(CheckBoundaries, PeriodicPairsGiveTheirMapFacesAreaAndHowWellTheyMatch) {
+    const std::string input =
+        box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[periodic]]\nzones = [\"left\", \"right\"]\n",
+            N_DIM == 3 ? std::vector<std::string>{"bottom", "top", "back", "front"}
+                       : std::vector<std::string>{"bottom", "top"});
+    const CheckReport r = check(input);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_EQ(r.periodic.size(), 1u);
+    const CheckPeriodic & p = r.periodic[0];
+    EXPECT_EQ(p.zone_a, "left");
+    EXPECT_EQ(p.zone_b, "right");
+    EXPECT_FALSE(p.rotation);
+    EXPECT_NEAR(p.translation[0], 2.0, 1e-12);
+    EXPECT_EQ(p.faces, N_DIM == 3 ? 16u : 8u);
+    EXPECT_NEAR(p.area, N_DIM == 3 ? 0.25 : 1.0, 1e-12);
+    EXPECT_LT(p.node_offset_relative, roundoff(1e-10));
 }
 
 TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
@@ -269,16 +313,134 @@ TEST(CheckTimeStep, EveryIntegratorHasItsLimitAndWarnsAboveIt) {
     }
 }
 
-TEST(CheckCost, GivenThroughputSetsWallTimePerUnitTimeAndFlowThrough) {
+TEST(CheckCost, GivenThroughputCostsTheLargestPartOnEachRankCountBelowLinearScaling) {
     CheckOptions options;
     options.throughput = 1e6;
     options.ranks = comm::size() == 1 ? 2 : comm::size();  // estimates for other counts need a serial check
     const CheckReport r = check(box(), options);
     ASSERT_TRUE(r.ok());
+    ASSERT_NE(r.scaling, nullptr) << "every CPU and the A100 have a step-time model";
     const double n_cells = N_DIM == 3 ? 16 * 8 * 2 : 16 * 8;
     EXPECT_EQ(r.n_cells, uint64_t(n_cells));
-    EXPECT_NEAR(r.wall_per_time, n_cells / (options.ranks * 1e6 * r.dt), roundoff(1e-12) * r.wall_per_time);
+    EXPECT_EQ(r.throughput_source, "option");
+    // Overheads, neighbors and the halo make the run slower than ranks at the single rank's throughput
+    EXPECT_GT(r.wall_per_time, 1.01 * n_cells / (options.ranks * 1e6 * r.dt));
+    EXPECT_LT(r.efficiency, 0.99);
+    EXPECT_GT(r.target_part.halo, 0u);
+    EXPECT_NEAR(r.wall_per_time, check_step_seconds(r, r.target_part, options.ranks) / r.dt,
+                roundoff(1e-12) * r.wall_per_time);
     EXPECT_NEAR(r.flow_through_time, 2.0, roundoff(1e-12));  // Lx / u
+}
+
+TEST(CheckCost, StepTimeGrowsWithTheHaloNeighborsAndExchangesBetweenNodes) {
+    // Every term of the model, with coefficients that all count
+    static const cost_model::Scaling every{"test", 1.0e-4, 0.25, 1.0e-5, 1.0e-8, 1.0e-9, 1.0e-3, 1, 1, 0.0, 0.0, "", ""};
+    CheckReport r;
+    r.throughput = 1e7;
+    r.n_cells = 4'000'000;
+    r.scaling = &every;
+    const PartSize part{1'000'000, 50'000, 2, 0, 0};
+    const double base = check_step_seconds(r, part, 4);
+    PartSize more = part;
+    more.halo *= 4;
+    EXPECT_GT(check_step_seconds(r, more, 4), base);
+    more = part;
+    more.neighbors = 26;
+    EXPECT_GT(check_step_seconds(r, more, 4), base);
+    more = part;
+    more.remote_neighbors = 1;
+    more.halo_remote = 25'000;
+    EXPECT_GT(check_step_seconds(r, more, 16), base);
+    r.particles = 1e5;
+    EXPECT_GT(check_step_seconds(r, part, 4), base);
+    // The fitted models: the halo costs on every device class (CPUs compute it, A100s exchange it between nodes),
+    // and fewer owned cells cost less, but not proportionally less
+    for (const char * device : {"a100", "cpu-apple-m"}) {
+        r.particles = 0.0;
+        r.scaling = cost_model::scaling(device);
+        ASSERT_NE(r.scaling, nullptr) << device;
+        EXPECT_GT(r.scaling->beta + r.scaling->delta, 0.0) << device;
+        const double fitted = check_step_seconds(r, part, 4);
+        PartSize smaller = part;
+        smaller.owned /= 2;
+        EXPECT_GT(check_step_seconds(r, smaller, 8), 0.5 * fitted * 1.01) << device;
+    }
+}
+
+TEST(CheckCost, EachDeviceClassHasItsOwnModel) {
+    EXPECT_EQ(cost_model::device_class("NVIDIA A100-SXM4-80GB (85 GB)", true), "a100");
+    EXPECT_EQ(cost_model::device_class("A100-80GB", true), "a100");
+    EXPECT_EQ(cost_model::device_class("Apple M4 Pro", false), "cpu-apple-m");
+    EXPECT_EQ(cost_model::device_class("AMD EPYC 7763 64-Core Processor", false), "cpu");
+    EXPECT_EQ(cost_model::device_class("NVIDIA H100 80GB HBM3 (85 GB)", true), "gpu");
+    const cost_model::Scaling * gpu = cost_model::scaling("a100");
+    const cost_model::Scaling * cpu = cost_model::scaling("cpu-apple-m");
+    ASSERT_TRUE(gpu && cpu);
+    EXPECT_NE(gpu->t0, cpu->t0);
+    EXPECT_EQ(cost_model::scaling("cpu"), cpu);
+    EXPECT_EQ(cost_model::scaling("gpu"), nullptr);
+    // Throughput: an A100's measurement of the key, not a CPU's, and none for a GPU without measurements
+    cost_model::Workload w{"a100", "NVIDIA A100-SXM4-80GB", 1, 3, "teno5", "ns", 0};
+    const cost_model::Throughput a100 = cost_model::throughput(w);
+    w.device = "cpu-apple-m";
+    w.threads = 2;
+    const cost_model::Throughput apple = cost_model::throughput(w);
+    w.threads = 4;
+    EXPECT_NEAR(cost_model::throughput(w).cells_per_second, 2.0 * apple.cells_per_second, 1e-9 * apple.cells_per_second);
+    EXPECT_GT(a100.cells_per_second, 10.0 * apple.cells_per_second);
+    w.device = "gpu";
+    EXPECT_EQ(cost_model::throughput(w).cells_per_second, 0.0);
+}
+
+TEST(CheckCost, ThroughputIsTheKeysMeasurementsElseTheFitWithItsHeldOutError) {
+    // A measured key: the geometric mean of its measurements
+    const cost_model::Measurement & m = cost_model::MEASUREMENTS[0];
+    cost_model::Workload w{m.device, m.hardware, std::max(1, m.threads), m.dim, m.reconstruction, m.physics,
+                           m.species};
+    double log_sum = 0.0;
+    int n = 0;
+    for (const cost_model::Measurement & k : cost_model::MEASUREMENTS) {
+        if (w.device == k.device && w.dim == k.dim && w.reconstruction == k.reconstruction &&
+            w.physics == k.physics && (w.physics != "reacting" || w.species == k.species)) {
+            log_sum += std::log(k.cells_per_second);
+            n++;
+        }
+    }
+    const double per = std::string(m.device).rfind("cpu", 0) == 0 ? double(w.threads) : 1.0;
+    cost_model::Throughput t = cost_model::throughput(w);
+    EXPECT_NEAR(t.cells_per_second, per * std::exp(log_sum / n), 1e-9 * t.cells_per_second);
+    EXPECT_EQ(t.uncertainty, cost_model::SAME_KEY_ERROR);
+    // TENO-E of order 4 is measured nowhere: fitted halfway between orders 3 and 5 (none measured with LES)
+    w = {"a100", "A100", 1, 3, "teno4", "les", 0};
+    t = cost_model::throughput(w);
+    EXPECT_GT(t.cells_per_second, 0.0);
+    EXPECT_EQ(t.uncertainty, cost_model::MODEL_ERROR);
+    w.reconstruction = "teno3";
+    const cost_model::Throughput teno3 = cost_model::throughput(w);
+    w.reconstruction = "teno5";
+    const cost_model::Throughput teno5 = cost_model::throughput(w);
+    ASSERT_EQ(teno3.uncertainty, cost_model::MODEL_ERROR);
+    ASSERT_EQ(teno5.uncertainty, cost_model::MODEL_ERROR);
+    EXPECT_LT(teno5.cells_per_second, teno3.cells_per_second);
+    EXPECT_NEAR(t.cells_per_second, std::sqrt(teno3.cells_per_second * teno5.cells_per_second),
+                1e-9 * t.cells_per_second);
+}
+
+TEST(CheckCost, EvaluatesTheStepTimeAsTheFitDoesAndInvertsAMeasuredStep) {
+    for (const cost_model::StepCheck & c : cost_model::STEP_CHECKS) {
+        const cost_model::Scaling * s = cost_model::scaling(c.device);
+        ASSERT_NE(s, nullptr) << c.device;
+        cost_model::Part p;
+        p.owned = c.owned;
+        p.halo = c.halo;
+        p.neighbors = c.neighbors;
+        p.halo_remote = c.halo_remote;
+        p.particles = c.particles;
+        p.ranks = c.ranks;
+        const double step = cost_model::step_seconds(*s, c.seconds_per_cell, p);
+        EXPECT_NEAR(step, c.step, 1e-6 * c.step) << c.device;
+        EXPECT_NEAR(cost_model::seconds_per_cell(*s, p, step), c.seconds_per_cell, 1e-9 * c.seconds_per_cell);
+    }
 }
 
 TEST(CheckCost, StepsMeasureTheThroughput) {
@@ -368,6 +530,27 @@ TEST(CheckSizing, FewestRanksTheMeshFitsOn) {
     EXPECT_NEAR(double(r.max_local_cells), double(whole.n_cells) / 3.0, 1.0);
 }
 
+TEST(CheckSizing, AGpuSizedFromAHostBuildLeavesOutWhatGpusFreeAfterSetup) {
+    // The mesh's node lists: GPU runs free them after setup, a host build's device views are the host copies
+    CheckOptions options;
+    ASSERT_EQ(set_memory_target("a100-80", options), "");
+    CheckReport r = check(sized_box(64, 32, false), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    const uint64_t released = r.released_on_devices[size_t(memory::Category::MESH)];
+    if (r.device_memory) {
+        EXPECT_EQ(sum(r.released_on_devices), 0u);
+        return;
+    }
+    EXPECT_GT(released, 0u);
+    EXPECT_EQ(sum(r.released_on_devices), released);
+    EXPECT_LT(released, r.steady_bytes[size_t(memory::Category::MESH)]);
+    r.setup_phases.clear();
+    CheckReport kept = r;
+    kept.released_on_devices.fill(0);
+    const double n = 1e6;
+    EXPECT_NEAR(predicted_peak(kept, n) - predicted_peak(r, n), double(released) / double(r.local_cells) * n, 1.0);
+}
+
 TEST(CheckSizing, CellsPerRankStayWithinTheEntriesOfAView) {
     // With a terabyte per rank, a View of rank 2 or more runs out of entries before the memory does
     CheckOptions options;
@@ -432,6 +615,29 @@ TEST(CheckOutput, CheckCreatesNoFilesAndWritesTheQualityFieldsOnRequest) {
     ASSERT_TRUE(vtu.good());
     const std::string text((std::istreambuf_iterator<char>(vtu)), std::istreambuf_iterator<char>());
     for (const char * field : MeshQuality::FIELDS) EXPECT_NE(text.find(field), std::string::npos) << field;
+}
+
+TEST(CheckOutput, InitialWritesTheInitialStateAsASnapshot) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_initial";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.initial = (dir / "initial").string();
+    std::string input = box();
+    input.replace(input.find("rho = \"1.0\""), 11, "rho = \"1 + x\"");
+    const CheckReport r = check(input, options);
+    ASSERT_TRUE(r.ok()) << (first_error(r));
+    ASSERT_FALSE(r.initial_file.empty());
+    EXPECT_TRUE(output_files_enabled());
+    comm::barrier();
+    if (!comm::is_root() || comm::size() > 1) return;
+    const output::Contents file = output::open(r.initial_file);
+    const std::vector<double> rho = output::read(file, "RHO", 0);
+    ASSERT_EQ(rho.size(), N_DIM == 3 ? 256u : 128u);
+    // The cell averages of 1 + x over 16 cells across [0, 2]
+    EXPECT_NEAR(*std::min_element(rho.begin(), rho.end()), 1.0625, roundoff(1e-10));
+    EXPECT_NEAR(*std::max_element(rho.begin(), rho.end()), 2.9375, roundoff(1e-10));
+    EXPECT_EQ(output::read(file, "P", 0).size(), rho.size());
 }
 
 TEST(CheckUnits, PhysicsUnitsSetsTheUnitsOfWhatIsPrinted) {
@@ -570,6 +776,14 @@ TEST(CheckResolution, ChannelWallUnitsFromTheForcingsBulkReynoldsNumber) {
     EXPECT_NEAR(r.epsilon, r.u_tau * r.u_tau, 1e-5 * r.epsilon);  // u_tau^2 U_b / h with U_b = h = 1
     EXPECT_TRUE(mentions(r.warnings(), "first cells at y+ up to"));
     EXPECT_TRUE(mentions(r.warnings(), "wall cells up to x+"));
+    // Every wall face of an owned cell has its y+ for the case view, and no other face
+    uint64_t walls = 0;
+    for (const double y : r.face_y_plus) {
+        if (!std::isfinite(y)) continue;
+        walls++;
+        EXPECT_NEAR(y, r.y_plus_max, 1e-5 * r.y_plus_max);
+    }
+    EXPECT_EQ(comm::allreduce(walls, comm::Op::SUM), N_DIM == 3 ? 2u * 8u * 4u : 2u * 8u);
 }
 
 namespace {
@@ -700,6 +914,31 @@ TEST(MeshQualityMetrics, SkewedPairOfCellsAgainstHandComputedValues) {
     EXPECT_NEAR(q.cells[0][tri], std::atan(0.5) * 180.0 / std::numbers::pi, roundoff(1e-10));
 }
 
+TEST(MeshQualityMetrics, HistogramsCountEveryCellFromTheSmallestValueToTheLargest) {
+    if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
+    Mesh stretched;
+    stretched.init(parse_input_string(
+        "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 20\nLx = 1.0\nLy = 1.0\nstretching = [0.0, 2.0]\n"));
+    const MeshQuality q = mesh_quality(stretched);
+    const auto s = summarize(stretched, q, 1);
+    const QualitySummary & aspect = s[2];
+    ASSERT_EQ(aspect.counts.size(), QualitySummary::N_BINS);
+    const uint64_t cells = comm::allreduce(uint64_t(stretched.n_owned()), comm::Op::SUM);
+    EXPECT_EQ(std::accumulate(aspect.counts.begin(), aspect.counts.end(), uint64_t(0)), cells);
+    EXPECT_EQ(aspect.min, -comm::allreduce(-*std::min_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
+    EXPECT_EQ(aspect.max, comm::allreduce(*std::max_element(q.cells[2].begin(), q.cells[2].end()), comm::Op::MAX));
+    const double width = (aspect.max - aspect.min) / double(QualitySummary::N_BINS);
+    for (size_t k = 0; k < QualitySummary::N_BINS; k++) {
+        const auto n = std::count_if(q.cells[2].begin(), q.cells[2].end(), [&](double v) {
+            const double lo = aspect.min + width * double(k);
+            return v >= lo - 1e-12 && (k + 1 == QualitySummary::N_BINS ? true : v < lo + width - 1e-12);
+        });
+        EXPECT_EQ(aspect.counts[k], comm::allreduce(uint64_t(n), comm::Op::SUM)) << k;
+    }
+    const std::string json = histogram_json(aspect);
+    EXPECT_EQ(json.rfind("{\"edges\": [", 0), 0u) << json;
+}
+
 TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
     if (N_DIM != 2) GTEST_SKIP() << "2D mesh";
     const auto input = parse_input_string(
@@ -715,6 +954,47 @@ TEST(MeshQualityMetrics, StretchedMeshVolumeRatioIsTheLargestSpacingRatio) {
     }
     const auto s = summarize(mesh, mesh_quality(mesh), 1);
     EXPECT_NEAR(s[3].max, expected, roundoff(1e-10));
+}
+
+TEST(LargestPart, PeriodicSeamsNeighborsAndHaloOnOtherNodes) {
+    // 8 x 8 quads periodic in x, in slabs: each slab's first halo layer is the column on either side, across the
+    // seam too, owned by its neighbors
+    if (N_DIM != 2) GTEST_SKIP() << "2D block";
+    const MeshBlock block = cartesian_2d_block(8, 8, 1.0, 1.0, MeshType::CARTESIAN, 0, 1);
+    auto slabs = [&](const int n) {
+        std::vector<int> owner(block.n_cells());
+        for (uint64_t c = 0; c < block.n_cells(); c++) {
+            double x = 0.0;
+            for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
+                x += block.node_coords[block.cell_nodes[k] - block.first_node][0];
+            }
+            owner[c] = static_cast<int>(n * x / double(block.cell_offsets[c + 1] - block.cell_offsets[c]));
+        }
+        return owner;
+    };
+    // Nodes at x = 1 are keyed by those at x = 0
+    std::vector<uint64_t> keys(block.n_nodes());
+    for (uint64_t n = 0; n < block.n_nodes(); n++) {
+        keys[n] = n;
+        for (uint64_t m = 0; m < block.n_nodes() && block.node_coords[n][0] > 1.0 - 1e-12; m++) {
+            if (block.node_coords[m][0] < 1e-12 && std::fabs(block.node_coords[m][1] - block.node_coords[n][1]) < 1e-12) {
+                keys[n] = m;
+            }
+        }
+    }
+    EXPECT_EQ(largest_part(block, slabs(2), 2, 1).halo, 8u);
+    const PartSize two = largest_part(block, slabs(2), 2, 1, keys);
+    EXPECT_EQ(two.halo, 16u);
+    EXPECT_EQ(two.neighbors, 1);
+    const PartSize four = largest_part(block, slabs(4), 4, 1, keys);
+    EXPECT_EQ(four.owned, 16u);
+    EXPECT_EQ(four.halo, 16u);
+    EXPECT_EQ(four.neighbors, 2);
+    EXPECT_EQ(four.remote_neighbors, 0);
+    // Two ranks per node: slab 0 has slab 1 beside it, and slab 3, on the other node, across the seam
+    const PartSize nodes = largest_part(block, slabs(4), 4, 1, keys, 2);
+    EXPECT_EQ(nodes.remote_neighbors, 1);
+    EXPECT_EQ(nodes.halo_remote, 8u);
 }
 
 TEST(LargestPart, HaloLayersOfNodeNeighbors) {
@@ -918,6 +1198,7 @@ TEST(CheckRegions, RegionsFromSurfaceFilesReportTheirBoxAndWarnOfLikelyUnitError
     EXPECT_NEAR(g.box[0][0], 0.8, 1e-15);
     EXPECT_NEAR(g.box[1][1], 0.7, 1e-15);
     EXPECT_NEAR(g.own_measure, N_DIM == 3 ? 0.4 * 0.4 * 0.15 : 0.4 * 0.4, 1e-15);
+    EXPECT_NE(check_text(placed, false).find("Regions from surface files"), std::string::npos);
     // Millimeters read as meters: 1000 times larger than it should be
     const CheckReport wrong = run("{type = \"stl\", file = \"" + mm + "\", units = \"m\"}");
     EXPECT_TRUE(mentions(wrong.warnings(), "times larger, which is likely a unit error")) << first_error(wrong);
@@ -994,6 +1275,221 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
         EXPECT_NE(svg.find(">left: inlet_state, T = 1.0 K, p = 1.0 Pa, u = [1.0, 0.0"), std::string::npos) << image;
         EXPECT_NE(svg.find(">bottom: wall_isothermal, T = 1.2 K<"), std::string::npos) << image;
         EXPECT_NE(svg.find(">right: outlet_pressure, p = 1.0 Pa<"), std::string::npos) << image;
+    }
+}
+
+#ifndef Mallard_HAS_HDF5
+TEST(CaseView, BlockFilesHaveDistinctNamesWindowsAccepts) {
+    const std::vector<std::string> names = {"inlet", "Inlet", "probes[name = \"wake\"]", "a:b", "a_b", "a/b",
+                                            "con", "Aux.region", "x<y>z|w?*\\v", "trailing. "};
+    std::vector<case_view::Block> blocks;
+    for (const std::string & name : names) {
+        case_view::Block b;
+        b.name = name;
+        b.add_cell(case_view::VERTEX, std::vector<std::array<double, 3>>{{0.0, 0.0, 0.0}});
+        blocks.push_back(b);
+    }
+    const std::filesystem::path dir = scratch_dir() / "mallard_case_view_names";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string vtm = case_view::write((dir / "case.vtkhdf").string(), blocks);
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const std::set<std::string> devices = {"CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4",
+                                           "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+                                           "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    std::set<std::string> seen;
+    for (const auto & entry : std::filesystem::directory_iterator(dir / "case_blocks")) {
+        const std::string file = entry.path().filename().string();
+        EXPECT_EQ(file.find_first_of("<>:\"/\\|?*"), std::string::npos) << file;
+        EXPECT_TRUE(std::none_of(file.begin(), file.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; }));
+        EXPECT_NE(file.back(), '.') << file;
+        EXPECT_NE(file.back(), ' ') << file;
+        std::string device = file.substr(0, file.find('.'));
+        while (!device.empty() && device.back() == ' ') device.pop_back();
+        std::transform(device.begin(), device.end(), device.begin(), [](char c) { return char(std::toupper(c)); });
+        EXPECT_FALSE(devices.count(device)) << file;
+        std::string folded = file;
+        std::transform(folded.begin(), folded.end(), folded.begin(), [](char c) { return char(std::tolower(c)); });
+        EXPECT_TRUE(seen.insert(folded).second) << file;
+    }
+    EXPECT_EQ(seen.size(), names.size());
+    // Readers follow file= to every block, which keeps its name; names Windows accepts are the files'
+    const std::string text = read_file(vtm);
+    for (const std::string & name : names) {
+        const std::string tag = "name=\"" + case_image::xml_text(name) + "\" file=\"";
+        const size_t at = text.find(tag);
+        ASSERT_NE(at, std::string::npos) << name;
+        const std::string file = text.substr(at + tag.size(), text.find('"', at + tag.size()) - at - tag.size());
+        EXPECT_TRUE(std::filesystem::exists(dir / file)) << name;
+        if (name == "inlet" || name == "a_b") {
+            EXPECT_EQ(file, "case_blocks/" + name + ".vtu");
+        }
+    }
+}
+#endif
+namespace {
+
+/** @brief view_case with a snapshot region and a sponge, whose blocks need their elements found by prefix and index. */
+std::string view_case_with_elements() {
+    const std::string box_region = N_DIM == 2 ? "{type = \"rectangle\", center = [1.5, 0.5], size = [0.2, 0.2]}"
+                                              : "{type = \"box\", center = [1.5, 0.5, 0.125], size = [0.2, 0.2, 0.1]}";
+    return view_case() + "[[write_data]]\nprefix = \"out/near_wake\"\nformat = \"vtu\"\nfields = [\"P\"]\ninterval = 5\nregion = " +
+           box_region + "\n[[sponges]]\nstrength = 1.0\nregion = " + box_region + "\nu = " + U_ZERO +
+           "\np = 1.0\nT = 1.0\n";
+}
+
+const case_view::BlockInfo * find_block(const std::vector<case_view::BlockInfo> & blocks, const std::string & name) {
+    for (const case_view::BlockInfo & b : blocks) {
+        if (b.name == name) return &b;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST(CheckRegions, CaseViewBlocksCarryTheirKindKeyElementAndZone) {
+    const std::filesystem::path dir = scratch_dir() / "mallard_check_view_metadata";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    CheckOptions options;
+    options.view_dir = dir.string();
+    const CheckReport r = check(view_case_with_elements(), options);
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    struct Expected {
+        std::string name, kind, key, element;
+        int64_t index;
+        std::string zone;
+    };
+    const int64_t bottom = N_DIM == 3 ? 4 : 2;  // left, right, (back, front,) bottom, top
+    const std::string wake = "write_data[prefix = \"out/near_wake\"]";
+    const std::vector<Expected> expected = {
+        {"domain", "mesh", "", "", -1, ""},
+        {"left", "boundary", "boundaries[name = \"left\"]", "boundaries[name = \"left\"]", 0, "left"},
+        {"bottom", "boundary", "boundaries[name = \"bottom\"]", "boundaries[name = \"bottom\"]", bottom, "bottom"},
+        {"heater", "region", "regions.heater", "regions.heater", -1, ""},
+        {"probes[name = \"s\"].region", "probe", "probes[name = \"s\"].region", "probes[name = \"s\"]", 0, ""},
+        {"probes[name = \"wake\"]", "probe", "probes[name = \"wake\"]", "probes[name = \"wake\"]", 1, ""},
+        {"probes[name = \"tap\"]", "probe", "probes[name = \"tap\"]", "probes[name = \"tap\"]", 2, ""},
+        // The block's name has no slashes; its key is the input's
+        {"write_data[prefix = \"out_near_wake\"].region", "snapshot", wake + ".region", wake, 0, ""},
+        {"sponges[0].region", "region", "sponges[0].region", "sponges[0]", 0, ""},
+    };
+    for (const Expected & e : expected) {
+        const case_view::BlockInfo * b = find_block(r.view_blocks, e.name);
+        ASSERT_NE(b, nullptr) << e.name;
+        EXPECT_EQ(case_view::kind_name(b->kind), e.kind) << e.name;
+        EXPECT_EQ(b->key, e.key) << e.name;
+        EXPECT_EQ(b->element, e.element) << e.name;
+        EXPECT_EQ(b->index, e.index) << e.name;
+        EXPECT_EQ(b->zone, e.zone) << e.name;
+        EXPECT_GT(b->cells, 0u) << e.name;
+    }
+
+    const json::Value report = json::parse(check_json(r));
+    const json::Value * view = report.find("view");
+    ASSERT_NE(view, nullptr);
+    EXPECT_EQ(view->find("schema")->string, interfaces::CASE_VIEW.name);
+    EXPECT_EQ(view->find("version")->number, interfaces::CASE_VIEW.version);
+    EXPECT_FALSE(view->find("geometry_only")->boolean);
+    EXPECT_EQ(view->find("files")->array.size(), 3u);
+    ASSERT_EQ(view->find("blocks")->array.size(), r.view_blocks.size());
+    for (const json::Value & b : view->find("blocks")->array) {
+        if (b.find("key")->string != wake + ".region") continue;
+        EXPECT_EQ(b.find("kind")->string, "snapshot");
+        EXPECT_EQ(b.find("element")->string, wake);
+        EXPECT_EQ(b.find("index")->number, 0.0);
+        EXPECT_EQ(b.find("zone")->type, json::Value::Type::NUL);
+    }
+
+    // Each block's metadata as its field data, in the ParaView file
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const std::string block = "probes[name = \"s\"].region";
+#ifdef Mallard_HAS_HDF5
+    const auto datasets = h5_all_datasets(r.view_file);
+    auto text = [&](const std::string & name) {
+        const std::vector<char> & bytes = datasets.at("VTKHDF/" + block + "/FieldData/" + name);
+        return std::string(bytes.begin(), std::find(bytes.begin(), bytes.end(), '\0'));
+    };
+    EXPECT_EQ(text("kind"), "probe");
+    EXPECT_EQ(text("key"), block);
+    EXPECT_EQ(text("element"), "probes[name = \"s\"]");
+    EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/element_index"));
+    EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/metadata_version"));
+#else
+    const std::string vtu = read_file(dir / "case_blocks" / "probes[name = _s_].region.vtu");  // Windows-safe file name
+    auto bytes = [](const std::string & s) {
+        std::string out;
+        for (const char ch : s) out += std::to_string(int(static_cast<unsigned char>(ch))) + " ";
+        return out + "0";
+    };
+    EXPECT_NE(vtu.find("Name=\"kind\" NumberOfTuples=\"1\" format=\"ascii\">\n" + bytes("probe")), std::string::npos);
+    EXPECT_NE(vtu.find("Name=\"element\" NumberOfTuples=\"1\" format=\"ascii\">\n" + bytes("probes[name = \"s\"]")),
+              std::string::npos);
+    EXPECT_NE(vtu.find("Name=\"element_index\" NumberOfTuples=\"1\" format=\"ascii\">\n0\n"), std::string::npos);
+#endif
+}
+
+TEST(CheckRegions, AGeometryOnlyViewDrawsWhatTheWholeCheckDrawsWithoutTheInitialState) {
+    const std::filesystem::path full_dir = scratch_dir() / "mallard_check_view_full";
+    const std::filesystem::path geometry_dir = scratch_dir() / "mallard_check_view_geometry";
+    if (comm::is_root()) {
+        std::filesystem::remove_all(full_dir);
+        std::filesystem::remove_all(geometry_dir);
+    }
+    comm::barrier();
+    // TENO's stencils and an initial state from a restart file that is not there yet: neither is geometry
+    std::string input = view_case_with_elements();
+    const std::string first_order = "[numerics.face_reconstruction]\ntype = \"FO\"\n";
+    input.replace(input.find(first_order), first_order.size(), "[numerics.face_reconstruction]\ntype = \"TENO\"\n");
+    std::string missing_restart = input;
+    const std::string analytical = "[initialize]\ntype = \"analytical\"\n";
+    missing_restart.replace(missing_restart.find(analytical), analytical.size(),
+                            "[initialize]\ntype = \"restart\"\nfile = \"" +
+                                (scratch_dir() / "mallard_no_such.restart").string() + "\"\n");
+    CheckOptions full;
+    full.view_dir = full_dir.string();
+    const CheckReport whole = check(input, full);
+    ASSERT_TRUE(whole.ok()) << first_error(whole);
+    EXPECT_FALSE(check(missing_restart).setup_done);
+    CheckOptions geometry;
+    geometry.view_dir = geometry_dir.string();
+    geometry.geometry_only = true;
+    const CheckReport g = check(missing_restart, geometry);
+    ASSERT_TRUE(g.ok()) << first_error(g);
+    EXPECT_TRUE(g.geometry_only);
+    EXPECT_EQ(g.dt, 0.0);
+
+    ASSERT_EQ(g.view_blocks.size(), whole.view_blocks.size());
+    for (size_t i = 0; i < g.view_blocks.size(); i++) {
+        const case_view::BlockInfo & a = whole.view_blocks[i], & b = g.view_blocks[i];
+        EXPECT_EQ(b.name, a.name);
+        EXPECT_EQ(b.kind, a.kind) << a.name;
+        EXPECT_EQ(b.key, a.key) << a.name;
+        EXPECT_EQ(b.element, a.element) << a.name;
+        EXPECT_EQ(b.index, a.index) << a.name;
+        EXPECT_EQ(b.cells, a.cells) << a.name;
+    }
+    ASSERT_EQ(g.regions.size(), whole.regions.size());
+    for (size_t i = 0; i < g.regions.size(); i++) {
+        EXPECT_EQ(g.regions[i].name, whole.regions[i].name);
+        EXPECT_EQ(g.regions[i].cells, whole.regions[i].cells) << whole.regions[i].name;
+        EXPECT_EQ(g.regions[i].measure, whole.regions[i].measure) << whole.regions[i].name;
+    }
+    EXPECT_TRUE(json::parse(check_json(g))["view"]["geometry_only"].boolean);
+    comm::barrier();
+    if (!comm::is_root()) return;
+#ifdef Mallard_HAS_HDF5
+    EXPECT_EQ(h5_all_datasets(g.view_file), h5_all_datasets(whole.view_file));
+#else
+    for (const auto & entry : std::filesystem::directory_iterator(full_dir / "case_blocks")) {
+        EXPECT_EQ(read_file(geometry_dir / "case_blocks" / entry.path().filename()), read_file(entry.path()))
+            << entry.path().filename();
+    }
+#endif
+    for (const char * image : {"case-light.svg", "case-dark.svg"}) {
+        EXPECT_EQ(read_file(geometry_dir / image), read_file(full_dir / image)) << image;
     }
 }
 
@@ -1289,8 +1785,30 @@ CheckReport report_case() {
     r.setup_bytes[size_t(memory::Category::STATE)] = r.steady_bytes[size_t(memory::Category::STATE)] = 27'100;
     r.setup_bytes[size_t(memory::Category::MESH)] = r.steady_bytes[size_t(memory::Category::MESH)] = 42'900;
     r.setup_bytes[size_t(memory::Category::SETUP)] = 58'100;
+    r.released_on_devices.fill(0);
+    r.released_on_devices[size_t(memory::Category::MESH)] = 4'200;
     r.bytes = r.target_bytes = 70'000;
     r.bytes_peak = r.target_bytes_peak = 128'100;
+    // The cost on an A100 by a model of fixed coefficients
+    static const cost_model::Scaling scaling{"a100", 1.0e-4, 0.25, 1.0e-5, 1.0e-8, 0.0, 0.0, 40, 6, 0.03, 0.05,
+                                             "case a 4.0%, case b 6.0%", "NVIDIA A100-SXM4-80GB, 2026-11-22"};
+    r.workload = {"a100", "A100-80GB", 1, 2, "fo", "euler", 0};
+    r.scaling = &scaling;
+    r.ranks_per_node = 8;
+    r.ranks_per_node_basis = "8 GPUs per node";
+    r.uncertainty = scaling.held_out_error;
+    r.scalings.clear();
+    for (const PartSize & part : {PartSize{128, 0, 0, 0, 0}, PartSize{64, 16, 1, 0, 0}, PartSize{32, 24, 3, 0, 0}}) {
+        CheckScaling row;
+        row.ranks = static_cast<int>(128 / part.owned);
+        row.part = part;
+        row.step = check_step_seconds(r, part, row.ranks);
+        row.efficiency = r.scalings.empty() ? 1.0 : r.scalings[0].step / (row.ranks * row.step);
+        row.wall_per_time = row.step / r.dt;
+        r.scalings.push_back(row);
+    }
+    r.efficiency = 1.0;
+    r.wall_per_time = r.sizing_wall_per_time = r.scalings[0].wall_per_time;
     return r;
 }
 
@@ -1383,6 +1901,13 @@ TEST(CheckReportJson, ReadsBackTheReportsNumbersAndDiagnostics) {
     EXPECT_EQ(v["memory"]["bytes_peak"].number, double(r.bytes_peak));
     EXPECT_EQ(v["memory"]["at_setup_peak"]["setup"].number, 58'100.0);
     EXPECT_EQ(v["cost"]["wall_per_time"].number, r.wall_per_time);
+    EXPECT_EQ(v["cost"]["model"]["held_out_error"].number, 0.05);
+    ASSERT_EQ(v["cost"]["scaling"].array.size(), r.scalings.size());
+    for (size_t i = 0; i < r.scalings.size(); i++) {
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["ranks"].number, r.scalings[i].ranks);
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["halo"].number, double(r.scalings[i].part.halo));
+        EXPECT_EQ(v["cost"]["scaling"].array[i]["efficiency"].number, r.scalings[i].efficiency);
+    }
     EXPECT_EQ(v["mesh_quality"]["ASPECT_RATIO"]["max"].number, r.quality[2].max);
 }
 

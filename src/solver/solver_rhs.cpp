@@ -238,7 +238,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
             polynomial_exchange.start(comm_space, polynomials);
         }
         if (viscous_gradients_due) {
-            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         face_exchange.finish(comm_space, face_solution);
         if (polynomial_viscous) polynomial_exchange.finish(comm_space, polynomials);
@@ -262,7 +262,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
     ViscousFluxFunctor viscous_functor;
     if (physics.is_viscous()) {
         if (viscous_gradients_due && !own_faces) {
-            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+            gated::parallel_for("viscous_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
         }
         if (les_on) update_eddy_viscosity(mesh->n_cells);
         if (wall_model_on) update_wall_model();
@@ -321,8 +321,8 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
 void Solver::set_polynomial_flux(ViscousFluxFunctor & functor) const {
     const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
     functor.polynomials = CellPolynomials{teno.polynomials, mesh->cell_coords, teno.degree};
-    functor.points = FacePoints{teno.quadrature_face.points, teno.offsets_nodes_of_face, teno.nodes_of_face,
-                                teno.node_coords, mesh->face_coords, teno.face_quad_points};
+    functor.points = FacePoints{teno.quadrature_face.points, teno.face_nodes, teno.node_coords, mesh->face_coords,
+                                teno.face_quad_points, teno.face_rule};
     functor.face_solution = face_solution;
     functor.quad_weights = teno.quadrature_face.weights;
     functor.face_weights = flux_weights;
@@ -355,10 +355,10 @@ void Solver::reconstruct_near_partition(const State & state, const bool exchange
     if (late_cells.size() > 0) face_reconstruction->calc_cell_face_values(comm_space, W_cells, face_solution, late_cells);
 }
 
-void Solver::exchange_for_first_stage() {
+void Solver::exchange_for_first_stage(const bool overlap) {
     // The first stage's interior reconstruction does not depend on dt: start it
     // before the exchange and the dt reduction, so that it covers both
-    if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
+    if (overlap && halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
         if (reconstruction_started) {
             discard_reconstruction();
         } else if (les_on && les.reconstruction_gradients) {
@@ -421,7 +421,7 @@ uint32_t Solver::n_gradient_cells() const {
 }
 
 void Solver::update_upwind_sensor() {
-    gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient);
+    gated::parallel_for("upwind_gradients", HeavyRange<>(0, n_gradient_cells()), viscous_gradient());
     Kokkos::View<rtype *, Kokkos::LayoutStride> cell_gamma;
     if (is_mixture()) cell_gamma = Kokkos::subview(cell_scalars, Kokkos::ALL(), species_names.size());
     gated::parallel_for("upwind_sensor", n_gradient_cells(),

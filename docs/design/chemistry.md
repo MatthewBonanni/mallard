@@ -1533,11 +1533,23 @@ Accepted cells leave the queue (a second scan of the flags) before it is
 ordered by cost and balanced across ranks, so the RODAS kernels, unchanged,
 integrate only the others, with no idle lanes for the cells that finished;
 an accepted step counts one sub-step and leaves `CHEM_H` as it was. A
-failed step negates `CHEM_H` (issue #1089), and a negative `CHEM_H` is no
+failed step negates `CHEM_H` (issue #1089; without a last sub-step,
+`-h_initial`, RODAS's first one), and a negative `CHEM_H` is no
 candidate: RODAS starts from its magnitude and keeps the sign as long as its
 proposal covers a call, so a cell that stays stiff (burnt gas) tries once,
 not every call, and tries again once its sub-steps have fallen short of a
-call (a front passing) and grown back. The
+call (a front passing) and grown back. The run's summary reports the share
+of integrations the explicit steps took and the cells marked at the end.
+
+A smaller `dt` does not clear the mark, although the stiffness bound
+`h lambda <= 2.5` may then hold. Keeping the `dt` of the failure in
+`CHEM_H` instead of RODAS's proposal was tried and rejected: with fused
+Strang half steps the calls alternate between `dt/2` and `dt`, so a
+half-step call retries every marked cell, and seeding RODAS from the
+failed call's `dt` rather than its proposal costs a sub-step in the next
+full call (burnt H2/air: 45 to 81 sub-steps over 5 steps of a
+9-cell box) and changes results. A separate per-cell `dt` would have to
+travel with restarts and the balancing. The
 explicit pass is one kernel over the queue, by one thread or the lanes of
 a team per cell like RODAS, and one scan, all on the device: no host work
 and graph-capturable. Whether a cell takes the explicit step depends only
@@ -1566,14 +1578,105 @@ The H2 flame's explicit steps take nearly half of its chemistry time off.
 burning out in hot gas); about half the cells that try the explicit step
 fail, most of them burnt gas whose fractional-order fuel consumption is
 stiff, and as each of them tries once rather than every call its chemistry
-stays within 0.5% of RODAS alone. Off by default (issue #1090: enabling it
-where it pays).
+stays within 1% of RODAS alone. Off by default (issue #1090: enabling it
+where it pays). `flame_3d`'s differences above predate the per-species
+bounds of the mass fractions ([reconstruction](#reconstruction), issue
+#1169): its 0D reactors agree to 1e-11 with and without the option, and
+the shared limiter amplified that noise; with the bounds, `explicit_step`
+moves its temperature by 1.5e-7 K.
 `ReactingTest.ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance`
 bounds the change of a constant-volume ignition (h2o2) at 2 delays to 1e-5
 of `T`, against RODAS's own 5e-5 from Cantera;
 `ReactingTest.CellsWhoseExplicitStepFailedStopTryingIt` checks that a
 failed step leaves RODAS's state and proposal bitwise as without the option,
-with `CHEM_H` negated, and that an ignition's short sub-steps clear it.
+with `CHEM_H` negated, also in a cell's first call (there, in single
+precision, the proposal only to rounding), and that an ignition's short
+sub-steps clear it.
+
+Which cells take it, and what it saves, on two flames of V8 (phi 1, 300 K,
+1 atm, 20 cells per thermal thickness, from Cantera's) on 2 threads of an
+Apple M4 Pro CPU (`tools/docs/chemistry.py`): the 1D flames, and 2D wrinkled
+ones of 300 x 64 cells (`flame_restart.py --ny 64 --perturb 2`), the
+chemistry time per step the best of three runs of 100 (H2) and 30 (CH4)
+steps:
+
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-light.svg#gh-light-mode-only)
+![Cells that keep, fail and skip the explicit step across 1D H2/air and CH4/air flames, and the chemistry time per step of 2D wrinkled flames without and with explicit steps](../images/guide/chemistry_explicit_step-dark.svg#gh-dark-mode-only)
+
+Every reacting cell of the H2 flame keeps the explicit step at its time step
+of 8 ns, and its chemistry runs 1.91 times faster. Every reacting cell of the
+CH4 flame fails it at the first call, as GRI-3.0 is stiff over 13 ns wherever
+the flame reacts, and then skips it: its chemistry time stays within the
+run-to-run spread of this shared machine (0.95 times as fast).
+
+### Explicit steps in the examples (issue #1090)
+
+Each reacting example was run from its initial state with and without
+`explicit_step`, and once more without it at `rtol` and `atol` ten times
+smaller, whose difference from the first run is RODAS's own error at the
+example's tolerances. CPU (AMD EPYC 7763, OpenMP), the example's own input
+and time step; the cheap cases to their end, where their validation quantity
+is measured, the others over a window of their first steps. Chemistry and
+step are wall times per step, the medians of two runs of each alternated
+one after the other; `T` and `Y` are the largest differences from RODAS
+alone at the end of the run (full runs: over every snapshot), with RODAS's
+own error in brackets.
+
+| Example | Run, threads | Chemistry, RODAS → explicit | Step | `T` (RODAS's own) | `Y` | Validation, both runs | Set |
+|---|---|---|---|---|---|---|---|
+| `premixed_flame` | 35,848 steps (all), 1 | 3.32 → 1.95 ms | 8.18 → 6.80 ms | 8.6e-6 K (4.3e-6) | 1.2e-9 | consumption speed +0.384% | yes |
+| `flame_outflow` | 10,507 (all), 1 | 0.48 → 0.32 ms | 1.49 → 1.25 ms | 9.3e-5 K (7.5e-6) | 4.6e-8 | pressure within 756.32 Pa of the target | yes |
+| `flame_2d` | 500, 8 | 130 → 74 ms | 313 → 238 ms | 4.8e-7 K (7.3e-7) | 1.3e-9 | | yes |
+| `flame_2d/unity` | 500, 8 | 102 → 73 ms | 258 → 224 ms | 2.2e-6 K (1.0e-6) | 1.3e-9 | | yes |
+| `flame_vortex` | 2,000, 8 | 45.3 → 27.8 ms | 116 → 98 ms | 9.0e-6 K (6.2e-7) | 1.2e-7 | | yes |
+| `autoignition_2d` | 500, 8 | 332 → 190 ms | 685 → 534 ms | 7e-12 K (1e-10) | 3e-15 | ignition (below) | yes |
+| `reacting_mixing_layer` | 1,000, 8 | 71.1 → 46.7 ms | 239 → 220 ms | 2.1e-6 K (1.9e-6) | 1.4e-9 | | yes |
+| `triple_flame/tfles` | 2,000, 4 | 24.8 → 17.5 ms | 119 → 113 ms | 1.4e-4 K (1.0e-5) | 6.9e-8 | | yes |
+| `flame_turbulence` (DNS) | 200, 10 (timed over 20, 8) | 4.04 → 2.64 s | 14.5 → 13.1 s | 2.6e-4 K (2.6e-4) | 2.5e-10 | | yes |
+| `triple_flame` | 1,000, 8 | 59.1 → 51.9 ms | 452 → 460 ms | 8.6e-8 K (4.1e-6) | 7.1e-11 | | no |
+| `triple_flame/thick` | 500, 8 | 101 → 90 ms | 700 → 697 ms | 3.2e-7 K (3.9e-6) | 5.0e-10 | | no |
+| `flame_vortex_quenching` | 1,000, 4 | 6.37 → 5.70 ms | 87 → 85 ms | 5.1e-8 K (4.1e-6) | 6.3e-12 | | no |
+| `counterflow_diffusion` | 1,000, 8 | 51.1 → 44.4 ms | 233 → 229 ms | 2.7e-8 K (1.2e-4) | 2.4e-11 | | no |
+| `reactive_shock_tube` | 8,568 (all), 2 | 10.0 → 9.2 ms | 19.6 → 18.4 ms | 1.0 K (5.7) | 1.2e-4 | fronts at 33.225 and 99.725 mm | no |
+| `detonation_1d` | 11,149 (all), 2 | 30.7 → 29.7 ms | 47.9 → 46.6 ms | 8.4e-3 K (5.3e-4) | 3.6e-7 | front speed 1617.9 m/s | no |
+| `detonation_2d` | 100, 8 | 806 → 820 ms | 1961 → 1970 ms | 1.1e-4 K (1.8e-6) | 8.1e-8 | | no |
+| `detonation_3d` (2D stage) | 300, 8 | 239 → 240 ms | 389 → 387 ms | 0.42 K (0.49) | 4.0e-4 | | no |
+| `premixed_flame/ch4` (GRI-3.0) | 3,000, 2 | 29.3 → 29.6 ms | 60.1 → 60.5 ms | 9e-10 K (1.0e-5) | 3e-13 | | no |
+| `flame_turbulence` (`les.toml`) | 2,000, 2 | 154 → 102 ms | 383 → 329 ms | 0.017 K (1.1e-6) | 1.6e-6 | | no |
+
+An example sets `explicit_step = true` where the explicit steps take at
+least 5% off its step on CPUs and every difference from RODAS alone stays
+within the chemistry's relative tolerance (`T` and each mass fraction within
+`rtol` = 1e-6 of their largest values), with the validation quantity of the
+full runs unchanged in every digit the example reports. Where it is set, the
+chemistry runs 1.4 to 1.8 times faster and the step 1.05 to 1.28 times; on an A100,
+where the flow takes less of the step, the same chemistry gain is worth more
+(the 2D H2 flame above: 16.4 to 12.0 ms per step). The detonations and the
+GRI-3.0 flame gain nothing: their active cells are stiff over a call (the
+burnt gas behind a front, a 53-species flame at a 13 ns step), so few pass
+and the others stay with RODAS. `triple_flame`, `thick`, `flame_vortex_quenching` and
+`counterflow_diffusion` gain 11% to 14% in chemistry, but their chemistry
+is 7% to 22% of the step (mixture-averaged transport and radiation take the
+rest), less than 3% of it; `reactive_shock_tube` gains 4%.
+
+The time step decides which cells qualify (`h lambda <= 2.5`): the
+autoignition at 128 um cells instead of 10.25 um (a step of 38 ns instead
+of 3 ns) took no explicit step at all, bitwise RODAS alone. At the example's
+own step, single cells of its mixture (41 atm, 1070 and 1110 K) ignite with
+their heat release peaking at the same time to five digits (0.9999 and 0.4709
+of the 1070 K delay of 3.650 ms) and mean temperatures within 2e-9 K over the
+whole ignition (RODAS's own error 2.5e-4 K), with chemistry 1.44 and 1.26
+times faster: the example's ignition and front statistics are unchanged.
+
+`les.toml` (thickened flame on cells 8 times larger, 9.5 times the DNS's
+step) is left off although its chemistry runs 1.52 times faster: after 2,000
+steps the explicit steps move `T` by 0.017 K and `Y_H2O` by 1.6e-6, about
+8e-6 and 6e-6 of their largest values, beyond `rtol`, and by 0.010 K still
+at `rtol` 1e-7, where RODAS alone moves by 1e-6 K. Why it does not shrink
+with the tolerances is not known yet. The other thickened flame,
+`triple_flame/tfles`, stays within 7e-8 of `T` and 3e-7 of `Y_O2`.
+`volvo_bluff_body` (propane two-step, thickened, 3D) was not measured: its
+chemistry is that of `flame_3d`, which does not gain.
 
 ### BDF integrator (issue #143)
 
@@ -1689,6 +1792,27 @@ Where it gains:
   and BDF 1.05, and both pay for a Jacobian and factorization of 57k
   entries. On the CPU, where a cell's work is serial, BDF's cheaper sub-step
   shows (1.39).
+
+The same comparison on the two small mechanisms, against `atol`
+(`tools/docs/chemistry.py`): the largest ignition-delay error of the V1 and
+V2 cases against Cantera, each run to 2 delays in four calls, and the
+throughput of `benchmarks/chemistry` with fewer cells (16,384 and 4,096),
+the best of 10 calls, on 2 threads of an Apple M4 Pro CPU. The machine was
+shared, and throughputs vary by about 15% from run to run.
+
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-light.svg#gh-light-mode-only)
+![Largest ignition-delay error and throughput of RODAS and BDF against atol, for H2/air (h2o2) and CH4/air (GRI-3.0), at dt = 1e-8 and 1e-6 s](../images/guide/chemistry_bdf-dark.svg#gh-dark-mode-only)
+
+- BDF's delay error falls with `atol` down to 1e-14 and more: at `atol` 1e-8
+  the H2 delays are up to 89% off, at 1e-10 2.3%, at 1e-12 6.3e-4. RODAS's
+  are 3.5e-4 (H2) and 2.6e-4 (CH4) at 1e-8 and stop falling at 6.1e-5 and
+  3.2e-6. BDF matches them at `atol` 1e-14 (H2: 2.5e-5) and comes within 2 to 3
+  times of them for CH4 at 1e-14 and 1e-16.
+- At `dt` 1e-8 s BDF has 1.6 to 1.9 times RODAS's throughput up to `atol`
+  1e-12, and 1.05 to 1.4 times at 1e-14 and 1e-16.
+- At `dt` 1e-6 s it has 0.75 to 0.96 times RODAS's throughput, except CH4 at
+  `atol` 1e-8 (1.25): with mechanisms this small, its restart at order 1
+  with a fresh Jacobian in every call outweighs its cheaper sub-steps.
 
 The rows are in `benchmarks/baselines.csv` (execution `... bdf`). BDF
 stays an option and not the default. Its throughput gains depend on the regime:

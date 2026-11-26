@@ -18,7 +18,7 @@ class Field:
     - `name`: `"RHO"`, `"U"`, `"MEAN_P"`, a table's column (`"Fx_pressure"`).
     - `components`: 1, or 3 for vectors (z is zero in 2D).
     - `units`: [UDUNITS](https://docs.unidata.ucar.edu/udunits/current/) units in SI base units (`"kg m-3"`,
-      `"1"` for dimensionless); `""` where the file records none.
+      `"1"` for dimensionless and for every quantity of a nondimensional case); `""` where the file records none.
     - `long_name`: `"density"`, `"velocity"`, ...
     - `location`: `"cell"`, `"point"` or `"column"` (tables).
     """

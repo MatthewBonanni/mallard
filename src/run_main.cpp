@@ -9,9 +9,11 @@
 #include <exception>
 #include <iostream>
 #include <new>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include <Kokkos_Core.hpp>
 
@@ -52,6 +54,18 @@ std::string error_text(const std::exception & e) {
     if (!comm::is_root()) std::this_thread::sleep_for(std::chrono::seconds(2));
     logging::error(code, message);
     comm::abort(1);
+}
+
+/** @brief The settings of --set, through mallard ctl set's path and checks; refused ones are an input error. */
+void apply_command_line_settings(Solver & solver, const std::vector<std::string> & settings) {
+    const auto [ok, reply] = solver.apply_settings(settings, "--set");
+    if (ok) return;
+    std::string refused;
+    std::istringstream lines(reply);
+    for (std::string line; std::getline(lines, line);) {
+        if (line.rfind("error: ", 0) == 0) refused += (refused.empty() ? "--set " : "\n--set ") + line.substr(7);
+    }
+    throw diagnostic_code::Error(diagnostic_code::INPUT, refused);
 }
 
 /**
@@ -124,6 +138,7 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                 binding::report();
                 solver.enable_control(true);
                 solver.init(input_file, restart_file);
+                apply_command_line_settings(solver, args.every("--set"));
                 code = diagnostic_code::RUN;
                 status = solver.run();
             }
@@ -219,8 +234,8 @@ int check_main(const cli::Args & args) {
     const std::string input_file =
         args.has("-i") ? args.value_or("-i", "") : args.positional.empty() ? "" : args.positional[0];
     if (input_file.empty()) {
-        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--quality",
-                                    "--catalog", "--view"}) {
+        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--ranks-per-node", "--memory",
+                                    "--quality", "--catalog", "--view", "--geometry-only"}) {
             if (args.has(option)) return cli::usage_error(command, std::string(option) + " needs an input file");
         }
     }
@@ -228,6 +243,17 @@ int check_main(const cli::Args & args) {
     options.input_file = input_file;
     options.catalog_file = args.value_or("--catalog", "");
     options.view_dir = args.value_or("--view", "");
+    options.geometry_only = args.has("--geometry-only");
+    if (options.geometry_only) {
+        for (const char * option : {"--restart", "--ranks", "--throughput", "--steps", "--memory", "--mesh-fields",
+                                    "--quality", "--stencils", "--cells", "--region", "--weights", "--initial",
+                                    "--catalog"}) {
+            if (args.has(option)) {
+                return cli::usage_error(command, std::string(option) + " needs the whole check, not --geometry-only");
+            }
+        }
+    }
+    options.initial = args.value_or("--initial", "");
     if (const std::string f = args.value_or("--format", "text"); f != "text" && f != "json") {
         return cli::usage_error(command, "--format takes text or json, not " + f);
     }
@@ -235,7 +261,8 @@ int check_main(const cli::Args & args) {
     if (error.empty() && args.has("--memory")) error = set_memory_target(args.value_or("--memory", ""), options);
     if (!error.empty()) return cli::usage_error(command, error);
     if (!number(args, "--ranks", options.ranks, error) || !number(args, "--throughput", options.throughput, error) ||
-        !number(args, "--steps", options.steps, error)) {
+        !number(args, "--steps", options.steps, error) ||
+        !number(args, "--ranks-per-node", options.ranks_per_node, error)) {
         return cli::usage_error(command, error);
     }
     return solve(args, input_file, &options);

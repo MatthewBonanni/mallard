@@ -95,7 +95,7 @@ statistics = "run1/restart_020000.restart"
 | `t_wall_stop` | Stop after this many seconds of wall time |
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
-| `control_file_interval` | Every this many steps, look for the files `STOP` and `CHECKPOINT` in the working directory (default 0: never). A file found acts like `mallard ctl stop` or `checkpoint`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
+| `control_file_interval` | Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory (default 0: never; `--set control_file_interval=N` turns them on from the command line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
 | `cuda_graphs` | CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL) or before CUDA 12.4; the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
 | `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, a moving region's probe outgrowing its staging, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; CUDA runs without graphs, and HIP and SYCL builds (whose graphs have no conditional nodes), take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
@@ -266,7 +266,8 @@ Jacobians, and the cells touching them their exact volumes, centroids and
 TENO moments; in 3D the faces sharing an edge with a curved face (side faces
 of prism layers, symmetry planes meeting the wall) are blended from their
 edges. This brings orders 3 to 6 to their design accuracy at curved walls
-(guide: [curved boundaries](guide/meshes.md#curved-boundaries)).
+(guide: [curved boundaries](guide/meshes.md#curved-boundaries)), also in
+[axisymmetric runs](#axisymmetric-flows).
 
 | Key | Description |
 |---|---|
@@ -415,8 +416,10 @@ averaged that way), and fluxes, sources, forces (`[[forces]]`), `[integrals]`
 and conserved totals are per radian of the revolved domain (multiply forces by
 `2 pi` for the force on the 3D body; only the axial component is meaningful).
 `u` is `[u_x, u_r]`. Every reconstruction, Riemann solver, viscous and
-mixture model, chemistry and MPI work as in planar runs; meshes cannot be
-periodic in y. Guide: [axisymmetric flows](guide/physics.md#axisymmetric-flows).
+mixture model, chemistry and MPI work as in planar runs, and so do
+[curved boundaries](#curved-boundaries), revolved with the cells next to
+them; meshes cannot be periodic in y. Guide:
+[axisymmetric flows](guide/physics.md#axisymmetric-flows).
 
 ## `[les]`
 
@@ -745,7 +748,7 @@ inlet's `u` is of `x`, `y`, `z` only.
 |---|---|
 | `L` | A length of the domain (required) |
 | `sigma` | Relaxation coefficient (default 0.25; 0 is perfectly non-reflecting but lets the mean drift, large values approach a fixed pressure or velocity) |
-| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets with turbulence, whose own incoming wave carries the transverse terms. Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
+| `beta` | The weight of the transverse terms in the incoming wave, 0 to 1: default the local Mach number at outlets, as Lodato et al. (1 is Poinsot & Lele's original condition, 0 drops them), and 0 at inlets, whose velocity they would hold off its target ([design](design/nscbc.md#transverse-terms-at-inlets)). Faces next to walls and other boundaries, and faces with reversed flow, have none, which keeps eddies that reverse the flow at the outlet from driving it unstable |
 | `sigma_T`, `sigma_t` | Inlets only: relax the temperature and tangential velocity at these rates instead of imposing them |
 
 ```toml
@@ -907,7 +910,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `cache_single_precision` | (`TENO`) Store the pseudo-inverses and smoothness-indicator matrices (3D: the cells' moments, from which the matrices are formed) of `cache_file` in single precision: about half the size (17 instead of 32 KB per cell for hexahedra at order 5). The run that writes the cache rounds them too, so it and the runs that read the cache agree with each other, but no longer with a run without it, whose results differ at single-precision round-off. Default false |
 | `bound_preserving` | (`TENO`) Scale troubled-cell polynomials to keep density and pressure within the neighbors' range, and (planar single gas) limit the convective fluxes so that every stage keeps density and pressure positive at `cfl` up to 0.5, default false |
 | `single_precision_tables` | (`TENO`, 3D, not with gas mixtures) Keep the pseudo-inverses on the device in single precision: about 40% less device memory for 3D TENO5 (25 instead of 40 KB per hexahedron, 31 instead of 51 KB per tetrahedron on an A100, everything included), so about 1.6 times the cells per GPU, and a 3-8% faster step. Results change at single-precision round-off: below 1e-7 of each field's range for smooth flow, but up to 1e-3 (order 3: 7e-3) behind shocks, where the stencil selection of some cells goes the other way (3D blast on hexahedra, 60-80 steps; [design notes](design/performance.md)); the cache, if any, holds the tables in single precision too. Default false |
-| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.25 in 3D (1 in 2D) |
+| `troubled_capacity` | (`TENO`) Fraction of the reconstructed cells that the troubled-cell passes take at a time, which sizes their scratch; more troubled cells are done in further rounds. Below 1, every round recomputes its cells' central coefficients, so results do not depend on which cells share a round. Default 0.125 in 3D (1 in 2D) |
 | `curved_mirrors` | (`TENO`) Also take mirror images across curved wall and symmetry faces (across each face's plane) into the stencils, default false: stencils are one-sided at curved walls, where mirroring is only second-order consistent (curved far fields and inflows keep their mirror images) |
 | `curved_wall_degree` | (`TENO`) Largest degree of the central polynomials of cells whose stencils reach a curved wall or symmetry face without mirror images, default 3: one-sided fits of degree 4 and 5 grow in time there, so orders 5 and 6 are fourth order at curved walls and of their order elsewhere |
 
@@ -937,7 +940,7 @@ variable-order BDF, in double precision in every build.
 | `atol` | Absolute tolerance on the mass fractions (default `1e-10`) |
 | `max_steps` | Sub-steps allowed per cell and chemistry call (default 100000); more stop the run |
 | `T_frozen` | No chemistry in cells below this temperature (default 0) |
-| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within 0.5%). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs |
+| `explicit_step` | `true` first advances each active cell whose last RODAS sub-step covered the whole call by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its error estimate passes RODAS's test (`rtol`, `atol`), it leaves no negative mass fraction and it is not stiff (the stages' estimate of the Jacobian's spectral radius times the step at most 2.5); the other cells take RODAS as without it, and a cell whose step failed skips it until its RODAS sub-steps have fallen short of a call (default `false`). It pays where most active cells are not stiff over a call (a 2D H2/air flame: chemistry 1.8 times faster on an A100, 1.6 on CPUs) and costs little where they are (`flame_3d`: within 1%). Results change within the chemistry's tolerances (see the [design notes](design/chemistry.md#explicit-steps-for-non-stiff-cells-issue-298)) and stay bitwise independent of ranks, partition, balancing and step graphs. The examples where it pays set it ([measurements](design/chemistry.md#explicit-steps-in-the-examples-issue-1090)) |
 | `fuse_half_steps` | Strang: `true` fuses the closing half step of a step with the next step's opening one, one chemistry call per step (default `true`). Output, checks, probes and statistics read the state with the pending half step applied, as the run without fusing has it, on a copy the run does not continue from; restart files hold the state before it and its time (attribute `CHEMISTRY_PENDING`), so results do not depend on output, and a restarted run reproduces the uninterrupted one bitwise. A run from such a file without fusing, or with SIMPLER, applies the pending half step first; one without chemistry ignores it. `false` takes the two half steps separately, twice the chemistry's cost where cells take few sub-steps; results agree within the chemistry's tolerances |
 | `C_reg` | concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate (`flame_3d`: chemistry 20 to 11.5 ms per step) but change results: after 100 steps of `flame_3d`, T by up to 0.54 K, Y by up to 3e-5, the integrated heat release by 0.08% |
 | `load_balance` | `true` moves the integration of cells from ranks with more chemistry work than the mean (sub-steps of their cells' last calls) to ranks with less, in every call where the most loaded rank exceeds the mean by 5%; only the cells' states travel, and results stay bitwise the same (default `false`). Each pair of ranks moves at most its capacity of cells per call, which starts at 0 and follows the cells the pair asked for (growing at once, shrinking after 256 steps of less than half); the rest stay with their owner, and a balanced run moves none. With NCCL the messages carry the whole capacity, so that the step's CUDA graph keeps its sizes; a change of the capacities records it again. The summary reports the time ranks wait for the slowest rank's chemistry with or without it |
@@ -1765,7 +1768,7 @@ units (`radius = "5 mm"`) and angles are in degrees unless given a unit;
 | `torus` | `center`, `axis` (default z in 2D), `major_radius`, `minor_radius` | filled |
 | `half_space` | `point` (default origin), `normal` | filled: the side `(x - point) . normal < 0` |
 | `implicit` | `f`, an expression in `x`, `y`, `z` | filled: `f < 0`. Smooth edges are in units of `f` (exact when `f` is a distance, e.g. `"sqrt(x^2 + y^2) - 1"`) |
-| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)) |
+| `stl`, `obj` | `file`: an STL (binary or ASCII) or OBJ file, its path relative to the directory the run starts in (required); `units`: the unit of length of its coordinates, `"m"`, `"mm"`, `"in"`, ... (required: the files do not state it) | filled: inside the file's closed surface, which must be watertight and manifold; cavities and separate bodies allowed, not crossing each other; in 2D its section by z = 0 ([Regions from CAD surfaces](guide/geometry.md#regions-from-cad-surfaces)). With `filled = false`, the surface itself; an open one (edges of one triangle only) is a surface (2D: curve) only, facing as its first triangle by the right-hand rule ([Open surfaces from CAD](guide/geometry.md#open-surfaces-from-cad)) |
 | `where` | `condition`: comparisons (`<`, `<=`, `>`, `>=`) of expressions in `x`, `y`, `z`, `t` and the solution's `RHO`, `U_X`, `U_Y`, `U_Z` (3D), `P`, `T`, `Y_<species>`, `MACH`, `H`, `X_<species>`, `VORTICITY` (3D: `VORTICITY_X`, `_Y`, `_Z`) and `Q_CRITERION` (SI units), joined by `and`, `or`, `not` and parentheses, e.g. `"T > 1500 and Y_OH > 1e-3"` | filled: where the condition holds on the solution ([Regions defined by the solution](guide/geometry.md#regions-defined-by-the-solution)) |
 | `isosurface` | `field`: one of the variables of `where`; `value`, in the field's units (`"1500 K"`) | surface (2D: curve) where `field` equals `value`, facing toward increasing `field` (`flip = true`: decreasing): the boundary of `{type = "where", condition = "<field> < <value>"}` |
 | `union`, `intersection` | `regions` = `[{...}, ...]` | of regions of one dimension; an `intersection` of one surface or curve with filled regions clips it |
@@ -1822,7 +1825,9 @@ Filled regions and flat surfaces may also have `filled` (default `true`):
 `filled = false` is the region's boundary, the same as
 `{type = "boundary", of = {...}}`: `{type = "sphere", ..., filled = false}` is
 the sphere's surface (2D: its circle), `{type = "rectangle", ..., filled = false}`
-in 3D its four edges. On a curve, `filled = false` is an error; take the
+in 3D its four edges. An `stl` or `obj` file of an open surface needs
+`filled = false`, which is that surface itself (default `true`: an error, as it
+has no inside). On a curve, `filled = false` is an error; take the
 boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 
 | Region | `boundary` | `interior` |
@@ -1830,6 +1835,7 @@ boundary of a region by name with `{type = "boundary", of = "<name>"}`.
 | filled (volume; 2D: area) | its closed surface (2D: curve), facing out | error: already filled |
 | closed surface (2D: closed curve), e.g. a sphere's surface, a `circle` in 2D | error: closed | the filled region it encloses |
 | open surface (3D), e.g. `disk`, `rectangle` | its edge curve | error: not closed |
+| open surface from an `stl` or `obj` file | error: not supported yet | error: not closed |
 | closed curve in 3D, e.g. `circle` | error: closed | error: needs a surface |
 | boundary zones | the zones' edges (2D: end points), if they are open; error if closed | the cells inside, if the zones are closed; error if open |
 
@@ -1954,6 +1960,9 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `report` | The [run report](guide/output.md#run-report-reporthtml): one self-contained HTML page of the run (outcome, identity, configuration, health, plots of the monitors, cost, output index, divergence), built from the run's records and written at the first progress row, after each restart file and at the end, also of a run that stops, diverges or fails. Works with `run_log = ""` too. `""` writes none. Default `"report.html"` |
 | `divergence_report` | Prefix of the [divergence report](guide/running.md#the-divergence-report) a run that diverges writes: `PREFIX.txt`, `PREFIX.json` and the snapshot of the failure's neighborhood `PREFIX_neighborhood_<step>.vtkhdf` (`.vtu` without HDF5); the report is printed and in the run record either way. `""` writes no files. Default `"divergence_report"` |
 | `health` | Run health diagnostics at each progress row: admissibility margins, numerics and chemistry activity, output timings, the audit of numerical repairs and the conservation ledger, in the run record's progress records and a summary at the end of the terminal output ([details](guide/output.md#run-health)). Default `true` |
+| `heartbeat_interval` | Wall time between the run log's `heartbeat` records, which tell a hung run from a slow one; one is written after the first step at least this long after the previous ([run health events](guide/output.md#run-health-events)). `0` writes none. Default `60` (seconds, or with a unit) |
+| `steady_residual` | A run to a steady state: the residual (the change of the state over a step relative to the state, [`health.residuals`](guide/output.md#run-health)) at which it is converged, a `converged` event of the run log at the first progress row where every residual is at or below it, and `W-HEALTH-STALL` when it stops falling ([run health events](guide/output.md#run-health-events)). Needs `health`; the run goes on to its stop. Default none |
+| `stall_steps` | With `steady_residual`: steps within which the largest residual must halve, else `W-HEALTH-STALL`. Default `10000` |
 | `hash_mesh` | Record the SHA-256 of a mesh file (or directory) in the run block; `false` skips reading it again for very large meshes. Default `true` |
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
@@ -2071,9 +2080,16 @@ CSV (`t`, `T`, `p`, `Y_<species>`). It reads `[physics]` (`mechanism`,
 | `[chemistry] atol` | Absolute tolerance on `Y` (default `1e-10`) |
 | `[chemistry] max_steps` | Sub-steps allowed per output interval (default 100000) |
 | `[chemistry] sparse` | The linear solver, as in the solver's `[chemistry]` |
+| `[chemistry] explicit_step`, `T_frozen` | In the `[benchmark]` only, as in the solver's `[chemistry]` (defaults `false`, `0`) |
 | `[benchmark]` | Instead of the run, a chemistry benchmark: states sampled along this reactor's trajectory, replicated over `cells` cells and advanced by the solver's chemistry kernels over each splitting step of `dt`, with results in `output` (default `benchmark.csv`); see `benchmarks/README.md` |
 
 It prints the ignition delay, the time of the maximum of `dT/dt`, once
 `dT/dt` has fallen below half that maximum by `end_time` (the runaway is over,
 however small the temperature rise of a lean mixture), and otherwise none.
 Example: `examples/h2_ignition`.
+
+It also reads `[physics] gas` (`mixture`, the default and the only one) and
+`[chemistry] integrator` and `C_reg`, as the solver does; the `[benchmark]`
+mode does not read `[reactor] output_interval` or `output`. Keys it does not
+read are errors, as in a run ([unknown and unused
+keys](guide/input_files.md#unknown-and-unused-keys)).

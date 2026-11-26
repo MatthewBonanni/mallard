@@ -15,11 +15,21 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
+
+#include <fcntl.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#include <sys/param.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -95,9 +105,52 @@ std::string serial_name(const std::string & name) {
     return comm::is_root() ? name : name + std::to_string(comm::rank());
 }
 
+std::vector<std::string> open_files_under(const std::filesystem::path & dir) {
+    std::error_code error;
+    const std::string root = std::filesystem::weakly_canonical(dir, error).string() + "/";
+    if (error) return {};
+    std::set<std::string> held;
+    auto add = [&](const std::string & path) {
+        if (path.compare(0, root.size(), root) == 0) held.insert(path);
+    };
+#ifdef __APPLE__
+    char path[MAXPATHLEN];
+    for (int fd = 0; fd < getdtablesize(); fd++) {
+        if (fcntl(fd, F_GETPATH, path) != -1) add(path);
+    }
+    proc_regionwithpathinfo region{};
+    uint64_t address = 0;
+    while (proc_pidinfo(getpid(), PROC_PIDREGIONPATHINFO, address, &region, sizeof(region)) == int(sizeof(region))) {
+        add(region.prp_vip.vip_path);
+        address = region.prp_prinfo.pri_address + region.prp_prinfo.pri_size;
+    }
+#elif defined(__linux__)
+    for (const auto & fd : std::filesystem::directory_iterator("/proc/self/fd", error)) {
+        std::error_code unreadable;
+        const auto target = std::filesystem::read_symlink(fd.path(), unreadable);
+        if (!unreadable) add(target.string());
+    }
+    std::ifstream maps("/proc/self/maps");
+    for (std::string line; std::getline(maps, line);) {
+        const size_t slash = line.find('/');
+        if (slash != std::string::npos) add(line.substr(slash));
+    }
+#endif
+    return {held.begin(), held.end()};
+}
+
 std::string remove_shared_directory(const std::filesystem::path & dir) {
-    comm::barrier();
+    std::string held;
+    for (const std::string & file : open_files_under(dir)) held += (held.empty() ? "" : ", ") + file;
+    const std::vector<std::string> every_rank = comm::allgather(held);
     std::string failure;
+    for (size_t rank = 0; rank < every_rank.size(); rank++) {
+        if (every_rank[rank].empty()) continue;
+        failure += (failure.empty() ? "" : "; ") + std::string("rank ") + std::to_string(rank) + " still has open " +
+                   every_rank[rank];
+    }
+    // Shared storage (NFS) cannot remove a file that a process on its node has open: it renames it to .nfsXXXX
+    if (!failure.empty()) return "files outlive the test, so " + dir.string() + " is kept: " + failure;
     if (comm::is_root()) {
         std::error_code error;
         std::filesystem::remove_all(dir, error);

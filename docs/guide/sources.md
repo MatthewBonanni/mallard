@@ -188,7 +188,8 @@ T = 1.0
 
 *Used in:*
 [`pulsed_jet`](https://matthewbonanni.github.io/mallard/docs/examples/#pulsed-jet),
-[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180).
+[`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step).
 
 `[[sponges]]` add `-strength (U - U_ref)` to the conservative variables (and
 species), damping the solution toward a reference state where the strength is

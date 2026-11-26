@@ -77,6 +77,14 @@ TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
 }
 
+TEST(MPI3DTest, TENOPlacesPlanarFacePointsAlikeWithAndWithoutStepGraphs) {
+    // The kernels place the quadrature points of planar faces from the faces'
+    // nodes, in the step graph too: smooth and troubled cells, triangles and
+    // quadrilaterals, the troubled cells over several rounds
+    expect_matches_serial_with_and_without_step_graphs(
+        blast_input("cartesian_mixed", "type = \"TENO\"\norder = 5\ntroubled_capacity = 0.05\n"));
+}
+
 TEST(MPI3DTest, TENOTablesCoverOnlyTheOwnedCells) {
     // With owner-computes partition faces no halo cell is reconstructed, and every
     // transmissive face of a hexahedron has an image face, so no halo cell's polynomial is read
@@ -288,6 +296,12 @@ TEST(MPI3DTest, DynamicFlameEfficiencyOnTetrahedraMatchesSerial) {
     expect_matches_serial(s.str(), [](const Solver & solver) { EXPECT_GT(solver.tfles_beta(), 0.0); });
 }
 
+TEST(MPI3DTest, TENOTroubledRoundsMatchSerialWithAndWithoutStepGraphs) {
+    // At the default capacity the blast's troubled cells take several rounds,
+    // which the step graph launches whether or not they find cells
+    expect_matches_serial_with_and_without_step_graphs(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
+}
+
 TEST(MPI3DTest, CharacteristicBoundariesMatchSerial) {
     std::string input = box_input("cartesian_tet", "type = \"MUSCL\"\n", "type = \"euler\"\n");
     const std::string from = "name = \"right\"\ntype = \"symmetry\"\n";
@@ -467,7 +481,10 @@ TEST(MPI3DTest, CurvedWallsMatchSerial) {
             "[numerics.face_reconstruction]\ntype = \"TENO\"\norder = 3\n"
             "[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
             "[output]\ncheck_interval = 1000000\n";
-        expect_matches_serial(input, [](const Solver & solver) { EXPECT_TRUE(solver.get_mesh()->curved_geometry); });
+        expect_matches_serial(input, [](const Solver & solver) {
+            EXPECT_TRUE(solver.get_mesh()->curved_geometry);
+            expect_halo_geometry_matches_owners(solver);
+        });
     }
     comm::barrier();
 }

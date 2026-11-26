@@ -15,10 +15,14 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <numeric>
 
 #include <Kokkos_Core.hpp>
 
+#include "binding.h"
+#include "build_info.h"
 #include "check.h"
+#include "cost_model.h"
 #include "common_io.h"
 #include "distributed_mesh.h"
 #include "input.h"
@@ -27,6 +31,7 @@
 #include "mesh_block.h"
 #include "mesh_quality.h"
 #include "partition.h"
+#include "periodic.h"
 #include "case_view.h"
 #include "region_input.h"
 #include "region_mesh.h"
@@ -49,8 +54,15 @@ std::string bytes(const double b) { return logging::si(b) + "B"; }
 // Sizing: the device memory outside Kokkos when not measured, CUDA's context and the local memory of
 // kernels with large stacks (A100, CUDA 12.9: 1.5 GB in 2D, 2.1 GB in 3D; see docs/design/performance.md)
 constexpr uint64_t CUDA_CONTEXT_BYTES = N_DIM == 2 ? 1'600'000'000 : 2'200'000'000;
+// The cost by rank count: powers of two up to 4 times the target (at least 8), parts of at least this many cells
+constexpr uint64_t MIN_CELLS_PER_RANK = 1000;
+constexpr int MAX_SCALING_RANKS = 4096;
+// Ranks per node of a GPU run without a placement to read: the measured A100 nodes' 8
+constexpr int GPUS_PER_NODE = 8;
 
 std::string point(const std::array<double, N_DIM> & x) { return quality_point(x); }
+
+std::vector<CheckPeriodic> periodic_summary(const Mesh & mesh);
 
 } // namespace
 
@@ -58,16 +70,20 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     const comm::SelfScope scope = communication_scope();
     CheckReport r;
     r.input_file = options.input_file;
+    r.geometry_only = options.geometry_only;
     struct Restore {
         bool files = output_files_enabled();
         bool * check;
+        bool * geometry;
         ~Restore() {
             set_output_files_enabled(files);
             *check = false;
+            *geometry = false;
         }
-    } restore{output_files_enabled(), &check_only};
+    } restore{output_files_enabled(), &check_only, &geometry_only};
     set_output_files_enabled(false);
     check_only = true;
+    geometry_only = options.geometry_only;
 
     memory::Tracker tracker;
     try {
@@ -78,7 +94,8 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     } catch (const std::exception & e) {
         r.error(diagnostic_code::SETUP, error_text(e));
     }
-    for (const Diagnostic & key : unused_keys(input)) {
+    // A geometry-only setup leaves the keys of the numerics and the initial state unread
+    for (const Diagnostic & key : options.geometry_only ? std::vector<Diagnostic>{} : unused_keys(input)) {
         if (!r.setup_done && key.suggestion.empty()) continue;
         r.unused.push_back(key);
         r.error(diagnostic_code::KEY_UNUSED, describe(key));
@@ -91,11 +108,30 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
         file << key_catalog(resolved);
         if (!file) r.error(diagnostic_code::CATALOG_WRITE, cannot_write("the key catalog", options.catalog_file).what());
     }
+    r.unassigned = unassigned_zones;
+    if (!r.setup_done && mesh && !options.view_dir.empty()) {
+        // The mesh alone, so that what the setup stopped on (a zone without a condition) can be seen
+        try {
+            const std::vector<case_view::Block> blocks = mesh_view(*mesh, region::MeshRegions(*mesh)).blocks;
+            const std::vector<std::string> files = case_view::write_view(
+                options.view_dir, blocks, options.input_file.empty() ? "case view" : options.input_file);
+            r.view_file = files[0];
+            r.view_images.assign(files.begin() + 1, files.end());
+            r.view_blocks = case_view::describe(blocks);
+        } catch (const std::exception &) {
+            // A mesh read only in part draws nothing; the setup's error says why
+        }
+    }
     if (!r.setup_done || !mesh) return r;
 
-    check_memory(r, options, tracker);
+    if (!options.geometry_only) check_memory(r, options, tracker);
     r.boundaries = boundary_summary;
+    r.periodic = periodic_summary(*mesh);
     r.t = static_cast<double>(t);
+    if (options.geometry_only) {
+        check_regions(r, options);
+        return r;
+    }
     check_time_step(r);
     const CheckFields resolution = check_resolution(r);
     check_mesh_quality(r, options, resolution);
@@ -105,7 +141,34 @@ CheckReport Solver::check(const Input & input_in, const CheckOptions & options) 
     // Regions defined by the solution are placed on the initial one
     update_cell_W();
     check_regions(r, options);
+    check_initial(r, options);
     return r;
+}
+
+void Solver::check_initial(CheckReport & r, const CheckOptions & options) {
+    if (options.initial.empty()) return;
+    try {
+        update_primitives();
+        copy_device_to_host();
+        std::vector<std::string> fields = {"RHO", "U", "P", "T"};
+        if (is_mixture()) fields.emplace_back("Y_*");
+        Input writer_input(Input::table_type{});
+        writer_input.as_table()["prefix"] = options.initial;
+        writer_input.as_table()["interval"] = 1;
+        writer_input.as_table()["fields"] = fields;
+        writer_input.as_table()["series"] = false;
+        set_output_files_enabled(true);
+        DataWriter writer;
+        writer.init(writer_input, data, mesh);
+        writer.omit_snapshot_block();
+        writer.write(0, t, true);
+        writer.finish();
+        set_output_files_enabled(false);
+        r.initial_file = writer.last_written();
+    } catch (const std::exception & e) {
+        set_output_files_enabled(false);
+        r.error(diagnostic_code::INITIAL_WRITE, error_text(e));
+    }
 }
 
 std::string Solver::setup_check() {
@@ -295,15 +358,34 @@ Model model(const CheckReport & r, const memory::Bytes & b) {
     return m;
 }
 
+/**
+ * @brief The steady state's bytes as the sized run holds them: a host build
+ *        sizing a GPU leaves out what device builds free after setup.
+ */
+memory::Bytes sized_steady(const CheckReport & r) {
+    memory::Bytes b = r.steady_bytes;
+    if (r.sizing_gpu && !r.device_memory) {
+        for (size_t c = 0; c < memory::N_CATEGORIES; c++) b[c] -= std::min(b[c], r.released_on_devices[c]);
+    }
+    return b;
+}
+
+/** @brief The rank's bytes that device builds free after setup but this host build keeps, by category. */
+memory::Bytes released_on_devices(const CheckReport & r, const Mesh & mesh) {
+    memory::Bytes b{};
+    if (!r.device_memory) b[static_cast<size_t>(memory::Category::MESH)] = mesh.released_on_devices;
+    return b;
+}
+
 } // namespace
 
 double predicted_peak(const CheckReport & r, const double local_cells) {
-    double peak = model(r, r.steady_bytes).at(local_cells);
+    double peak = model(r, sized_steady(r)).at(local_cells);
     for (const memory::Bytes & phase : r.setup_phases) peak = std::max(peak, model(r, phase).at(local_cells));
     return peak;
 }
 
-PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) const {
+PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks, const int ranks_per_node) const {
     const std::string method = find_value_or<std::string>(input, "parallel", "partitioner", "multijagged");
     const std::vector<int> owner = method == "graph" && have_graph_partitioner() ? partition_graph(whole, n_ranks)
                                    : method == "hilbert" ? partition_hilbert(whole, n_ranks)
@@ -312,7 +394,16 @@ PartSize Solver::check_part(const DistributedMesh & whole, const int n_ranks) co
     if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
         for (const uint8_t depth : teno->gather_depth) layers = std::max(layers, depth + 1);
     }
-    return largest_part(whole.mesh_block(), owner, n_ranks, layers);
+    const MeshBlock & block = whole.mesh_block();
+    std::vector<uint64_t> node_keys;
+    if (!whole.block_periodic_classes().empty()) {
+        node_keys.resize(block.n_nodes());
+        std::iota(node_keys.begin(), node_keys.end(), uint64_t(0));
+        for (const auto & [node, key] : whole.block_periodic_classes()) {
+            node_keys[node - block.first_node] = key.first - block.first_node;
+        }
+    }
+    return largest_part(block, owner, n_ranks, layers, node_keys, ranks_per_node);
 }
 
 void Solver::check_memory(CheckReport & r, const CheckOptions & options, const memory::Tracker & tracker) const {
@@ -323,6 +414,7 @@ void Solver::check_memory(CheckReport & r, const CheckOptions & options, const m
     r.bytes_peak = comm::allreduce(usage.peak, comm::Op::MAX);
     r.setup_bytes = of_largest_rank(usage.at_peak, usage.peak);
     r.steady_bytes = of_largest_rank(usage.by_category, usage.peak);
+    r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
     for (const memory::Bytes & phase : usage.phases) r.setup_phases.push_back(of_largest_rank(phase, usage.peak));
     r.local_cells = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_cells) : 0, comm::Op::MAX);
     r.local_owned = comm::allreduce(usage.peak == r.bytes_peak ? uint64_t(mesh->n_owned()) : 0, comm::Op::MAX);
@@ -401,7 +493,7 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     const double usable = (1.0 - SIZING_MARGIN) * static_cast<double>(r.sizing_memory);
     double n_max = std::numeric_limits<double>::infinity();
     std::vector<memory::Bytes> snapshots = r.setup_phases;
-    snapshots.push_back(r.steady_bytes);
+    snapshots.push_back(sized_steady(r));
     for (size_t k = 0; k < snapshots.size(); k++) {
         const Model m = model(r, snapshots[k]);
         const double n_fit = (usable - overhead - m.fixed) / m.per_cell;
@@ -440,13 +532,15 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
     if (comm::size() > 1) {
         // Without the whole mesh at hand: parts keep this run's halo as a fraction of their cells
         const uint64_t owned = (n_cells_global + uint64_t(n) - 1) / uint64_t(n);
-        record(n, {owned, static_cast<uint64_t>(halo_ratio * double(owned))});
+        const PartSize p{owned, static_cast<uint64_t>(halo_ratio * double(owned)), 0, 0, 0};
+        record(n, p);
+        if (r.dt > 0.0) r.sizing_wall_per_time = check_step_seconds(r, p, n) / r.dt;
         return;
     }
     r.min_partitioned = true;
     const uint64_t max_ranks = std::max<uint64_t>(1, n_cells_global / 64);
     const DistributedMesh whole(read_mesh_block(input), Mesh::periodic_pairs(input));
-    PartSize part = n == 1 ? PartSize{n_cells_global, 0} : check_part(whole, n);
+    PartSize part = n == 1 ? PartSize{n_cells_global, 0, 0, 0, 0} : check_part(whole, n, r.ranks_per_node);
     for (int tries = 0; !fits(part); tries++) {
         if (tries == 16 || uint64_t(n) >= max_ranks) {
             r.warning(diagnostic_code::SIZING_PARTS, "no partition into up to " + logging::count(uint64_t(n), "part") +
@@ -456,23 +550,25 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
         }
         const double over = double(part.owned + part.halo) / n_max;
         n = std::max(n + 1, static_cast<int>(std::ceil(n * std::min(over, 2.0))));
-        part = check_part(whole, n);
+        part = check_part(whole, n, r.ranks_per_node);
     }
     record(n, part);
     // Halo below 10% of the owned cells: doubling the ranks while it holds
+    PartSize at = part;
     for (int m = n; uint64_t(m) <= max_ranks; m *= 2) {
-        const PartSize p = m == n ? part : check_part(whole, m);
+        const PartSize p = m == n ? part : check_part(whole, m, r.ranks_per_node);
         if (double(p.halo) >= SIZING_HALO_FRACTION * double(p.owned)) break;
         r.halo_ranks = m;
+        at = p;
     }
+    if (r.dt > 0.0) r.sizing_wall_per_time = check_step_seconds(r, at, std::max(r.min_ranks, r.halo_ranks)) / r.dt;
 }
 
 void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::Tracker & tracker) {
     r.t_stop = static_cast<double>(t_stop);
     r.n_steps = n_steps;
-    if (options.throughput > 0.0) {
-        r.throughput = options.throughput;
-    } else if (options.steps > 0) {
+    double step_measured = 0.0;
+    if (options.steps > 0) {
         calc_dt();
         tracker.reset_peak();
         take_step();  // first-use allocations
@@ -484,12 +580,14 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
         }
         Kokkos::fence();
         const double seconds = comm::allreduce(timer_steps.seconds(), comm::Op::MAX);
-        r.throughput = static_cast<double>(n_cells_global * options.steps) / seconds / comm::size();
+        step_measured = seconds / static_cast<double>(options.steps);
+        r.measured_throughput = static_cast<double>(n_cells_global * options.steps) / seconds / comm::size();
         r.throughput_measured = true;
         r.steps_timed = options.steps;
         const memory::Usage usage = r.device_memory ? tracker.device() : tracker.host();
         const uint64_t peak = comm::allreduce(usage.peak, comm::Op::MAX);
         r.steady_bytes = of_largest_rank(usage.at_peak, usage.peak);
+        r.released_on_devices = of_largest_rank(released_on_devices(r, *mesh), usage.peak);
         // The time stepping's kernels add their local memory to CUDA's reservation
         if (r.device_memory) {
             r.outside_kokkos =
@@ -501,8 +599,144 @@ void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::T
             r.bytes_peak = peak;
         }
     }
-    if (r.throughput > 0.0 && r.dt > 0.0) {
-        r.wall_per_time = static_cast<double>(r.n_cells) / (r.target_ranks * r.throughput * r.dt);
+
+    // What the estimate is for: --memory's GPU when nothing is timed here, else this device
+    cost_model::Workload & w = r.workload;
+    const bool target_gpu = options.memory_gpu && options.steps == 0;
+    w.hardware = target_gpu ? options.memory_name : device_name();
+    w.device = cost_model::device_class(w.hardware, target_gpu || r.device_memory);
+    w.threads = std::max(1, Kokkos::DefaultHostExecutionSpace().concurrency());
+    w.dim = static_cast<int>(N_DIM);
+    w.reconstruction = "fo";
+    if (const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get())) {
+        w.reconstruction = "teno" + std::to_string(teno->degree + 1);
+    } else if (dynamic_cast<const MUSCL *>(face_reconstruction.get()) != nullptr) {
+        w.reconstruction = "muscl";
+    }
+    w.physics = reacting ? "reacting" : is_les() ? "les" : is_viscous() ? "ns" : "euler";
+    w.species = reacting ? static_cast<int>(mixture_model->n_species()) : 0;
+    r.particles = particles ? static_cast<double>(particles->get_capacity()) : 0.0;
+    r.scaling = cost_model::scaling(w.device);
+
+    // Ranks per node: this check's under its launcher, else the device's
+    if (options.ranks_per_node > 0) {
+        r.ranks_per_node = options.ranks_per_node;
+        r.ranks_per_node_basis = "--ranks-per-node";
+    } else if (comm::size() > 1) {
+        std::map<std::string, int> per_host;
+        for (const binding::Placement & p : binding::placements()) per_host[p.host]++;
+        int most = 0;
+        for (const auto & [host, n] : per_host) most = std::max(most, n);
+        r.ranks_per_node = comm::allreduce(most, comm::Op::MAX);
+        if (r.ranks_per_node >= comm::size()) r.ranks_per_node = 0;
+        r.ranks_per_node_basis = "as this check's ranks are placed";
+    } else if (w.device.rfind("cpu", 0) != 0) {
+        r.ranks_per_node = GPUS_PER_NODE;
+        r.ranks_per_node_basis = logging::format("%d GPUs per node", GPUS_PER_NODE);
+    } else {
+        r.ranks_per_node_basis = "every rank on one node";
+    }
+
+    // The largest part on each rank count
+    PartSize own;
+    own.owned = mesh->n_owned();
+    own.halo = mesh->n_cells - mesh->n_owned();
+    own.neighbors = static_cast<int>(distribution.neighbors.size());
+    for (size_t k = 0; k < distribution.neighbors.size(); k++) {
+        const int q = distribution.neighbors[k];
+        if (r.ranks_per_node > 0 && q / r.ranks_per_node != comm::rank() / r.ranks_per_node) {
+            own.remote_neighbors++;
+            own.halo_remote += distribution.recv_cells[k].size();
+        }
+    }
+    {
+        // The rank with the most owned and halo cells
+        const uint64_t local = own.owned + own.halo;
+        const uint64_t most = comm::allreduce(local, comm::Op::MAX);
+        const int rank = comm::allreduce(local == most ? comm::rank() : 0, comm::Op::MAX);
+        std::array<uint64_t, 5> v{};
+        if (comm::rank() == rank) {
+            v = {own.owned, own.halo, uint64_t(own.neighbors), uint64_t(own.remote_neighbors), own.halo_remote};
+        }
+        v = comm::allreduce(v, comm::Op::MAX);
+        own = {v[0], v[1], static_cast<int>(v[2]), static_cast<int>(v[3]), v[4]};
+    }
+
+    // Seconds per cell of one rank alone: --throughput, the timed steps, or the model
+    double seconds_per_cell = 0.0;
+    if (options.throughput > 0.0) {
+        seconds_per_cell = 1.0 / options.throughput;
+        r.throughput_source = "option";
+        r.throughput_basis = "--throughput";
+    } else if (step_measured > 0.0) {
+        const cost_model::Part p = cost_model::part(own, comm::size(), r.particles);
+        seconds_per_cell = r.scaling != nullptr ? cost_model::seconds_per_cell(*r.scaling, p, step_measured) : 0.0;
+        if (!(seconds_per_cell > 0.0)) {
+            seconds_per_cell = step_measured / static_cast<double>(r.scaling ? own.owned : n_cells_global / uint64_t(comm::size()));
+        }
+        r.throughput_source = "steps";
+        r.throughput_basis = logging::format("measured over %s on %s", logging::count(r.steps_timed, "step").c_str(),
+                                             logging::count(uint64_t(comm::size()), "rank").c_str());
+    } else {
+        const cost_model::Throughput modeled = cost_model::throughput(w);
+        r.throughput_basis = modeled.basis;
+        if (modeled.cells_per_second > 0.0) {
+            seconds_per_cell = 1.0 / modeled.cells_per_second;
+            r.throughput_source = "model";
+            r.throughput_uncertainty = modeled.uncertainty;
+        }
+    }
+    const bool estimate = seconds_per_cell > 0.0 && r.dt > 0.0;
+    if (estimate) {
+        r.throughput = 1.0 / seconds_per_cell;
+        const double held_out = r.scaling != nullptr ? r.scaling->held_out_error : 0.0;
+        r.uncertainty = std::sqrt(r.throughput_uncertainty * r.throughput_uncertainty + held_out * held_out);
+    } else {
+        r.throughput_source.clear();
+    }
+    {
+        std::vector<int> counts = {r.target_ranks};
+        if (estimate && comm::size() == 1) {
+            const int top = static_cast<int>(std::min<uint64_t>(
+                uint64_t(std::max(8, 4 * r.target_ranks)), std::max<uint64_t>(1, n_cells_global / MIN_CELLS_PER_RANK)));
+            for (int n = 1; n <= std::min(top, MAX_SCALING_RANKS); n *= 2) counts.push_back(n);
+        }
+        std::sort(counts.begin(), counts.end());
+        counts.erase(std::unique(counts.begin(), counts.end()), counts.end());
+        std::unique_ptr<DistributedMesh> whole;
+        const double t1 = estimate ? check_step_seconds(r, PartSize{n_cells_global, 0, 0, 0, 0}, 1) : 0.0;
+        for (const int n : counts) {
+            CheckScaling row;
+            row.ranks = n;
+            row.nodes = r.ranks_per_node > 0 ? (n + r.ranks_per_node - 1) / r.ranks_per_node : 1;
+            if (n == comm::size()) {
+                row.part = own;
+            } else if (n == 1) {
+                row.part = PartSize{n_cells_global, 0, 0, 0, 0};
+            } else if (comm::size() > 1) {
+                // Without the whole mesh at hand: this run's largest part, its halo kept as a fraction of its cells
+                row.part = own;
+                row.part.owned = (n_cells_global + uint64_t(n) - 1) / uint64_t(n);
+                const double scale = double(row.part.owned) / double(std::max<uint64_t>(1, own.owned));
+                row.part.halo = static_cast<uint64_t>(double(own.halo) * scale);
+                row.part.halo_remote = static_cast<uint64_t>(double(own.halo_remote) * scale);
+            } else {
+                if (!whole) {
+                    whole = std::make_unique<DistributedMesh>(read_mesh_block(input), Mesh::periodic_pairs(input));
+                }
+                row.part = check_part(*whole, n, r.ranks_per_node);
+            }
+            if (n == r.target_ranks) r.target_part = row.part;
+            if (!estimate) continue;
+            row.step = check_step_seconds(r, row.part, n);
+            row.efficiency = t1 / (static_cast<double>(n) * row.step);
+            row.wall_per_time = row.step / r.dt;
+            if (n == r.target_ranks) {
+                r.efficiency = row.efficiency;
+                r.wall_per_time = row.wall_per_time;
+            }
+            r.scalings.push_back(row);
+        }
     }
 
     // Flow-through time: the domain's length along the mean velocity over its magnitude
@@ -742,6 +976,97 @@ std::vector<case_view::Block> periodic_blocks(const Mesh & mesh) {
     return blocks;
 }
 
+/** @brief The periodic pairs as the mesh joined them (check's periodic): map, faces, area and node offset. */
+std::vector<CheckPeriodic> periodic_summary(const Mesh & mesh) {
+    const size_t n_directions = mesh.periodic_translations.size();
+    std::vector<CheckPeriodic> out(n_directions);
+    if (n_directions == 0) return out;
+    const bool named = mesh.periodic_zones.size() == 2 * n_directions;
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = out[j];
+        if (named) {
+            p.zone_a = mesh.periodic_zones[2 * j];
+            p.zone_b = mesh.periodic_zones[2 * j + 1];
+        }
+        p.rotation = mesh.periodic_rotation.direction == int(j);
+        if (p.rotation) {
+            p.angle = mesh.periodic_rotation.angle * 180.0 / std::numbers::pi;
+            p.center = mesh.periodic_rotation.center;
+            p.axis = mesh.periodic_rotation.axis;
+        }
+        for (size_t i = 0; i < N_DIM; i++) p.translation[i] = double(mesh.periodic_translations[j][i]);
+    }
+    std::vector<double> sums(2 * n_directions, 0.0);  // faces, area
+    for (uint32_t f = 0; f < mesh.n_faces; f++) {
+        const uint8_t shift = mesh.h_face_shift(f);
+        const int32_t c0 = mesh.h_cells_of_face(f, 0), c1 = mesh.h_cells_of_face(f, 1);
+        if (shift == 0 || c1 < 0 || uint32_t(c0) >= mesh.n_owned()) continue;
+        if (uint32_t(c1) >= mesh.n_owned() && mesh.h_global_cell(uint32_t(c1)) < mesh.h_global_cell(uint32_t(c0))) continue;
+        const auto & lattice = mesh.shift_lattice[shift];
+        size_t j = 0;
+        while (j + 1 < n_directions && lattice[j] == 0) j++;
+        sums[2 * j] += 1.0;
+        sums[2 * j + 1] += double(mesh.h_face_area(f));
+    }
+    // A node and its class's key: x_n = M(L) x_key, up to the matching tolerance
+    std::vector<double> offsets(n_directions, 0.0);
+    for (uint32_t n = 0; n < mesh.h_node_key.size() && n < mesh.h_node_lattice.size(); n++) {
+        const uint32_t key = mesh.h_node_key[n];
+        const auto & L8 = mesh.h_node_lattice[n];
+        const std::array<int, 3> L = {L8[0], L8[1], L8[2]};
+        if (key == n || key >= mesh.h_node_key.size() || std::count(L.begin(), L.end(), 0) != 2) continue;
+        const size_t j = static_cast<size_t>(std::find_if(L.begin(), L.end(), [](int l) { return l != 0; }) - L.begin());
+        if (j >= n_directions) continue;
+        double Q[3][3], t[3];
+        periodic_lattice_map(mesh.periodic_translations, mesh.periodic_rotation, L, Q, t);
+        double d2 = 0.0;
+        for (size_t i = 0; i < N_DIM; i++) {
+            double y = t[i];
+            for (size_t m = 0; m < N_DIM; m++) y += Q[i][m] * double(mesh.h_node_coords(key, m));
+            d2 += (y - double(mesh.h_node_coords(n, i))) * (y - double(mesh.h_node_coords(n, i)));
+        }
+        offsets[j] = std::max(offsets[j], std::sqrt(d2));
+    }
+    if (mesh.n_global_cells > 0) {
+        comm::allreduce(std::span<double>(sums), comm::Op::SUM);
+        comm::allreduce(std::span<double>(offsets), comm::Op::MAX);
+    }
+    for (size_t j = 0; j < n_directions; j++) {
+        CheckPeriodic & p = out[j];
+        p.faces = static_cast<uint64_t>(sums[2 * j]);
+        p.area = sums[2 * j + 1];
+        p.node_offset_max = offsets[j];
+        const double size = p.faces > 0 ? (N_DIM == 3 ? std::sqrt(p.area / double(p.faces)) : p.area / double(p.faces)) : 0.0;
+        p.node_offset_relative = size > 0.0 ? p.node_offset_max / size : 0.0;
+    }
+    return out;
+}
+
+/**
+ * @brief The first-cell y+ of a wall zone's faces as the block's field y_plus, in the block's order (the zone's
+ *        faces of owned cells); nothing unless every face has one.
+ */
+void add_wall_y_plus(const Mesh & mesh, const std::vector<double> & face_y_plus, const std::string & zone,
+                     case_view::Block & block) {
+    if (face_y_plus.size() != mesh.n_faces) return;
+    std::vector<double> values;
+    for (const FaceZone & z : mesh.h_face_zones()) {
+        if (z.get_type() != FaceZoneType::BOUNDARY || z.get_name() != zone) continue;
+        for (uint32_t i = 0; i < z.n_faces(); i++) {
+            const uint32_t f = z.h_faces(i);
+            if (uint32_t(mesh.h_cells_of_face(f, 0)) >= mesh.n_owned()) continue;
+            values.push_back(face_y_plus[f]);
+        }
+    }
+    const bool all = values.size() == block.n_cells() &&
+                     std::all_of(values.begin(), values.end(), [](double v) { return std::isfinite(v); });
+    if (comm::allreduce(int(all || values.empty()), comm::Op::MIN) == 0 ||
+        comm::allreduce(uint64_t(values.size()), comm::Op::SUM) == 0) {
+        return;
+    }
+    block.field("y_plus", 1).values = std::move(values);
+}
+
 /** @brief Boundary entry i as the view labels it: its type and the keys the input sets, "inlet_mass_flow, mdot = 0.2 kg/s". */
 std::string condition_text(const ResolvedInput & resolved, const size_t i, const CheckBoundary & b) {
     const std::string prefix = "boundaries[" + std::to_string(i) + "].";
@@ -871,6 +1196,59 @@ void check_surface_file(CheckReport & r, const std::string & label, const Box & 
     }
 }
 
+/**
+ * @brief The input element that holds the block's key and its index in its array of tables: the table whose
+ *        index, name or prefix the key selects it by (sponges[0].region, probes[name = "s"].region), found
+ *        without reading any key.
+ */
+void link_to_element(const Input & input, case_view::Block & b) {
+    const size_t open = b.key.find('[');
+    if (open == std::string::npos) {
+        const size_t dot = b.key.rfind('.');
+        b.element = dot == std::string::npos ? "" : b.key.substr(0, dot);
+        return;
+    }
+    const std::string array = b.key.substr(0, open);
+    const Input * node = &input;
+    for (size_t at = 0; node && at <= array.size();) {
+        const size_t dot = std::min(array.find('.', at), array.size());
+        const Input * next = nullptr;
+        if (node->is_table()) {
+            const auto & entries = node->as_table().entries();
+            const auto it = entries.find(array.substr(at, dot - at));
+            if (it != entries.end()) next = &it->second;
+        }
+        node = next;
+        at = dot + 1;
+    }
+    auto selects = [&](const std::string & element) {
+        return b.key.starts_with(element) &&
+               (b.key.size() == element.size() || b.key[element.size()] == '.' || b.key[element.size()] == '[');
+    };
+    if (node && node->is_array()) {
+        const auto & tables = node->as_array();
+        for (size_t i = 0; i < tables.size(); i++) {
+            std::vector<std::string> names = {array + "[" + std::to_string(i) + "]"};
+            for (const char * field : {"name", "prefix"}) {
+                if (!tables[i].is_table()) continue;
+                const auto & entries = tables[i].as_table().entries();
+                const auto it = entries.find(field);
+                if (it != entries.end() && it->second.is_string()) {
+                    names.push_back(array + "[" + field + " = \"" + it->second.as_string() + "\"]");
+                }
+            }
+            for (const std::string & element : names) {
+                if (!selects(element)) continue;
+                b.element = element;
+                b.index = static_cast<int64_t>(i);
+                return;
+            }
+        }
+    }
+    const size_t close = b.key.find(']', open);
+    b.element = close == std::string::npos ? b.key : b.key.substr(0, close + 1);
+}
+
 } // namespace
 
 MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, const bool outlines) {
@@ -882,6 +1260,8 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, con
         if (name == "domain") v.domain = m.box;
         const bool zone = std::binary_search(automatic.boundary_zones.begin(), automatic.boundary_zones.end(), name);
         m.block.kind = name == "domain" ? case_view::Kind::MESH : zone ? case_view::Kind::BOUNDARY : case_view::Kind::CELL_ZONE;
+        if (name != "domain") m.block.zone = name;
+        if (name != "domain") m.block.zone = name;
         if (zone && mesh.curved_geometry) follow_curved_faces(mesh, m.block);
         v.regions.push_back(entry(mesh, name, region, m, true));
         v.blocks.push_back(std::move(m.block));
@@ -905,22 +1285,38 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         std::string conditions;
         for (size_t i = 0; i < boundary_summary.size(); i++) {
             if (block_name(boundary_summary[i].zone) != b.name) continue;
-            if (b.condition.empty()) b.condition = boundary_summary[i].condition;
+            if (b.condition.empty()) {
+                b.condition = boundary_summary[i].condition;
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
+                b.key = "boundaries[name = \"" + boundary_summary[i].zone + "\"]";
+                if (drawn) add_wall_y_plus(*mesh, r.face_y_plus, boundary_summary[i].zone, b);
+            }
             conditions += (conditions.empty() ? "" : "; ") + condition_text(resolved, i, boundary_summary[i]);
         }
         if (!conditions.empty()) b.label = b.name + ": " + conditions;
     }
     const std::vector<std::string> mesh_names = automatic.names();
+    const Input * names = region::named_regions(input);
+    auto link_input = [&](case_view::Block & b, const std::string & label) {
+        if (names && names->is_table() && names->as_table().entries().contains(label)) {
+            b.key = b.element = "regions." + label;
+        } else {
+            b.key = label;
+            link_to_element(input, b);
+        }
+    };
     for (const auto & [label, region] : used_regions->used()) {
         if (std::find(mesh_names.begin(), mesh_names.end(), label) != mesh_names.end()) continue;
         const case_view::Kind kind = label.starts_with("probes[")       ? case_view::Kind::PROBE
                                      : label.starts_with("write_data[") ? case_view::Kind::SNAPSHOT
                                                                         : case_view::Kind::REGION;
         if (region->solution()) {
+            if (options.geometry_only) continue;
             const auto levels =
                 std::make_shared<const region::SolutionLevels>(*mesh, region->conditions(), species_names, cell_fields());
             OnMesh m = on_mesh(*mesh, *region, block_name(label), false, false, levels, static_cast<double>(t));
             m.block.kind = kind;
+            link_input(m.block, label);
             CheckRegion g = entry(*mesh, label, *region, m, false);
             g.resolution = 0;
             g.solution = true;
@@ -930,6 +1326,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         OnMesh m = on_mesh(*mesh, *region, block_name(label), region->dimension() == N_DIM, drawn);
         m.block.kind = kind;
+        link_input(m.block, label);
         CheckRegion g = entry(*mesh, label, *region, m, false);
         g.from_file = std::any_of(region->nodes().begin(), region->nodes().end(),
                                   [](const region::Node & n) { return n.kind == region::Kind::TRIANGLES; });
@@ -949,12 +1346,19 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         }
         blocks.push_back(std::move(m.block));
     }
-    for (case_view::Block & b : probes.view_blocks()) blocks.push_back(std::move(b));
+    for (case_view::Block & b : probes.view_blocks()) {
+        link_input(b, b.name);
+        blocks.push_back(std::move(b));
+    }
+    for (case_view::Block & b : blocks) {
+        if (b.kind == case_view::Kind::BOUNDARY && !b.key.empty()) link_to_element(input, b);
+    }
     if (!options.view_dir.empty()) {
         const std::string title = options.input_file.empty() ? "case view" : options.input_file;
         const std::vector<std::string> files = case_view::write_view(options.view_dir, blocks, title);
         r.view_file = files[0];
         r.view_images.assign(files.begin() + 1, files.end());
+        r.view_blocks = case_view::describe(blocks);
     }
 }
 
