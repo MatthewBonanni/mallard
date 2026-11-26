@@ -82,6 +82,11 @@ std::vector<Lattice> make_lattice(Shape shape, int64_t n) {
     Nodes nodes;
     const Vec o{0, 0, 0}, x{n, 0, 0}, y{0, n, 0}, z{0, 0, n};
     switch (shape) {
+        case Shape::CURVE:
+            nodes.push(o);
+            nodes.push(x);
+            nodes.edge(o, x, n);
+            break;
         case Shape::TRIANGLE:
             triangle(nodes, o, x, y, n);
             break;
@@ -174,6 +179,7 @@ std::vector<std::array<uint32_t, 3>> exponents(Shape shape, uint32_t order) {
             for (uint32_t a = 0; a <= order; a++) {
                 const bool fits = shape == Shape::TRIANGLE || shape == Shape::WEDGE ? a + b <= order
                                   : shape == Shape::TETRAHEDRON                     ? a + b + c <= order
+                                  : shape == Shape::CURVE                           ? b == 0
                                                                                     : true;
                 if (fits) e.push_back({a, b, c});
             }
@@ -190,6 +196,7 @@ double monomial(const std::array<uint32_t, 3> & e, const Point & x) {
 
 uint8_t vtk_type(Shape shape) {
     switch (shape) {
+        case Shape::CURVE: return 68;
         case Shape::TRIANGLE: return 69;
         case Shape::QUADRILATERAL: return 70;
         case Shape::TETRAHEDRON: return 71;
@@ -202,6 +209,7 @@ uint8_t vtk_type(Shape shape) {
 uint32_t n_nodes(Shape shape, uint32_t order) {
     const uint32_t p = order;
     switch (shape) {
+        case Shape::CURVE: return p + 1;
         case Shape::TRIANGLE: return (p + 1) * (p + 2) / 2;
         case Shape::QUADRILATERAL: return (p + 1) * (p + 1);
         case Shape::TETRAHEDRON: return (p + 1) * (p + 2) * (p + 3) / 6;

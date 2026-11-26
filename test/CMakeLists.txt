@@ -82,6 +82,7 @@ set(MALLARD_TEST_SOURCES
     particles_test.cpp
     viscous_order_test.cpp
     high_order_output_test.cpp
+    surface_high_order_test.cpp
 )
 if(Mallard_DIM EQUAL 2)
     list(APPEND MALLARD_TEST_SOURCES

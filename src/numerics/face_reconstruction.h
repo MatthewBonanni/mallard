@@ -298,6 +298,21 @@ class FaceReconstruction {
         }
 
         /**
+         * @brief As point_values for output (select_troubled), with the gradients
+         *        of W at the points from the derivatives of the same polynomials:
+         *        where point_values writes out(i), also gradients(i) and exact(i) = 1; other
+         *        points are left as they are.
+         * @return Whether the scheme has such polynomials (nothing written otherwise).
+         */
+        virtual bool point_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> /*solution*/,
+                                     Kokkos::View<uint32_t *> /*cells*/, Kokkos::View<rtype *[N_DIM]> /*offsets*/,
+                                     Kokkos::View<rtype *[N_CONSERVATIVE]> /*out*/,
+                                     Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> /*gradients*/,
+                                     Kokkos::View<uint8_t *> /*exact*/, bool /*by_cell*/) {
+            return false;
+        }
+
+        /**
          * @brief Axisymmetric runs: for each of the first n_cells cells whose
          *        reconstruction has a smooth polynomial, replace source(c) by
          *        int (p - tau_thetatheta) dA over the planar cell, with p and the
@@ -552,6 +567,10 @@ class TENO : public FaceReconstruction {
         bool point_values(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                           Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
                           bool select_troubled, bool by_cell) override;
+        bool point_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
+                             Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                             Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients,
+                             Kokkos::View<uint8_t *> exact, bool by_cell) override;
 
         uint8_t degree = 4;
         uint8_t n_dof_large = 0;
@@ -764,6 +783,7 @@ class TENO : public FaceReconstruction {
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_points(Kokkos::View<rtype *[N_CONSERVATIVE]> solution, Kokkos::View<uint32_t *> cells,
                            Kokkos::View<rtype *[N_DIM]> offsets, Kokkos::View<rtype *[N_CONSERVATIVE]> out,
+                           Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients, Kokkos::View<uint8_t *> exact,
                            bool select_troubled, bool by_cell);
         template <uint8_t DEG, bool PRIM, typename TABLE>
         void launch_gradients(Kokkos::View<rtype *[N_CONSERVATIVE]> solution,

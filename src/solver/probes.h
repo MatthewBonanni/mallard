@@ -430,6 +430,14 @@ class Probes {
             Kokkos::View<uint32_t *> unique_cells;  // cells of the inside samples, once each
             Kokkos::View<const uint32_t> unique_count;  // isosurfaces cut on the device: the first count() of them
             Kokkos::View<rtype *[N_CONSERVATIVE]> W;
+            // Gradients of W at the samples from the polynomials' derivatives (polynomial_gradients): of the
+            // inside samples where the reconstruction has them (inside_exact), then of every sample, the cell's
+            // least-squares gradient where not (exact 0), the last slot of exact ones that of p / rho; and
+            // axisymmetric runs' radius of each sample
+            bool polynomial_gradients = false;
+            Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> inside_dW, dW;
+            Kokkos::View<uint8_t *> inside_exact, exact;
+            Kokkos::View<rtype *> radius;
             Kokkos::View<rtype **, Kokkos::LayoutRight> values;  // (local sample, variable)
             // Staged probes: values of each record slot, (slot, local sample * variables)
             Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::SharedHostPinnedSpace> staging;
@@ -445,6 +453,12 @@ class Probes {
             void select(const Mesh & mesh, const std::vector<uint32_t> & owned_cells, uint32_t n_variables);
             /** @brief The faces of a face set, sampled on their cell side. */
             void on_faces(const Mesh & mesh, const probe::FaceSet & set, uint32_t n_variables);
+            /**
+             * @brief Local sample i becomes the samples at points[first[i]] to points[first[i + 1]] in its cell,
+             *        with its face and normal: n_global in all, rank 0's row of each in row.
+             */
+            void expand(const Mesh & mesh, const std::vector<size_t> & first, const std::vector<probe::Point> & points,
+                        uint64_t n_global, std::vector<uint64_t> row, uint32_t n_variables);
             void evaluate(Sampling sampling, Kokkos::View<int32_t *> codes, const ProbeFields & fields,
                           const ProbeReference & reference, bool gradients, bool diffusive = false);
             /**
@@ -566,6 +580,7 @@ class Probes {
             bool reduced_for_triggers = false;
             Samples nodes;
             Samples quadrature;  // curves with reductions; regions: the cells they cover
+            uint32_t lagrange_degree = 0;  // snapshots of surfaces and curves: elements as Lagrange cells (0: one sample each)
             std::shared_ptr<std::ofstream> out, out_reductions;
             std::unique_ptr<ProbeSpectra> spectra;
             std::shared_ptr<std::ofstream> out_spectra, out_reduction_spectra;
@@ -735,6 +750,12 @@ class Probes {
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
                                              const std::string & summary, uint32_t n_variables);
         /**
+         * @brief A snapshot's elements, one sample each, as Lagrange cells of degree p.lagrange_degree: triangles
+         *        and quadrilaterals (other polygons as triangles from their first vertex), curves in 2D, sampled at
+         *        their nodes in the element's cell (collective).
+         */
+        static void lagrange_elements(Probe & p, const Mesh & mesh);
+        /**
          * @brief A filled region probe's samples: the owned cells with their weight f V.
          */
         static void select_region(Probe & p, const Mesh & mesh, const region::Region & r,
@@ -766,6 +787,7 @@ class Probes {
 
         std::vector<std::unique_ptr<Probe>> probes;
         snapshot_block::Reconstruction reconstruction{"linear_least_squares", 2, {"cell_average"}};
+        uint32_t polynomial_degree = 0;  // of the reconstruction's polynomials (TENO), 0 without
         std::vector<std::string> statistics_variables;
         uint64_t average_interval = 1;
         rtype average_start = 0.0;

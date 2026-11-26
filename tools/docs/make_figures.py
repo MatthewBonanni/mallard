@@ -45,6 +45,7 @@ import runs
 import scaling
 import schematics
 import structured_blocks
+import surface_high_order
 import teno
 import thickened_flames
 import theory
@@ -94,6 +95,7 @@ def main():
         probes.main()
         python.figures(args.mallard)
         regions.figures(args.mallard, args.mallard3d)
+        surface_high_order.figures(args.mallard)
         sys.argv = [sys.argv[0], "--mallard", args.mallard]
         run_report.main()
         sys.argv = [sys.argv[0], "--mallard", args.mallard, "--mpirun", args.mpirun]

@@ -437,6 +437,28 @@ void monomials(const uint8_t r, const T xi, const T eta, const T zeta, T * phi) 
 }
 
 /**
+ * @brief Derivatives of all monomials of degree 1..r at a point x (N_DIM
+ *        coordinates, already scaled): d[l * N_DIM + k] = d phi_l / d x_k.
+ */
+template <typename T> KOKKOS_INLINE_FUNCTION
+void monomial_derivatives(const uint8_t r, const T * x, T * d) {
+    const uint8_t nk = n_dof(r);
+    for (uint8_t l = 0; l < nk; l++) {
+        uint8_t e[3] = {0, 0, 0};
+        if constexpr (N_DIM == 2) {
+            exponents(l, e[0], e[1]);
+        } else {
+            exponents(l, e[0], e[1], e[2]);
+        }
+        for (uint8_t k = 0; k < N_DIM; k++) {
+            T v = T(e[k]);
+            for (uint8_t j = 0; j < N_DIM && e[k] > 0; j++) v *= ipow(x[j], static_cast<uint8_t>(j == k ? e[j] - 1 : e[j]));
+            d[l * N_DIM + k] = v;
+        }
+    }
+}
+
+/**
  * @brief Monomials at a point x (N_DIM coordinates, already scaled).
  */
 template <typename T> KOKKOS_INLINE_FUNCTION
