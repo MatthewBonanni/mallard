@@ -45,6 +45,12 @@ on:
         description: Run the device builds (CUDA, HIP, SYCL) even without device-code changes
         type: boolean
         default: false
+      changelog:
+        description: >-
+          Require a changelog fragment; the landing tooling turns it off for a batch whose pull
+          requests are all labeled no-changelog, since a batch branch has no pull request to read
+        type: boolean
+        default: true
       only:
         description: >-
           Run only these jobs, comma-separated (backend names, tutorials, device, spack, fuzz;
@@ -114,8 +120,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.ref_name }}
+          CHANGELOG: ${{ inputs.changelog }}
         run: |
-          if [ "$BRANCH" != main ] && gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+          if [ "$CHANGELOG" = false ]; then
+            echo "Dispatched with changelog=false: skipped."
+          elif [ "$BRANCH" != main ] && gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
               --json labels -q '.[].labels[].name' | grep -qx no-changelog; then
             echo "Labeled no-changelog: skipped."
           else
@@ -416,7 +425,7 @@ jobs:
         env:
           LLVM: ${{ matrix.backend.llvm }}
         run: |
-          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
           echo "deb http://apt.llvm.org/resolute/ llvm-toolchain-resolute-$LLVM main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sh tools/dev/apt_install.sh clang-$LLVM
       # Kitware's build of the oldest CMake that Mallard supports (cmake_minimum_required)
@@ -426,7 +435,7 @@ jobs:
         env:
           VERSION: ${{ matrix.backend.cmake }}
         run: |
-          curl -fsSL "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 "https://github.com/Kitware/CMake/releases/download/v$VERSION/cmake-$VERSION-linux-$(uname -m).tar.gz" |
             tar -xz -C /opt
           echo "/opt/cmake-$VERSION-linux-$(uname -m)/bin" >> "$GITHUB_PATH"
       # Branches restore main's latest cache. The name ends with a slash: a bare prefix
@@ -1029,7 +1038,7 @@ jobs:
           ONEAPI: ${{ matrix.toolchain.oneapi }}
         run: |
           sh tools/dev/apt_install.sh --no-install-recommends gpg
-          curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB |
             gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
             > /etc/apt/sources.list.d/oneAPI.list
