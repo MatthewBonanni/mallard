@@ -99,6 +99,7 @@ add_library(MallardCore STATIC
     solver/solver_check.cpp
     solver/solver_mesh_fields.cpp
     solver/check_report.cpp
+    solver/cost_model.cpp
     solver/run_report.cpp
     solver/solver_resolution.cpp
     solver/solver_chemistry.cpp
@@ -107,6 +108,7 @@ add_library(MallardCore STATIC
     solver/divergence_report.cpp
     solver/solver_graph.cpp
     solver/solver_health.cpp
+    solver/health_events.cpp
     solver/solver_step_control.cpp
     solver/solver_triggers.cpp
     solver/triggers.cpp

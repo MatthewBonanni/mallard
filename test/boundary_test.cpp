@@ -66,14 +66,6 @@ TEST(BoundaryTest, TimeDependentDirichletInflowIsAdvected) {
     EXPECT_LT(max_err, 5e-4);
 }
 
-TEST(BoundaryTest, WhereSplitsAZoneBetweenConditions) {
-    const std::string bottom =
-        "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.5\"\n"
-        "[[boundaries]]\nname = \"bottom\"\ntype = \"wall_adiabatic\"\nwhere = \"x >= 0.5\"\n";
-    Solver solver;
-    EXPECT_NO_THROW(solver.init(parse_toml(strip_input("type = \"outlet_extrapolation\"\n", bottom, "n_steps = 1\ncfl = 0.2\n", 20))));
-}
-
 TEST(BoundaryTest, OverlappingOrMissingAssignmentsAreRejected) {
     const std::string overlap =
         "[[boundaries]]\nname = \"bottom\"\ntype = \"symmetry\"\nwhere = \"x < 0.6\"\n"

@@ -1,0 +1,1 @@
+- `[chemistry] explicit_step`: a cell whose explicit step fails in its first call (no last sub-step yet) now also skips it in the next calls; the run summary reports the share of integrations taken by explicit steps and the cells whose last explicit step failed.
