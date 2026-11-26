@@ -177,13 +177,13 @@ void Particles::init_crossings(const Input & input, const Input & table, region:
     events.entry = Kokkos::View<uint32_t *>("particle_crossings_entry", rows);
     events.alpha = Kokkos::View<double *>("particle_crossings_alpha", rows);
     events.direction = Kokkos::View<int8_t *>("particle_crossings_direction", rows);
-    events.x = Kokkos::View<double *[3]>("particle_crossings_x", rows);
+    events.x = decltype(events.x)("particle_crossings_x", rows);
     if (any_exits) {
         exit_mask = Kokkos::View<uint32_t *>("particle_exit_mask", mesh->n_faces);
         Kokkos::deep_copy(exit_mask, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>(
                                          mask.data(), mask.size()));
     }
-    crossing_start = Kokkos::View<double *[3]>("particle_crossing_start", capacity);
+    crossing_start = decltype(crossing_start)("particle_crossing_start", capacity);
     crossing_id = Kokkos::View<uint64_t *>("particle_crossing_id", capacity);
     uint32_t width_max = 0;
     for (const auto & c : crossings) width_max = std::max(width_max, static_cast<uint32_t>(c.columns.size()));

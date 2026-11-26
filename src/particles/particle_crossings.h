@@ -58,7 +58,7 @@ struct CrossingEvents {
     Kokkos::View<uint32_t *> slot, entry;
     Kokkos::View<double *> alpha;
     Kokkos::View<int8_t *> direction;
-    Kokkos::View<double *[3]> x;
+    Kokkos::View<double *[3], Kokkos::LayoutLeft> x;  // LayoutLeft on every backend, as on CUDA
     Kokkos::View<uint64_t *[2], Kokkos::LayoutRight> tally;  // LayoutRight: the host reads it as (entry, direction) pairs
     uint32_t tallied = 0;
 

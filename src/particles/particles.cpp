@@ -837,8 +837,9 @@ void Particles::relocate() {
                 continue;
             }
             if (exits.extent(0) > 0 && action != particles::LOST && exits(static_cast<uint32_t>(face))) {
+                const double x0[3] = {starts(s, 0), starts(s, 1), starts(s, 2)};
                 particles::record_exit(recorded, w, exits(static_cast<uint32_t>(face)), ids(s), s, c,
-                                       static_cast<uint32_t>(face), p, &starts(s, 0));
+                                       static_cast<uint32_t>(face), p, x0);
             }
             Kokkos::atomic_inc(&removed(action == particles::EXIT ? 0 : action == particles::STICK ? 2 : 1));
             ids(s) = EMPTY;
