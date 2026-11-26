@@ -703,9 +703,10 @@ Each record has a `type`:
 | `start` | After setup | `schema` (`"mallard-run-log"`), `version` (2), `run_id` (the run's, as in its [run block](#run-block)), `restart_of` (`run_id`, `file` and `step` of the restart file the run started from, `run_id` `null` for a file of a run before 0.10; `null` for a fresh start), `provenance` (the [run block](#run-block); its key keeps its name), `placement` (one object per rank, as the [rank report](parallel.md#the-rank-report) finds it: `rank`, `host`, `threads`, `cpus` (the CPU set before Kokkos starts, e.g. `"0-15"`; `null` where unknown), `cpu_numa`, `omp_bind`, and on GPUs `gpu` (PCI address), `gpu_uuid`, `gpu_index`, `gpu_numa`; `null` where unknown or on CPUs), `setup_phases` (seconds of each setup phase: `max` and `mean` over ranks), `units` (the units of the progress records' quantities, as the CSV files' units lines write them, `"1"` for none: `t`, `dt`, `cfl`, `wall`, ..., and per object `monitors`, `margins` (of `health.margins`), `integrals`, `forces_<zone>` and by probe `probes`, a column each; bytes `B`; in a nondimensional case `"1"` for every physical quantity), `check` (the [check at setup](#the-check-at-setup)); runs started from a restart file: `restart` (`file`, `step`, `t`, and on a rewind `rewound_from`, the last step recorded before it, and `superseded`, the files of the later steps it [set aside](#which-format): `path`, as recorded, and `to`, where the file is now) |
 | `progress` | Every progress row | as below |
 | `output` | A snapshot completely written (also in the background): the run's output index | `step`, `t`, `kind` (`vtkhdf`, `vtu`, `xdmf`, `restart`; probes: `vtp`, `vtkhdf`; `spectra`), `path`, `reason` (as the [snapshot metadata](#snapshot-metadata)'s), `writer` (the `[[write_data]]` prefix, probe or output that wrote it), `run_id`, `complete` (`true`), `bytes` (of its files), `files` (every file of it, each rank's piece too: `path`, `bytes`, `sha256`; a file over one chunk (64 MiB) `sha256_tree`, `chunk_bytes` and `chunks` instead, its [chunk-tree hash](#complete-files); no hash for a [file appended to](#complete-files)) |
-| `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md), `set` with also `source` (`"mallard ctl"`, `"SET file"`, `"--set"`) and `setting` (`"key=value"`); `state_set` when a program set the state through the [C++ API](cpp_api.md#fields); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read), `text` |
+| `event` | A request acted on (the rows between progress rows) | `step`, `t`, `kind` (`checkpoint`, `stop`, `set` and `diverged` from [run control](running.md), `set` with also `source` (`"mallard ctl"`, `"SET file"`, `"--set"`) and `setting` (`"key=value"`); `state_set` when a program set the state through the [C++ API](cpp_api.md#fields); `trigger` from [triggers](running.md#triggers), with also `name`, `firing` (1 for the first) and `values`, the values its condition read; `converged` and `wall_time` from the [run health events](#run-health-events), with also `values`), `text` |
+| `heartbeat` | Every `[output] heartbeat_interval` of wall time, after the step that reaches it ([run health events](#run-health-events)) | `step`, `t`, `wall` (seconds since the solver started), `steps` (taken since the previous heartbeat) |
 | `divergence` | A run that diverged, before its `error` record | the [divergence report](running.md#the-divergence-report): `step`, `t`, `invalid_cells`, `failed` (cells by the quantity that failed first), `box` (their extent), `last_valid` (`step`, `t`, `file`, or `null`), `causes` (most likely first: `kind` (`time_step`, `mesh`, `boundary`, `initial_state`, `chemistry`, `numerics`), `title`, `score`, `evidence`, `fix`), `cell`, `neighbors`, `others` (`id`, `rank`, `x`, `failed`, `rho`, `speed`, `p`, `T`, `cfl`, `quality`, `repaired`, `troubled`), `time_step` (`integrator`, `limit`, `dt`, `dt_cfl1`, `cfl`, `cells_over_limit`), `zones` (`name`, `type`, `near`, and where compared `inadmissible`, `ratio`, `jump`), `history` (the last progress rows), `snapshot`, `units` (of `t`, `dt`, `x`, `rho`, `speed`, `p` and `T`, as the CSV files' units lines write them; `"1"` for each in a nondimensional case) |
-| `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `code` (stable: [Warnings and errors](running.md#warnings-and-errors)), `message`, `docs` (the page and anchor that explain the code) |
+| `warning`, `error` | A warning (those of the setup right after the `start` record), or the error that ended the run | `code` (stable: [Warnings and errors](running.md#warnings-and-errors)), `message`, `docs` (the page and anchor that explain the code); the run health warnings (`W-HEALTH-...`) also `step` and `t`, and the [run health events](#run-health-events) `values`, the numbers they judged |
 | `probe` | After the `start` record, for each filled region probe | `probe` (its name), `sampling` (its [probe sampling block](#probe-sampling), with the region's `measures`) |
 | `end` | The end of the run, also on a stop signal, divergence or an error (on rank 0): a run without one was killed (`SIGKILL`, a lost node) or is still running | `outcome` (`finished`, `stopped`, `signal`, `wall_time_limit`, `diverged`, `error`), `cause` (`finished`: `n_steps` or `t_stop`; `stopped`: `stop_file`, `mallard_ctl`, `trigger` or `caller`, a program that ended the run through the [C++ API](cpp_api.md); `signal`: `SIGTERM`, `SIGINT` or `SIGUSR2`), `trigger` (the [trigger](running.md#triggers) that stopped the run, by name), `reason` (in words; the error's message), `step`, `t`, `last_snapshot` and `last_restart` (the last of each recorded complete: `step`, `t`, `path`; none if the run wrote none), `steps` (this run's), `wall` and its parts `wall_setup`, `wall_stepping`, `wall_diagnostics`, `wall_output` (and `wall_chemistry`), `rejected_steps` (with error control), `cells_per_second` |
 
@@ -891,15 +892,75 @@ it all off.
 | `repairs`, `repairs_run` | Each [numerical repair](#numerical-repairs), since the previous row and since the start: `activations`, `cells` (distinct owned cells) and `change`, the integrated change of each quantity it changes |
 | `balance`, `balance_run` | The [conservation ledger](#conservation-ledger), since the previous row and since the first row |
 | `element_drift` | Mixtures with chemistry: the largest change of a rank's element mass over one chemistry call, beyond the recorded repairs, relative to the rank's mass (round-off) |
+| `residuals` | The change of the state over the step that ended at the row, `rho`, `momentum` and `energy`: the root mean square over the domain (weighted by cell volume) of the change of &rho;, &rho;**u** (its magnitude) and &rho;E, over that of &rho;, (\|&rho;**u**\|<sup>2</sup> + 2 &rho; &rho;E)<sup>1/2</sup> and &rho;E. Dimensionless and per step; 0 for a state that no longer changes. Absent at a row with no step before it, and with `[run] keep_last_good = false`, whose copy of the step's start it reads |
 
 A breakdown of the step by phase is a profiling question, not a health check:
 timing phases needs a fence after each one, which a CUDA-graph step does not
 have; use a profiler (Nsight Systems, Kokkos Tools) for it.
 
 Mallard warns once per kind when the density or pressure falls below
-10<sup>-3</sup> of its domain mean, when a mass fraction is below
--10<sup>-6</sup>, and when a checked balance has an unexplained relative
-change above 10<sup>5</sup> machine epsilons.
+10<sup>-3</sup> of its domain mean, or a mass fraction is below
+-10<sup>-6</sup> ([`W-HEALTH-MARGIN`](running.md#w-health-margin)), and when
+a checked balance has an unexplained relative change above 10<sup>5</sup>
+machine epsilons ([`W-HEALTH-LEDGER`](#w-health-ledger)).
+
+### Run health events
+
+Besides those, the run judges its own course and says so in the log, as
+warnings with stable codes and events, so that a script or the GUI following
+[`mallard.jsonl`](#run-record-mallardjsonl) need not infer them from the
+numbers. Each comes from values the host already has: the time step and stable
+time step of every step, which it takes anyway, and the progress row's values.
+None adds a reduction, a copy from the device or a wait to the step.
+
+```toml
+[output]
+heartbeat_interval = 60     # seconds of wall time between heartbeat records (the default; 0: none)
+steady_residual = 1e-8      # a run to a steady state: converged once every residual is below this
+stall_steps = 10000         # ... and stalled when its largest residual has not halved in this many steps
+```
+
+| Code or kind | When | `values` |
+|---|---|---|
+| <a id="w-health-cfl-limit"></a>`W-HEALTH-CFL-LIMIT` | A step's CFL number (`dt` over the stable time step at CFL 1) is above the time integrator's stability limit for smooth flow, the `cfl_limit` of the [check at setup](#the-check-at-setup): a fixed `dt` the flow has outgrown, or an error controller's step. Not with a `run.cfl` above the limit, which the check reported as `W-CFL-LIMIT`. Use `run.cfl`, or a smaller `run.dt` | `cfl`, `cfl_limit`, `dt`, `dt_cfl1` |
+| <a id="w-health-cfl-spike"></a>`W-HEALTH-CFL-SPIKE` | A step's CFL number is above twice its median over the last 20 progress rows (judged from the 5th): at a fixed `dt`, the stable time step fell, a wave speed jumped. Often the step before a divergence: look at the place of the run's [margins](#run-health) | `cfl`, `median`, `dt`, `dt_cfl1` |
+| <a id="w-health-dt-collapse"></a>`W-HEALTH-DT-COLLAPSE` | With `run.cfl`: a step's stable time step at CFL 1 is below a tenth of its median over the last 20 progress rows (judged from the 5th), and the time step with it: a wave speed or a viscosity that jumped, a cell in trouble. At a fixed `dt` the same shows as `W-HEALTH-CFL-SPIKE` | `dt_cfl1`, `median`, `dt` |
+| <a id="w-health-rejected-steps"></a>`W-HEALTH-REJECTED-STEPS` | With [error control](numerics.md): more than a quarter of the steps tried since the previous progress row were rejected. The controller is fighting the solution: tighten nothing, look at what changed in the flow | `rejected`, `tried`, `since_step` |
+| <a id="w-health-stall"></a>`W-HEALTH-STALL` | With `steady_residual`: the largest of the progress rows' `residuals` has not halved in `stall_steps` steps, and is still above `steady_residual`. The run has stopped converging: a flow that is not steady (vortex shedding, a separated shear layer), or a tolerance below the precision's round-off. Warned again once the residual halves and stalls anew | the `residuals`, `steady_residual`, `since_step`, `residual_since` |
+| `converged` (event) | With `steady_residual`: every one of a progress row's `residuals` is at or below it, once per run. The run goes on to its stop: stop it with `mallard ctl stop` | the `residuals`, `steady_residual` |
+| <a id="w-health-job-time"></a>`W-HEALTH-JOB-TIME` | The scheduler ends the job before the run's own stop: its ETA is beyond the job's end, or 90% of the job's time is used. The job's end comes from `SLURM_JOB_END_TIME`, which Slurm sets in a batch job. Not when `t_wall_stop` ends the run before the job does, with its final output and restart. A job killed at its limit has no end record, and its last restart file is the last one written on schedule: set `t_wall_stop` a few minutes below the limit (`mallard ctl set t_wall_stop=...`), or have Slurm signal the run (`#SBATCH --signal=USR2@120`, [MPI launchers and Slurm](running.md#mpi-launchers-and-slurm)) | `job_left` (seconds), `eta` (`null` if unknown) |
+| `wall_time` (event) | 90% of `[run] t_wall_stop` is used, once per run: the run stops soon, with its final output and restart | `wall`, `t_wall_stop` |
+| <a id="w-health-ledger"></a>`W-HEALTH-LEDGER` | A checked balance of the [conservation ledger](#conservation-ledger) has an unexplained relative change above 10<sup>5</sup> machine epsilons, once per quantity: something changes the totals that neither the boundaries, the sources nor the repairs explain. Report it with the input | (`step`, `t` only) |
+| <a id="w-health-nonfinite"></a>`W-HEALTH-NONFINITE` | A monitored value of a progress row is NaN or infinite, once per value: a reduction or one-point value of a probe, a column of `[integrals]` or of a `[[forces]]` zone. The solution diverged there, or the probe had no value at its write (an empty region) | `monitor`, `value` (its column), `step_written` |
+
+The warnings of a step (CFL, dt) are written once, and again only after their
+condition has stayed clear for 5 progress rows; the others once per run (per
+quantity or value), as said. Each is a line on stderr and a `warning` record
+(`code`, `message`, `docs`, `step`, `t`, `values`), and the events a remark
+between the progress rows and an `event` record:
+
+```json
+{"type":"warning","code":"W-HEALTH-CFL-SPIKE","message":"CFL 2.31 at step 1,204 is 2.62 times its median 0.88 over the last 20 progress rows","docs":"docs/guide/output.md#w-health-cfl-spike","step":1204,"t":0.0182,"values":{"cfl":2.31,"median":0.88,"dt":2e-05,"dt_cfl1":8.66e-06}}
+{"type":"event","step":52000,"t":0.418,"kind":"converged","text":"every residual is below steady_residual = 1e-08 (largest: energy, 9.7e-09)","values":{"rho":4.1e-09,"momentum":6.3e-09,"energy":9.7e-09,"steady_residual":1e-08}}
+{"type":"heartbeat","step":52311,"t":0.4205,"wall":3601.2,"steps":874}
+```
+
+**Heartbeats** tell a hung run from a slow one: a run writes one at the end
+of the first step at least `heartbeat_interval` after the previous one, so a
+log whose last heartbeat is much older than the interval (and the step time,
+the progress records' `wall_per_step`) belongs to a run that no longer steps:
+stuck in a collective, a file system, or killed. A step longer than the
+interval writes one heartbeat per step.
+
+**Residuals** are those of an explicit time-marching run to a steady state:
+the change of the state over one step relative to the state, which falls
+toward the precision's round-off as the flow settles: keep `steady_residual`
+well above it (10<sup>-6</sup> to 10<sup>-10</sup> in double precision,
+10<sup>-5</sup> in single). They are part of
+the run health (`[output] health`), measured at progress rows, so
+`steady_residual` needs it, and the residual is judged every
+`check_interval` steps. A run that is unsteady by nature never converges:
+leave `steady_residual` unset there.
 
 ### Conservation ledger
 

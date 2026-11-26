@@ -140,6 +140,10 @@ void set_verbose(bool on);
  * @param code one of diagnostic_code::ALL
  */
 void warning(std::string_view code, std::string_view message);
+/** @brief warning() whose record also has the fields given as (key, JSON text) after its own: a run health event's
+ *         step, t and values. */
+void warning(std::string_view code, std::string_view message,
+             const std::vector<std::pair<std::string, std::string>> & fields);
 
 /**
  * @brief Error on stderr from the calling rank, as warning, prefixed with the rank in parallel runs; also a record
