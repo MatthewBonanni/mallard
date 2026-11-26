@@ -1,0 +1,12 @@
+{
+ "default": "10000",
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/steady.toml",
+  "tools/dev/catalog_inputs/3d/steady.toml"
+ ],
+ "type": "integer"
+}

@@ -1,0 +1,4 @@
+- In a nondimensional case (`physics.units = "nondimensional"`), the units lines of the probe, force, integral, statistics and `mallard post extract` CSV files, and the spectra's `units` column, say `1` for every quantity, as the run log does, instead of SI units.
+- In a nondimensional case (`physics.units = "nondimensional"`), the units stored in snapshot and probe files (VTKHDF, VTU and VTP field data, HDF5 attributes, XDMF, and the snapshot and probe sampling blocks) are `1` for every physical quantity, as the CSV units lines and the run log say, instead of SI units.
+- The probe sampling block's units of a filled region's measures are in UDUNITS syntax (`m2`, `m3 rad-1`) like every other units entry, instead of `m^2`, `m^3 rad^-1`.
+- The message for a restart, mesh or output file of a format version this build cannot read names the build's full version (`git describe`, as `mallard --version` prints it), instead of the release it was configured from.
