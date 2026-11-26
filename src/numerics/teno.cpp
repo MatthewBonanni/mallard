@@ -4319,6 +4319,20 @@ std::vector<uint8_t> TENO::stencil_cells(const std::vector<uint8_t> & cells) con
     return used;
 }
 
+std::vector<uint32_t> TENO::mirror_face_cells() const {
+    const auto h_boundary_faces = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), boundary_faces);
+    std::vector<uint32_t> out;
+    for (const teno::PackedStencils * packed : {&stencil_large, &stencil_small}) {
+        const auto h_images = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), packed->images);
+        for (size_t k = 1; k < h_images.extent(0); k += 2) {
+            int32_t row, rel_row;
+            const int32_t f = teno::entry_face(h_images(k), h_boundary_faces, row, rel_row);
+            if (f >= 0) out.push_back(static_cast<uint32_t>(mesh->h_cells_of_face(static_cast<uint32_t>(f), 0)));
+        }
+    }
+    return out;
+}
+
 uint64_t TENO::options_key() const {
     Fnv1a hash;
     hash.add(sizeof(rtype));

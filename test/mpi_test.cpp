@@ -28,6 +28,7 @@
 #include "compression.h"
 #include "data_paths.h"
 #include "device_comm.h"
+#include "example_inputs.h"
 #include "file_hash.h"
 #include "gmsh_fixtures.h"
 #include "hdf5_output.h"
@@ -356,6 +357,31 @@ TEST(MPITest, TENOStencilShapesAtWallsAndInHalosMatchSerial) {
     expect_matches_serial(on_file(mixture_input("", teno3, "", "euler"),
                                   "type = \"cartesian_tri\"\nNx = 24\nNy = 8\nLx = 1.0\nLy = 0.3\n",
                                   write_temp_shared("mallard_mpi_clustered_strip.msh", clustered_quads(24, 24, 0.3))));
+}
+
+TEST(MPITest, DroppingTheUnreadHaloKeepsTheFacesImagesMirrorAcrossAndChangesNoBit) {
+    // On 3 ranks the cylinder wall's stencils mirror cells across wall faces of halo cells no stencil reads
+    if (comm::size() == 1) GTEST_SKIP() << "needs several ranks";
+    const Input input = example_under_preset({"cylinder/input.toml", "high_order", 2, "",
+                                              {{{"inlet", "farfield"}, {"outlet", "farfield"}, {"walls", "farfield"},
+                                                {"cylinder", "cylinder"}}}, ""}, 3, 16);
+    std::vector<double> states[2];
+    uint32_t n_cells[2];
+    for (const bool keep : {true, false}) {
+        Solver solver;
+        solver.set_keep_unread_halo(keep);
+        solver.init(input);
+        solver.run();
+        solver.copy_device_to_host();
+        n_cells[keep] = solver.get_mesh()->n_cells;
+        for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+            for (size_t i = 0; i < solver.h_conservatives.extent(1); i++) {
+                states[keep].push_back(double(solver.h_conservatives(c, i)));
+            }
+        }
+    }
+    EXPECT_GT(comm::allreduce(uint64_t(n_cells[true] - n_cells[false]), comm::Op::SUM), 0u);
+    EXPECT_EQ(states[false], states[true]);
 }
 
 TEST(MPITest, TENOStencilShapeKeysOfReconstructedHaloCellsAreTheirOwnersKeys) {

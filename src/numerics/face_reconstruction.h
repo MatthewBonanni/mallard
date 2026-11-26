@@ -694,6 +694,9 @@ class TENO : public FaceReconstruction {
         /** @brief Local cells that some stencil (central or sector) of the cells with tables flagged in cells reads. */
         std::vector<uint8_t> stencil_cells(const std::vector<uint8_t> & cells) const;
 
+        /** @brief Local cells holding the boundary faces that the stencils' images mirror across. */
+        std::vector<uint32_t> mirror_face_cells() const;
+
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of
          *        cell i are ranked by distance: the identity unless the

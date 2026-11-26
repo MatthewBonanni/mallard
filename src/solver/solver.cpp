@@ -680,6 +680,8 @@ void Solver::drop_unread_halo() {
     }
     // The walks to the wall model's points find the same cells again
     for (const uint32_t c : wall_model_points.walked) keep[c] = 1;
+    // Images read their mirror faces' conditions and geometry, which may be the faces of cells no stencil reads
+    for (const uint32_t c : static_cast<const TENO &>(*face_reconstruction).mirror_face_cells()) keep[c] = 1;
     const uint64_t dropped = static_cast<uint64_t>(std::count(keep.begin(), keep.end(), uint8_t(0)));
     if (comm::allreduce(dropped, comm::Op::SUM) == 0) return;
     timed_phase("halo trim (" + logging::count(comm::allreduce(dropped, comm::Op::MAX), "cell") + " dropped)", [&] {
