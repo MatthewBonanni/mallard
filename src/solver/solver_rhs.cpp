@@ -355,10 +355,10 @@ void Solver::reconstruct_near_partition(const State & state, const bool exchange
     if (late_cells.size() > 0) face_reconstruction->calc_cell_face_values(comm_space, W_cells, face_solution, late_cells);
 }
 
-void Solver::exchange_for_first_stage() {
+void Solver::exchange_for_first_stage(const bool overlap) {
     // The first stage's interior reconstruction does not depend on dt: start it
     // before the exchange and the dt reduction, so that it covers both
-    if (halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
+    if (overlap && halo.active() && exchanges_partition_faces() && inflows.empty() && average_pressure_outlets.empty()) {
         if (reconstruction_started) {
             discard_reconstruction();
         } else if (les_on && les.reconstruction_gradients) {

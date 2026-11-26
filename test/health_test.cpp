@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <span>
@@ -22,8 +24,11 @@
 #include "comm.h"
 #include "conservation_ledger.h"
 #include "data_paths.h"
+#include "health_events.h"
+#include "json.h"
 #include "mechanism.h"
 #include "reactor.h"
+#include "scratch.h"
 #include "solver.h"
 #include "test_fixtures.h"
 #include "test_utils.h"
@@ -432,4 +437,202 @@ TEST(HealthReport, LimitedCellsAreThoseAtSteepGradientsNotEverySmoothCell) {
     const double at_steps = limited_share("abs(x - 0.5) < 0.25 ? 2.0 : 1.0");
     EXPECT_GT(at_steps, 2.0 / 32.0);
     EXPECT_LT(at_steps, 12.0 / 32.0);
+}
+
+namespace {
+
+using health_events::Finding;
+
+std::vector<std::string> codes(const std::vector<Finding> & found) {
+    std::vector<std::string> out;
+    for (const Finding & f : found) out.push_back(f.code ? f.code : f.kind);
+    return out;
+}
+
+health_events::Row row_at(uint64_t step, double cfl = 0.5, double dt_cfl1 = 1e-3) {
+    health_events::Row r;
+    r.step = step;
+    r.t = 1e-3 * static_cast<double>(step);
+    r.cfl = cfl;
+    r.dt_cfl1 = dt_cfl1;
+    r.wall = static_cast<double>(step);
+    return r;
+}
+
+} // namespace
+
+TEST(HealthEvents, AStepWarningRepeatsOnlyAfterItsConditionHasClearedForSomeRows) {
+    health_events::Settings settings;
+    settings.integrator = "SSPRK3";
+    settings.cfl_limit = 1.2;
+    health_events::Monitor monitor(settings, 0, 0);
+    std::vector<Finding> found;
+    uint64_t step = 0;
+    const auto at_cfl = [&](double cfl) {
+        step++;
+        monitor.step(step, 1e-3 * static_cast<double>(step), cfl * 1e-3, 1e-3, found);
+        monitor.row(row_at(step, cfl), found);
+    };
+    at_cfl(1.5);
+    at_cfl(1.5);
+    EXPECT_EQ(codes(found), std::vector<std::string>{"W-HEALTH-CFL-LIMIT"});
+    for (int i = 0; i < health_events::REARM_ROWS - 1; i++) at_cfl(1.0);
+    at_cfl(1.5);  // too soon to repeat
+    EXPECT_EQ(found.size(), 1u);
+    for (int i = 0; i < health_events::REARM_ROWS; i++) at_cfl(1.0);
+    at_cfl(1.5);
+    EXPECT_EQ(found.size(), 2u);
+    // run.cfl itself above the limit was reported by the check at setup (W-CFL-LIMIT), not at every step
+    settings.cfl_above_limit = true;
+    health_events::Monitor above(settings, 0, 0);
+    found.clear();
+    above.step(1, 1e-3, 1.5e-3, 1e-3, found);
+    EXPECT_TRUE(found.empty());
+}
+
+TEST(HealthEvents, SpikesAndCollapsesAreJudgedAgainstAHistoryAndCollapsesOnlyWhereDtFollowsTheCfl) {
+    for (const bool follows : {false, true}) {
+        health_events::Settings settings;
+        settings.dt_follows_cfl = follows;
+        health_events::Monitor monitor(settings, 0, 0);
+        std::vector<Finding> found;
+        // A spike at the first rows has nothing to be judged against
+        monitor.step(1, 1e-3, 1e-3, 1e-4, found);
+        EXPECT_TRUE(found.empty());
+        for (uint64_t s = 1; s <= health_events::MIN_HISTORY; s++) monitor.row(row_at(s, 0.5, 1e-3), found);
+        // The stable time step falls 20-fold: a CFL spike at a fixed dt, a collapse where dt follows it
+        const double dt = follows ? 0.5e-4 : 0.5e-3;
+        monitor.step(6, 6e-3, dt, 0.5e-4, found);
+        EXPECT_EQ(codes(found), follows ? std::vector<std::string>{"W-HEALTH-DT-COLLAPSE"}
+                                        : std::vector<std::string>{"W-HEALTH-CFL-SPIKE"})
+            << follows;
+    }
+}
+
+TEST(HealthEvents, SteadyRunsConvergeOnceAndStallWhenTheResidualStopsHalving) {
+    health_events::Settings settings;
+    settings.steady_residual = 1e-8;
+    settings.stall_steps = 100;
+    health_events::Monitor monitor(settings, 0, 0);
+    std::vector<Finding> found;
+    const auto at = [&](uint64_t step, double residual) {
+        health_events::Row r = row_at(step);
+        r.residuals = {{"rho", residual}, {"momentum", 0.5 * residual}, {"energy", 0.1 * residual}};
+        monitor.row(r, found);
+    };
+    at(10, 1e-3);
+    at(60, 0.6e-3);
+    at(109, 0.6e-3);
+    EXPECT_TRUE(found.empty());
+    at(110, 0.6e-3);  // not halved in 100 steps since step 10
+    EXPECT_EQ(codes(found), std::vector<std::string>{"W-HEALTH-STALL"});
+    at(300, 0.6e-3);
+    EXPECT_EQ(found.size(), 1u);
+    at(310, 0.2e-3);  // halved: watched afresh from here
+    at(400, 0.2e-3);
+    at(410, 0.2e-3);
+    EXPECT_EQ(codes(found), (std::vector<std::string>{"W-HEALTH-STALL", "W-HEALTH-STALL"}));
+    at(500, 1e-9);
+    at(510, 1e-9);
+    EXPECT_EQ(codes(found), (std::vector<std::string>{"W-HEALTH-STALL", "W-HEALTH-STALL", "converged"}));
+}
+
+TEST(HealthEvents, TheJobEndingBeforeTheRunWarnsUnlessTWallStopEndsTheRunFirst) {
+    health_events::Settings settings;
+    settings.job_end = 3600.0;
+    std::vector<Finding> found;
+    health_events::Row r = row_at(100);
+    r.wall = 600.0;
+    r.eta = 2000.0;
+    health_events::Monitor(settings, 0, 0).row(r, found);
+    EXPECT_TRUE(found.empty());
+    r.eta = 4000.0;  // 600 s + 4000 s is past the job's end
+    health_events::Monitor(settings, 0, 0).row(r, found);
+    EXPECT_EQ(codes(found), std::vector<std::string>{"W-HEALTH-JOB-TIME"});
+    found.clear();
+    r.t_wall_stop = 3000.0;  // the run stops itself, with its restart, before the job ends
+    health_events::Monitor(settings, 0, 0).row(r, found);
+    EXPECT_TRUE(found.empty());
+}
+
+TEST(HealthReport, ResidualsAreTheStepsRmsChangeOverTheStatesScale) {
+    const std::string periodic = N_DIM == 2 ? "[\"x\", \"y\"]" : "[\"x\", \"y\", \"z\"]";
+    const std::string u = N_DIM == 2 ? "[\"0.3 + 0.2 * sin(2 * pi * y)\", \"0.1 * cos(2 * pi * x)\"]"
+                                     : "[\"0.3 + 0.2 * sin(2 * pi * y)\", \"0.1 * cos(2 * pi * x)\", \"0.1\"]";
+    Solver solver;
+    solver.init(parse_toml("[run]\nn_steps = 20\ncfl = 0.4\n" + mesh(8, 8, 1.0, 1.0, periodic) +
+                           "[initialize]\ntype = \"analytical\"\nrho = \"1.0 + 0.2 * sin(2 * pi * x)\"\np = \"1.0\"\n"
+                           "u = " + u + "\n[physics]\ntype = \"euler\"\ngamma = 1.4\np_ref = 1.0\nT_ref = 1.0\n"
+                           "rho_ref = 1.0\n[output]\ncheck_interval = 5\nrun_log = \"\"\nreport = \"\"\n"));
+    solver.start_run();
+    solver.advance_run(9);
+    ASSERT_EQ(solver.get_step(), 9u);
+    solver.copy_device_to_host();
+    const auto before = Kokkos::create_mirror(Kokkos::HostSpace(), solver.h_conservatives);
+    Kokkos::deep_copy(before, solver.h_conservatives);
+    solver.advance_run(10);
+    ASSERT_EQ(solver.get_step(), 10u);
+    solver.copy_device_to_host();
+    const auto after = Kokkos::create_mirror(Kokkos::HostSpace(), solver.h_conservatives);
+    Kokkos::deep_copy(after, solver.h_conservatives);
+    const health::Report & report = solver.get_health();
+    ASSERT_EQ(report.residuals.size(), 3u);
+    ASSERT_EQ(report.margins.at(0).step, 10u);
+    // Owned cells of equal volume: [sum of change^2, sum of scale^2] of rho, momentum and rho E
+    std::array<double, 6> sums = {};
+    for (uint32_t c = 0; c < solver.get_mesh()->n_owned(); c++) {
+        const double rho = double(after(c, 0)), rho_E = double(after(c, N_DIM + 1));
+        double momentum = 0.0, d_momentum = 0.0;
+        for (int d = 1; d <= N_DIM; d++) {
+            momentum += double(after(c, d)) * double(after(c, d));
+            d_momentum += double(after(c, d) - before(c, d)) * double(after(c, d) - before(c, d));
+        }
+        sums[0] += double(after(c, 0) - before(c, 0)) * double(after(c, 0) - before(c, 0));
+        sums[1] += rho * rho;
+        sums[2] += d_momentum;
+        sums[3] += momentum + 2.0 * rho * rho_E;
+        sums[4] += double(after(c, N_DIM + 1) - before(c, N_DIM + 1)) * double(after(c, N_DIM + 1) - before(c, N_DIM + 1));
+        sums[5] += rho_E * rho_E;
+    }
+    sums = comm::allreduce(sums, comm::Op::SUM);
+    const char * names[] = {"rho", "momentum", "energy"};
+    for (size_t i = 0; i < 3; i++) {
+        EXPECT_EQ(report.residuals[i].first, names[i]);
+        EXPECT_GT(report.residuals[i].second, 0.0);
+        EXPECT_NEAR(report.residuals[i].second, std::sqrt(sums[2 * i] / sums[2 * i + 1]),
+                    1e-6 * report.residuals[i].second)
+            << names[i];
+    }
+    solver.finish_run();
+}
+
+TEST(HealthEvents, TheRunLogCarriesHeartbeatsAndHealthWarningsWithTheirStepAndValues) {
+    const std::filesystem::path dir = scratch_dir() / "health_events";
+    if (comm::is_root()) std::filesystem::create_directories(dir);
+    comm::barrier();
+    // A fixed dt at CFL 1.6 or so, above SSPRK3's limit of 1.2 from the first step, for 3 steps
+    std::string input = periodic_box("[numerics]\nriemann_solver = \"HLLC\"\ntime_integrator = \"SSPRK3\"\n");
+    input.replace(input.find("n_steps = 20\ncfl = 0.4"), 21, "n_steps = 3\ndt = 0.065");
+    input.replace(input.find("run_log = \"\""), 12, "run_log = \"" + (dir / "mallard.jsonl").string() +
+                                                       "\"\nreport = \"\"\nheartbeat_interval = 1e-9");
+    run(input);
+    if (!comm::is_root()) return;
+    std::ifstream in(dir / "mallard.jsonl");
+    std::vector<uint64_t> beats;
+    int cfl_warnings = 0;
+    for (std::string line; std::getline(in, line);) {
+        const json::Value v = json::parse(line);
+        if (v["type"].string == "heartbeat") beats.push_back(static_cast<uint64_t>(v["step"].number));
+        if (v["type"].string == "warning" && v["code"].string == "W-HEALTH-CFL-LIMIT") {
+            cfl_warnings++;
+            EXPECT_EQ(v["step"].number, 1.0);
+            EXPECT_GT(v["values"]["cfl"].number, v["values"]["cfl_limit"].number);
+            EXPECT_EQ(v["docs"].string, "docs/guide/output.md#w-health-cfl-limit");
+        }
+    }
+    EXPECT_EQ(cfl_warnings, 1);
+    // One heartbeat after every step, the interval being shorter than a step
+    std::vector<uint64_t> every(3);
+    for (uint64_t s = 0; s < every.size(); s++) every[s] = s + 1;
+    EXPECT_EQ(beats, every);
 }
