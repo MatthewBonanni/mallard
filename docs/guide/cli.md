@@ -579,8 +579,12 @@ Options:
                             its name, a legend, axes, a scale bar and the
                             domain's extent in its units. Every block carries
                             its metadata (kind, key, element, element_index,
-                            zone) as field data, and the JSON report's view
-                            lists them. Default: none.
+                            zone) as field data. With --format json, the
+                            report's view lists the files, every block with its
+                            metadata and condition, and the frame of each
+                            boundary's local coordinates: where u starts, which
+                            way it grows, the inward normal and the length.
+                            Default: none.
   --geometry-only           Set up and check only what the case view draws: the
                             mesh, its zones, the boundaries' conditions, the
                             regions, probes, snapshot regions and periodic

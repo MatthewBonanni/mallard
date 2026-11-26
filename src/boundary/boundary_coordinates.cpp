@@ -496,3 +496,112 @@ std::vector<FacePoint> local_coordinates(const Mesh & mesh, const std::vector<ui
     }
     return points;
 }
+
+BoundaryFrame boundary_frame(const Mesh & mesh, const std::vector<uint32_t> & faces, const Input & entry,
+                             const std::string & where, const bool distributed) {
+    namespace bv = boundary_variable;
+    std::vector<uint16_t> used = {bv::U, bv::U_M};
+#if N_DIM == 3
+    used.insert(used.end(), {bv::V, bv::V_M});
+#endif
+    std::string summary;
+    const std::vector<FacePoint> points = local_coordinates(mesh, faces, entry, where, used, WallDistance(), distributed, summary);
+    // Per owned face: center, inward area vector, u, u_m, v, v_m
+    constexpr size_t W = 2 * N_DIM + 4;
+    std::vector<uint64_t> keys;
+    std::vector<double> values;
+    for (size_t k = 0; k < faces.size(); k++) {
+        if (!owned(mesh, faces[k])) continue;
+        keys.push_back(face_key(mesh, faces[k]));
+        for (size_t d = 0; d < N_DIM; d++) values.push_back(points[k][d]);
+        for (size_t d = 0; d < N_DIM; d++) values.push_back(-static_cast<double>(mesh.h_face_normals(faces[k], d)));
+#if N_DIM == 3
+        values.insert(values.end(), {points[k][bv::U], points[k][bv::U_M], points[k][bv::V], points[k][bv::V_M]});
+#else
+        values.insert(values.end(), {points[k][bv::U], points[k][bv::U_M], 0.0, 0.0});
+#endif
+    }
+    const std::vector<double> all = gather_sorted(keys, values, W, distributed);
+    const size_t n = all.size() / W;
+    auto at = [&](size_t k, size_t i) { return all[k * W + i]; };
+    auto center = [&](size_t k) {
+        std::array<double, 3> x{};
+        for (size_t d = 0; d < N_DIM; d++) x[d] = at(k, d);
+        return x;
+    };
+    auto unit = [](std::array<double, 3> v) {
+        const double norm = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (norm > 0.0) {
+            for (double & c : v) c /= norm;
+        }
+        return v;
+    };
+    BoundaryFrame f;
+    size_t first = 0;
+    for (size_t k = 0; k < n; k++) {
+        f.length = std::max(f.length, at(k, 2 * N_DIM + 1));
+        f.width = std::max(f.width, at(k, 2 * N_DIM + 3));
+        if (at(k, 2 * N_DIM + 1) + at(k, 2 * N_DIM + 3) < at(first, 2 * N_DIM + 1) + at(first, 2 * N_DIM + 3)) first = k;
+    }
+    // At the origin: the mean normal of a curved boundary (a cylinder's) may vanish
+    for (size_t d = 0; d < N_DIM; d++) f.normal[d] = at(first, N_DIM + d);
+    f.normal = unit(f.normal);
+#if N_DIM == 2
+    f.shape = "curve";
+    f.length = 0.0;
+    for (size_t k = 0; k < n; k++) f.length += std::hypot(at(k, 2), at(k, 3));
+    // The first face's center lies half its length from the end, along the tangent toward the next face
+    const std::array<double, 3> c = center(first);
+    f.u_direction = unit({-at(first, 3), at(first, 2), 0.0});
+    size_t second = first;
+    for (size_t k = 0; k < n; k++) {
+        if (k != first && (second == first || at(k, 5) < at(second, 5))) second = k;
+    }
+    if (second != first && (at(second, 0) - c[0]) * f.u_direction[0] + (at(second, 1) - c[1]) * f.u_direction[1] < 0.0) {
+        for (double & v : f.u_direction) v = -v;
+    }
+    const double half_face = 0.5 * std::hypot(at(first, 2), at(first, 3));
+    f.origin = {c[0] - half_face * f.u_direction[0], c[1] - half_face * f.u_direction[1], 0.0};
+#else
+    f.shape = summary.rfind("ring", 0) == 0 ? "ring" : summary.rfind("disk", 0) == 0 ? "disk" : "four-sided";
+    f.origin = center(first);
+    // u's gradient at the origin, by least squares over the faces near it, in the plane of its face
+    const std::array<double, 3> n0 = unit({at(first, 3), at(first, 4), at(first, 5)});
+    const double area0 = std::sqrt(at(first, 3) * at(first, 3) + at(first, 4) * at(first, 4) + at(first, 5) * at(first, 5));
+    const double radius = 4.0 * std::sqrt(area0);
+    std::array<std::array<double, 3>, 3> a{};
+    std::array<double, 3> b{};
+    double spread = 0.0;
+    for (size_t k = 0; k < n; k++) {
+        std::array<double, 3> dx{};
+        for (size_t d = 0; d < 3; d++) dx[d] = at(k, d) - f.origin[d];
+        const double r2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+        // u jumps from 1 to 0 across the seam of a ring or a disk
+        if (k == first || r2 > radius * radius || at(k, 6) > 0.5) continue;
+        const double du = at(k, 7) - at(first, 7);
+        for (size_t i = 0; i < 3; i++) {
+            for (size_t j = 0; j < 3; j++) a[i][j] += dx[i] * dx[j];
+            b[i] += dx[i] * du;
+        }
+        spread += r2;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        for (size_t j = 0; j < 3; j++) a[i][j] += spread * n0[i] * n0[j];
+    }
+    const double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                       a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if (det > 0.0) {
+        std::array<double, 3> g{};
+        for (size_t col = 0; col < 3; col++) {
+            std::array<std::array<double, 3>, 3> m = a;
+            for (size_t i = 0; i < 3; i++) m[i][col] = b[i];
+            g[col] = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                      m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])) / det;
+        }
+        const double into = g[0] * n0[0] + g[1] * n0[1] + g[2] * n0[2];
+        for (size_t d = 0; d < 3; d++) g[d] -= into * n0[d];
+        f.u_direction = unit(g);
+    }
+#endif
+    return f;
+}

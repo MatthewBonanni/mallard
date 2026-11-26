@@ -293,13 +293,14 @@ std::vector<BlockInfo> describe(const std::vector<Block> & blocks) {
     std::vector<BlockInfo> out;
     for (size_t i = 0; i < blocks.size(); i++) {
         const Block & b = blocks[i];
-        out.push_back({b.name, b.kind, b.key, b.element, b.zone, b.index, cells[i]});
+        out.push_back({b.name, b.kind, b.key, b.element, b.zone, b.index, cells[i], b.condition,
+                       b.label.empty() ? b.name : b.label});
     }
     return out;
 }
 
 std::string json(const std::vector<std::string> & files, const std::vector<BlockInfo> & blocks,
-                 const bool geometry_only) {
+                 const bool geometry_only, const std::string & frames) {
     auto text_or_null = [](const std::string & s) { return s.empty() ? std::string("null") : json::quote(s); };
     std::string file_list, block_list;
     for (const std::string & f : files) file_list += (file_list.empty() ? "" : ", ") + json::quote(f);
@@ -312,6 +313,8 @@ std::string json(const std::vector<std::string> & files, const std::vector<Block
                                                              .raw("index", b.index < 0 ? "null" : std::to_string(b.index))
                                                              .raw("zone", text_or_null(b.zone))
                                                              .add("cells", b.cells)
+                                                             .raw("condition", text_or_null(b.condition))
+                                                             .add("label", b.label)
                                                              .str();
     }
     return json::Object()
@@ -320,6 +323,7 @@ std::string json(const std::vector<std::string> & files, const std::vector<Block
         .add("geometry_only", geometry_only)
         .raw("files", "[" + file_list + "]")
         .raw("blocks", "[" + block_list + "]")
+        .raw("frames", frames)
         .str();
 }
 

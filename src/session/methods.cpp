@@ -116,6 +116,25 @@ std::string case_check(Context & context, const json::Value & params) {
     return result;
 }
 
+std::string case_view(Context & context, const json::Value & params) {
+    as_options(params, {"dir"});
+    const std::string dir = string_param(params, "dir");
+    if (dir.empty()) throw Error(code::INVALID_PARAMS, "case.view takes dir, the directory to write the view in");
+    const std::string key = "case.view " + json::dump(params);
+    if (const std::optional<std::string> known = context.remembered(key)) return *known;
+    CheckOptions options;
+    options.input_file = context.path();
+    options.view_dir = dir;
+    const CheckReport report = check_case(context, options).report;
+    const std::string view = case_view_json(report);
+    if (!report.setup_done || view == "null") {
+        throw Error(code::INVALID_PARAMS, "the case cannot be set up, so it has no view",
+                    json::Object().raw("diagnostics", diagnostics_json(report.diagnostics)).str());
+    }
+    context.remember(key, view);
+    return view;
+}
+
 std::string listing(const json::Value & catalog, const json::Value & params, const KeyCase * per_case) {
     const std::string section = section_argument(string_param(params, "section"));
     try {
@@ -227,6 +246,7 @@ constexpr Method METHODS[] = {
     {"case.update", "", CASE_SCHEMA, true, case_update},
     {"case.close", "", "", false, case_close},
     {"case.check", "mallard check INPUT --format json", "mallard-check", true, case_check},
+    {"case.view", "mallard check INPUT --view DIR --format json", interfaces::CASE_VIEW.name, true, case_view},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
     {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},

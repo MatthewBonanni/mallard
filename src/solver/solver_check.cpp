@@ -1415,6 +1415,7 @@ void Solver::check_regions(CheckReport & r, const CheckOptions & options) const 
         r.view_file = files[0];
         r.view_images.assign(files.begin() + 1, files.end());
         r.view_blocks = case_view::describe(blocks);
+        check_frames(r);
     }
 }
 

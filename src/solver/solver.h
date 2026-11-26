@@ -994,6 +994,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
+        /** @brief The frame of each [[boundaries]] entry's local coordinates, for the case view. Collective. */
+        void check_frames(CheckReport & r) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
         void check_initial(CheckReport & report, const CheckOptions & options);
@@ -1377,6 +1379,7 @@ class Solver {
         // Run log
         MeshSetup mesh_setup;
         std::vector<CheckBoundary> boundary_summary;
+        std::vector<std::vector<uint32_t>> boundary_entry_faces;  // this rank's faces of each, as boundary_summary
         report::Summary source_summary;
         std::string initial_state;
         double t_wall_setup = 0.0;

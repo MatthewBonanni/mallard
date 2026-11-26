@@ -125,8 +125,10 @@ constexpr Option CHECK_OPTIONS[] = {
      "and periodic pair (a setup that stops draws the mesh alone); and DIR/case-light.svg and DIR/case-dark.svg, the annotated image (3D: an isometric "
      "view over three orthographic ones) with every boundary labeled by its name and condition and every region "
      "and probe by its name, a legend, axes, a scale bar and the domain's extent in its units. Every block "
-     "carries its metadata (kind, key, element, element_index, zone) as field data, and the JSON report's view "
-     "lists them. Default: none."},
+     "carries its metadata (kind, key, element, element_index, zone) as field data. With --format json, the "
+     "report's view lists the files, every block with its metadata and condition, and the frame of each "
+     "boundary's local coordinates: where u starts, which way it grows, the inward normal and the length. "
+     "Default: none."},
     {"--geometry-only", "", "",
      "Set up and check only what the case view draws: the mesh, its zones, the boundaries' conditions, the "
      "regions, probes, snapshot regions and periodic pairs, without the numerics (stencils), the initial state "

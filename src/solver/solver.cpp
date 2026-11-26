@@ -942,6 +942,28 @@ std::vector<CheckUnassigned> Solver::zones_without_condition(const std::vector<i
     return out;
 }
 
+void Solver::check_frames(CheckReport & r) const {
+    const std::vector<Input> entries =
+        contains_optional(input, "boundaries") ? find_value<std::vector<Input>>(input, "boundaries") : std::vector<Input>{};
+    for (size_t i = 0; i < boundary_summary.size() && i < entries.size(); i++) {
+        CheckFrame f;
+        f.zone = boundary_summary[i].zone;
+        f.entry = "boundaries[name = \"" + f.zone + "\"]";
+        try {
+            const BoundaryFrame b = boundary_frame(*mesh, boundary_entry_faces[i], entries[i], f.entry, is_distributed());
+            f.shape = b.shape;
+            f.origin = b.origin;
+            f.u_direction = b.u_direction;
+            f.normal = b.normal;
+            f.length = b.length;
+            f.width = b.width;
+        } catch (const InputError & e) {
+            f.error = e.diagnostic.message.empty() ? e.what() : e.diagnostic.message;
+        }
+        r.frames.push_back(f);
+    }
+}
+
 void Solver::init_boundaries() {
     // A fully periodic mesh has no boundary faces
     const std::vector<Input> input_boundaries =
@@ -950,6 +972,7 @@ void Solver::init_boundaries() {
     std::vector<int32_t> face_bc(mesh->n_faces, -1);
     std::vector<BoundaryCondition> bcs;
     boundary_summary.clear();
+    boundary_entry_faces.clear();
     wall_model_specs.clear();
     std::vector<DirichletBoundary> dirichlet_boundaries;
     average_pressure_outlets.clear();
@@ -1271,6 +1294,7 @@ void Solver::init_boundaries() {
             profiled_flux.push_back(flux.empty() ? std::nan("") : flux[k]);
         }
         if (bcs.back().type == BoundaryType::INLET_STATE && bcs.back().is_characteristic()) inlets.emplace_back(i_bc, dirichlet.faces);
+        boundary_entry_faces.push_back(dirichlet.faces);
         if (bcs.back().type == BoundaryType::DIRICHLET) {
             dirichlet_boundaries.push_back(std::move(dirichlet));
         } else if (bcs.back().type == BoundaryType::OUTLET_PRESSURE && bcs.back().has(BoundaryCondition::AVERAGE)) {
