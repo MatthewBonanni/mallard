@@ -139,6 +139,8 @@ Commands:
     mallard list species      The species of a case
     mallard list keys         The input keys there are, or exactly those of one
                               case: type, units, default, values
+    mallard list units        The units quantities in input files take, with
+                              their dimensions and exact SI values
     mallard list templates    The case templates of mallard new
     mallard session           Hold a case and answer JSON-RPC requests on stdin
                               and stdout: the interface for the GUI and scripts
@@ -723,7 +725,7 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard list <command> [options]
 
-Catalogs: the fields, species, input keys and case templates there are.
+Catalogs: the fields, species, input keys, units and case templates there are.
 
 Commands:
   mallard list fields         The output fields there are, or exactly those of
@@ -731,6 +733,8 @@ Commands:
   mallard list species        The species of a case
   mallard list keys           The input keys there are, or exactly those of one
                               case: type, units, default, values
+  mallard list units          The units quantities in input files take, with
+                              their dimensions and exact SI values
   mallard list templates      The case templates of mallard new
 
 mallard list <command> --help shows the page of a command.
@@ -851,6 +855,38 @@ Exit status:
   2  usage error, or a section with no key
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-keys
+```
+
+### mallard list units
+
+```text
+Usage: mallard list units [--format text|json]
+
+Lists every unit a quantity such as "1 atm" or "5 mm" may carry: its dimension,
+as the key catalog's units name it, its SI value as defined (a decimal, or an
+exact quotient such as 101325/760 or pi/180), the offset of an absolute
+temperature, and whether it takes an SI prefix; then the prefixes. --format json
+adds the exponents of each dimension and its double value, and the named
+dimensions with example units.
+
+Options:
+  --format text|json  text: one table per group (of fields) or table (of keys),
+                      with units; json: the same as one JSON object, for
+                      scripts. Default: text.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
+
+Examples:
+  $ mallard list units
+  $ mallard list units --format json
+
+Exit status:
+  0  listed
+  2  usage error
+
+Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-list-units
 ```
 
 ### mallard list templates

@@ -180,6 +180,11 @@ error E-INPUT: input.toml: line 14: boundaries.p: "300 K" has the dimension of t
 | Energy, power, force, frequency | `J`, `cal`, `W`, `N`, `lbf`, `Hz` (and `kJ`, `kcal`, `kW`, `kHz`, ...) |
 | Volume | `L` (and `mL`) |
 
+`mallard list units` lists every unit with its dimension and its SI value as
+defined (`101325/760` for `Torr`, `pi/180` for `deg`), and `--format json`
+gives the same for tools, with each dimension's exponents (schema
+`mallard-unit-catalog`, the session's `units.catalog`).
+
 **Temperatures.** `degC` and `degF` are absolute temperatures: `"20 degC"`
 is 293.15 K. They stand alone (`"20 degC/s"` is an error; use K) and are an
 error for the one key that is a temperature difference, `sutherland_S`.

@@ -987,6 +987,25 @@ constexpr Command COMMANDS[] = {
         .run = list_keys_main,
     },
     {
+        .name = "list units",
+        .group = "Inspect",
+        .summary = "The units quantities in input files take, with their dimensions and exact SI values",
+        .synopsis = "mallard list units [--format text|json]",
+        .description =
+            "Lists every unit a quantity such as \"1 atm\" or \"5 mm\" may carry: its dimension, as the key "
+            "catalog's units name it, its SI value as defined (a decimal, or an exact quotient such as 101325/760 "
+            "or pi/180), the offset of an absolute temperature, and whether it takes an SI prefix; then the "
+            "prefixes. --format json adds the exponents of each dimension and its double value, and the named "
+            "dimensions with example units.",
+        .options = LIST_OPTIONS,
+        .arguments = {},
+        .examples = "$ mallard list units\n"
+                    "$ mallard list units --format json",
+        .exit_status = "0  listed\n"
+                       "2  usage error",
+        .run = list_units_main,
+    },
+    {
         .name = "list templates",
         .group = "Inspect",
         .summary = "The case templates of mallard new",
@@ -1442,7 +1461,7 @@ constexpr Command COMMANDS[] = {
 constexpr Family FAMILIES[] = {
     {"input", "Commands on input files."},
     {"install", "Commands on this install of Mallard."},
-    {"list", "Catalogs: the fields, species, input keys and case templates there are."},
+    {"list", "Catalogs: the fields, species, input keys, units and case templates there are."},
     {"mesh", "Commands on meshes."},
     {"post", "Commands on a run's output: probes, integrals, snapshots, derived fields and averages of it, the speeds of a premixed flame in it, and the grid convergence of several runs."},
 };
@@ -1482,6 +1501,7 @@ std::string capabilities_json() {
     const std::string list = json::Object()
                                  .raw("capabilities", entry(interfaces::CAPABILITIES))
                                  .raw("key_catalog", entry(interfaces::KEY_CATALOG))
+                                 .raw("unit_catalog", entry(interfaces::UNIT_CATALOG))
                                  .raw("check_report", entry(interfaces::CHECK_REPORT))
                                  .raw("case_view", entry(interfaces::CASE_VIEW))
                                  .raw("boundary_values", entry(interfaces::BOUNDARY_VALUES))
