@@ -315,33 +315,36 @@ std::vector<int> partition_graph(const DistributedMesh & mesh, int n_parts) {
 }
 
 PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, const int n_parts,
-                      const int halo_layers) {
+                      const int halo_layers, const std::vector<uint64_t> & node_keys, const int ranks_per_node) {
     const uint64_t n_cells = block.n_cells();
+    auto key = [&](const uint64_t node) { return node_keys.empty() ? node : node_keys[node]; };
     std::vector<uint64_t> node_offsets(block.n_nodes() + 1, 0);
-    for (const uint64_t node : block.cell_nodes) node_offsets[node - block.first_node + 1]++;
+    for (const uint64_t node : block.cell_nodes) node_offsets[key(node - block.first_node) + 1]++;
     std::partial_sum(node_offsets.begin(), node_offsets.end(), node_offsets.begin());
     std::vector<uint64_t> node_cells(node_offsets.back());
     std::vector<uint64_t> fill(node_offsets.begin(), node_offsets.end() - 1);
     for (uint64_t c = 0; c < n_cells; c++) {
         for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
-            node_cells[fill[block.cell_nodes[k] - block.first_node]++] = c;
+            node_cells[fill[key(block.cell_nodes[k] - block.first_node)]++] = c;
         }
     }
     std::vector<std::vector<uint64_t>> owned(static_cast<size_t>(n_parts));
     for (uint64_t c = 0; c < n_cells; c++) owned[static_cast<size_t>(owner[c])].push_back(c);
+    auto node_of = [&](const int part) { return ranks_per_node > 0 ? part / ranks_per_node : 0; };
 
     PartSize largest;
     std::vector<int> seen(n_cells, -1);
+    std::vector<int> neighbor_seen(static_cast<size_t>(n_parts), -1);
     for (int p = 0; p < n_parts; p++) {
         const auto & cells = owned[static_cast<size_t>(p)];
         for (const uint64_t c : cells) seen[c] = p;
         std::vector<uint64_t> front = cells, next;
-        uint64_t halo = 0;
+        PartSize part{cells.size(), 0, 0, 0, 0};
         for (int layer = 0; layer < halo_layers; layer++) {
             next.clear();
             for (const uint64_t c : front) {
                 for (uint64_t k = block.cell_offsets[c]; k < block.cell_offsets[c + 1]; k++) {
-                    const uint64_t node = block.cell_nodes[k] - block.first_node;
+                    const uint64_t node = key(block.cell_nodes[k] - block.first_node);
                     for (uint64_t j = node_offsets[node]; j < node_offsets[node + 1]; j++) {
                         const uint64_t other = node_cells[j];
                         if (seen[other] == p) continue;
@@ -350,10 +353,19 @@ PartSize largest_part(const MeshBlock & block, const std::vector<int> & owner, c
                     }
                 }
             }
-            halo += next.size();
+            for (const uint64_t c : next) {
+                const int q = owner[c];
+                const bool remote = node_of(q) != node_of(p);
+                if (remote) part.halo_remote++;
+                if (neighbor_seen[static_cast<size_t>(q)] == p) continue;
+                neighbor_seen[static_cast<size_t>(q)] = p;
+                part.neighbors++;
+                if (remote) part.remote_neighbors++;
+            }
+            part.halo += next.size();
             front.swap(next);
         }
-        if (cells.size() + halo > largest.owned + largest.halo) largest = {cells.size(), halo};
+        if (part.owned + part.halo > largest.owned + largest.halo) largest = part;
     }
     return largest;
 }
