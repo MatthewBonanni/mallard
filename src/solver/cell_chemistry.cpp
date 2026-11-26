@@ -381,9 +381,14 @@ struct AdvanceFunctor {
         return h_last < 0.0 && h >= cell_dt(c) ? -h : h;
     }
 
-    /** @brief After cell c's failed explicit step: no other until its sub-steps fall short of a call. */
+    /**
+     * @brief After cell c's failed explicit step: no other until its sub-steps fall short of a call. Without a
+     *        last sub-step, the mark is RODAS's first one negated (-0 would be none).
+     */
     KOKKOS_INLINE_FUNCTION
-    void explicit_failed(const uint32_t c) const { chem_h(c) = -chem_h(c); }
+    void explicit_failed(const uint32_t c) const {
+        chem_h(c) = chem_h(c) > rtype(0) ? -chem_h(c) : static_cast<rtype>(-options.integrator.h_initial);
+    }
 
     /** @brief After cell c's accepted explicit step: one sub-step, and the cell leaves the queue. */
     KOKKOS_INLINE_FUNCTION
@@ -658,10 +663,13 @@ void CellChemistry::init(const Mixture & gas_in, const chemistry::Mechanism & me
         const size_t room = static_cast<size_t>(TeamPolicy<false, true>::scratch_size_max(0));
         if (bytes + chemistry::TeamLanes<Member>::scratch_bytes(n_lanes * n_threads) + 64 <= room) fast_bytes = bytes;
     }
-    // Mass fractions, then the reactor's work memory (also enough for the activity and heat release kernels).
-    // Every view of a row per cell of the chunk is labeled "chem_work*" and counted here, the audit's
-    // clipped masses included
-    const uint32_t reactor_size = ns + chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr, options.reactor.method);
+    // Mass fractions, then the work memory of the reactor or of its explicit step (also enough for the activity
+    // and heat release kernels). Every view of a row per cell of the chunk is labeled "chem_work*" and counted
+    // here, the audit's clipped masses included
+    const uint32_t reactor_size = ns + std::max(chemistry::reactor_work_size(kinetics, sparse ? &pattern : nullptr,
+                                                                              options.reactor.method),
+                                                options.explicit_step ? chemistry::explicit_reactor_work_size(kinetics)
+                                                                      : 0u);
     forcing_offset = options.forced ? reactor_size : 0;
     const uint32_t work_size = reactor_size + (options.forced ? ns + 1 : 0);
     const double per_cell = 8.0 * work_size + 4.0 * (ns + 3) + 8.0 + 8.0 * ns;
@@ -745,6 +753,8 @@ void CellChemistry::advance(const StateView & U, const SpeciesView & rhoY, const
         // The cells whose explicit step is accepted leave the queue before it is ordered and balanced
         integrate(cells, queue, n, range, dt, true);
         gated::parallel_scan("chemistry_queue", n, QueueFunctor{active, queue, cost, previous_cost, range, n});
+        gated::parallel_for("chemistry_tally_explicit", 1,
+                            KOKKOS_LAMBDA(const int) { t(EXPLICIT) += t(LAST_ACTIVE) - range(2); });
     }
     if (bin_by_cost) sort_queue(queue, cost, n, range);
     if (balance) balance->send(cells, queue, range, tally, SENT);
@@ -857,7 +867,7 @@ void CellChemistry::add_failures(const Kokkos::View<uint32_t> & failures) const 
 
 CellChemistry::Statistics CellChemistry::statistics() const {
     const auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), tally);
-    return {h(LAST_ACTIVE), h(ACTIVE), h(FAILURES), h(SENT)};
+    return {h(LAST_ACTIVE), h(ACTIVE), h(FAILURES), h(SENT), h(EXPLICIT)};
 }
 
 void CellChemistry::audit(const RepairRecorder & recorder, const Kokkos::View<rtype *> & volume,

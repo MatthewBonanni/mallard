@@ -375,7 +375,10 @@ WarningCapture * capture = nullptr;
 WarningCapture::WarningCapture() : outer(capture) { capture = this; }
 WarningCapture::~WarningCapture() { capture = outer; }
 
-void warning(std::string_view code, std::string_view message) {
+void warning(std::string_view code, std::string_view message) { warning(code, message, {}); }
+
+void warning(std::string_view code, std::string_view message,
+             const std::vector<std::pair<std::string, std::string>> & fields) {
     if (!comm::is_root()) return;
     if (capture) {
         capture->warnings.emplace_back(code, message);
@@ -384,9 +387,11 @@ void warning(std::string_view code, std::string_view message) {
     close_phase();
     std::cout << std::flush;
     std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
-    run_log::write(json::Object().add("type", "warning").add("code", std::string(code)).add("message", message).add(
-                       "docs", diagnostic_code::docs(code)),
-                   true);
+    json::Object record;
+    record.add("type", "warning").add("code", std::string(code)).add("message", message).add(
+        "docs", diagnostic_code::docs(code));
+    for (const auto & [key, value] : fields) record.raw(key, value);
+    run_log::write(record, true);
 }
 
 void error(std::string_view code, std::string_view message) {
