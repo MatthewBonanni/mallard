@@ -1134,10 +1134,10 @@ TEST(ReactingTest, ExplicitStepsKeepTheIgnitionWithinTheChemistrysTolerance) {
 }
 
 TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
-    // The burnt reactor at 4 tau is too stiff for an explicit step: with explicit_step, every call leaves
-    // RODAS's state and proposal bitwise as without it, and CHEM_H negated, which skips the next attempts
-    // until the cell's sub-steps fall short of a call
-    const double tau = 4.42e-5;
+    // Burnt gas is too stiff for an explicit step: with explicit_step, every call leaves RODAS's state and
+    // proposal bitwise as without it, and CHEM_H negated, which skips the next attempts until the cell's
+    // sub-steps fall short of a call; also after a first call, which has no sub-step to negate
+    const double tau = 4.42e-5, dt = tau / 50.0;
     const std::string dir = (scratch_dir() / "mallard_explicit_failures").string();
     std::filesystem::remove_all(dir);
     const auto writer = [&](const std::string & prefix, uint32_t interval) {
@@ -1145,44 +1145,76 @@ TEST(ReactingTest, CellsWhoseExplicitStepFailedStopTryingIt) {
                std::to_string(interval) + "\n";
     };
     Solver burnt;
-    burnt.init(parse_toml(reacting_box(200, tau / 50.0) + writer("burnt", 200)));
+    burnt.init(parse_toml(reacting_box(200, dt) + writer("burnt", 200)));
     burnt.run();
-    const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/burnt_000200.restart\"\n";
-    std::string box = reacting_box(205, tau / 50.0);
-    const size_t init = box.find("[initialize]\n") + 13;
-    box.replace(init, box.find("\n[", init) + 1 - init, restart);
-    Solver runs[2];
-    for (int e = 0; e < 2; e++) {
-        const std::string name = e ? "on" : "off";
-        runs[e].init(parse_toml(box + (e ? "explicit_step = true\n" : "") + writer(name, 205)));
-        runs[e].run();
-        runs[e].copy_device_to_host();
+    burnt.copy_device_to_host();
+    const auto initialized = [&](uint32_t n_steps, const std::string & init_table) {
+        std::string box = reacting_box(n_steps, dt);
+        const size_t init = box.find("[initialize]\n") + 13;
+        box.replace(init, box.find("\n[", init) + 1 - init, init_table);
+        return box;
+    };
+    // The burnt state without a last sub-step
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(chemistry::read_mechanism(H2O2));
+    const double rho = double(burnt.h_conservatives(0, 0));
+    std::ostringstream fresh;
+    fresh << std::setprecision(17) << "type = \"analytical\"\nrho = \"" << rho << "\"\nT = \""
+          << cell_temperatures(burnt, thermo)[0] << "\"\nu = " << (N_DIM == 2 ? "[\"0\", \"0\"]" : "[\"0\", \"0\", \"0\"]")
+          << "\nY = {";
+    for (size_t k = 0; k < burnt.get_species_names().size(); k++) {
+        fresh << (k ? ", " : " ") << burnt.get_species_names()[k] << " = " << double(burnt.h_species(0, k)) / rho;
     }
-    for (uint32_t c = 0; c < runs[0].get_mesh()->n_cells; c++) {
-        FOR_I_CONSERVATIVE ASSERT_EQ(runs[1].h_conservatives(c, i), runs[0].h_conservatives(c, i));
-        for (uint32_t k = 0; k < runs[0].get_species_names().size(); k++) {
-            ASSERT_EQ(runs[1].h_species(c, k), runs[0].h_species(c, k));
+    fresh << " }\n";
+    const auto chem_h = [&](const std::string & file) { return *read_restart(dir + "/" + file).find("CHEM_H"); };
+    const std::string restart = "type = \"restart\"\nfile = \"" + dir + "/burnt_000200.restart\"\n";
+    for (const auto & [box, last] : {std::pair<std::string, uint32_t>{initialized(205, restart), 205},
+                                     {initialized(1, fresh.str()), 1}}) {
+        const std::string step = std::string(6 - std::to_string(last).size(), '0') + std::to_string(last);
+        Solver runs[2];
+        for (int e = 0; e < 2; e++) {
+            runs[e].init(parse_toml(box + (e ? "explicit_step = true\n" : "") + writer(e ? "on" : "off", last)));
+            runs[e].run();
+            runs[e].copy_device_to_host();
+        }
+        SCOPED_TRACE(box);
+        EXPECT_EQ(runs[1].chemistry_explicit_steps(), 0.0);
+        EXPECT_EQ(runs[1].chemistry_explicit_marked(),
+                  comm::allreduce(double(runs[1].get_mesh()->n_owned()), comm::Op::SUM));
+        for (uint32_t c = 0; c < runs[0].get_mesh()->n_cells; c++) {
+            FOR_I_CONSERVATIVE ASSERT_EQ(runs[1].h_conservatives(c, i), runs[0].h_conservatives(c, i));
+            for (uint32_t k = 0; k < runs[0].get_species_names().size(); k++) {
+                ASSERT_EQ(runs[1].h_species(c, k), runs[0].h_species(c, k));
+            }
+        }
+        const std::vector<rtype> h_off = chem_h("off_" + step + ".restart");
+        const std::vector<rtype> h_on = chem_h("on_" + step + ".restart");
+        ASSERT_EQ(h_on.size(), h_off.size());
+        // In single precision the first call's mark, -h_initial rounded, seeds RODAS slightly differently
+        const bool exact = last > 1 || std::is_same_v<rtype, double>;
+        for (size_t c = 0; c < h_off.size(); c++) {
+            EXPECT_GT(h_off[c], rtype(0));
+            if (exact) {
+                EXPECT_EQ(h_on[c], -h_off[c]);
+            } else {
+                EXPECT_NEAR(-double(h_on[c]), double(h_off[c]), 1e-5 * double(h_off[c]));
+            }
         }
     }
-    const std::vector<rtype> h_off = *read_restart(dir + "/off_000205.restart").find("CHEM_H");
-    const std::vector<rtype> h_on = *read_restart(dir + "/on_000205.restart").find("CHEM_H");
-    ASSERT_EQ(h_on.size(), h_off.size());
-    for (size_t c = 0; c < h_off.size(); c++) {
-        EXPECT_GT(h_off[c], rtype(0));
-        EXPECT_EQ(h_on[c], -h_off[c]);
-    }
-    // Explicit steps fail late in the induction; the ignition's sub-steps, shorter than a call, clear that
+    // Explicit steps fail during the induction; the ignition's sub-steps, shorter than a call, clear the mark
     Solver igniting;
-    igniting.init(parse_toml(reacting_box(40, tau / 50.0) + "explicit_step = true\n" + writer("igniting", 20)));
+    igniting.init(parse_toml(reacting_box(40, dt) + "explicit_step = true\n" + writer("igniting", 2)));
     igniting.run();
-    // Copies: a range-for over *read_restart(...).find(...) would read the restart data after it is destroyed
-    const std::vector<rtype> h_induction = *read_restart(dir + "/igniting_000020.restart").find("CHEM_H");
-    const std::vector<rtype> h_ignited = *read_restart(dir + "/igniting_000040.restart").find("CHEM_H");
-    for (rtype h : h_induction) EXPECT_LT(h, rtype(0));
-    for (rtype h : h_ignited) {
-        EXPECT_GT(h, rtype(0));
-        EXPECT_LT(h, rtype(tau / 50.0));
+    std::vector<int> stage(burnt.get_mesh()->n_cells, 0);
+    for (uint32_t step = 2; step <= 40; step += 2) {
+        const std::string file = "igniting_" + std::string(6 - std::to_string(step).size(), '0') +
+                                 std::to_string(step) + ".restart";
+        const std::vector<rtype> h = chem_h(file);
+        for (size_t c = 0; c < stage.size(); c++) {
+            if (stage[c] == 0 && h[c] < rtype(0)) stage[c] = 1;
+            if (stage[c] == 1 && h[c] > rtype(0) && h[c] < rtype(dt)) stage[c] = 2;
+        }
     }
+    for (int s : stage) EXPECT_EQ(s, 2);
 }
 
 namespace {
