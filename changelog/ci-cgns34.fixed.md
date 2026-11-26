@@ -1,0 +1,1 @@
+- CGNS mesh files build and read again with CGNS libraries older than 4.2, such as Debian 13's 3.4.

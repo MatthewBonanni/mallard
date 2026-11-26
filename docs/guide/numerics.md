@@ -215,7 +215,7 @@ t_stop = 0.2       # and/or n_steps, t_wall_stop
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 58 more.
+and 59 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -268,7 +268,7 @@ order = 5          # TENO: 3 to 6
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 58 more.
+and 59 more.
 
 !!! note "Defaults"
     Without a [preset](#presets) or this table Mallard runs the `high_order`
@@ -333,7 +333,7 @@ and 1 more.
 | `cache_file` | none | Save the stencils and matrices, and reuse them on later runs of the same mesh and options |
 | `cache_single_precision` | `false` | Store the cache in single precision (half the size) |
 | `single_precision_tables` | `false` | 3D, single gas: keep the matrices in single precision on the device: ~40% less memory, 3–8% faster, results change at round-off |
-| `troubled_capacity` | 0.25 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
+| `troubled_capacity` | 0.125 (3D), 1 (2D) | Share of cells the troubled-cell passes handle at a time (memory) |
 | `curved_mirrors`, `curved_wall_degree` | `false`, 3 | Stencils at [curved walls](meshes.md#curved-boundaries) |
 
 Pitfalls:
@@ -445,7 +445,7 @@ riemann_solver = "HLLC"   # default
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 58 more.
+and 59 more.
 
 | `riemann_solver` | Use |
 |---|---|

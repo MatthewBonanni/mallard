@@ -1,0 +1,1 @@
+- `mallard info` and `mallard diff` read a VTKHDF series' mesh file (`PREFIX_mesh.vtkhdf`) as a mesh, not as a snapshot at t = 0 without fields: `mallard diff` says it is a mesh file instead of "no field in common".
