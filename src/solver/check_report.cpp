@@ -65,6 +65,12 @@ Status CheckReport::status() const {
 
 std::string CheckDiagnostic::docs() const { return diagnostic_code::docs(code); }
 
+double check_step_seconds(const CheckReport & r, const PartSize & p, const int n) {
+    if (!(r.throughput > 0.0)) return 0.0;
+    if (r.scaling == nullptr) return static_cast<double>(r.n_cells) / (static_cast<double>(n) * r.throughput);
+    return cost_model::step_seconds(*r.scaling, 1.0 / r.throughput, cost_model::part(p, n, r.particles));
+}
+
 namespace {
 
 using logging::count;
@@ -92,6 +98,12 @@ std::pair<std::string, std::string> time_parts(const double s) {
     if (s < 59.95) return {digits3(s), "s"};
     if (s < 3597.0) return {digits3(s / 60.0), "min"};
     return {format("%.3g", s / 3600.0), "h"};
+}
+
+/** @brief A duration as text in the report's ASCII units, whatever the locale: "100 us", "4.09 ms". */
+std::string time_text(const double s) {
+    const auto [value, units] = time_parts(s);
+    return value + " " + units;
 }
 
 std::string steps(const double n) { return n >= 1000.0 ? count(static_cast<uint64_t>(std::llround(n))) : g4(n); }
@@ -442,13 +454,12 @@ void sizing_section(report::Text & text, const CheckReport & r) {
                                  "the halo is already above that on the fewest: a coarser mesh or larger " + units +
                                      " keep more of the work local"}});
             }
-            if (r.throughput > 0.0 && r.dt > 0.0) {
+            if (r.sizing_wall_per_time > 0.0) {
                 const int n = std::max(r.min_ranks, r.halo_ranks);
-                const auto [wall, wall_units] = time_parts(double(r.n_cells) / (n * r.throughput * r.dt));
+                const auto [wall, wall_units] = time_parts(r.sizing_wall_per_time);
                 rows.push_back({Status::NONE,
                                 {"wall time per unit simulated time", wall, wall_units, "",
-                                 "on " + count(uint64_t(n), unit) + " at " + logging::si(r.throughput) +
-                                     " cells/s each"}});
+                                 "on " + count(uint64_t(n), unit) + ", by the cost model (Cost)"}});
             }
         }
     }
@@ -460,28 +471,84 @@ void sizing_section(report::Text & text, const CheckReport & r) {
     text.quantities(rows);
 }
 
+bool gpu_device(const CheckReport & r) { return r.workload.device.rfind("cpu", 0) != 0; }
+
+/** @brief Compute hours per wall hour on n ranks: GPUs, or cores (ranks times threads). */
+double hours_per_rank(const CheckReport & r) { return gpu_device(r) ? 1.0 : double(std::max(1, r.workload.threads)); }
+
+std::string scaling_basis(const CheckReport & r) {
+    const cost_model::Scaling & c = *r.scaling;
+    // Terms the fit gave no measurable weight are left out
+    return "Step time of the largest part: s " +
+           (c.beta >= 0.005 ? format("(owned + %.2f halo cells)", c.beta) : std::string("(owned cells)")) + " + " +
+           time_text(c.t0) +
+           (c.gamma >= 1.0e-8 ? " + " + time_text(c.gamma) + " per neighbor part" : "") +
+           (c.delta >= 1.0e-12 ? format(" + %.3g ns per halo cell owned on another node", c.delta * 1.0e9) : "") +
+           (c.particle >= 1.0e-12 ? format(" + %.3g ns per particle slot", c.particle * 1.0e9) : "") +
+           (c.particle_mpi >= 1.0e-8 ? " (+ " + time_text(c.particle_mpi) + " with particles on several ranks)"
+                                     : "") +
+           ", s the seconds per cell of one rank alone; " + c.basis +
+           format(", fitted to %d measured step times of %d cases (%.1f%% rms; %.1f%% on cases left out: %s). "
+                  "Ranks per node: ",
+                  c.runs, c.cases, 100.0 * c.fit_error, 100.0 * c.held_out_error, c.held_out) +
+           r.ranks_per_node_basis + ".";
+}
+
 void cost_section(report::Text & text, const CheckReport & r) {
     text.section("Cost", Status::NONE);
     if (!(r.wall_per_time > 0.0)) {
-        text.line("Not estimated: --throughput CELLS_PER_S or --steps N gives an estimate.");
+        text.line("Not estimated: " +
+                  (r.throughput_basis.empty() ? std::string("no time step at the initial state")
+                                              : r.throughput_basis) +
+                  ".");
         return;
     }
-    const std::string hours = r.device_memory ? "GPU-hours" : "rank-hours";
-    text.note("On " + count(uint64_t(r.target_ranks), "rank") + " at " + logging::si(r.throughput) +
-              " cells/s per rank (" +
-              (r.throughput_measured ? "measured over " + count(r.steps_timed, "step") : std::string("--throughput")) +
-              "), at the initial time step; " + hours + ": ranks times wall hours.");
+    const std::string hours = gpu_device(r) ? "GPU-hours" : "core-hours";
+    const double per_rank = hours_per_rank(r);
+    text.note("Throughput of one rank alone: " + logging::si(r.throughput) + " cells/s (" + r.throughput_basis + ").");
+    if (r.scaling != nullptr) {
+        text.note(scaling_basis(r));
+    } else {
+        text.note("No step-time model for " + (r.workload.hardware.empty() ? r.workload.device : r.workload.hardware) +
+                  " (fitted on A100s and Apple M CPUs): every rank keeps the single rank's throughput.");
+    }
+    text.note(format("On %s, at the initial time step: efficiency %.0f%%; wall times +-%.0f%% (one standard "
+                     "deviation of the throughput and the step-time model); %s: %s times wall hours.",
+                     count(uint64_t(r.target_ranks), "rank").c_str(), 100.0 * r.efficiency, 100.0 * r.uncertainty,
+                     hours.c_str(), gpu_device(r) ? "GPUs" : "ranks times threads"));
     std::vector<Row> rows;
     auto row = [&](const std::string & period, const double time) {
         rows.push_back({Status::NONE,
                         {period, g4(time), steps(time / r.dt), logging::duration(r.wall_per_time * time),
-                         format("%.3g", r.wall_per_time * time * r.target_ranks / 3600.0)}});
+                         format("%.3g", r.wall_per_time * time * r.target_ranks * per_rank / 3600.0)}});
     };
     row("per unit simulated time", 1.0);
     if (r.flow_through_time > 0.0) row("per flow-through time", r.flow_through_time);
     if (r.t_stop > 0.0) row("to run.t_stop", r.t_stop);
     if (r.n_steps > 0) row("for run.n_steps", double(r.n_steps) * r.dt);
     text.table({"period", "simulated time [s]", "steps", "wall time", hours}, rows, false);
+
+    if (r.scalings.size() < 2) return;
+    const bool to_stop = r.t_stop > 0.0;
+    const bool for_steps = !to_stop && r.n_steps > 0;
+    const double time = to_stop ? r.t_stop : for_steps ? double(r.n_steps) * r.dt : 1.0;
+    const std::string period = to_stop ? "to run.t_stop" : for_steps ? "for run.n_steps" : "per unit simulated time";
+    std::vector<Row> by_ranks;
+    for (const CheckScaling & c : r.scalings) {
+        const double wall = c.wall_per_time * time;
+        by_ranks.push_back({Status::NONE,
+                            {std::to_string(c.ranks) + (c.ranks == r.target_ranks ? " (--ranks)" : ""),
+                             std::to_string(c.nodes), count(c.part.owned),
+                             format("%.1f%%", 100.0 * double(c.part.halo) / double(std::max<uint64_t>(c.part.owned, 1))),
+                             std::to_string(c.part.neighbors), format("%.0f%%", 100.0 * c.efficiency),
+                             logging::duration(wall), format("%.3g", wall * c.ranks * per_rank / 3600.0)}});
+    }
+    text.blank();
+    text.note("By rank count, " + period +
+              ": the largest part the run's partitioner makes (owned cells; halo over owned; parts its halo "
+              "comes from) and its step time; efficiency: one rank's step time over ranks times this one's.");
+    text.table({"ranks", "nodes", "owned cells", "halo / owned", "neighbors", "efficiency", "wall time", hours},
+               by_ranks, false);
 }
 
 void diagnostics_section(report::Text & text, const CheckReport & r) {
@@ -645,6 +712,26 @@ std::string environment_json(const CheckEnvironment & e) {
                   .str();
           }));
     return o.str();
+}
+
+std::string scaling_json(const CheckReport & r) {
+    if (r.scaling == nullptr) return "null";
+    const cost_model::Scaling & c = *r.scaling;
+    return json::Object()
+        .add("device", std::string(c.device))
+        .add("t0", c.t0)
+        .add("beta", c.beta)
+        .add("gamma", c.gamma)
+        .add("delta", c.delta)
+        .add("particle", c.particle)
+        .add("particle_mpi", c.particle_mpi)
+        .add("runs", c.runs)
+        .add("cases", c.cases)
+        .add("fit_error", c.fit_error)
+        .add("held_out_error", c.held_out_error)
+        .add("held_out", std::string(c.held_out))
+        .add("basis", std::string(c.basis))
+        .str();
 }
 
 std::string diagnostics_json(const CheckReport & r) { return ::diagnostics_json(r.diagnostics); }
@@ -872,6 +959,9 @@ std::string check_json(const CheckReport & r) {
                             .add("target_ranks", r.target_ranks)
                             .add("target_owned", r.target_owned)
                             .add("target_halo", r.target_halo)
+                            .add("target_neighbors", r.target_part.neighbors)
+                            .add("target_remote_neighbors", r.target_part.remote_neighbors)
+                            .add("target_halo_remote", r.target_part.halo_remote)
                             .add("target_bytes", r.target_bytes)
                             .add("target_bytes_peak", r.target_bytes_peak)
                             .add("device_capacity", r.device_capacity)
@@ -906,6 +996,7 @@ std::string check_json(const CheckReport & r) {
                             .add("min_partitioned", r.min_partitioned)
                             .add("halo_fraction", SIZING_HALO_FRACTION)
                             .add("halo_ranks", r.halo_ranks)
+                            .add("wall_per_time", r.sizing_wall_per_time)
                             .str());
     } else {
         o.raw("sizing", "null");
@@ -918,6 +1009,36 @@ std::string check_json(const CheckReport & r) {
                           .add("throughput_measured", r.throughput_measured)
                           .add("steps_timed", r.steps_timed)
                           .add("wall_per_time", r.wall_per_time)
+                          .add("throughput_source", r.throughput_source)
+                          .add("throughput_basis", r.throughput_basis)
+                          .add("throughput_uncertainty", r.throughput_uncertainty)
+                          .add("measured_throughput", r.measured_throughput)
+                          .add("device", r.workload.device)
+                          .add("hardware", r.workload.hardware)
+                          .add("threads", r.workload.threads)
+                          .add("reconstruction", r.workload.reconstruction)
+                          .add("physics", r.workload.physics)
+                          .add("species", r.workload.species)
+                          .add("particles", r.particles)
+                          .add("ranks_per_node", r.ranks_per_node)
+                          .add("efficiency", r.efficiency)
+                          .add("uncertainty", r.uncertainty)
+                          .raw("model", scaling_json(r))
+                          .raw("scaling", array_json(r.scalings, [&](const CheckScaling & c) {
+                              return json::Object()
+                                  .add("ranks", c.ranks)
+                                  .add("nodes", c.nodes)
+                                  .add("owned", c.part.owned)
+                                  .add("halo", c.part.halo)
+                                  .add("neighbors", c.part.neighbors)
+                                  .add("remote_neighbors", c.part.remote_neighbors)
+                                  .add("halo_remote", c.part.halo_remote)
+                                  .add("step", c.step)
+                                  .add("efficiency", c.efficiency)
+                                  .add("wall_per_time", c.wall_per_time)
+                                  .add("hours_per_time", c.wall_per_time * c.ranks * hours_per_rank(r) / 3600.0)
+                                  .str();
+                          }))
                           .add("flow_through_time", r.flow_through_time)
                           .add("t_stop", r.t_stop)
                           .add("n_steps", r.n_steps)

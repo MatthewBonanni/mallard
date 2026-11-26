@@ -3031,6 +3031,7 @@ void Solver::start_run() {
         if (control_file_interval > 0) control_files_polled = step / control_file_interval;
         wall_time_reached = false;
         checkpoint_requested = false;
+        start_health_events();
 
         try {
             // A restart's pending half step, where this run does not fuse it into its first step
@@ -3040,7 +3041,9 @@ void Solver::start_run() {
                 update_cell_W();
                 particles->start_from_gas(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
             }
-            calc_dt();
+            // The first step's calc_dt starts its reconstruction: one started here would be discarded, and its
+            // troubled-cell measure would show in the start's output
+            calc_dt(false);
             // Output before the progress row, which reports the monitors' values and counts the files
             if (step == 0) {
                 Kokkos::Timer output_timer;
@@ -3111,6 +3114,7 @@ void Solver::advance_once() {
         const step_queue::Record record = next_record();
         take_record(record);
         if (record.outcome != step_queue::ACCEPTED) return;
+        note_step_health();
         if (record.reasons != 0) {
             // The steps enqueued after this one do nothing
             drain_device_steps();
@@ -3144,6 +3148,7 @@ void Solver::advance_once() {
     Kokkos::Timer step_timer;
     calc_dt();
     take_step();
+    note_step_health();
     after_step(step_timer, nullptr);
 }
 
@@ -3372,18 +3377,23 @@ void Solver::print_progress(const step_queue::ProgressLocals & locals, const std
         report_health(locals, values);
         status.health = run_health.last;
     }
+    for (const auto & monitor : force_monitors) {
+        if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
+    }
+    if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
+    status.probes = probes.recorded();
+    if (comm::is_root()) {
+        std::vector<MonitorValues> monitored = status.monitored;
+        monitored.insert(monitored.end(), status.probes.begin(), status.probes.end());
+        health_event_row(status, std::move(monitored));
+    }
     if (run_log_on || run_log::streams_progress()) {
         const MemoryUsage m = memory_usage();
         const auto largest = comm::allreduce(std::array<double, 4>{m.host, m.host_peak, m.device, m.device_total},
                                              comm::Op::MAX);
         status.memory = {largest[0], largest[1], largest[2], largest[3]};
-        for (const auto & monitor : force_monitors) {
-            if (!monitor.last.name.empty()) status.monitored.push_back(monitor.last);
-        }
-        if (!integral_monitor.last.name.empty()) status.monitored.push_back(integral_monitor.last);
         if (!convergence.last().name.empty()) status.monitored.push_back(convergence.last());
         for (auto && peaks : probes.spectra_peaks()) status.monitored.push_back(std::move(peaks));
-        status.probes = probes.recorded();
         run_log::write_progress(status.record());
     }
 
@@ -3549,6 +3559,12 @@ void Solver::print_summary(const RunEnd & end) const {
         s.chemistry_slowest = comm::allreduce(t_wall_chemistry, comm::Op::MAX);
         s.chemistry_mean = sums[0] / comm::size();
         if (chemistry_load_balance && sums[1] > 0.0) s.chemistry_sent = sums[2] / sums[1];
+    }
+    if (reacting && chemistry_explicit_step) {
+        const comm::SelfScope scope = communication_scope();
+        const double active = comm::allreduce(double(cell_chemistry.statistics().active), comm::Op::SUM);
+        s.chemistry_explicit = active > 0.0 ? chemistry_explicit_steps() / active : 0.0;
+        s.chemistry_marked = chemistry_explicit_marked();
     }
     if (!data_writers.empty()) {
         uint64_t bytes = 0;
@@ -3916,10 +3932,10 @@ rtype Solver::next_target_time(const bool unstaged) const {
     return std::min(t_target, probes.next_time(unstaged));
 }
 
-void Solver::calc_dt() {
+void Solver::calc_dt(const bool overlap) {
     // Halo values are stale after the last stage of the previous step; the
     // first stage of the next one reuses them
-    exchange_for_first_stage();
+    exchange_for_first_stage(overlap);
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
     if (!(dt_cfl1 > 0.0_r)) throw DivergedError();
