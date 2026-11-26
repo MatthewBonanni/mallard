@@ -387,6 +387,22 @@ void memory_section(report::Text & text, const CheckReport & r) {
                categories, false);
 }
 
+void output_section(report::Text & text, const CheckReport & r) {
+    if (r.outputs.empty()) return;
+    std::vector<Row> rows;
+    Status s = Status::OK;
+    for (const CheckOutput & o : r.outputs) {
+        const Status row = o.high_order_bytes > OUTPUT_SIZE_WARNING ? Status::WARNING : Status::OK;
+        s = report::worse(s, row);
+        rows.push_back({row, {o.prefix, o.format, bytes(o.bytes), o.high_order_bytes > 0.0 ? bytes(o.high_order_bytes) : "-"}});
+    }
+    text.section("Output", s);
+    text.note("Bytes of each [[write_data]] snapshot before compression, the mesh counted where each snapshot "
+              "repeats it; high-order view: its companion files of the reconstruction polynomials, written "
+              "on by default for TENO runs. See docs/guide/output.md#high-order-view.");
+    text.table({"prefix", "format", "cell values", "high-order view"}, rows);
+}
+
 void sizing_section(report::Text & text, const CheckReport & r) {
     if (r.sizing_name.empty()) return;
     const std::string unit = r.sizing_gpu ? "GPU" : "rank";
@@ -780,6 +796,20 @@ std::string resolution_json(const CheckReport & r) {
     return resolution.str();
 }
 
+std::string outputs_json(const CheckReport & r) {
+    std::string a = "[";
+    for (const CheckOutput & o : r.outputs) {
+        if (a.size() > 1) a += ",";
+        a += json::Object()
+                 .add("prefix", o.prefix)
+                 .add("format", o.format)
+                 .add("bytes", o.bytes)
+                 .add("high_order_bytes", o.high_order_bytes)
+                 .str();
+    }
+    return a + "]";
+}
+
 } // namespace
 
 std::string check_text(const CheckReport & r, const bool color) {
@@ -793,6 +823,7 @@ std::string check_text(const CheckReport & r, const bool color) {
         if (r.dt > 0.0) time_step_section(text, r);
         resolution_section(text, r);
         if (r.bytes > 0) memory_section(text, r);
+        output_section(text, r);
         sizing_section(text, r);
         if (r.setup_done && !r.geometry_only) cost_section(text, r);
     }
@@ -938,6 +969,7 @@ std::string check_json(const CheckReport & r) {
     } else {
         o.raw("memory", "null");
     }
+    o.raw("outputs", outputs_json(r));
     if (!r.sizing_name.empty()) {
         o.raw("sizing", json::Object()
                             .add("name", r.sizing_name)

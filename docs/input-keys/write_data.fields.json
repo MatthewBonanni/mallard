@@ -63,6 +63,7 @@
   "examples/turbulent_inflow_duct/input.toml",
   "examples/viscous_shock_tube/input.toml",
   "examples/wedge/input.toml",
+  "tools/dev/catalog_inputs/2d/high_order_view.toml",
   "tutorials/wedge/input.toml"
  ],
  "type": "array"

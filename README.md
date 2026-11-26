@@ -99,6 +99,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - [Divergence report](https://matthewbonanni.github.io/mallard/docs/guide/running/#the-divergence-report) on failure: where, when, ranked likely causes with evidence, what to try
 - VTKHDF output for ParaView
 - [Derived fields](https://matthewbonanni.github.io/mallard/docs/guide/output/#derived-fields), in the run or via `mallard post derive`: Mach number, stagnation state, entropy, Q-criterion, λ₂, enstrophy, helicity, numerical schlieren, pressure coefficient; flames: mixture fraction, progress variable, flame index, scalar dissipation
+- [High-order view](https://matthewbonanni.github.io/mallard/docs/guide/output/#high-order-view) of TENO snapshots: VTK Lagrange cells of the reconstruction polynomials, so ParaView draws the solution inside cells
 - Probes on points, curves, surfaces, boundaries, regions
 - Statistics, spectra, phase averages, PDFs, conditional statistics (on mixture fraction or progress variable)
 - Initial-transient detection and confidence intervals (MSER-5, batch means): start statistics, stop at convergence

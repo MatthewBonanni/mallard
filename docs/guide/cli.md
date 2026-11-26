@@ -1017,6 +1017,11 @@ Options:
                          given) at each step extracted, as [[write_data]] writes
                          it: OUTPUT/NAME.vtkhdf, or .vtu files with a .pvd
                          index. Default: none.
+  --high-order on|off    With a TENO input, also write NAME_high_order: the
+                         reconstruction's polynomials at the nodes of VTK
+                         Lagrange cells, as [[write_data]] high_order does
+                         (docs/guide/output.md#high-order-view); the whole mesh
+                         only. Default: off.
   --steps LIST           Extract the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Extract the snapshot nearest to simulated time T, or
@@ -1105,6 +1110,11 @@ Options:
                          HDF5.
   --name NAME            The name of the snapshots: NAME.vtkhdf. Default:
                          derived.
+  --high-order on|off    With a TENO input, also write NAME_high_order: the
+                         reconstruction's polynomials at the nodes of VTK
+                         Lagrange cells, as [[write_data]] high_order does
+                         (docs/guide/output.md#high-order-view); the whole mesh
+                         only. Default: off.
   --steps LIST           Derive the snapshots of these steps, separated by
                          commas (--steps 100,200). Default: every snapshot.
   --times T|T1:T2        Derive the snapshot nearest to simulated time T, or

@@ -78,6 +78,15 @@ def test_series_of_a_directory_is_every_snapshot_in_time_order(run):
     np.testing.assert_array_equal(f.read("RHO", i), mallard.open(run / "snapshots_vtkhdf_000001.vtkhdf")["RHO"])
 
 
+def test_listing_a_directory_leaves_out_high_order_views():
+    from mallard.reader import is_high_order_view
+    for name in ["flow_high_order.vtkhdf", "flow_high_order.vtkhdf.series", "flow_high_order_000010.vtkhdf",
+                 "flow_high_order.pvd", "flow_high_order_000010.vtu", "flow_high_order_000010.pvtu"]:
+        assert is_high_order_view(name) and not is_high_order_view(name, "flow_high_order*")
+    for name in ["flow.vtkhdf", "flow_000010.vtu", "high_order.vtkhdf", "flow_high_order_000010.restart"]:
+        assert not is_high_order_view(name)
+
+
 def test_triangles_cover_each_cell_once(run):
     g = mallard.open(run / "snapshots_series.vtkhdf").geometry()
     triangles, cell = g.triangles()

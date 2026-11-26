@@ -128,6 +128,7 @@ add_library(MallardCore STATIC
     solver/spectra.cpp
     solver/statistics.cpp
     solver/favre_average.cpp
+    solver/high_order_output.cpp
     common/homogeneous_average.cpp
     io/archive.cpp
     io/compression.cpp
@@ -137,6 +138,7 @@ add_library(MallardCore STATIC
     io/data_writer.cpp
     io/data_writer_hdf5.cpp
     io/data_writer_vtkhdf.cpp
+    io/lagrange.cpp
     io/vtkhdf_series.cpp
     parallel/binding.cpp
     parallel/comm.cpp

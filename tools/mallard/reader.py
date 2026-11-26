@@ -4,6 +4,7 @@ import ctypes
 import fnmatch
 import json
 import os
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -287,15 +288,25 @@ def run_files(directory):
         lib.lib.mallard_array_free(array)
 
 
+HIGH_ORDER_VIEW = re.compile(r"_high_order(_\d+)?\.(vtkhdf|vtkhdf\.series|pvd|pvtu|vtu)$")
+
+
+def is_high_order_view(path, pattern="*"):
+    """Whether a file of a directory is a snapshot's high-order view (`PREFIX_high_order...`) that `pattern`
+    does not name: another view of the snapshots beside it, which listing a directory leaves out."""
+    return "high_order" not in pattern and HIGH_ORDER_VIEW.search(os.path.basename(path)) is not None
+
+
 def series(path, pattern="*"):
     """The snapshots of a series, as `(File, index)` pairs in time order (then step): of a series index or
     snapshot file, or of every series index and snapshot file in a directory (not its subdirectories) whose
-    name matches `pattern`, as `run_files` lists them, but files still being written. `file.read(field, index)`
-    reads one."""
+    name matches `pattern`, as `run_files` lists them, but files still being written and high-order views
+    (`PREFIX_high_order...`, unless `pattern` names them). `file.read(field, index)` reads one."""
     path = os.fspath(path)
     if os.path.isdir(path):
         paths = [p for p in run_files(path) if os.path.samefile(os.path.dirname(p), path)
-                 and fnmatch.fnmatch(os.path.basename(p), pattern) and not p.endswith(".partial")]
+                 and fnmatch.fnmatch(os.path.basename(p), pattern) and not p.endswith(".partial")
+                 and not is_high_order_view(p, pattern)]
     else:
         paths = [path]
     pairs = []

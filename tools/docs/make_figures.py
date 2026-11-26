@@ -30,6 +30,7 @@ import flamelet
 import geometry
 import gui_mockups
 import high_order_cost
+import high_order_view
 import inlets
 import les_models
 import limiters
@@ -87,6 +88,7 @@ def main():
     work_precision.figures()
     if args.mallard:
         case_view.figures(args.mallard, args.mallard3d)
+        high_order_view.figures(args.mallard)
         mesh_fields.figures(args.mallard, args.mallard3d)
         sys.argv = [sys.argv[0], "--mallard", args.mallard] + (["--mallard3d", args.mallard3d] if args.mallard3d else [])
         probes.main()

@@ -430,6 +430,28 @@ bool writes_variable(const Input & input, const std::string & name) {
     return false;
 }
 
+bool Solver::samples_points() const {
+    if (contains_optional(input, "probes")) {
+        for (const auto & entry : find_value<std::vector<Input>>(input, "probes")) {
+            if (entry.contains("sampling") && entry.at("sampling").is_string() &&
+                entry.at("sampling").as_string() == "point") {
+                return true;
+            }
+        }
+    }
+    if (contains_optional(input, "write_data")) {
+        // Every entry that can write a high-order view and does not turn it off
+        for (const auto & entry : find_value<std::vector<Input>>(input, "write_data")) {
+            const bool off = entry.contains("high_order") && entry.at("high_order").is_boolean() &&
+                             !entry.at("high_order").as_boolean();
+            const std::string format =
+                entry.contains("format") && entry.at("format").is_string() ? entry.at("format").as_string() : "";
+            if (!off && format != "restart" && format != "xdmf") return true;
+        }
+    }
+    return false;
+}
+
 void Solver::init_mesh() {
     const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");
     // Read in every run, so that an input runs unchanged on any number of ranks
@@ -1695,8 +1717,9 @@ void Solver::init_numerics() {
     if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
         teno->partition_faces_exchanged = exchanges_partition_faces();
         teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
-        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
-        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
+        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors,
+        // and point values of troubled cells select among them
+        if (state_reader && !writes_stencils() && !samples_points()) teno->sector_stencils = false;
     }
     face_reconstruction->init(face_reconstruction_input);
     describe_block_path();
@@ -2095,11 +2118,13 @@ void Solver::init_output(region::Regions & regions) {
     } else {
         run_log::close();
     }
+    high_order_output.init(mesh, face_reconstruction.get(), is_mixture(), lagrange_view);
     if (contains_optional(input, "write_data")) {
         for (const auto & output : find_value<std::vector<Input>>(input, "write_data")) {
             add_data_writers(output, regions, async_output, io_threads);
         }
     }
+    high_order_output.setup();
     if (probes.any_gradients()) allocate_viscous_gradients();
     if (std::none_of(data_writers.begin(), data_writers.end(),
                      [](const auto & writer) { return writer->get_format() == DataFormat::RESTART; })) {
@@ -2114,7 +2139,8 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                               uint32_t io_threads) {
     auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
         data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix,
+                                  subset ? nullptr : &lagrange_view);
         data_writers.back()->set_async(async_output, io_threads);
     };
     const bool one = output.contains("region"), several = output.contains("regions");
@@ -3589,11 +3615,15 @@ void Solver::write_data(bool force) {
     if (!any_due) {
         return;
     }
-    if (std::any_of(data_writers.begin(), data_writers.end(),
-                    [&](const auto & w) { return w->follows_solution() && (force || w->due(step, t)); })) {
+    const bool high_order = std::any_of(data_writers.begin(), data_writers.end(),
+                                        [&](const auto & w) { return w->high_order_due(step, t, force); });
+    if (high_order || std::any_of(data_writers.begin(), data_writers.end(), [&](const auto & w) {
+            return w->follows_solution() && (force || w->due(step, t));
+        })) {
         update_cell_W();
     }
     update_primitives();
+    if (high_order) high_order_output.update(*face_reconstruction, W_cells, physics);
     copy_device_to_host();
     write_outputs(force);
     if (snapshots) {

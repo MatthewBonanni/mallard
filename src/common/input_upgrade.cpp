@@ -739,6 +739,20 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
     return true;
 }
 
+/** @brief Whether the input reconstructs with TENO: its [numerics.face_reconstruction] type, or else its preset's. */
+bool runs_teno(const Input & input) {
+    const auto string_at = [](const Input & table, const char * key, const std::string & fallback) {
+        return table.is_table() && table.contains(key) && table.at(key).is_string() ? table.at(key).as_string() : fallback;
+    };
+    const Input empty(Input::table_type{});
+    const Input & numerics = input.contains("numerics") ? input.at("numerics") : empty;
+    if (numerics.is_table() && numerics.contains("face_reconstruction")) {
+        return string_at(numerics.at("face_reconstruction"), "type", "FO") == "TENO";
+    }
+    const std::string preset = string_at(numerics, "preset", "high_order");
+    return preset == "high_order" || preset == "accurate";
+}
+
 } // namespace
 
 std::vector<std::string> notices(const std::string & text) {
@@ -778,6 +792,21 @@ std::vector<std::string> notices(const std::string & text) {
             out.push_back("[[write_data]] \"" + prefix + "\" has no series: VTKHDF output writes the series file " + prefix +
                           ".vtkhdf over a file per snapshot by default; add series = false for each snapshot whole, " +
                           prefix + "_<n>.vtkhdf, indexed by " + prefix + ".vtkhdf.series");
+        }
+    }
+    if (input.contains("write_data") && input.at("write_data").is_array() && runs_teno(input)) {
+        for (const auto & entry : input.at("write_data").as_array()) {
+            if (!entry.is_table() || entry.contains("high_order") || entry.contains("region") || entry.contains("regions")) {
+                continue;
+            }
+            const std::string format =
+                entry.contains("format") && entry.at("format").is_string() ? entry.at("format").as_string() : "vtkhdf";
+            if (format != "vtkhdf" && format != "vtu") continue;
+            const std::string prefix =
+                entry.contains("prefix") && entry.at("prefix").is_string() ? entry.at("prefix").as_string() : "PREFIX";
+            out.push_back("[[write_data]] \"" + prefix + "\" has no high_order: since 0.11.0 a TENO run's whole-mesh "
+                          "snapshots also write the high-order view, " + prefix + "_high_order...; add high_order = false "
+                          "to write the cell values alone");
         }
     }
     if (has("numerics", "preset") && input.at("numerics").at("preset").is_string() &&

@@ -662,8 +662,13 @@ void Solver::device_step_body() {
         const bool solution = std::any_of(data_writers.begin(), data_writers.end(),
                                           [](const auto & w) { return w->follows_solution(); });
         device_if(&output_due.data()[n_writers], [&] {
-            if (solution) device_if(&output_due.data()[n_writers + 1], [&] { update_cell_W(); });
+            if (high_order_output.active()) {
+                update_cell_W();
+            } else if (solution) {
+                device_if(&output_due.data()[n_writers + 1], [&] { update_cell_W(); });
+            }
             update_primitives();
+            if (high_order_output.active()) high_order_output.update(*face_reconstruction, W_cells, physics);
             output_arrays_to_host();
             if (triggers_on_device()) copy_to_pinned(pinned_mirrors, h_trigger_states, trigger_states);
         });

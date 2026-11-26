@@ -394,6 +394,111 @@ Pitfalls: the run's summary reports the time spent writing; if each file takes l
 **Restart files** (`format = "restart"`) are described in
 [Initialization and restarts](initialization.md#restarts).
 
+### High-order view
+
+A TENO run knows more than its cell averages: inside each cell, the
+reconstruction's central polynomial of degree `order - 1`. Every whole-mesh
+`vtkhdf` or `vtu` snapshot writer of a TENO run also writes that, as the
+**high-order view** `PREFIX_high_order...`, beside its own files, in the same
+format and layout (`PREFIX_high_order.vtkhdf`, or `PREFIX_high_order.pvd` and
+its `.vtu` files). `high_order = false` writes the cell values alone:
+
+```toml
+[[write_data]]
+prefix = "solut/flow"
+interval = 500
+fields = ["RHO", "U", "P", "MACH"]
+# high_order = false    # the cell values alone
+```
+
+The run's **Output** table lists the view and its degree with the entry, and
+the resolved input of every output file's [run block](#run-block) holds the
+`high_order` value the entry used.
+
+Each cell is a VTK Lagrange cell of the polynomials' degree (order 3:
+quadratic, order 5: quartic), and its nodes hold the fields
+the entry writes from the polynomial: `RHO`, `RHOU`, `RHOE`, `U`, `P`, `T`,
+`H`, `MACH` and their components, from the point values of the conservative
+variables. Other fields (`TENO_SIGMA`, `CFL`, statistics, ...) are cell data
+of the view, so one file shows them all. Open `PREFIX_high_order.vtkhdf` (or
+`.pvd`) in ParaView and raise **Nonlinear Subdivision Level** (Properties,
+advanced) to 2 or 3 to draw each cell's polynomial instead of its corners.
+
+![The same TENO order 5 snapshot of a density bump on a coarse mesh of quadrilaterals and triangles: flat cell averages, and the high-order view, smooth inside each cell](../images/guide/high-order-view-light.svg#gh-light-mode-only)
+![The same TENO order 5 snapshot of a density bump on a coarse mesh of quadrilaterals and triangles: flat cell averages, and the high-order view, smooth inside each cell](../images/guide/high-order-view-dark.svg#gh-dark-mode-only)
+
+The solution files are unchanged, byte for byte, and restart files stay cell
+averages: nothing reads the view back. Its nodes are not shared between
+cells, so the jumps between neighbors' polynomials, the scheme's own
+discontinuities, stay visible. Troubled cells take the polynomial the
+stencil selection chooses for the whole cell ([below](#troubled-cells)), as
+[probes](probes.md) with `sampling = "point"` do; nodes whose values leave
+the admissible states, and troubled cells whose polynomial does at a face
+point, hold the cell's average; the view's
+[snapshot block](#snapshot-metadata) says so (`value = "point_value"`, with
+the reconstruction and its fallback). Triangles, quadrilaterals,
+tetrahedra, hexahedra and prisms are Lagrange cells of their shape; each
+pyramid is two Lagrange tetrahedra, which VTK draws, probes and resamples
+like any cell (VTK 9 has no Lagrange pyramid), its cell data repeated on
+both. Cells on [curved boundaries](meshes.md#curved-boundaries) keep their
+shape: nodes on a curved face lie on the exact curve or surface, the others
+on the cell's quadratic geometry. On straight cells the drawn field is the
+polynomial exactly; on curved cells it is exact at the nodes. Rationale, node orderings and costs: [design
+note](../design/high_order_output.md).
+
+#### Troubled cells
+
+A troubled cell (`TENO_SIGMA` at or above `troubled_threshold`) has no single
+polynomial in the flux, which selects among the central and sector stencils
+face by face and per characteristic variable
+([TENO-E](../theory/finite_volume.md#teno-e), "Smooth and troubled cells").
+Output gives it the polynomial that selection would choose for the whole
+cell, with the flux's smoothness indicators, weights and adaptive cutoff
+`C_T`: per variable, the central polynomial where it passes the cutoff, else
+the mean of the sector polynomials that do (at order 4 the face rule
+counts if it would reject the central polynomial on any face). With
+`bound_preserving = true` its deviation from the mean is scaled as the
+flux's is, by the values at the output points. Just above
+`troubled_threshold` the cutoff is `1e-10`, so a smooth feature flagged on a
+coarse mesh almost always keeps its central polynomial: its cells curve like
+their neighbors. The one approximation is that the choice is made on each
+output variable (the conservative ones) rather than on the flux's
+characteristic variables of each face; it is exact wherever the central
+polynomial passes, and with `characteristic = false` it is the flux's own
+choice (at order 4 except on faces the face rule decides).
+
+**Use it to look, not to measure.** ParaView's filters on the view (contours,
+slices, integrals, plots over lines) act on the values at the nodes and VTK's
+interpolation between them, not on the cell averages the solver conserves;
+take quantitative results from [probes](probes.md) (`sampling = "point"` for
+the same point values), [`[integrals]`](statistics.md) and
+[statistics](statistics.md), or from the solution files.
+
+**Size.** The view holds `(p+1)^2` (2D quadrilaterals) or `(p+1)^3` (hexahedra)
+nodes per cell for degree `p`, each with its coordinates: at order 5 about 25
+times a 2D snapshot of the same fields, 125 times in 3D. On 32 x 32 x 32
+hexahedra (TENO order 5, fields `RHO`, `U`, `P`, `T`, 2 CPU threads), each
+1.7 MB snapshot comes with a 197 MB view, and the view's mesh file is 131 MB;
+writing the view adds about 0.1 s of wall time per snapshot. Where that is
+too much, write the view less often in an entry of its own, or set
+`high_order = false`. `mallard check` prints each entry's bytes per snapshot,
+with and without the view, in its **Output** section, and warns
+(`W-OUTPUT-SIZE`) above 10 GB per snapshot.
+
+For a run written without it, `mallard post derive --high-order on` writes
+the view afterwards. From restart files, which hold the cell averages, it is
+the view the run would have written:
+
+```sh
+mallard post derive solut/restart_000500.restart --fields MACH --with-state --high-order on -o view
+```
+
+MUSCL and first-order runs have no polynomial beyond the average, and
+entries without a field of the state have nothing to put at the nodes: they
+write no view, and `high_order = true` is an error there. `xdmf`, restart,
+region and boundary writers hold cell values or samples of their own and take
+no `high_order` key.
+
 ### Snapshots of regions
 
 Large runs need the whole field rarely and a few planes, a near field or the
@@ -1185,9 +1290,10 @@ says which of three kinds of value each field holds, as `value` in its
 | `point_value` | The reconstruction evaluated at the sample | [Probes](probes.md) with `sampling = "point"` and [snapshots of regions](#snapshots-of-regions) of lower dimension, except mass fractions and the cell fields they copy |
 
 Point values are a snapshot's `reconstruction`: with TENO its polynomials
-at the scheme's `order`, falling back to linear least squares in troubled
-cells and to the cell average where neither gives a positive density and
-energy
+at the scheme's `order` (in troubled cells the one the stencil selection
+chooses for the whole cell, [below](#troubled-cells)), falling back to linear
+least squares where the polynomial gives a nonpositive density or energy and
+to the cell average where neither gives a positive one
 (`{"method": "TENO", "order": 5, "fallback": ["linear_least_squares", "cell_average"]}`);
 with MUSCL or first order, linear least squares (order 2). The same
 distinction is in the format's own metadata where it has a slot: the

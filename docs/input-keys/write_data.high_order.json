@@ -1,0 +1,15 @@
+{
+ "default": "false",
+ "defaults_by_dim": {
+  "2": "true",
+  "3": "true"
+ },
+ "dims": [
+  2,
+  3
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/high_order_view.toml"
+ ],
+ "type": "bool"
+}

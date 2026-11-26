@@ -726,7 +726,8 @@ TEST(TENO3DSetup, CentralStencilsThatReachACurvedWallFitTheWallDegree) {
 
 TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
     // Probes hand point_values their points by cell (by_cell), and each run of a cell is fitted once: runs longer
-    // than a team's groups and across teams, a cell in two runs, troubled cells (left as they are), m of 1 and 2
+    // than a team's groups and across teams, a cell in two runs, troubled cells (left as they are, or given the
+    // output's troubled polynomial), m of 1 and 2
     auto mesh = make_mesh_3d("cartesian", 6, 6, 6);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
     auto avg = cell_averages_3d(*mesh, [](double x, double y, double z, double * U) {
@@ -750,7 +751,10 @@ TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
     cells.insert(cells.end(), 5, cells.front());
     Kokkos::View<uint32_t *> d_cells("cells", cells.size());
     Kokkos::deep_copy(d_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(cells.data(), cells.size()));
-    for (const size_t m : {size_t(1), size_t(2)}) {
+    for (const auto & run :
+         {std::pair{size_t(1), false}, std::pair{size_t(2), false}, std::pair{size_t(1), true}, std::pair{size_t(2), true}}) {
+        const size_t m = run.first;
+        const bool select_troubled = run.second;
         const size_t n = cells.size() * m;
         Kokkos::View<rtype *[N_DIM]> offsets("offsets", n);
         auto h_offsets = Kokkos::create_mirror_view(offsets);
@@ -761,7 +765,7 @@ TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
         auto values = [&](const bool by_cell) {
             Kokkos::View<rtype *[N_CONSERVATIVE]> out("out", n);
             Kokkos::deep_copy(out, -1.0_r);
-            EXPECT_TRUE(teno->point_values(W, d_cells, offsets, out, by_cell));
+            EXPECT_TRUE(teno->point_values(W, d_cells, offsets, out, select_troubled, by_cell));
             return Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
         };
         const auto runs_once = values(true);
@@ -770,11 +774,14 @@ TEST(TENO3D, PointValuesOfRunsOfOneCellAreThoseOfOneFitPerPointBitForBit) {
         for (size_t p = 0; p < n; p++) {
             written += each(p, 0) > 0.0_r;
             for (int v = 0; v < N_CONSERVATIVE; v++) {
-                EXPECT_EQ(runs_once(p, v), each(p, v)) << "m " << m << ", point " << p << ", variable " << v;
+                EXPECT_EQ(runs_once(p, v), each(p, v))
+                    << "m " << m << ", troubled " << select_troubled << ", point " << p << ", variable " << v;
             }
         }
         EXPECT_GT(written, n / 4) << "m " << m;
-        EXPECT_LT(written, n) << "m " << m << ": no troubled cell";
+        if (!select_troubled) {
+            EXPECT_LT(written, n) << "m " << m << ": no troubled cell";
+        }
     }
 }
 
@@ -985,6 +992,102 @@ TEST(TENO3DSetup, MirrorImagesAcrossAThinBodyStayOnTheTargetsSide) {
     }
     const auto mesh = extruded(nodes, quads, 2, h);
     for (int order : {3, 5}) EXPECT_GT(expect_images_across_their_faces(mesh, order), 0u) << "order " << order;
+}
+
+namespace {
+
+// Density 1 below x = 0.5 and 0.5 above, times a smooth wave in y and z; uniform velocity and pressure
+void step_conservatives(double x, double y, double z, double * U) {
+    const double rho = (x < 0.5 ? 1.0 : 0.5) * (1.0 + 0.2 * std::cos(2.0 * M_PI * y) * std::cos(M_PI * z));
+    U[0] = rho;
+    U[1] = 0.1 * rho;
+    U[2] = 0.0;
+    U[3] = 0.0;
+    U[4] = 1.0 / (double(GAMMA) - 1.0) + 0.005 * rho;
+}
+
+} // namespace
+
+TEST(TENO3DOutputPoints, TroubledCellsTakeTheFluxsChoiceAtTheirFacePoints) {
+    // Without characteristic variables the flux's choice is the same on every face of a cell (outside
+    // order 4), so the output polynomial of a troubled cell, from the smoothness matrix its moments
+    // give, is the flux's face values at the face points: the mean of the sectors that pass the cutoff
+    // next to the step, far from the central polynomial
+    for (const char * type : {"cartesian_mixed", "cartesian_pyramid"}) {
+        auto mesh = make_mesh_3d(type, 8, 8, 8);
+        BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+        auto avg = cell_averages_3d(*mesh, step_conservatives);
+        Euler euler = Euler::from_reference(GAMMA, 1.0, 1.0, 1.0);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+        auto h_W = Kokkos::create_mirror_view(W);
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            rtype U[N_CONSERVATIVE], Wc[N_CONSERVATIVE];
+            FOR_I_CONSERVATIVE U[i] = avg(c, i);
+            euler.compute_W_from_conservatives(Wc, U);
+            FOR_I_CONSERVATIVE h_W(c, i) = Wc[i];
+        }
+        Kokkos::deep_copy(W, h_W);
+        const std::string options = "characteristic = false\nbound_preserving = false\n";
+        auto teno = make_teno(mesh, bd, 5, options);
+        auto smooth = make_teno(mesh, bd, 5, options + "troubled_threshold = 1e9\n");
+        const uint8_t n_quad = teno->n_face_quadrature_points();
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, n_quad);
+        teno->calc_face_values(W, face_W);
+        auto h_face_W = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+        auto sigma = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->troubled);
+        const auto h_points = teno->host_face_points();
+        auto h_weights = teno->face_quad_weights.host();
+
+        // MAX_FACES faces of n_quad points per cell; padding points and missing faces at the centroid
+        const uint32_t m = uint32_t(teno::MAX_FACES) * n_quad;
+        std::vector<uint32_t> h_cells(mesh->n_cells);
+        Kokkos::View<rtype *[N_DIM]> off("offsets", size_t(mesh->n_cells) * m);
+        Kokkos::View<rtype *[N_CONSERVATIVE]> out("out", off.extent(0)), central("central", off.extent(0));
+        auto h_off = Kokkos::create_mirror_view(off);
+        auto h_out = Kokkos::create_mirror_view(out);
+        std::vector<std::array<int64_t, 3>> at(off.extent(0), {-1, 0, 0});
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            h_cells[c] = c;
+            for (uint32_t p = c * m; p < (c + 1) * m; p++) {
+                FOR_I_DIM h_off(p, i) = 0.0;
+                FOR_I_CONSERVATIVE h_out(p, i) = h_W(c, i);
+            }
+            uint32_t p = c * m;
+            for (uint32_t k = mesh->h_offsets_faces_of_cell(c); k < mesh->h_offsets_faces_of_cell(c + 1); k++) {
+                const uint32_t f = mesh->h_faces_of_cell(k);
+                for (uint8_t q = 0; q < n_quad; q++, p++) {
+                    if (double(h_weights(f, q)) == 0.0) continue;
+                    FOR_I_DIM h_off(p, i) = h_points(f, q, i) - mesh->h_cell_coords(c, i);
+                    at[p] = {int64_t(f), q, mesh->h_cells_of_face(f, 0) == int32_t(c) ? 0 : 1};
+                }
+            }
+        }
+        Kokkos::View<uint32_t *> cells("cells", mesh->n_cells);
+        Kokkos::deep_copy(cells, Kokkos::View<uint32_t *, Kokkos::HostSpace>(h_cells.data(), h_cells.size()));
+        Kokkos::deep_copy(off, h_off);
+        Kokkos::deep_copy(out, h_out);
+        Kokkos::deep_copy(central, h_out);
+        teno->point_values(W, cells, off, out, true, false);
+        smooth->point_values(W, cells, off, central, true, false);
+        auto got = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), out);
+        auto h_central = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), central);
+        uint32_t n_troubled = 0, n_sectors = 0;
+        for (uint32_t c = 0; c < mesh->n_cells; c++) {
+            if (sigma(c) < teno->sigma_threshold) continue;
+            n_troubled++;
+            double off_central = 0.0;
+            for (uint32_t p = c * m; p < (c + 1) * m; p++) {
+                if (at[p][0] < 0) continue;
+                const uint32_t f = uint32_t(at[p][0]);
+                const auto q = uint8_t(at[p][1]), side = uint8_t(at[p][2]);
+                FOR_I_CONSERVATIVE EXPECT_NEAR(got(p, i), h_face_W(f, q, side, i), roundoff(1e-12)) << type << ", cell " << c << ", variable " << int(i);
+                off_central = std::max(off_central, std::abs(double(got(p, 0)) - double(h_central(p, 0))));
+            }
+            n_sectors += off_central > 1e-3;
+        }
+        EXPECT_GT(n_troubled, 0u) << type;
+        EXPECT_GT(n_sectors, 0u) << type;
+    }
 }
 
 TEST(TENO3DTroubled, FaceValuesDoNotDependOnHowManyTroubledCellsARoundHolds) {

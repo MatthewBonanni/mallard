@@ -41,6 +41,7 @@
 #include "radiation.h"
 #include "scalar_reconstruction.h"
 #include "data_writer.h"
+#include "high_order_output.h"
 #include "derived_fields.h"
 #include "probes.h"
 #include "statistics.h"
@@ -972,6 +973,8 @@ class Solver {
         stencils::Table stencil_table(const std::vector<uint32_t> & targets, bool weights) const;
         /** @brief Whether the setup writes STENCIL_* fields or the stencil file of [output] write_stencils. */
         bool writes_stencils() const;
+        /** @brief Whether output evaluates the polynomials at points: probes with sampling = "point" or a high-order view. */
+        bool samples_points() const;
         /**
          * @brief The mesh and stencil fields [[write_data]] asks for, once, and
          *        the stencil file of [output] write_stencils.
@@ -991,6 +994,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
+        /** @brief Each [[write_data]] entry's projected size per snapshot, with its high-order view's (collective). */
+        void check_outputs(CheckReport & report) const;
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
         void check_initial(CheckReport & report, const CheckOptions & options);
@@ -1620,6 +1625,8 @@ class Solver {
         // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
+        LagrangeView lagrange_view;  // the snapshots' high-order view, filled by high_order_output
+        HighOrderOutput high_order_output;
         std::vector<ForceMonitor> force_monitors;
         IntegralMonitor integral_monitor;
         Statistics statistics;
