@@ -8,6 +8,28 @@
   "tools/dev/catalog_inputs/2d/solid_particles.toml"
  ],
  "type": "array",
+ "value_notes": {
+  "added_mass": {
+   "cost": "cheap",
+   "cost_why": "reads the cell's gas gradient that the point value already computes; a few operations",
+   "summary": "Half the displaced gas mass moves with the sphere (C_A = 1/2), with the gas's own acceleration"
+  },
+  "basset_history": {
+   "cost": "expensive",
+   "cost_why": "29 history vectors per particle (62 values in 2D, 92 in 3D), summed every stage: several times the particles' work and memory; order 3/2 in the step",
+   "summary": "Basset history force of the slip's past in creeping flow, from 29 exponentials of the kernel"
+  },
+  "pressure_gradient": {
+   "cost": "cheap",
+   "cost_why": "reads the cell's pressure gradient that the point value already computes; a few operations",
+   "summary": "Force of the gas pressure gradient over the sphere's volume, in place of plain buoyancy"
+  },
+  "saffman_lift": {
+   "cost": "cheap",
+   "cost_why": "reads the cell's velocity gradient already computed: a curl, a square root and a cross product",
+   "summary": "Saffman lift of a sphere slipping through a shear"
+  }
+ },
  "values": [
   "added_mass",
   "basset_history",

@@ -33,6 +33,17 @@
   "tools/dev/catalog_inputs/3d/flamelet_transported.toml"
  ],
  "type": "string",
+ "value_notes": {
+  "flamelet": {
+   "summary": "Reacting gas from a flamelet table, transporting the mixture fraction and a progress variable"
+  },
+  "mixture": {
+   "summary": "Mixture of species from a mechanism, with mixture-averaged transport and finite-rate chemistry"
+  },
+  "perfect": {
+   "summary": "A single calorically perfect gas"
+  }
+ },
  "values": [
   "flamelet",
   "mixture",

@@ -207,14 +207,15 @@ through shear, `forces` adds the forces of
 [Maxey & Riley (1983)](../references.md#maxey-riley-1983) and lift
 ([theory](../theory/particles.md#solid-particles)):
 
-| `forces` entry | Adds | Matters when |
-|---|---|---|
-| `"pressure_gradient"` | `-grad p / rho_p` in place of the buoyancy `-g rho / rho_p` (equal in a gas at rest) | the gas accelerates: `rho / rho_p` is not small and the flow has strong pressure gradients (shocks, nozzles, vortex cores) |
-| `"added_mass"` | half the displaced gas mass, accelerated with the gas: `rho_p` becomes `rho_p + rho / 2` in `tau` and the inertia, and `(rho g - grad p) / 2` is added to the force | `rho / rho_p` is not small (bubbles, light particles in dense gas) |
-| `"saffman_lift"` | the shear lift of [Saffman (1965)](../references.md#saffman-1965), `1.615 (6 / (pi d)) sqrt(rho mu / abs(w)) (u - v) x w` per volume, `w` the vorticity | particles slip through shear layers and boundary layers |
-| `"basset_history"` | the history force of [Boussinesq (1885)](../references.md#boussinesq-1885) and [Basset (1888)](../references.md#basset-1888), `(9 / d) sqrt(rho mu / pi)` times the integral of `dw(s) / sqrt(t - s)` over the path, `w = u - v` the slip | the slip changes in less than `tau`: impulsive starts, shocks, `rho / rho_p` not small; a few percent of the drag for heavy particles in gas |
+| `forces` entry | Adds | Matters when | Cost |
+|---|---|---|---|
+| `"pressure_gradient"` | `-grad p / rho_p` in place of the buoyancy `-g rho / rho_p` (equal in a gas at rest) | the gas accelerates: `rho / rho_p` is not small and the flow has strong pressure gradients (shocks, nozzles, vortex cores) | cheap: reads the cell's pressure gradient, already computed for the gas state at the particle |
+| `"added_mass"` | half the displaced gas mass, accelerated with the gas: `rho_p` becomes `rho_p + rho / 2` in `tau` and the inertia, and `(rho g - grad p) / 2` is added to the force | `rho / rho_p` is not small (bubbles, light particles in dense gas) | cheap: the same gradient, and a few operations |
+| `"saffman_lift"` | the shear lift of [Saffman (1965)](../references.md#saffman-1965), `1.615 (6 / (pi d)) sqrt(rho mu / abs(w)) (u - v) x w` per volume, `w` the vorticity | particles slip through shear layers and boundary layers | cheap: the velocity gradient, a curl, a square root and a cross product |
+| `"basset_history"` | the history force of [Boussinesq (1885)](../references.md#boussinesq-1885) and [Basset (1888)](../references.md#basset-1888), `(9 / d) sqrt(rho mu / pi)` times the integral of `dw(s) / sqrt(t - s)` over the path, `w = u - v` the slip | the slip changes in less than `tau`: impulsive starts, shocks, `rho / rho_p` not small; a few percent of the drag for heavy particles in gas | expensive: 29 history vectors per particle, kept and summed every stage; order 3/2 in the step |
 
-The gradients come from the cell's least-squares gradient.
+The gradients come from the cell's least-squares gradient. `mallard list keys
+particles` shows each entry's cost, and the key catalog says why.
 
 **The history force.** When the slip changes, the drag lags behind it while
 the shed vorticity diffuses away: `"basset_history"` adds that memory, a

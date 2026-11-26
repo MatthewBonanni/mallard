@@ -199,6 +199,21 @@ TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
     }
 }
 
+TEST(CheckKeys, DescribedValuesGiveTheCatalogTheirSummaryAndOnlyTheCostsSetupRates) {
+    const Input input = parse_input_string("[t]\nmode = \"fast\"\n");
+    record_options("t.mode", {"fast", "plain"});
+    describe_options("t.mode", {{"fast", {"Fast", Cost::MODERATE, "one pass"}}, {"plain", {"Plain"}}});
+    find_value<std::string>(input.at("t"), "mode");
+    const json::Value catalog = json::parse(key_catalog(resolve_input(input)));
+    const json::Value & notes = catalog["t.mode"]["value_notes"];
+    EXPECT_EQ(notes["fast"]["summary"].string, "Fast");
+    EXPECT_EQ(notes["fast"]["cost"].string, "moderate");
+    EXPECT_EQ(notes["fast"]["cost_why"].string, "one pass");
+    EXPECT_EQ(notes["plain"]["summary"].string, "Plain");
+    EXPECT_FALSE(notes["plain"].has("cost"));
+    EXPECT_FALSE(notes["plain"].has("cost_why"));
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");

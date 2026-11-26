@@ -99,6 +99,17 @@
   "tutorials/wedge/input.toml"
  ],
  "type": "string",
+ "value_notes": {
+  "FO": {
+   "summary": "First order: the cell values on both sides of each face"
+  },
+  "MUSCL": {
+   "summary": "Second order: limited linear states from one least-squares gradient per cell"
+  },
+  "TENO": {
+   "summary": "High order (TENO-E, order face_reconstruction.order): nonlinear weights of candidate stencils"
+  }
+ },
  "values": [
   "FO",
   "MUSCL",

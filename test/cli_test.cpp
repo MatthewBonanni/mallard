@@ -1230,6 +1230,36 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
 }
 
+TEST(CliTest, ListKeysGivesWhatEachDescribedValueDoesAndCosts) {
+    SKIP_UNDER_MPI();
+    const bool three = Mallard_DIM == 3;
+    std::ofstream("particles.toml")
+        << "[run]\nn_steps = 1\ndt = 1.0e-3\n[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 4\nLx = 1.0\nLy = 1.0\n"
+        << (three ? "Nz = 4\nLz = 1.0\n[[periodic]]\nzones = [\"back\", \"front\"]\n" : "")
+        << "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+        << "[initialize]\np = 1.0\nT = 1.0\nu = " << (three ? "[0.1, 0.0, 0.0]" : "[0.1, 0.0]") << "\n"
+        << "[physics]\ntype = \"navier_stokes\"\nunits = \"nondimensional\"\nmu = 0.01\ngamma = 1.4\n"
+        << "p_ref = 1.0\nT_ref = 1.0\nrho_ref = 1.0\n"
+        << "[particles]\ntype = \"solid\"\ndiameter = 0.01\ndensity = 1000.0\nforces = [\"saffman_lift\"]\n"
+        << "points = [" << (three ? "[0.5, 0.5, 0.5]" : "[0.5, 0.5]") << "]\n";
+    const Result listed = run({"list", "keys", "particles", "particles.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value forces = json::parse(listed.out)["keys"]["particles.forces"];
+    const json::Value * notes = forces.find("value_notes");
+    ASSERT_NE(notes, nullptr) << listed.out;
+    for (const json::Value & value : forces["values"].array) {
+        const json::Value * note = notes->find(value.string);
+        ASSERT_NE(note, nullptr) << value.string;
+        EXPECT_FALSE((*note)["summary"].string.empty()) << value.string;
+        EXPECT_FALSE((*note)["cost_why"].string.empty()) << value.string;
+        EXPECT_EQ((*note)["cost"].string, value.string == "basset_history" ? "expensive" : "cheap") << value.string;
+    }
+    const Result text = run({"list", "keys", "particles.forces", "particles.toml"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(contains(text.out, "basset_history (expensive)")) << text.out;
+    EXPECT_TRUE(contains(text.out, "pressure_gradient (cheap)")) << text.out;
+}
+
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
     SKIP_UNDER_MPI();
     const Result listed = run({"list", "templates"});

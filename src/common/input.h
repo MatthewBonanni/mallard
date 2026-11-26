@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <map>
@@ -224,11 +225,32 @@ InputError not_accepted(const Input & table, const std::string & key, const std:
 /** @brief Record the values a key accepts, by its path ("numerics.riemann_solver"; indices are dropped). */
 void record_options(const std::string & key, std::vector<std::string> names);
 
+/**
+ * @brief Roughly what a value of a closed set costs per cell or particle, against its alternatives. Tiers are
+ *        for opt-in extras whose cost buys nothing else on the same case (the forces of solid particles), never
+ *        for choices that trade cost for accuracy or physics (a reconstruction, a gas model): those stay unrated.
+ */
+enum class Cost : uint8_t { UNRATED, CHEAP, MODERATE, EXPENSIVE };
+
+/** @brief "cheap", "moderate", "expensive", or "" if unrated. */
+const char * cost_name(Cost cost);
+
+/** @brief What one accepted value does, in a line, and optionally its cost and why, in a line. */
+struct OptionNote {
+    std::string summary;
+    Cost cost = Cost::UNRATED;
+    std::string why{};
+};
+
+/** @brief Record what the accepted values of a key do, by value, for the key catalog (record_options names them). */
+void describe_options(const std::string & key, std::map<std::string, OptionNote> notes);
+
 /** @brief A key setup looked up, as the accessors recorded it, and the value the run used. */
 struct KeyRecord {
     std::string path;                 // "boundaries[0].p"
     KeyUse use;                       // empty type if only looked up (contains, a table, a value read directly)
     std::vector<std::string> values;  // accepted values, if a closed set
+    std::map<std::string, OptionNote> notes;  // of the accepted values, by value, if described
     bool set = false;                 // in the input, or written into it by the program (a preset, --restart)
     bool by_name = true;              // looked up by its name, not only read by iterating its table
     std::string value;                // as TOML: the input's (in the key's plain units) or the default; empty
