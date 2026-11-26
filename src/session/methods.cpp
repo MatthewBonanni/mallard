@@ -23,6 +23,7 @@
 #include "common_typedef.h"
 #include "interfaces.h"
 #include "log.h"
+#include "output_reader.h"
 #include "run_control.h"
 #include "run_ctl.h"
 #include "session.h"
@@ -192,6 +193,22 @@ std::string keys_catalog(Context &, const json::Value & params) {
     }
 }
 
+std::string file_info(Context &, const json::Value & params) {
+    as_options(params, {"file"});
+    const std::string file = string_param(params, "file");
+    if (file.empty()) throw Error(code::INVALID_PARAMS, "file.info takes file, the output or restart file to describe");
+    std::error_code error;
+    if (std::filesystem::is_directory(file, error) || output::is_mesh_file(file)) {
+        throw Error(code::INVALID_PARAMS, file + " is a run directory or a mesh file: file.info describes output and "
+                                                 "restart files (mallard info describes the others)");
+    }
+    try {
+        return file_info_json(file);
+    } catch (const std::exception & e) {
+        throw Error(code::UNREADABLE, e.what());
+    }
+}
+
 std::string units_catalog(Context &, const json::Value & params) {
     as_options(params, {});
     return units::catalog_json();
@@ -275,6 +292,7 @@ constexpr Method METHODS[] = {
      true, case_boundary_values},
     {"case.keys", "mallard list keys [SECTION] INPUT --format json", "mallard-key-catalog", true, case_keys},
     {"keys.catalog", "mallard list keys [SECTION] --format json", "mallard-key-catalog", false, keys_catalog},
+    {"file.info", "mallard info FILE --format json", interfaces::FILE_INFO.name, false, file_info},
     {"units.catalog", "mallard list units --format json", interfaces::UNIT_CATALOG.name, false, units_catalog},
     {"run.launch", "mallard -i INPUT --detach", run_ctl::LAUNCH_SCHEMA, false, launch_run},
     {"run.control", "mallard ctl RUN ACTION [KEY=VALUE...] --format json", run_control::SCHEMA, false, control_run},

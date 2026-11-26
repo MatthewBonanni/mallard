@@ -467,6 +467,33 @@ TEST(SessionTest, UnitsCatalogAnswersAsListUnitsWithEachFactorAsDefined) {
     EXPECT_NE(text.out.find("101325/760"), std::string::npos) << text.out;
 }
 
+TEST(SessionTest, FileInfoAnswersAsInfoJsonWithWhetherThisBuildContinuesARestart) {
+    SKIP_UNDER_MPI();
+    const std::string restart = source_dir() + "/test/data/formats/v0.8.0/gas_000002.restart";  // 2D, double
+    const Result session = run({"session"}, request(1, "file.info", "{\"file\":" + json::quote(restart) + "}") +
+                                                request(2, "file.info", "{\"file\":\"no_such.restart\"}") +
+                                                request(3, "file.info", "{\"file\":\".\"}") + request(4, "shutdown"));
+    ASSERT_EQ(session.status, 0) << session.err;
+    const std::vector<json::Value> list = messages(session.out);
+    expect_conforms(list, {{1, "mallard-file-info"}});
+    EXPECT_EQ(response(list, 2)["error"]["code"].number, session::code::UNREADABLE);
+    EXPECT_EQ(response(list, 3)["error"]["code"].number, session::code::INVALID_PARAMS);
+    const Result one_shot = run({"info", restart, "--format", "json"});
+    ASSERT_EQ(one_shot.status, 0) << one_shot.err;
+    const json::Value info = json::parse(one_shot.out);
+    EXPECT_EQ(json::dump(response(list, 1)["result"]), json::dump(info));
+    EXPECT_EQ(violations("mallard-file-info", info), "");
+    // The reasons are those the run gives when it refuses the file
+    std::vector<std::string> expected;
+    if (sizeof(rtype) != 8) expected.push_back("Restart file " + restart + " was written with a different floating-point precision.");
+    if (Mallard_DIM == 3) expected.push_back("Restart file " + restart + " holds a 2D run, but Mallard was built with Mallard_DIM = 3.");
+    EXPECT_EQ(info["continuable"].boolean, expected.empty());
+    ASSERT_EQ(info["incompatibilities"].array.size(), expected.size()) << one_shot.out;
+    for (size_t k = 0; k < expected.size(); k++) EXPECT_EQ(info["incompatibilities"].array[k].string, expected[k]);
+    const Result text = run({"info", restart});
+    EXPECT_NE(text.out.find(expected.empty() ? "yes, by this build" : "no, by this build"), std::string::npos) << text.out;
+}
+
 TEST(SessionTest, BoundaryValuesOfAStagnationInletAreItsInflowAtTheInitialPressure) {
     SKIP_UNDER_MPI();
     write_cylinder_case();
