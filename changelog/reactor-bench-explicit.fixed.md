@@ -1,0 +1,1 @@
+- `mallard reactor`'s `[benchmark]` takes `[chemistry] explicit_step` and `T_frozen` as the solver does, and with `explicit_step` prints the cells whose explicit step was accepted; it ignored both, timing every cell by RODAS at any temperature (#1474).
