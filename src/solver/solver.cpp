@@ -3019,7 +3019,9 @@ void Solver::start_run() {
             }
             if (particles) particles->start_injection(static_cast<double>(t));
             settle_injected_particles();
-            calc_dt();
+            // The first step's calc_dt starts its reconstruction: one started here would be discarded, and its
+            // troubled-cell measure would show in the start's output
+            calc_dt(false);
             // Output before the progress row, which reports the monitors' values and counts the files
             if (step == 0) {
                 Kokkos::Timer output_timer;
@@ -3895,10 +3897,10 @@ rtype Solver::next_target_time(const bool unstaged) const {
     return std::min(t_target, probes.next_time(unstaged));
 }
 
-void Solver::calc_dt() {
+void Solver::calc_dt(const bool overlap) {
     // Halo values are stale after the last stage of the previous step; the
     // first stage of the next one reuses them
-    exchange_for_first_stage();
+    exchange_for_first_stage(overlap);
     update_boundary_states(t);
     dt_cfl1 = calc_dt_cfl1();
     if (!(dt_cfl1 > 0.0_r)) throw DivergedError();
