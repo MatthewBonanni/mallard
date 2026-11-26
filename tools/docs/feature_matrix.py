@@ -142,7 +142,7 @@ TABLES = [
 
 # Input guards that reject a pair of features: (file, part of the message, feature, feature)
 GUARDS = [
-    ("src/solver/solver.cpp", "rotational periodicity is not supported in axisymmetric runs",
+    ("src/solver/solver_mesh.cpp", "rotational periodicity is not supported in axisymmetric runs",
      "axisymmetric", "rotational"),
     ("src/solver/solver.cpp", "its thermodynamics are frozen over a step", "double_flux", "simpler"),
     ("src/solver/solver.cpp", '"hybrid" is not available with chemistry.coupling', "hybrid", "simpler"),
