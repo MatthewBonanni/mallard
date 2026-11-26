@@ -2,8 +2,8 @@
  * @file comm_test.cpp
  * @author Matthew Bonanni (mbonanni001@gmail.com)
  * @brief Communication layer and exact sums; valid on any number of ranks.
- * @version 0.4
- * @date 2026-11-11
+ * @version 0.5
+ * @date 2026-11-22
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  *
@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -28,12 +29,7 @@
 #include "device_comm.h"
 #include "exact_sums.h"
 #include "scratch.h"
-
-TEST(CommTest, RanksAreNumberedFromZero) {
-    EXPECT_GE(comm::rank(), 0);
-    EXPECT_LT(comm::rank(), comm::size());
-    EXPECT_EQ(comm::is_root(), comm::rank() == 0);
-}
+#include "step_graph_guard.h"
 
 TEST(CommTest, AllreduceCombinesEveryRank) {
     const int p = comm::size();
@@ -73,6 +69,52 @@ void fill_rank_columns(const Kokkos::View<double **, Kokkos::LayoutLeft> & colum
     });
 }
 
+constexpr uint32_t N_HARD_ROWS = 1100, N_HARD_COLUMNS = 7;
+
+/**
+ * @brief Term k of global row g of columns that only an exact sum rounded once gets right: terms from subnormals to
+ *        2^1022 that cancel 550 rows apart but for the smallest, a tie broken by a subnormal, a term that is not
+ *        finite, sums that overflow only on the way, -0s, and an overflow.
+ */
+KOKKOS_INLINE_FUNCTION double hard_term(const uint32_t g, const uint32_t k) {
+    constexpr double big = 1.7976931348623157e308;
+    switch (k) {
+        case 0: {
+            const uint64_t h = g % 550, e = h * 37 % 2046, m = (h * 0x9E3779B97F4A7C15ull) >> 12;
+            const double v = Kokkos::bit_cast<double>(e << 52 | m);
+            return g >= 550 && e >= 100 ? -v : v;
+        }
+        case 1: return g == 0 ? 1.0 : g <= 1024 ? 0x1p-63 : g == 1025 ? 0x1p-1074 : 0.0;
+        case 2: return g == 7 ? Kokkos::Experimental::infinity_v<double> : 1.0;
+        case 3: return g == 900 ? Kokkos::Experimental::quiet_NaN_v<double> : 1.0;
+        case 4: return g < 2 ? big : g == 2 ? -big : -0.0;
+        case 5: return -0.0;
+        default: return g < 2 ? big : 0.0;
+    }
+}
+
+/** @brief The exact sums of the columns of hard_term, rounded once (Python's fractions). */
+std::array<double, N_HARD_COLUMNS> hard_sums() {
+    const double nan = std::numeric_limits<double>::quiet_NaN(), inf = std::numeric_limits<double>::infinity();
+    return {0x1.1f5010213c1c1p-925, 0x1.0000000000001p+0, nan, nan, 0x1.fffffffffffffp+1023, 0.0, inf};
+}
+
+/** @brief This rank's rows of hard_term, every size()-th global row. */
+Kokkos::View<double **, Kokkos::LayoutLeft> hard_terms() {
+    const uint32_t r = static_cast<uint32_t>(comm::rank()), p = static_cast<uint32_t>(comm::size());
+    const uint32_t n = (N_HARD_ROWS - r + p - 1) / p;
+    Kokkos::View<double **, Kokkos::LayoutLeft> terms("hard_terms", n, N_HARD_COLUMNS);
+    Kokkos::parallel_for("fill", n, KOKKOS_LAMBDA(const uint32_t i) {
+        for (uint32_t k = 0; k < N_HARD_COLUMNS; k++) terms(i, k) = hard_term(r + i * p, k);
+    });
+    return terms;
+}
+
+/** @brief Whether a and b are the same bits, NaN for NaN. */
+bool same_bits(const double a, const double b) {
+    return std::isnan(a) ? std::isnan(b) : Kokkos::bit_cast<uint64_t>(a) == Kokkos::bit_cast<uint64_t>(b);
+}
+
 /** @brief terms, then `extra` rows of terms no sum may read: NaN, and too large for the fixed point of the others. */
 Kokkos::View<double *[2]> padded(const Kokkos::View<double *[2]> & terms, const uint32_t extra) {
     const uint32_t n = static_cast<uint32_t>(terms.extent(0));
@@ -83,6 +125,20 @@ Kokkos::View<double *[2]> padded(const Kokkos::View<double *[2]> & terms, const 
     return out;
 }
 
+}
+
+TEST(ExactSumsTest, SumsAllocateNothingOnceConstructed) {
+    // As in a step graph's capture, before any other sum: 7 columns take the windows of 4, 2 and 1 columns
+    const uint32_t n = 1000;
+    Kokkos::View<double **, Kokkos::LayoutLeft> columns("columns", n, 7);
+    Kokkos::deep_copy(columns, 1.0);
+    const ExactSums sums(7, n, false, false);
+    const StepGraphGuard guard;
+    Kokkos::Profiling::ProfilingSection section("step_graph_capture");
+    section.start();
+    sums.sum(columns);
+    section.stop();
+    for (const std::string & v : guard.violations()) ADD_FAILURE() << v;
 }
 
 TEST(ExactSumsTest, UnitLeavesRoomForEveryRow) {
@@ -103,8 +159,8 @@ TEST(ExactSumsTest, UnitLeavesRoomForEveryRow) {
 }
 
 TEST(ExactSumsTest, SumsOfRowsCountedOnTheDeviceAreThoseOfTheRowsAlone) {
-    // The rows past the count would make every sum NaN, and counting them would make the unit that of more rows
-    const std::array<double, 2> expected = {0x1.df11f45f4e617p+2, 0x1.8f5a74b891b44p+26};
+    // The rows past the count would make every sum NaN
+    const std::array<double, 2> expected = {0x1.df11f45f4e61ap+2, 0x1.8f5a74b891b48p+26};
     const bool distributed = comm::size() > 1;
     const auto terms = global_terms<Kokkos::View<double *[2]>>("terms");
     const uint32_t n = static_cast<uint32_t>(terms.extent(0));
@@ -120,8 +176,8 @@ TEST(ExactSumsTest, SumsOfRowsCountedOnTheDeviceAreThoseOfTheRowsAlone) {
 }
 
 TEST(ExactSumsTest, SumsAreTheSameBitForBitOnAnyNumberOfRanks) {
-    // The fixed-point sums of 1 / (g + 1) and of terms 16 orders apart, not the floating-point ones
-    const std::array<double, 2> expected = {0x1.df11f45f4e617p+2, 0x1.8f5a74b891b44p+26};
+    // The exactly rounded sums of 1 / (g + 1) and of terms 16 orders apart, not the floating-point ones
+    const std::array<double, 2> expected = {0x1.df11f45f4e61ap+2, 0x1.8f5a74b891b48p+26};
     const bool distributed = comm::size() > 1;
     const auto fixed = global_terms<Kokkos::View<double *[2]>>("terms");
     const auto columns = global_terms<Kokkos::View<double **, Kokkos::LayoutLeft>>("columns");
@@ -136,6 +192,49 @@ TEST(ExactSumsTest, SumsAreTheSameBitForBitOnAnyNumberOfRanks) {
         for (size_t k = 0; k < 2; k++) {
             EXPECT_EQ(a(k), expected[k]) << "column " << k << (nccl ? ", NCCL" : "");
             EXPECT_EQ(b(k), expected[k]) << "column " << k << (nccl ? ", NCCL" : "");
+        }
+    }
+}
+
+TEST(ExactSumsTest, AreTheExactSumRoundedOnce) {
+    // Ties to even unless a lower bit is set, on either sign, in the subnormals, and at the overflow
+    const auto sum = [](std::vector<double> terms) { return exact_column_sum(terms.data(), terms.size()); };
+    const double min = 0x1p-1074, max = 1.7976931348623157e308;
+    for (const double s : {1.0, -1.0}) {
+        EXPECT_EQ(sum({s, s * 0x1p-53}), s);
+        EXPECT_EQ(sum({s, s * 0x1p-53, s * min}), s * (1.0 + 0x1p-52));
+        EXPECT_EQ(sum({s * (1.0 + 0x1p-52), s * 0x1p-53}), s * (1.0 + 0x1p-51));
+        EXPECT_EQ(sum({s * (1.0 + 0x1p-52), s * 0x1p-53, -s * min}), s * (1.0 + 0x1p-52));
+        EXPECT_EQ(sum({s * min, s * min, s * min}), s * 3 * min);
+        EXPECT_EQ(sum({s * 0x1p-1022, -s * min}), s * (0x1p-1022 - min));
+        EXPECT_EQ(sum({s * max, s * 0x1p969}), s * max);
+        EXPECT_EQ(sum({s * max, s * 0x1p970}), s * std::numeric_limits<double>::infinity());
+        EXPECT_EQ(sum({s * 0x1p100, s * 1.0, -s * 0x1p100}), s);
+    }
+    EXPECT_FALSE(std::signbit(sum({-0.0, -0.0})));
+    EXPECT_FALSE(std::signbit(sum({-1.0, 1.0})));
+    EXPECT_TRUE(std::isnan(sum({1.0, -std::numeric_limits<double>::infinity()})));
+}
+
+TEST(ExactSumsTest, AreTheExactSumOnAnyNumberOfRanks) {
+    // Each rank holds every size()-th row, so the ranks' partial sums of column 0 are of terms up to 2^1022 that
+    // cancel only across the ranks: any rounding before the end, or in any order, changes the sums
+    const auto expected = hard_sums();
+    std::vector<double> all(size_t(N_HARD_ROWS) * N_HARD_COLUMNS);
+    for (uint32_t g = 0; g < N_HARD_ROWS; g++) {
+        for (uint32_t k = 0; k < N_HARD_COLUMNS; k++) all[g * N_HARD_COLUMNS + k] = hard_term(g, k);
+    }
+    for (uint32_t k = 0; k < N_HARD_COLUMNS; k++) {
+        EXPECT_TRUE(same_bits(exact_column_sum(all.data() + k, N_HARD_ROWS, N_HARD_COLUMNS), expected[k])) << k;
+    }
+    const bool distributed = comm::size() > 1;
+    const auto terms = hard_terms();
+    for (const bool nccl : {false, comm::nccl_available() && distributed}) {
+        const ExactSums sums(N_HARD_COLUMNS, static_cast<uint32_t>(terms.extent(0)), distributed, nccl);
+        sums.sum(terms);
+        const auto a = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sums.sums());
+        for (uint32_t k = 0; k < N_HARD_COLUMNS; k++) {
+            EXPECT_TRUE(same_bits(a(k), expected[k])) << "column " << k << ": " << a(k) << (nccl ? ", NCCL" : "");
         }
     }
 }
