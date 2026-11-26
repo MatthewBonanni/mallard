@@ -106,6 +106,7 @@ add_library(MallardCore STATIC
     solver/divergence_report.cpp
     solver/solver_graph.cpp
     solver/solver_health.cpp
+    solver/health_events.cpp
     solver/solver_step_control.cpp
     solver/solver_triggers.cpp
     solver/triggers.cpp

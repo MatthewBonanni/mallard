@@ -1080,6 +1080,12 @@ class Solver {
         void write_provenance();
         // Run health (solver_health.cpp)
         void init_health();
+        /** @brief At a run's start: the run health events' settings, the scheduler's end of the job, the heartbeat. */
+        void start_health_events();
+        /** @brief Rank 0, after each accepted step: the health events of its time step, and the heartbeat. */
+        void note_step_health();
+        /** @brief Rank 0, at a progress row: its health events, written to the log and the run log. */
+        void health_event_row(const RunStatus & status, std::vector<MonitorValues> monitored);
         /** @brief The ledger's terms of one RHS evaluation (viscous: the single gas's viscous flux, else null). */
         void ledger_stage(const State & state, const ViscousFluxFunctor * viscous);
         /** @brief The ledger's boundary fluxes of a single gas (solver_convective_flux.cpp). */
