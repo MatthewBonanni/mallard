@@ -10,13 +10,17 @@
 #include "gated.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <ctime>
 #include <limits>
 
 #include <Kokkos_Core.hpp>
 
 #include "comm.h"
 #include "diagnostic_code.h"
+#include "health_events.h"
+#include "json.h"
 #include "log.h"
 #include "mechanism.h"
 #include "run_log.h"
@@ -34,6 +38,7 @@ struct MarginsFunctor {
     SpeciesView rhoY;
     Kokkos::View<rtype *> T_seed;
     Kokkos::View<rtype *> volume;
+    StateView U_start;  // the state at the step's start, for the residuals; empty: none
 
     using value_type = step_queue::Margins;
 
@@ -42,7 +47,7 @@ struct MarginsFunctor {
             m.v[i] = Kokkos::Experimental::finite_max_v<double>;
             m.at[i] = -1;
         }
-        for (int i = 0; i < 3; i++) m.sum[i] = 0.0;
+        for (int i = 0; i < value_type::N_SUMS; i++) m.sum[i] = 0.0;
     }
 
     KOKKOS_INLINE_FUNCTION void join(value_type & dst, const value_type & src) const {
@@ -52,7 +57,7 @@ struct MarginsFunctor {
                 dst.at[i] = src.at[i];
             }
         }
-        for (int i = 0; i < 3; i++) dst.sum[i] += src.sum[i];
+        for (int i = 0; i < value_type::N_SUMS; i++) dst.sum[i] += src.sum[i];
     }
 
     KOKKOS_INLINE_FUNCTION void take(value_type & m, const int i, const double v, const int64_t at) const {
@@ -84,6 +89,26 @@ struct MarginsFunctor {
         m.sum[0] += V * static_cast<double>(W[0]);
         m.sum[1] += V * static_cast<double>(W[N_DIM + 1]);
         m.sum[2] += V;
+        if (U_start.extent(0) == 0) return;
+        double change[3] = {0.0, 0.0, 0.0}, scale[3] = {0.0, 0.0, 0.0};
+        const double d_rho = static_cast<double>(cons[0] - U_start(c, 0));
+        const double d_E = static_cast<double>(cons[N_DIM + 1] - U_start(c, N_DIM + 1));
+        change[0] = d_rho * d_rho;
+        change[2] = d_E * d_E;
+        double momentum2 = 0.0;
+        for (int d = 1; d <= N_DIM; d++) {
+            const double d_m = static_cast<double>(cons[d] - U_start(c, d));
+            change[1] += d_m * d_m;
+            momentum2 += static_cast<double>(cons[d]) * static_cast<double>(cons[d]);
+        }
+        const double rho = static_cast<double>(cons[0]), rho_E = static_cast<double>(cons[N_DIM + 1]);
+        scale[0] = rho * rho;
+        scale[1] = momentum2 + 2.0 * rho * rho_E;
+        scale[2] = rho_E * rho_E;
+        for (int i = 0; i < 3; i++) {
+            m.sum[3 + i] += V * change[i];
+            m.sum[6 + i] += V * scale[i];
+        }
     }
 };
 
@@ -125,6 +150,32 @@ void Solver::init_health() {
     run_health.ledger.off("[output] health = false");
     run_health.repairs = RepairAudit();
     run_health.clip_site = run_health.reset_site = HealthState::NONE;
+    run_health.heartbeat_interval =
+        std::max(0.0, static_cast<double>(find_real_or(input, "output", "heartbeat_interval", dim::time, 60.0)));
+    run_health.steady_residual = 0.0;
+    if (contains_optional(input, "output") && input.at("output").contains("steady_residual")) {
+        const Input & output = input.at("output");
+        run_health.steady_residual = find_value<double>(output, "steady_residual");
+        if (!(run_health.steady_residual > 0.0)) {
+            throw InputError({.key = "output.steady_residual",
+                              .line = line_of(output, "steady_residual"),
+                              .message = "must be positive",
+                              .fix = "Give the residual at which the run counts as steady, e.g. 1e-8"});
+        }
+        if (!run_health.on) {
+            throw InputError({.key = "output.steady_residual",
+                              .line = line_of(output, "steady_residual"),
+                              .message = "needs the run health diagnostics, which [output] health = false turns off",
+                              .fix = "Remove health = false, or steady_residual"});
+        }
+        run_health.stall_steps = find_value_or<uint64_t>(input, "output", "stall_steps", 10000);
+        if (run_health.stall_steps == 0) {
+            throw InputError({.key = "output.stall_steps",
+                              .line = line_of(output, "stall_steps"),
+                              .message = "must be positive",
+                              .fix = "Give the steps the residual has to halve in, e.g. 10000 (the default)"});
+        }
+    }
     if (!run_health.on) return;
     const uint32_t n_species = static_cast<uint32_t>(species_names.size());
 
@@ -227,7 +278,7 @@ void Solver::health_reductions() {
     const uint32_t n_owned = mesh->n_owned();
     gated::parallel_reduce("health_margins", Kokkos::RangePolicy<>(0, n_owned),
                             MarginsFunctor{physics, mixture, is_mixture(), conservatives, species, T_seed,
-                                           mesh->cell_measure},
+                                           mesh->cell_measure, last_good.flow},
                             Kokkos::View<step_queue::Margins, Memory>(&out->margins));
     auto * teno = dynamic_cast<TENO *>(face_reconstruction.get());
     auto * muscl = dynamic_cast<MUSCL *>(face_reconstruction.get());
@@ -288,7 +339,9 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
         local.push_back(i == MASS_FRACTION && n_species > 0 && m.at[i] >= 0 ? double(m.at[i] % int64_t(n_species)) : -1.0);
     }
     const std::vector<double> all = comm::allgatherv(local);
-    const auto sums = comm::allreduce(std::array<double, 3>{m.sum[0], m.sum[1], m.sum[2]}, comm::Op::SUM);
+    std::array<double, step_queue::Margins::N_SUMS> local_sums;
+    std::copy(m.sum, m.sum + local_sums.size(), local_sums.begin());
+    const auto sums = comm::allreduce(local_sums, comm::Op::SUM);
     static const char * MARGIN_NAMES[] = {"rho", "p", "T", "Y"};
     const size_t stride = 5 * N_MARGINS;
     for (int i = 0; i < N_MARGINS; i++) {
@@ -317,20 +370,29 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
     }
     report.margins_run = run_health.margins_run;
     const double mean_rho = sums[2] > 0.0 ? sums[0] / sums[2] : 0.0, mean_p = sums[2] > 0.0 ? sums[1] / sums[2] : 0.0;
-    auto warn = [&](const std::string & kind, const std::string & message) {
+    // The state's change over the step that ended here, from its start (last_good)
+    if (last_good.flow.is_allocated() && last_good_set && last_good_step + 1 == step) {
+        static const char * RESIDUAL_NAMES[] = {"rho", "momentum", "energy"};
+        for (size_t i = 0; i < 3; i++) {
+            report.residuals.emplace_back(RESIDUAL_NAMES[i],
+                                          sums[6 + i] > 0.0 ? std::sqrt(sums[3 + i] / sums[6 + i]) : 0.0);
+        }
+    }
+    auto warn = [&](const char * code, const std::string & kind, const std::string & message) {
         if (!run_health.warned.insert(kind).second) return;
-        logging::warning(diagnostic_code::HEALTH_MARGIN, message);
+        logging::warning(code, message,
+                         {{"step", std::to_string(step)}, {"t", json::number(static_cast<double>(t))}});
     };
     for (const auto & e : report.margins) {
         if (!e.valid) continue;
         const std::string at = logging::format(" at step %llu, x = (%.4g, %.4g, %.4g)", static_cast<unsigned long long>(step),
                                                e.x[0], e.x[1], e.x[2]);
         if (e.name == "rho" && e.value < 1e-3 * mean_rho) {
-            warn("rho", logging::format("density %.3g is below 1e-3 of its mean", e.value) + at);
+            warn(diagnostic_code::HEALTH_MARGIN, "rho", logging::format("density %.3g is below 1e-3 of its mean", e.value) + at);
         } else if (e.name == "p" && e.value < 1e-3 * mean_p) {
-            warn("p", logging::format("pressure %.3g is below 1e-3 of its mean", e.value) + at);
+            warn(diagnostic_code::HEALTH_MARGIN, "p", logging::format("pressure %.3g is below 1e-3 of its mean", e.value) + at);
         } else if (e.name.rfind("Y", 0) == 0 && e.value < -1e-6) {
-            warn("Y", logging::format("mass fraction %s = %.3g is negative", e.name.c_str(), e.value) + at);
+            warn(diagnostic_code::HEALTH_MARGIN, "Y", logging::format("mass fraction %s = %.3g is negative", e.name.c_str(), e.value) + at);
         }
     }
 
@@ -409,9 +471,77 @@ void Solver::report_health(const step_queue::ProgressLocals & locals, const std:
     report.element_drift = ledger.element_drift(chemistry_load_balance && is_distributed(), drift);
     for (const auto & b : report.balance_run) {
         if (b.checked && std::fabs(b.relative()) > 1e5 * double(std::numeric_limits<rtype>::epsilon())) {
-            warn("balance_" + b.name, logging::format("the %s balance has an unexplained relative change of %.2e",
+            warn(diagnostic_code::HEALTH_LEDGER, "balance_" + b.name, logging::format("the %s balance has an unexplained relative change of %.2e",
                                                       b.name.c_str(), b.relative()) + logging::format(" at step %llu",
                                                       static_cast<unsigned long long>(step)));
         }
     }
+}
+
+void Solver::start_health_events() {
+    health_events::Settings settings;
+    const TimeIntegratorType type = time_integrator->get_type();
+    settings.integrator = TIME_INTEGRATOR_NAMES.at(type);
+    settings.cfl_limit = cfl_limit(type);
+    settings.cfl_above_limit = use_cfl && static_cast<double>(cfl) > settings.cfl_limit;
+    settings.dt_follows_cfl = use_cfl;
+    settings.steady_residual = run_health.steady_residual;
+    settings.stall_steps = run_health.stall_steps;
+    const double wall = timer.seconds();
+    if (const double end = health_events::job_end_from_environment(); end > 0.0) {
+        settings.job_end = std::max(end - static_cast<double>(std::time(nullptr)) + wall, 1e-3);
+    }
+    run_health.events = health_events::Monitor(std::move(settings), step, n_rejected);
+    run_health.heartbeat_next = wall + run_health.heartbeat_interval;
+    run_health.heartbeat_step = step;
+}
+
+namespace {
+
+void emit(const std::vector<health_events::Finding> & found) {
+    for (const health_events::Finding & f : found) {
+        if (f.code) {
+            logging::warning(f.code, f.message,
+                             {{"step", std::to_string(f.step)}, {"t", json::number(f.t)}, {"values", f.values}});
+        } else {
+            logging::event(f.step, f.t, f.kind, f.message, {{"values", f.values}});
+        }
+    }
+}
+
+} // namespace
+
+void Solver::note_step_health() {
+    if (!comm::is_root()) return;
+    std::vector<health_events::Finding> found;
+    run_health.events.step(step, static_cast<double>(t), static_cast<double>(dt), static_cast<double>(dt_cfl1), found);
+    emit(found);
+    if (!(run_health.heartbeat_interval > 0.0)) return;
+    const double wall = timer.seconds();
+    if (wall < run_health.heartbeat_next) return;
+    run_log::write(json::Object()
+                       .add("type", "heartbeat")
+                       .add("step", step)
+                       .add("t", static_cast<double>(t))
+                       .add("wall", wall)
+                       .add("steps", step - run_health.heartbeat_step));
+    run_health.heartbeat_next = wall + run_health.heartbeat_interval;
+    run_health.heartbeat_step = step;
+}
+
+void Solver::health_event_row(const RunStatus & status, std::vector<MonitorValues> monitored) {
+    if (!comm::is_root()) return;
+    health_events::Row row{.step = step,
+                           .t = status.t,
+                           .dt_cfl1 = static_cast<double>(dt_cfl1),
+                           .cfl = status.cfl,
+                           .wall = status.wall,
+                           .eta = status.eta,
+                           .t_wall_stop = t_wall_stop ? static_cast<double>(*t_wall_stop) : 0.0,
+                           .rejected = n_rejected,
+                           .residuals = run_health.last.residuals,
+                           .monitored = std::move(monitored)};
+    std::vector<health_events::Finding> found;
+    run_health.events.row(row, found);
+    emit(found);
 }

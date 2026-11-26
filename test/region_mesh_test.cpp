@@ -44,6 +44,8 @@ std::shared_ptr<Mesh> unit_mesh() {
 
 struct Fixture {
     std::shared_ptr<Mesh> mesh = unit_mesh();
+    Fixture() = default;
+    explicit Fixture(std::shared_ptr<Mesh> m) : mesh(std::move(m)) {}
     region::MeshRegions automatic{*mesh};
 
     region::Region region(const std::string & table) const {
@@ -154,12 +156,23 @@ TEST(RegionMeshTest, PrimitivesHaveExactMeasures) {
         for (int i = 0; i < 4; i++) area += 0.5 * (xy[i][0] * xy[(i + 1) % 4][1] - xy[(i + 1) % 4][0] * xy[i][1]);
         cases[10].second = area * std::sqrt(1.0 + 0.04 + 0.01);
     }
-    for (const auto & [table, exact] : cases) {
-        const region::Elements e = f.elements(table);
-        EXPECT_TRUE(e.exact) << table;
-        // The ellipsoid's reference is a midpoint sum, good to 1e-7
-        const double tol = table.find("ellipsoid") != std::string::npos ? 1e-6 : 1e-9;
-        EXPECT_NEAR(total(e), exact, tol * exact) << table;
+    std::vector<const Fixture *> fixtures = {&f};
+    // Hexahedra with warped faces, which a point near them must still find
+    std::unique_ptr<Fixture> warped;
+    if constexpr (N_DIM == 3) {
+        auto mesh = std::make_shared<Mesh>();
+        mesh->init_file(write_temp_shared("mallard_region_mesh_hex.msh", jittered_periodic_mesh_3d(5, 0.2)));
+        warped = std::make_unique<Fixture>(mesh);
+        fixtures.push_back(warped.get());
+    }
+    for (const Fixture * g : fixtures) {
+        for (const auto & [table, exact] : cases) {
+            const region::Elements e = g->elements(table);
+            EXPECT_TRUE(e.exact) << table;
+            // The ellipsoid's reference is a midpoint sum, good to 1e-7
+            const double tol = table.find("ellipsoid") != std::string::npos ? 1e-6 : 1e-9;
+            EXPECT_NEAR(total(e), exact, tol * exact) << table;
+        }
     }
 }
 
