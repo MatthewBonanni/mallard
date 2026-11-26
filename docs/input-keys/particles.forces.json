@@ -10,6 +10,7 @@
  "type": "array",
  "values": [
   "added_mass",
+  "basset_history",
   "pressure_gradient",
   "saffman_lift"
  ]

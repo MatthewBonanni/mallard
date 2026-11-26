@@ -163,13 +163,14 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
         const std::vector<rtype> g = read_vector(table, "gravity", dim::acceleration);
         FOR_I_DIM solid.gravity[i] = g[i];
     }
-    const std::vector<std::string> forces = {"added_mass", "pressure_gradient", "saffman_lift"};
+    const std::vector<std::string> forces = {"added_mass", "basset_history", "pressure_gradient", "saffman_lift"};
     record_options("particles.forces", forces);
     for (const std::string & force : find_value_or<std::vector<std::string>>(table, "forces", {})) {
         if (std::find(forces.begin(), forces.end(), force) == forces.end()) throw not_accepted(table, "particles.forces", force, forces);
         solid.added_mass = solid.added_mass || force == "added_mass";
         solid.pressure_gradient = solid.pressure_gradient || force == "pressure_gradient";
         solid.lift = solid.lift || force == "saffman_lift";
+        if (force == "basset_history" && !solid.history) solid.enable_history();
     }
     if (contains_optional(table, "specific_heat")) solid.specific_heat = positive(table, "specific_heat", dim::specific_heat);
     return solid;
@@ -216,7 +217,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     quantities.init(table, regions, first_quantity, R > 0.0);
     probes.init(table, regions, quantities);
     width = first_quantity + quantities.n_integrated();
-    const uint32_t n_aux = quantities.n_aux();
+    const uint32_t n_aux = aux_width(), n_quantity_aux = quantities.n_aux();
     n_owned = mesh->n_owned();
 
     // What a particle does at each face
@@ -275,7 +276,8 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         if (is_solid) FOR_I_DIM new_values.push_back(v_seed[i]);
         if (heated) new_values.push_back(T_seed);
         for (uint32_t k = first_quantity; k < width; k++) new_values.push_back(0.0_r);
-        for (uint32_t j = 0; j < n_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
+        for (uint32_t j = 0; j < n_quantity_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
+        for (uint32_t j = n_quantity_aux; j < n_aux; j++) new_values.push_back(0.0_r);
     };
     std::array<uint64_t, 3> removed_before{0, 0, 0};
     const auto find_array = [&](const char * name) -> const std::vector<double> * {
@@ -317,6 +319,12 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
                                          " is inconsistent.");
             }
         }
+        // The history of the Basset force continues if the file has it, else starts at the first step
+        const uint32_t n_history = solid.n_history();
+        const std::vector<double> * restored_history = n_history > 0 ? find_array("PARTICLE_HISTORY") : nullptr;
+        if (restored_history && restored_history->size() != size_t(n_history) * n_restored) {
+            throw std::runtime_error("particles: the restart file's particle histories are inconsistent.");
+        }
         for (uint64_t k = 0; k < n_restored; k++) {
             const auto local = local_of_global.find(static_cast<uint64_t>((*restored_cell)[k]));
             if (local == local_of_global.end()) continue;
@@ -336,6 +344,11 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
                 const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
                                         spec.kind == particles::Accumulate::WINDING;
                 new_values[at + (integrated ? spec.column : width + spec.column)] = static_cast<rtype>((*restored_q[q])[k]);
+            }
+            if (restored_history) {
+                for (uint32_t j = 0; j < n_history; j++) {
+                    new_values[at + width + n_quantity_aux + j] = static_cast<rtype>((*restored_history)[size_t(n_history) * k + j]);
+                }
             }
         }
         if (!distributed || comm::is_root()) {
@@ -404,7 +417,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     Kokkos::deep_copy(h_id, EMPTY);
     Kokkos::deep_copy(h_cell, 0u);
     Kokkos::deep_copy(h_x, 0.0_r);
-    for (uint32_t j = 0; j < n_aux; j++) {
+    for (uint32_t j = 0; j < n_quantity_aux; j++) {
         for (uint32_t s = 0; s < capacity; s++) h_aux(s, j) = static_cast<rtype>(quantities.initial_aux(j));
     }
     const uint32_t n_persistent = persistent();
@@ -477,8 +490,8 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const bool timed = quantities.reads_time();
     const particles::QuantityFunctor q = quantities.functor();
     const bool observe = first_stage && q.size() > 0;
-    const uint32_t n_aux = quantities.n_aux();
-    const bool inertia = is_solid, heat = heated;
+    const uint32_t n_aux = aux_width(), n_quantity_aux = quantities.n_aux();
+    const bool inertia = is_solid, heat = heated, history = solid.history;
     const particles::Solid sphere = solid;
     const bool read_gradients = solid.reads_gradients();
     const auto pc = point_cell;
@@ -499,7 +512,8 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
                 FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = gradients(pc(s), i, d);
             }
             sphere.rates(Ws, G, values + N_DIM, dt_device ? *dt_device : dt, first_stage,
-                         start.data() + size_t(n_start) * s, rate);
+                         start.data() + size_t(n_start) * s, rate,
+                         history ? a.data() + size_t(n_aux) * s + n_quantity_aux : nullptr, history ? time() : 0.0_r);
             FOR_I_DIM v[i] = values[N_DIM + i];
         } else {
             FOR_I_DIM v[i] = Ws[1 + i];
@@ -623,7 +637,7 @@ void Particles::write_probes(const uint64_t step, const double t) {
     const double gas_R = R;
     const bool inertia = is_solid, heat = heated;
     const particles::QuantityFunctor q = quantities.functor();
-    const uint32_t n_aux = quantities.n_aux();
+    const uint32_t n_aux = aux_width();
     const kexpr::ProgramTable<> table = probes.table();
     const auto field_probe = probes.fields_of();
     const auto probe_region = probes.regions_of();
@@ -667,20 +681,26 @@ void Particles::relocate() {
     const bool inertia = is_solid;
     const auto e = restitution;
     const auto step = step_start;
+    const auto a = aux;
+    // The history of the Basset force turns with the particle across rotational periodic sides
+    const bool turn_history = solid.history && mesh->periodic_maps().rotated();
+    const uint32_t history_at = quantities.n_aux();
     gated::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
         uint32_t c = start(s);
-        // The velocity, then the gas velocity and acceleration of the step's start, which turn with it
-        rtype p[N_DIM], v[3 * N_DIM];
+        // The velocity, then the gas velocity and acceleration of the step's start, which turn with it, then
+        // the axes, whose turn the history takes
+        rtype p[N_DIM], v[(3 + N_DIM) * N_DIM];
         FOR_I_DIM p[i] = pos(wd * s + i);
         FOR_I_DIM {
             v[i] = inertia ? pos(wd * s + N_DIM + i) : 0.0_r;
             v[N_DIM + i] = inertia ? step(s, particles::Solid::U + i) : 0.0_r;
             v[2 * N_DIM + i] = inertia ? step(s, particles::Solid::A + i) : 0.0_r;
+            for (uint8_t j = 0; j < N_DIM; j++) v[(3 + j) * N_DIM + i] = i == j ? 1.0_r : 0.0_r;
         }
         for (int bounce = 0; bounce <= MAX_BOUNCES; bounce++) {
             int32_t face = -1;
-            const Walker::Outcome outcome = w.walk(c, p, face, inertia ? v : nullptr, 3);
+            const Walker::Outcome outcome = w.walk(c, p, face, inertia ? v : nullptr, turn_history ? 3 + N_DIM : 3);
             if (outcome == Walker::INSIDE) break;
             if (outcome == Walker::STUCK || bounce == MAX_BOUNCES) {
                 Kokkos::atomic_inc(&removed(1));
@@ -706,6 +726,18 @@ void Particles::relocate() {
         FOR_I_DIM pos(wd * s + i) = p[i];
         if (inertia) FOR_I_DIM pos(wd * s + N_DIM + i) = v[i];
         start(s) = c;
+        if (!turn_history) return;
+        const rtype * axes = v + 3 * N_DIM;
+        bool turned = false;
+        FOR_I_DIM for (uint8_t j = 0; j < N_DIM; j++) turned = turned || axes[j * N_DIM + i] != (i == j ? 1.0_r : 0.0_r);
+        if (!turned) return;
+        for (uint32_t k = 0; k <= particles::BASSET_MODES; k++) {
+            // The z_k, then the slip at the last step's start
+            rtype * h = &a(s, history_at + N_DIM * k);
+            rtype r[N_DIM] = {};
+            for (uint8_t j = 0; j < N_DIM; j++) FOR_I_DIM r[i] += axes[j * N_DIM + i] * h[j];
+            FOR_I_DIM h[i] = r[i];
+        }
     });
 }
 
@@ -716,7 +748,7 @@ void Particles::migrate() {
     const auto pos = x;
     const auto a = aux;
     const uint32_t owned = n_owned;
-    const uint32_t w = width, n_aux = quantities.n_aux();
+    const uint32_t w = width, n_aux = aux_width();
     // Slots of the particles that left the owned cells, in slot order
     const auto slot = slots;
     uint32_t n_out = 0;
@@ -893,7 +925,7 @@ void Particles::stage_output() {
 }
 
 RestartArrays Particles::restart_arrays() const {
-    const uint32_t n_aux = quantities.n_aux();
+    const uint32_t n_aux = aux_width(), n_history = solid.n_history();
     std::vector<double> local;  // per particle: id, global cell, block values, aux
     for (uint32_t s = 0; s < capacity; s++) {
         if (h_id(s) == EMPTY) continue;
@@ -916,6 +948,7 @@ RestartArrays Particles::restart_arrays() const {
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[WIDTH * a] < all[WIDTH * b]; });
     std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0), Ts(heated ? n : 0);
     std::vector<std::vector<double>> qs(quantities.size(), std::vector<double>(n));
+    std::vector<double> histories(size_t(n_history) * n);
     for (size_t k = 0; k < n; k++) {
         const double * p = all.data() + WIDTH * order[k];
         ids[k] = p[0];
@@ -931,6 +964,7 @@ RestartArrays Particles::restart_arrays() const {
                                     spec.kind == particles::Accumulate::WINDING;
             qs[q][k] = p[2 + (integrated ? spec.column : width + spec.column)];
         }
+        for (uint32_t j = 0; j < n_history; j++) histories[size_t(n_history) * k + j] = p[2 + width + n_aux - n_history + j];
     }
     RestartArrays arrays = {{"PARTICLE_ID", std::move(ids)},
                             {"PARTICLE_CELL", std::move(cells)},
@@ -943,6 +977,7 @@ RestartArrays Particles::restart_arrays() const {
     for (uint32_t q = 0; q < quantities.size(); q++) {
         arrays.emplace_back("PARTICLE_Q_" + quantities.names()[q], std::move(qs[q]));
     }
+    if (n_history > 0) arrays.emplace_back("PARTICLE_HISTORY", std::move(histories));
     return arrays;
 }
 
@@ -964,6 +999,7 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
         if (solid.pressure_gradient) solid_text += ", pressure gradient";
         if (solid.added_mass) solid_text += ", added mass";
         if (solid.lift) solid_text += ", Saffman lift";
+        if (solid.history) solid_text += ", Basset history";
         if (heated) solid_text += ", Ranz-Marshall heat transfer (specific heat " + logging::real(static_cast<double>(solid.specific_heat)) + ")";
         lines.emplace_back("Solid particles", solid_text);
     }

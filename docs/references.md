@@ -348,6 +348,15 @@ The numerical methods Mallard implements and the reference data it is validated 
   Used in: the coefficient 1.615 of the `"saffman_lift"` force.
 - <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
   Used in: the `"saffman_lift"` force of solid particles.
+- <a id="boussinesq-1885"></a>J. Boussinesq, Sur la résistance qu'oppose un liquide indéfini en repos, sans pesanteur, au mouvement varié d'une sphère solide qu'il mouille sur toute sa surface, quand les vitesses restent bien continues et assez faibles pour que leurs carrés et produits soient négligeables, *C. R. Acad. Sci. Paris* 100, 935–937 (1885).
+- <a id="basset-1888"></a>A. B. Basset, *A Treatise on Hydrodynamics*, vol. 2, ch. 22, Deighton, Bell and Co., Cambridge (1888).
+  Used in (these two): the `"basset_history"` force of solid particles (`particles::Solid::history_integral`, `src/particles/particle_forces.h`).
+- <a id="beylkin-monzon-2010"></a>G. Beylkin and L. Monzón, Approximation by exponential sums revisited, *Appl. Comput. Harmon. Anal.* 28, 131–149 (2010). [doi:10.1016/j.acha.2009.08.011](https://doi.org/10.1016/j.acha.2009.08.011)
+  Used in: the sum of exponentials that approximates the Basset kernel $1/\sqrt{t}$ (`particles::basset_exponentials`), from the trapezoidal rule on its integral representation.
+- <a id="van-hinsberg-2011"></a>M. A. T. van Hinsberg, J. H. M. ten Thije Boonkkamp and H. J. H. Clercx, An efficient, second order method for the approximation of the Basset history force, *J. Comput. Phys.* 230, 1465–1478 (2011). [doi:10.1016/j.jcp.2010.11.014](https://doi.org/10.1016/j.jcp.2010.11.014)
+  Used in: the history force's tail as exponentials advanced recursively in time, which Mallard extends down to the step (its rates and the slip linear over each step: [numerics](numerics/particles.md#integration-in-time)).
+- <a id="mei-adrian-1992"></a>R. Mei and R. J. Adrian, Flow past a sphere with an oscillation in the free-stream velocity and unsteady drag at finite Reynolds number, *J. Fluid Mech.* 237, 323–341 (1992). [doi:10.1017/S0022112092003434](https://doi.org/10.1017/S0022112092003434)
+  Used in: the range of the Basset kernel, whose memory decays faster at finite $Re_p$.
 - <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
   Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
 - <a id="maxey-1987"></a>M. R. Maxey, The gravitational settling of aerosol particles in homogeneous turbulence and random flow fields, *J. Fluid Mech.* 174, 441–465 (1987). [doi:10.1017/S0022112087000193](https://doi.org/10.1017/S0022112087000193)
@@ -358,7 +367,7 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="balachandar-eaton-2010"></a>S. Balachandar and J. K. Eaton, Turbulent dispersed multiphase flow, *Annu. Rev. Fluid Mech.* 42, 111–133 (2010). [doi:10.1146/annurev.fluid.010908.165243](https://doi.org/10.1146/annurev.fluid.010908.165243)
   Used in (these three): the regimes of particle-laden flow (one-way coupling of dilute suspensions, Stokes numbers) in the [theory manual](theory/particles.md) and the [user guide](guide/particles.md#which-particles).
 - <a id="crowe-2011"></a>C. T. Crowe, J. D. Schwarzkopf, M. Sommerfeld and Y. Tsuji, *Multiphase Flows with Droplets and Particles*, 2nd ed., CRC Press (2011). [doi:10.1201/b11103](https://doi.org/10.1201/b11103)
-  Used in: the forces on a particle that Mallard leaves out, and their magnitudes.
+  Used in: the magnitudes of the forces on a particle, among them those Mallard leaves out, and the motion of a sphere with the Basset force from rest, against which the tests check it.
 - <a id="haselbacher-2007"></a>A. Haselbacher, F. M. Najjar and J. P. Ferry, An efficient and robust particle-localization algorithm for unstructured grids, *J. Comput. Phys.* 225, 2198–2213 (2007). [doi:10.1016/j.jcp.2007.03.018](https://doi.org/10.1016/j.jcp.2007.03.018)
   Used in: the location of particles by walking across faces (`Walker`, `src/particles/particles.h`).
 

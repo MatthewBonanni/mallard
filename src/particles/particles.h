@@ -223,7 +223,7 @@ class Particles {
         const std::vector<std::string> & quantity_names() const { return quantities.names(); }
 
         /** @brief Whether the right-hand side reads the stage time (set_stage_time before velocity()). */
-        bool reads_time() const { return quantities.reads_time(); }
+        bool reads_time() const { return quantities.reads_time() || solid.history; }
 
         /** @brief Whether the particles are solid, with a velocity of their own. */
         bool inertial() const { return is_solid; }
@@ -319,7 +319,8 @@ class Particles {
          *        PARTICLE_CELL (global cell), PARTICLE_X (N_DIM per particle),
          *        PARTICLE_V (solid particles, likewise), PARTICLE_T (with heat
          *        transfer), PARTICLE_Q_<name> (per
-         *        quantity) and PARTICLE_REMOVED (left the domain, lost, stuck).
+         *        quantity), PARTICLE_HISTORY (with the Basset force, Solid::History
+         *        per particle) and PARTICLE_REMOVED (left the domain, lost, stuck).
          */
         RestartArrays restart_arrays() const;
 
@@ -339,7 +340,10 @@ class Particles {
 
     private:
         /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
-        uint32_t persistent() const { return width + quantities.n_aux(); }
+        uint32_t persistent() const { return width + aux_width(); }
+
+        /** @brief Values per slot in aux: those of the quantities, then the history of the Basset force (Solid::History). */
+        uint32_t aux_width() const { return quantities.n_aux() + solid.n_history(); }
 
         /** @brief Read [[particles.walls]] into the face actions and restitution coefficients. */
         void read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action);
@@ -363,7 +367,7 @@ class Particles {
         std::string file;
 
         ParticleView x;                     // (width slot + k): position, velocity (solid), temperature (heated), integrated quantities
-        Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
+        Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times, history of the Basset force
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
         Kokkos::View<uint64_t[3]> n_removed;  // left the domain, lost, stuck
