@@ -45,7 +45,7 @@ p = """\
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 23 more.
+and 25 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -401,9 +401,9 @@ interval = 10000
 [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
 [`channel_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-retau180),
 [`channel_inflow_retau180`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-inflow-retau180),
-[`cbc_les`](https://matthewbonanni.github.io/mallard/docs/examples/#cbc-les),
-[`channel_les`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-les)
-and 14 more.
+[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
+[`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake)
+and 16 more.
 
 `format = "restart"` in `[[write_data]]` writes the conservative variables
 (and whatever else the run needs to continue: chemistry sub-steps, the soot

@@ -408,8 +408,8 @@ number of ranks, threads or GPUs and after restarts:
   ([numerical methods](overview.md#discretization));
 - sums that feed the solution (the dynamic model constants, the thickened
   flame's $\beta$, the mass-flow force, the transverse fits of characteristic
-  boundaries) round every term to $2^{-b}$ of the largest, with $b$ leaving
-  room for every row in 63 bits, and add integers, over MPI or NCCL
+  boundaries) add every term exactly in integers of $2^{-1074}$, over MPI or
+  NCCL in one all-reduce, and round the total once
   (`src/parallel/exact_sums.h`);
 - stencils, faces and neighbor lists are ordered by global ids, and the
   halo is deepened until every stencil equals the serial one

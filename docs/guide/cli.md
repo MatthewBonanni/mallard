@@ -93,7 +93,7 @@ How the commands are laid out, and which are planned:
 ### mallard
 
 ```text
-Usage: mallard -i input.toml [--restart FILE|latest] [Kokkos options]
+Usage: mallard -i input.toml [--restart FILE|latest] [--set KEY=VALUE...] [Kokkos options]
        mallard <command> [options]
 
 Mallard solves the compressible Euler, Navier-Stokes and reacting-flow equations
@@ -186,6 +186,15 @@ Options:
                            progress records, one JSON object per line as
                            mallard.jsonl has them, for live monitoring and
                            plotting, and the text on stderr. Default: text.
+  --set KEY=VALUE          Change a setting before the first step, as mallard
+                           ctl set does while the run goes on: the same keys
+                           (n_steps, t_stop, t_wall_stop, check_interval,
+                           control_file_interval, an output's or probe's
+                           interval or time_interval, ...) and checks; a setting
+                           it refuses is an error. Give it once per setting.
+                           Each is a set event of mallard.jsonl, and mallard
+                           pack's rerun command repeats it. Default: the input's
+                           settings.
   --kokkos-*               Kokkos options, e.g. --kokkos-num-threads=8 (threads
                            per rank) or --kokkos-device-id=1 (the GPU; by
                            default each rank gets its own).
@@ -227,9 +236,11 @@ ETA, memory and the state of each trigger. checkpoint: write a restart file now;
 the reply names it. stop: write a restart file and end the run (exit status 3).
 set: change settings from the next step on: n_steps, t_stop, t_wall_stop (0
 removes a limit; one must remain; times in seconds or with a unit, e.g.
-t_wall_stop=2h), check_interval, write_data.<prefix or index>.interval or
-.time_interval, probes.<name>.interval or .time_interval,
-forces.<zone>.interval, integrals.interval. Other keys are refused.
+t_wall_stop=2h), check_interval, control_file_interval, write_data.<prefix or
+index>.interval or .time_interval, probes.<name>.interval or .time_interval,
+forces.<zone>.interval, integrals.interval. Other keys are refused. A SET file
+in run-dir does the same from anywhere the directory is visible, with [run]
+control_file_interval: lines of key = value, the run log the reply.
 
 Options:
   -h, --help  Show this page.
@@ -414,13 +425,16 @@ Usage: mallard check input.toml [options]
 Runs the whole setup of a case (mesh, partition, boundaries, numerics, initial
 solution) without time stepping and without writing any file, then reports:
 unknown or unused keys, boundary zones without a condition, mesh quality with
-the worst cells, the stable time step and the cell that sets it, memory per rank
-and, with --throughput or --steps, the cost. Each row has a status, each error
-or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and the docs that
-explain it. It lists every region the case uses and the mesh's own (domain,
-boundary zones, cell zones) with its dimension, measure and cells, and whether a
-surface or curve is exact or extracted; a region that covers no cell is an
-error. Under mpirun -n N it checks the run on N ranks.
+the worst cells, the stable time step and the cell that sets it, memory per
+rank, and the cost: wall time, GPU- or core-hours and parallel efficiency over
+rank counts, from the throughput measured on this device class for this kind of
+case (or --throughput, or --steps timed here) and a step-time model of the
+largest part fitted to measured runs, with its uncertainty. Each row has a
+status, each error or warning a stable code (E-REGION-OUTSIDE, W-CFL-LIMIT) and
+the docs that explain it. It lists every region the case uses and the mesh's own
+(domain, boundary zones, cell zones) with its dimension, measure and cells, and
+whether a surface or curve is exact or extracted; a region that covers no cell
+is an error. Under mpirun -n N it checks the run on N ranks.
 
 Without an input, checks the environment only; with one, the report ends with
 the same Environment section: the build (dimension, precision, the solvers
@@ -444,13 +458,19 @@ Options:
                             a serial check, memory is scaled to the largest part
                             the run's partitioner would make. Default: the ranks
                             of this check.
-  --throughput CELLS_PER_S  Cost (wall time and GPU-hours per unit simulated
-                            time, per flow-through and to t_stop) at this many
-                            cell updates per second per rank: the Throughput of
-                            a run's summary over its ranks. Default: no cost.
-  --steps N                 Cost at the throughput measured over N steps, after
-                            one untimed step; the memory then includes the
-                            steps' peak. Default: no cost.
+  --throughput CELLS_PER_S  Cost (wall time, GPU-hours and parallel efficiency
+                            per unit simulated time, per flow-through and to
+                            t_stop) at this many cell updates per second of one
+                            rank alone: the Throughput of a single-rank run's
+                            summary. Default: the throughput measured on this
+                            device class for this kind of case, or fitted to
+                            those measurements.
+  --steps N                 Cost at the throughput measured over N steps on this
+                            device, after one untimed step; the memory then
+                            includes the steps' peak.
+  --ranks-per-node N        Ranks on each node, for the cost's exchanges between
+                            nodes. Default: as in this check under its launcher,
+                            else 8 per GPU node, and every CPU rank on one node.
   --memory SIZE|GPU         Size the run for this memory per rank: a size (40GB,
                             512MiB; host memory per rank in CPU builds) or a GPU
                             (a100-40, a100-80, h100-80, h200, mi250x, mi300x):
@@ -532,7 +552,7 @@ Options:
 Examples:
   $ mallard check input.toml
   $ srun -N 2 --ntasks-per-node 4 mallard check   # the environment of a job
-  $ mallard check input.toml --ranks 64 --throughput 5e7
+  $ mallard check input.toml --ranks 64 --memory a100-80   # cost on 64 A100s
   $ mpirun -n 4 mallard check input.toml --mesh-fields mesh
   $ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils
   $ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView

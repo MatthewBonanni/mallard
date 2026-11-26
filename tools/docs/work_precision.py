@@ -34,7 +34,7 @@ CASES = {
 def platform_name(p):
     if "cuda" in " ".join(p["backend"]).lower():
         return p["hardware"].replace("NVIDIA ", "")
-    return f"{p['threads']} threads"
+    return f"{p['threads']} threads, {p['hardware'].replace(' 64-Core Processor', '')}"
 
 
 def series(platform, case, scheme, norm):

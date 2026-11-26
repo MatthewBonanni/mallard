@@ -1,0 +1,1 @@
+- The scripts of `mallard new` cases that use the Python package (post.sh, and mesh.sh or init.sh where they do) find its library again when `mallard` is not on `PATH`: they point it at the mallard that run.sh runs (`MALLARD`, else the one that made the case).
