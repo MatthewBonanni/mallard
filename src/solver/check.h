@@ -18,6 +18,7 @@
 
 #include "binding.h"
 #include "case_view.h"
+#include "cost_model.h"
 #include "diagnostic_code.h"
 #include "input.h"
 #include "json.h"
@@ -36,8 +37,9 @@ using CheckFields = std::vector<std::pair<std::string, std::vector<double>>>;
 
 struct CheckOptions {
     int ranks = 0;              // ranks to estimate memory and cost for (0: this run's)
-    double throughput = 0.0;    // cells/s (cell updates per wall second) per rank; 0: steps or none
+    double throughput = 0.0;    // cells/s (cell updates per wall second) of one rank alone; 0: steps or the model
     uint64_t steps = 0;         // steps to time for a measured throughput
+    int ranks_per_node = 0;     // for the cost's exchanges between nodes; 0: this run's, else the device's default
     size_t n_worst = 5;         // worst cells listed per quality metric
     std::string mesh_fields;    // prefix of the mesh and stencil fields' snapshot (--mesh-fields), or empty
     bool all_stencils = false;  // the stencil file of every cell (--stencils all)
@@ -162,6 +164,16 @@ struct CheckEnvironment {
     bool nccl_used = false;             // halo exchanges by NCCL (several ranks, [parallel] halo_exchange)
 };
 
+/** @brief The cost on one rank count: its largest part, and the step time the cost model gives it. */
+struct CheckScaling {
+    int ranks = 1;
+    int nodes = 1;
+    PartSize part;          // largest part
+    double step = 0.0;      // s per step of that part
+    double efficiency = 1.0;     // the single rank's step time over ranks times this one's
+    double wall_per_time = 0.0;  // wall seconds per unit simulated time
+};
+
 struct CheckReport {
     std::vector<CheckDiagnostic> diagnostics;
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
@@ -208,6 +220,7 @@ struct CheckReport {
     int ranks = 1;               // the run's ranks
     int target_ranks = 1;
     uint64_t target_owned = 0, target_halo = 0;  // largest part at target_ranks
+    PartSize target_part;                         // and its neighbors
     uint64_t target_bytes = 0, target_bytes_peak = 0;
     uint64_t device_capacity = 0;  // bytes, 0 if unknown
     memory::Bytes setup_bytes{};   // largest rank by category: at the setup's peak
@@ -233,12 +246,25 @@ struct CheckReport {
     uint64_t min_owned = 0, min_halo = 0, min_peak = 0;  // largest part there and its predicted peak
     bool min_partitioned = false;  // the part comes from the partitioner (serial checks), else from this halo ratio
     int halo_ranks = 0;            // most ranks (doubling from min_ranks) with halo below 10% of owned, 0 if none
+    double sizing_wall_per_time = 0.0;  // on max(min_ranks, halo_ranks), 0 if not estimated
 
     // Cost at target_ranks
     uint64_t n_cells = 0;
-    double throughput = 0.0;  // cells/s per rank
+    double throughput = 0.0;  // cells/s of one rank alone, without communication
     bool throughput_measured = false;
+    std::string throughput_source;  // "steps", "option", "model"; empty: no estimate
+    std::string throughput_basis;
+    double throughput_uncertainty = 0.0;  // relative, one standard deviation
+    double measured_throughput = 0.0;     // --steps: cells/s per rank on this check's ranks
     uint64_t steps_timed = 0;
+    cost_model::Workload workload;        // what the estimate is for
+    const cost_model::Scaling * scaling = nullptr;  // the step-time model of the device, or null: linear
+    double particles = 0.0;          // particle slots per rank
+    int ranks_per_node = 0;          // 0: one node
+    std::string ranks_per_node_basis;
+    double efficiency = 1.0;         // at target_ranks
+    double uncertainty = 0.0;        // of the wall times, relative, one standard deviation
+    std::vector<CheckScaling> scalings;  // by rank count, target_ranks among them
     double wall_per_time = 0.0;        // wall seconds per unit simulated time
     double flow_through_time = 0.0;    // domain length along the mean velocity over its magnitude, 0 if none
     double t_stop = 0.0;
@@ -297,6 +323,9 @@ MeshView mesh_view(const Mesh & mesh, const region::MeshRegions & automatic, boo
  *        that are not (memory::scales_with_cells); for a GPU from a host check, without the output staging.
  */
 double predicted_peak(const CheckReport & report, double local_cells);
+
+/** @brief The step time of the largest part p on n ranks by the report's cost model; 0 without a throughput. */
+double check_step_seconds(const CheckReport & report, const PartSize & p, int n);
 
 /**
  * @brief The report as text: the result, a section per part of the check whose rows each have a status, the

@@ -87,7 +87,10 @@ struct Margins {
     static constexpr int N = 4;
     double v[N];
     int64_t at[N];
-    double sum[3];
+    // V rho, V p, V; the step's change, V drho^2, V |d(rho u)|^2, V d(rho E)^2; its scales, V rho^2,
+    // V (|rho u|^2 + 2 rho rho E), V (rho E)^2
+    static constexpr int N_SUMS = 9;
+    double sum[N_SUMS];
 };
 
 /** @brief A progress row's minima of rho and p, maximum Mach number and TENO-troubled cells. */
