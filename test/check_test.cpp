@@ -18,6 +18,7 @@
 #include <numeric>
 #include <numbers>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -1116,6 +1117,56 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
     }
 }
 
+#ifndef Mallard_HAS_HDF5
+TEST(CaseView, BlockFilesHaveDistinctNamesWindowsAccepts) {
+    const std::vector<std::string> names = {"inlet", "Inlet", "probes[name = \"wake\"]", "a:b", "a_b", "a/b",
+                                            "con", "Aux.region", "x<y>z|w?*\\v", "trailing. "};
+    std::vector<case_view::Block> blocks;
+    for (const std::string & name : names) {
+        case_view::Block b;
+        b.name = name;
+        b.add_cell(case_view::VERTEX, std::vector<std::array<double, 3>>{{0.0, 0.0, 0.0}});
+        blocks.push_back(b);
+    }
+    const std::filesystem::path dir = scratch_dir() / "mallard_case_view_names";
+    if (comm::is_root()) std::filesystem::remove_all(dir);
+    comm::barrier();
+    const std::string vtm = case_view::write((dir / "case.vtkhdf").string(), blocks);
+    comm::barrier();
+    if (!comm::is_root()) return;
+    const std::set<std::string> devices = {"CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4",
+                                           "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+                                           "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    std::set<std::string> seen;
+    for (const auto & entry : std::filesystem::directory_iterator(dir / "case_blocks")) {
+        const std::string file = entry.path().filename().string();
+        EXPECT_EQ(file.find_first_of("<>:\"/\\|?*"), std::string::npos) << file;
+        EXPECT_TRUE(std::none_of(file.begin(), file.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; }));
+        EXPECT_NE(file.back(), '.') << file;
+        EXPECT_NE(file.back(), ' ') << file;
+        std::string device = file.substr(0, file.find('.'));
+        while (!device.empty() && device.back() == ' ') device.pop_back();
+        std::transform(device.begin(), device.end(), device.begin(), [](char c) { return char(std::toupper(c)); });
+        EXPECT_FALSE(devices.count(device)) << file;
+        std::string folded = file;
+        std::transform(folded.begin(), folded.end(), folded.begin(), [](char c) { return char(std::tolower(c)); });
+        EXPECT_TRUE(seen.insert(folded).second) << file;
+    }
+    EXPECT_EQ(seen.size(), names.size());
+    // Readers follow file= to every block, which keeps its name; names Windows accepts are the files'
+    const std::string text = read_file(vtm);
+    for (const std::string & name : names) {
+        const std::string tag = "name=\"" + case_image::xml_text(name) + "\" file=\"";
+        const size_t at = text.find(tag);
+        ASSERT_NE(at, std::string::npos) << name;
+        const std::string file = text.substr(at + tag.size(), text.find('"', at + tag.size()) - at - tag.size());
+        EXPECT_TRUE(std::filesystem::exists(dir / file)) << name;
+        if (name == "inlet" || name == "a_b") {
+            EXPECT_EQ(file, "case_blocks/" + name + ".vtu");
+        }
+    }
+}
+#endif
 namespace {
 
 /** @brief view_case with a snapshot region and a sponge, whose blocks need their elements found by prefix and index. */
@@ -1206,7 +1257,7 @@ TEST(CheckRegions, CaseViewBlocksCarryTheirKindKeyElementAndZone) {
     EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/element_index"));
     EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/FieldData/metadata_version"));
 #else
-    const std::string vtu = read_file(dir / "case_blocks" / (block + ".vtu"));
+    const std::string vtu = read_file(dir / "case_blocks" / "probes[name = _s_].region.vtu");  // Windows-safe file name
     auto bytes = [](const std::string & s) {
         std::string out;
         for (const char ch : s) out += std::to_string(int(static_cast<unsigned char>(ch))) + " ";
