@@ -521,7 +521,7 @@ class Particles {
         particles::CrossingEvents events;
         std::vector<particles::Surface> surfaces;
         Kokkos::View<uint32_t *> exit_mask;         // (face): bit e for entry e on its zone, empty without exits
-        Kokkos::View<double *[3]> crossing_start;   // (slot): position at the step's start
+        Kokkos::View<double *[3], Kokkos::LayoutLeft> crossing_start;  // (slot): position at the step's start
         Kokkos::View<uint64_t *> crossing_id;       // (slot): its particle then, EMPTY if none
         Kokkos::View<uint32_t **> crossing_columns; // (entry, j): particle variable of field column j
         Kokkos::View<uint32_t *> crossing_width;    // (entry): its columns

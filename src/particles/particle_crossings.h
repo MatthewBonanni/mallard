@@ -54,7 +54,7 @@ struct CrossingEvents {
     Kokkos::View<uint32_t *> slot, entry;
     Kokkos::View<double *> alpha;
     Kokkos::View<int8_t *> direction;
-    Kokkos::View<double *[3]> x;
+    Kokkos::View<double *[3], Kokkos::LayoutLeft> x;  // LayoutLeft on every backend, as on CUDA
 
     KOKKOS_INLINE_FUNCTION void add(const uint64_t particle, const uint32_t s, const uint32_t e, const double a,
                                     const int8_t d, const double p[3]) const {
