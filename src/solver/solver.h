@@ -1049,6 +1049,8 @@ class Solver {
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void init_particles(region::Regions & regions);  // [particles], before allocate_time_stepping
         void write_particle_probes();   // [[particles.probes]] due at this step
+        /** @brief Enqueue the particle snapshot of data_writers[k] into its pinned mirrors (capturable). */
+        void stage_particle_snapshot(size_t k);
         std::unique_ptr<Particles> particles;
         /**
          * @brief stage_scratch: the reconstructions' work memory and face_thermo and face_mdot (from the
@@ -1633,6 +1635,7 @@ class Solver {
         // Outputs
         std::vector<Data> data;
         std::vector<std::unique_ptr<DataWriter>> data_writers;
+        std::vector<int32_t> writer_particles;  // (writer): its particle snapshot, or -1
         std::vector<ForceMonitor> force_monitors;
         IntegralMonitor integral_monitor;
         Statistics statistics;

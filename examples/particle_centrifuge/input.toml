@@ -14,7 +14,7 @@
 #
 # Run (4,200 steps: about 3 minutes on two CPU threads):
 #   ../../build/src/mallard -i input.toml
-#   python check_particle_centrifuge.py particles.csv
+#   python check_particle_centrifuge.py centrifuge
 #
 # Result: at t = 15 the particles released at r = 0.25 and 0.35 have spiraled
 # out to r = 0.55 and 0.77 and are within 1.5e-3 of their exact positions;
@@ -74,11 +74,16 @@ points = [[0.25, 0.0], [0.0, 0.25], [-0.25, 0.0], [0.0, -0.25],
           [0.35, 0.0], [0.0, 0.35], [-0.35, 0.0], [0.0, -0.35],
           [0.5, 0.0], [0.0, 0.5], [-0.5, 0.0], [0.0, -0.5],
           [0.65, 0.0], [0.0, 0.65], [-0.65, 0.0], [0.0, -0.65]]
-file = "particles.csv"
 
 [[particles.walls]]
 zones = ["outer"]
 interaction = "stick"
+
+# The particles at the start and the end, centrifuge_particles_<n>.vtkhdf
+[[write_data]]
+prefix = "centrifuge"
+particle_fields = ["V"]
+time_interval = 15.0
 
 [output]
 check_interval = 200

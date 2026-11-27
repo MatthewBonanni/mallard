@@ -668,6 +668,9 @@ void Solver::device_step_body() {
             if (triggers_on_device()) copy_to_pinned(pinned_mirrors, h_trigger_states, trigger_states);
         });
         for (uint32_t k = 0; k < n_writers; k++) {
+            if (writer_particles[k] >= 0) device_if(&output_due.data()[k], [&] { stage_particle_snapshot(k); });
+        }
+        for (uint32_t k = 0; k < n_writers; k++) {
             if (!data_writers[k]->moving_subset()) continue;
             device_if(&output_due.data()[k], [&] { data_writers[k]->stage_subset(output_time()); });
         }

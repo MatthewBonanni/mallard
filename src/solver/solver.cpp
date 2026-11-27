@@ -2113,10 +2113,31 @@ void Solver::init_output(region::Regions & regions) {
 
 void Solver::add_data_writers(const Input & output, region::Regions & regions, bool async_output,
                               uint32_t io_threads) {
-    auto add_writer = [&](const CellSubset * subset, const std::string & prefix) {
+    const bool with_particles = output.contains("particle_fields");
+    const bool mesh_fields = !with_particles || output.contains("fields");
+    if (with_particles && !particles) {
+        throw InputError({.key = "write_data.particle_fields",
+                          .line = line_of(output, "particle_fields"),
+                          .message = "writes particles, and the run has none",
+                          .fix = "Add [particles], or remove particle_fields",
+                          .docs = "docs/guide/output.md#particle-snapshots"});
+    }
+    const std::string entry_prefix = find_value_or<std::string>(output, "prefix", "");
+    auto add_writer = [&](const CellSubset * subset, const std::string & prefix,
+                          const region::Region * particle_region = nullptr) {
         data_writers.push_back(std::make_unique<DataWriter>());
-        data_writers.back()->init(output, data, mesh, restart_variables(), subset, prefix);
+        data_writers.back()->init(output, data, mesh, restart_variables(), mesh_fields ? subset : nullptr, prefix);
         data_writers.back()->set_async(async_output, io_threads);
+        writer_particles.push_back(-1);
+        if (!with_particles) return;
+        const std::string key = "write_data[prefix = \"" + entry_prefix + "\"].particle_fields";
+        const region::RegionView<> view = particle_region ? particle_region->device() : region::RegionView<>{};
+        const uint32_t k = particles->add_snapshot(find_value<std::vector<std::string>>(output, "particle_fields"),
+                                                   particle_region ? &view : nullptr, key,
+                                                   line_of(output, "particle_fields"));
+        writer_particles.back() = static_cast<int32_t>(k);
+        data_writers.back()->set_particles(particles->snapshot_fields(k), [this, k]() { return particles->snapshot(k); },
+                                           particle_region ? particle_region->summary() : "");
     };
     const bool one = output.contains("region"), several = output.contains("regions");
     if (!one && !several) {
@@ -2158,6 +2179,14 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
         } else if (r.kind == probe::RegionValue::Kind::VOLUME) {
             const region::Region & region = regions.get(*value, key);
             region::require_full_dimension(region, *value, key);
+            if (with_particles && (!region.analytic() || region.moving())) {
+                throw InputError({.key = key,
+                                  .line = line_of(output, one ? "region" : "regions"),
+                                  .message = "filters particle_fields, which needs a filled region of shapes that does "
+                                             "not move",
+                                  .fix = "Write the particles from another [[write_data]] with such a region, or none",
+                                  .docs = "docs/guide/output.md#particle-snapshots"});
+            }
             CellSubset subset;
             subset.name = region.summary();
             if (region.moving() || region.solution()) {
@@ -2180,8 +2209,16 @@ void Solver::add_data_writers(const Input & output, region::Regions & regions, b
                     throw InputError(key + " contains no part of any cell.");
                 }
             }
-            add_writer(&subset, file_prefix);
+            add_writer(&subset, file_prefix, &region);
         } else {
+            if (with_particles) {
+                throw InputError({.key = key,
+                                  .line = line_of(output, one ? "region" : "regions"),
+                                  .message = "is a boundary, surface, curve or points, which holds no particles",
+                                  .fix = "Give a filled region for particle_fields; the particles crossing a surface "
+                                         "are recorded by [[particles.crossings]]",
+                                  .docs = "docs/guide/output.md#particle-snapshots"});
+            }
             // Boundary zones, cut planes, surfaces, curves and points: point values, written as a probe writes them
             const std::string format = find_value_or<std::string>(output, "format", have_hdf5() ? "vtkhdf" : "vtu");
             if (format != "vtkhdf" && format != "vtu") {
@@ -3116,7 +3153,6 @@ int Solver::finish_run() {
         probes.finish(step, t);
         copy_device_to_host();
         write_data(true);
-        if (particles) particles->write(step, static_cast<double>(t));
         const snapshot_block::Reason reason(snapshot_block::reason::STOP);
         const std::string restart_file =
             control_stop.empty() && trigger_stop.empty() ? std::string() : write_restarts();
@@ -3626,6 +3662,10 @@ void Solver::write_data(bool force) {
     }
     update_primitives();
     copy_device_to_host();
+    for (size_t k = 0; k < data_writers.size(); k++) {
+        if (writer_particles[k] >= 0 && (force || data_writers[k]->due(step, t))) stage_particle_snapshot(k);
+    }
+    if (particles) Kokkos::fence("particle_snapshots");
     write_outputs(force);
     if (snapshots) {
         // Regions of lower dimension: point values, written as probes write them
@@ -3699,6 +3739,15 @@ void Solver::write_probes() {
     if (probes.statistics_due(step, t)) statistics.copy_device_to_host();
     ProbeFluxes fluxes;
     probes.write(step, t, probe_fields(fluxes));
+}
+
+void Solver::stage_particle_snapshot(const size_t k) {
+    const uint32_t snapshot = static_cast<uint32_t>(writer_particles[k]);
+    if (particles->snapshot_reads_gas(snapshot)) {
+        update_cell_W();
+        particles->sample(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients);
+    }
+    particles->stage_snapshot(snapshot);
 }
 
 void Solver::write_particle_probes() {

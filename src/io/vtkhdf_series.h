@@ -60,18 +60,40 @@ std::vector<Step> describe(const std::string & file, size_t max_steps = std::num
  */
 void write_index(const std::string & index, const std::vector<Step> & steps);
 
-/** @brief Whether a file is an index of write_index. */
+/** @brief A block of a collection index: its name (its group under /VTKHDF) and its snapshots. */
+struct Block {
+    std::string name;
+    std::vector<Step> steps;
+};
+
+/**
+ * @brief The suffix of the root datasets (FILES_DATASET, the snapshot blocks) of a block of a collection: none
+ *        for the first, which readers of the plain layout take as the file's, "_<name>" for the others.
+ */
+inline std::string block_suffix(const std::string & name, bool first) { return first ? "" : "_" + name; }
+
+/**
+ * @brief Write an index that is a VTKHDF 2.1 PartitionedDataSetCollection (ParaView 6.0 and later) of
+ *        temporal blocks, each the index write_index writes of its snapshots, linked from Assembly in order
+ *        (block i has Index i); the root attributes those of the first block's last snapshot, version this.
+ */
+void write_collection(const std::string & index, int64_t version, const std::vector<Block> & blocks);
+
+/** @brief Whether a file is an index of write_index or write_collection. */
 bool is_index(const std::string & file);
 
-/** @brief The files an index reads: its steps' files and the series' mesh file, if there is one. */
+/** @brief The files an index reads: its steps' files (of every block) and the series' mesh file, if there is one. */
 std::vector<std::string> members(const std::string & index);
 
 /**
  * @brief The snapshots of the series at index up to time t (with a relative
  *        tolerance), to continue it. A series in one file of Mallard 0.11 and
  *        earlier is renamed to legacy first, and its snapshots are those of legacy.
+ *        With block, those of that block of a collection index (first: its first
+ *        block, which also continues a plain index, or a 0.11 series).
  */
-std::vector<Step> resume(const std::string & index, double t, const std::string & legacy);
+std::vector<Step> resume(const std::string & index, double t, const std::string & legacy, const std::string & block = "",
+                         bool first = true);
 
 } // namespace vtkhdf_series
 

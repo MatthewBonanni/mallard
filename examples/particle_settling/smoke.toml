@@ -9,7 +9,7 @@
 #
 # Run (seconds on one CPU thread):
 #   ../../build/src/mallard -i smoke.toml
-#   python check_particle_settling.py smoke.csv
+#   python check_particle_settling.py smoke
 #
 # Result: every particle falls at tau g' = 30.24 um/s, exactly (to round-off),
 # Real smoke of this size settles faster: Schiller-Naumann drag has no slip
@@ -61,12 +61,17 @@ diameter = 1e-6          # m
 density = 1000.0         # kg/m^3
 gravity = [0.0, -9.81]   # m/s^2, on the particles only
 velocity = [0.0, 0.0]
-file = "smoke.csv"
 
 [particles.lattice]
 lo = [0.005, 0.005]
 hi = [0.035, 0.035]
 n = [3, 3]
+
+# The particles at the start and the end, smoke_particles_<n>.vtkhdf
+[[write_data]]
+prefix = "smoke"
+particle_fields = ["V"]
+time_interval = 0.01
 
 [output]
 check_interval = 500

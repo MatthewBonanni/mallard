@@ -13,7 +13,7 @@
 #
 # Run (seconds on one CPU thread):
 #   ../../build/src/mallard -i input.toml
-#   python check_particle_bounce.py particles.csv
+#   python check_particle_bounce.py bounce
 #
 # Result: after t = 4, three to six bounces each (one off the right wall),
 # the particles are within 4e-10 of their exact positions. Mallard locates
@@ -77,7 +77,6 @@ drag = "stokes"
 gravity = [0.0, -1.0]
 velocity = [0.6, 0.0]
 points = [[0.1, 0.3], [0.1, 0.5], [0.1, 0.7]]
-file = "particles.csv"
 
 [[particles.walls]]
 zones = ["bottom"]
@@ -87,6 +86,12 @@ tangential_restitution = 0.9
 [[particles.walls]]
 zones = ["top"]
 interaction = "stick"
+
+# The particles at the start and the end, bounce_particles_<n>.vtkhdf
+[[write_data]]
+prefix = "bounce"
+particle_fields = ["V"]
+time_interval = 4.0
 
 [output]
 check_interval = 100

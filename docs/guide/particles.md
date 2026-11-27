@@ -10,9 +10,10 @@ them. Each particle can carry
 first times, turns about an axis), and [probes](#particle-probes) give
 statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas, and
-[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh. Sprays,
-injection during the run and particle output beyond the final positions follow
-in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
+[Snapshots](#particle-snapshots) write every particle, with the mesh or
+alone. Sprays and injection during the run follow in later releases
+([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 - [Which particles?](#which-particles)
 - [Tracers](#tracers-particles), [seeding](#seeding), [restarts](#restarts) and [boundaries](#boundaries)
@@ -77,12 +78,16 @@ spiral out, fastest near $\Omega\tau = 1$.*
 ```toml
 [particles]
 type = "tracer"
-file = "tracers.csv"
 
 [particles.lattice]
 lo = [0.1, 0.1]
 hi = [0.9, 0.9]
 n = [9, 9]
+
+[[write_data]]
+prefix = "tracers"
+particle_fields = ["U"]
+time_interval = 0.1
 ```
 
 *Used in:*
@@ -107,7 +112,6 @@ bitwise the same on any number of ranks.
 | `type` | required | `"tracer"` |
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
-| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
 | `capacity` | the number of particles | Particles a rank can hold |
 
 ### Seeding
@@ -146,8 +150,8 @@ Mallard counts the particles that left the domain, that were lost (a
 particle that crossed more than a halo layer of a rank in one step, or that
 the location walk could not place on a badly distorted mesh) and, for solid
 particles, that stuck to walls; restart files carry the three counts. The ids
-missing from `file`, or the count of a [probe](#particle-probes) without a
-region, give the particles removed.
+missing from a [snapshot](#particle-snapshots), or the count of a
+[probe](#particle-probes) without a region, give the particles removed.
 
 **Pitfalls.**
 
@@ -227,8 +231,8 @@ $$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2
 \qquad Nu = 2 + 0.6 Re_p^{1/2} Pr^{1/3},$$
 
 with `k` the gas conductivity. The particle is isothermal (its Biot number is
-small) and, unless coupled two-way, does not heat the gas. Particle expressions read it as `T_P`, the
-`file` has it as a column `T_p`, and restart files carry it.
+small) and, unless coupled two-way, does not heat the gas. Particle expressions read it as `T_P`,
+[snapshots](#particle-snapshots) write it as `T_P`, and restart files carry it.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -242,7 +246,7 @@ small) and, unless coupled two-way, does not heat the gas. Particle expressions 
 | `velocity` | the gas velocity at each seed | Velocity of every seeded particle |
 | `temperature` | the gas temperature at each seed | Temperature of every seeded particle (with `specific_heat`) |
 
-The other keys of [`[particles]`](#tracers-particles) (seeds, `file`,
+The other keys of [`[particles]`](#tracers-particles) (seeds,
 `capacity`) are the same. Particle expressions read the particle velocity as
 `V_X`, `V_Y`, `V_Z`. Restart files carry the velocities and temperatures;
 tracers restarted as solid particles start at the gas velocity, and particles
@@ -508,19 +512,19 @@ They are written by `[[write_data]]` and listed by `mallard list fields`.
 
 ```toml
 [[particles.quantities]]
-name = "t_cavity"
+name = "T_CAVITY"
 integral = "in(cavity)"          # time spent in the region cavity of [regions]
 
 [[particles.quantities]]
-name = "T_max"
+name = "T_MAX"
 max = "T"
 
 [[particles.quantities]]
-name = "t_hot"
+name = "T_HOT"
 first_time = "T > 1500"
 
 [[particles.quantities]]
-name = "turns"
+name = "TURNS"
 winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 ```
 
@@ -584,7 +588,7 @@ order. Extrema and first times sample the start of every step, where the
 state is the accepted solution, so they are exact to the step: a peak between
 two steps' starts is missed by the difference.
 
-Quantities are written as columns of `file`, continue across restarts (a
+Quantities are written by [snapshots](#particle-snapshots) that list them, continue across restarts (a
 quantity the restart file does not have starts afresh), move with their
 particles between ranks, and are bitwise the same on any number of ranks.
 
@@ -594,7 +598,7 @@ particles between ranks, and are bitwise the same on any number of ranks.
 [[particles.probes]]
 name = "core"
 region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
-fields = ["turns", "hypot(U_X, U_Y)"]
+fields = ["TURNS", "hypot(U_X, U_Y)"]
 interval = 100
 ```
 
@@ -637,6 +641,41 @@ deposition history.
   residence time of visits (per visit, total, visit counts) is a quantity:
   `integral = "in(name)"` gives the total.
 
+## Particle snapshots
+
+```toml
+[[write_data]]
+prefix = "flow"
+time_interval = 0.5
+fields = ["RHO", "U"]
+particle_fields = ["V", "T_P", "TURNS"]
+```
+
+*Used in:*
+[`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex).
+
+`particle_fields` in a [`[[write_data]]`](output.md#solution-snapshots-write_data)
+entry writes the particles at each of its snapshots: their positions, `ID`,
+and the variables listed (`RHO`, `U`, `P`, `T` of the gas at each particle,
+`V`, `T_P`, and quantities by name). With `fields` too, the mesh and the
+particles are two blocks of one series, which ParaView 6.0 and later open;
+`particles = "separate"` writes them as two series instead, for ParaView 5.12
+and later; `region` keeps the particles in a volume. Files, layout and
+pitfalls: [Particle snapshots](output.md#particle-snapshots). Restart files
+carry every particle and quantity whatever the snapshots write.
+
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-light.svg#gh-light-mode-only)
+![Three particle snapshots of the particle_vortex example over the gas speed: heavy particles seeded in a vortex core are flung out of it and heat toward the gas temperature](../images/guide/particle_snapshots-dark.svg#gh-dark-mode-only)
+
+*Particle snapshots (`particle_fields = ["T_P", "SLIP_MAX"]`) of the
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+example at `t` = 0, 3 and 6, over the gas speed of a mesh snapshot at the same
+times (a Mallard run): the heavy particles seeded in one vortex are flung out
+of it into the strain between the vortices and heat from 0.4 toward the gas's
+1/1.4.*
+
 ## Accuracy
 
 The particles read the gas from the reconstruction's polynomial at their
@@ -677,10 +716,9 @@ In practice:
 - **Several ranks.** Particles that change rank go through the host at every
   step, which takes distributed runs with particles out of CUDA graphs. On one
   GPU, steps with particles are graphed.
-- **Output.** The CSV file and the restart files gather every particle on
-  rank 0 (restart files on every rank): fine for thousands to hundreds of
-  thousands of particles, not millions, until parallel particle output
-  ([#753](https://github.com/MatthewBonanni/mallard/issues/753)).
+- **Output.** [Snapshots](#particle-snapshots) write each rank's particles
+  in parallel. Restart files carry every particle on every rank: fine for
+  thousands to hundreds of thousands of particles, not millions.
 - **Probes** sample on the host: a probe every step of a GPU run stops the
   device at every step; sample every 10 to 100 steps.
 

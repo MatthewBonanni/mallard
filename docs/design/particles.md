@@ -430,16 +430,45 @@ a file's particles onto another mesh is #541).
 
 ## Output
 
-This layer writes the final positions as CSV (`[particles] file`), sorted by
-id, gathered to rank 0. Trajectories, exit records, snapshots and their
-parallel I/O are #753; `Particles::gather` is the interface it replaces.
+Particle snapshots ride `[[write_data]]` (`particle_fields`), so every reason
+a snapshot is written (interval, start, end, stop, checkpoint, trigger,
+divergence) writes the particles too, through the writer's own async queue,
+run record and restart resumption. `Particles::stage_snapshot` (capturable, in
+the step graph's staged outputs) evaluates each slot's position and variables
+on the device, with the slot's id or `EMPTY` outside the region, into pinned
+mirrors; the writer then takes this rank's particles in slot order
+(`Particles::snapshot`).
+
+There is no gather: each rank writes its own particles with collective
+parallel HDF5 at the offset of an exclusive scan of the ranks' counts, with an
+`ID` array, and nothing sorts them. The order of the rows therefore depends on
+the rank count and on migration history, while the set of (id, values) pairs
+does not, bitwise; readers match particles by id. Sorting by id would need a
+global sort (or a gather) at every snapshot for an order that readers and
+ParaView do not need. A snapshot costs one kernel over the slots and a copy of
+the live particles, so it scales with the particles per rank.
+
+Each snapshot's particles are a file of their own, a non-temporal `PolyData`,
+following the write-once series of the mesh (`docs/design/output_objects.md`):
+a file is written once and never reopened, and the series file indexes the
+files through virtual datasets. With mesh fields too, the default series file
+is a VTKHDF 2.1 `PartitionedDataSetCollection` (`VTKHDF/mesh`,
+`VTKHDF/particles`, an `Assembly` of soft links), each block a temporal
+dataset of its own steps, which VTK reads from 9.5 (ParaView 6.0). Mesh-only
+series keep the plain `UnstructuredGrid` index (VTKHDF 2.0, ParaView 5.12),
+and particle-only series a plain temporal `PolyData` index:
+`particles = "separate"` produces exactly the two plain series, so ParaView
+5.12 remains supported by a key. The collection index is rewritten from the
+two blocks' step lists, as the plain index is (`vtkhdf_series::write_collection`).
 
 ## Not in this layer
 
 - **Graphable migration** (above): distributed runs with particles are not
   graphed yet.
-- **Parallel particle I/O** (#753): restart files gather every particle on
-  every rank, which suits thousands of particles, not millions.
+- **Parallel particle restart I/O**: restart files still gather every particle on
+  every rank into header arrays sorted by id, which suits thousands of particles,
+  not millions; per-rank sections of the restart file need a restart format
+  version. Snapshots do not gather.
 - **Remapped restarts** (#541): `type = "remap"` seeds the particles from
   `[particles]` instead of relocating the file's.
 - **Seeding during the run**, regions and weights (#759), counter-based random

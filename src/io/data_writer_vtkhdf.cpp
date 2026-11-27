@@ -20,6 +20,7 @@
 #include <mutex>
 #include <regex>
 #include <sstream>
+#include <tuple>
 
 #include "comm.h"
 #include "common_io.h"
@@ -37,9 +38,12 @@ bool kept_on_resume(double t_entry, rtype t) {
 
 } // namespace
 
-void DataWriter::write_vtkhdf_series(const Index & list) const {
-    std::ofstream out(partial_name(prefix + ".vtkhdf.series"));
-    if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + prefix + ".vtkhdf.series.");
+void DataWriter::write_vtkhdf_series(const Index & list) const { write_series_index(prefix, list); }
+
+void DataWriter::write_series_index(const std::string & file_prefix, const Index & list) {
+    const std::string index = file_prefix + ".vtkhdf.series";
+    std::ofstream out(partial_name(index));
+    if (!out.good()) throw std::runtime_error("DataWriter: Could not open file: " + index + ".");
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
     out << "{\n  \"file-series-version\": \"1.0\",\n  \"files\": [\n";
     for (size_t i = 0; i < list.size(); i++) {
@@ -50,46 +54,57 @@ void DataWriter::write_vtkhdf_series(const Index & list) const {
     }
     out << "  ]\n}\n";
     out.close();
-    if (!out) throw cannot_write("the VTKHDF series index", prefix + ".vtkhdf.series");
-    publish_file("the VTKHDF series index", prefix + ".vtkhdf.series");
+    if (!out) throw cannot_write("the VTKHDF series index", index);
+    publish_file("the VTKHDF series index", index);
 }
 
-void DataWriter::resume_vtkhdf(rtype t) {
-    if (!one_file) {
-        // Keep the snapshots of the previous run's index up to the restart time
-        std::ifstream in(prefix + ".vtkhdf.series");
-        if (!in.good()) return;
-        const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
-        try {
-            const json::Value index = json::parse(std::string(std::istreambuf_iterator<char>(in), {}));
-            for (const auto & e : index["files"].array) {
-                const double t_entry = e["time"].number;
-                const json::Value * step = e.find("step");
-                if (kept_on_resume(t_entry, t)) {
-                    history.push_back({t_entry, step ? static_cast<int64_t>(step->number) : -1,
-                                       (dir / e["name"].string).string()});
-                }
+DataWriter::Index DataWriter::kept_series(const std::string & file_prefix, rtype t) {
+    Index kept;
+    std::ifstream in(file_prefix + ".vtkhdf.series");
+    if (!in.good()) return kept;
+    const std::filesystem::path dir = std::filesystem::path(file_prefix).parent_path();
+    try {
+        const json::Value index = json::parse(std::string(std::istreambuf_iterator<char>(in), {}));
+        for (const auto & e : index["files"].array) {
+            const double t_entry = e["time"].number;
+            const json::Value * step = e.find("step");
+            if (kept_on_resume(t_entry, t)) {
+                kept.push_back({t_entry, step ? static_cast<int64_t>(step->number) : -1, (dir / e["name"].string).string()});
             }
-        } catch (const std::exception & error) {
-            throw std::runtime_error("DataWriter: " + prefix + ".vtkhdf.series is not a series index: " + error.what());
         }
-        return;
+    } catch (const std::exception & error) {
+        throw std::runtime_error("DataWriter: " + file_prefix + ".vtkhdf.series is not a series index: " + error.what());
     }
-    // Rank 0 keeps the series' snapshots up to the restart time (renaming a series in one file of Mallard 0.11
-    // and earlier, which it continues), and every rank numbers on from their count
-    series_steps.clear();
-    vtkhdf_mesh_ready = false;
-    vtkhdf_reuse_mesh = std::filesystem::exists(vtkhdf_mesh_file());
+    return kept;
+}
+
+std::optional<FieldDescription> particle_field_description(const std::string & name) {
+    if (name == "V" || name == "V_X" || name == "V_Y" || name == "V_Z") {
+        return FieldDescription{dim::velocity, "particle velocity", "", ""};
+    }
+    if (name == "T_P") return FieldDescription{dim::temperature, "particle temperature", "", ""};
+    if (name == "ID") return FieldDescription{dim::none, "particle id", "", ""};
+    for (const char * gas : {"RHO", "U", "U_X", "U_Y", "U_Z", "P", "T"}) {
+        if (name == gas) return field_units::find(name);
+    }
+    return std::nullopt;
+}
+
+DataWriter::Index DataWriter::resume_index(const std::string & index, rtype t, const std::string & legacy,
+                                           const std::string & block, bool first,
+                                           std::vector<vtkhdf_series::Step> & steps) const {
+    // Rank 0 keeps the series' snapshots up to the restart time, and every rank numbers on from their count
+    steps.clear();
     std::string kept, error;
     if (comm::is_root()) {
         try {
-            series_steps = vtkhdf_series::resume(prefix + ".vtkhdf", double(t), prefix + "_legacy.vtkhdf");
+            steps = vtkhdf_series::resume(index, double(t), legacy, block, first);
         } catch (const std::exception & e) {
             error = e.what();
         }
         std::ostringstream out;
         out << std::setprecision(std::numeric_limits<double>::max_digits10);
-        for (const auto & s : series_steps) {
+        for (const auto & s : steps) {
             const auto step = s.values.find("FieldData/STEP");
             out << s.t << " " << (step == s.values.end() ? int64_t(-1) : int64_t(step->second)) << " " << s.file << "\n";
         }
@@ -100,14 +115,42 @@ void DataWriter::resume_vtkhdf(rtype t) {
         error = comm::broadcast(error);
         kept = comm::broadcast(kept);
     }
-    if (!error.empty()) throw std::runtime_error("DataWriter: continuing " + prefix + ".vtkhdf: " + error);
-    const std::filesystem::path dir = std::filesystem::path(prefix).parent_path();
+    if (!error.empty()) throw std::runtime_error("DataWriter: continuing " + index + ": " + error);
+    const std::filesystem::path dir = std::filesystem::path(index).parent_path();
     std::istringstream in(kept);
+    Index out;
     IndexEntry e;
     while (in >> e.t >> e.step && in.get() && std::getline(in, e.file)) {
         e.file = (dir / e.file).string();
-        history.push_back(e);
+        out.push_back(e);
     }
+    return out;
+}
+
+void DataWriter::resume_particles(rtype t) {
+    particles->series_steps.clear();
+    particles->history.clear();
+    if (!one_file) {
+        particles->history = kept_series(particles->prefix, t);
+    } else if (combined) {
+        particles->history = resume_index(prefix + ".vtkhdf", t, "", PARTICLE_BLOCK, false, particles->series_steps);
+    } else {
+        particles->history = resume_index(particles->prefix + ".vtkhdf", t, particles->prefix + "_legacy.vtkhdf", "",
+                                          true, particles->series_steps);
+    }
+}
+
+void DataWriter::resume_vtkhdf(rtype t) {
+    if (!one_file) {
+        // Keep the snapshots of the previous run's index up to the restart time
+        history = kept_series(prefix, t);
+        return;
+    }
+    // A series in one file of Mallard 0.11 and earlier is renamed, and continued
+    vtkhdf_mesh_ready = false;
+    vtkhdf_reuse_mesh = std::filesystem::exists(vtkhdf_mesh_file());
+    history = resume_index(prefix + ".vtkhdf", t, prefix + "_legacy.vtkhdf", combined ? MESH_BLOCK : "", true,
+                           series_steps);
 }
 
 #ifdef Mallard_HAS_HDF5
@@ -400,7 +443,7 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
         try {
             Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "H5Gopen2");
             write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
-            write_int_attribute(root, "version", static_cast<int>(file_format::VTKHDF_OUTPUT.version));
+            write_int_attribute(root, "version", static_cast<int>(VTKHDF_MESH_VERSION));
             Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
             write_array_attribute(top, "Version", VTKHDF_VERSION);
             write_string_scalar_attribute(top, "Type", "UnstructuredGrid");
@@ -499,6 +542,78 @@ void DataWriter::write_vtkhdf(const std::string & filename, const Block & snapsh
     }
 }
 
+void DataWriter::write_particles(const std::string & filename, const Block & block, const ParticleCloud & cloud) {
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    const bool distributed = mesh->n_global_cells > 0;
+    const bool serial = !distributed;
+    const uint64_t mine = first_rank(distributed) ? 1 : 0;
+    const uint64_t n = cloud.id.size();
+    const auto [first, total] = scan(n, distributed);
+    const std::string & provenance = provenance::json();
+    Handle fapl(file_access(distributed), H5Pclose, "H5Pcreate");
+    Handle dxpl(transfer(distributed), H5Pclose, "H5Pcreate");
+    Handle fcpl(file_creation(fapl, provenance.size()), H5Pclose, "H5Pcreate");
+    Handle file(H5Fcreate(partial_name(filename).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + filename);
+    {
+        Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+        write_strings_attribute(root, provenance::ATTRIBUTE, {provenance});
+        write_int_attribute(root, "version", static_cast<int>(file_format::PARTICLE_OUTPUT.version));
+        write_string_scalar_attribute(root, "content", "particles");
+    }
+    Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
+    write_array_attribute(top, "Version", VTKHDF_VERSION);
+    write_string_scalar_attribute(top, "Type", "PolyData");
+    {
+        Handle field_data(H5Gcreate2(top, "FieldData", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "FieldData");
+        put_rows(field_data, "TIME", 1, 1, 0, mine, &block.time, dxpl);
+        annotate(field_data, "TIME", FieldDescription{dim::time, "time", "time", ""});
+        put_rows(field_data, "STEP", 1, 1, 0, mine, &block.step, dxpl);
+        annotate(field_data, "STEP", FieldDescription{dim::none, "time step number", "", ""});
+        const std::string text = block.json();
+        put_string_row(file, snapshot_block::DATASET, 1, 0, mine, text, snapshot_block::dataset_width(text.size()), dxpl);
+    }
+    // One vertex per particle, each rank's after the lower ranks'
+    write_count(top, "NumberOfPoints", total, dxpl, distributed);
+    write_dataset(top, "Points", total, 3, first, n, cloud.x.data(), dxpl, false, serial, io_threads);
+    annotate(top, "Points", FieldDescription{dim::length, "particle positions", "", ""});
+    for (const char * kind : {"Vertices", "Lines", "Polygons", "Strips"}) {
+        Handle group(H5Gcreate2(top, kind, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, kind);
+        const bool vertices = std::string(kind) == "Vertices";
+        const uint64_t n_cells = vertices ? total : 0, mine_cells = vertices ? n : 0;
+        write_count(group, "NumberOfCells", n_cells, dxpl, distributed);
+        write_count(group, "NumberOfConnectivityIds", n_cells, dxpl, distributed);
+        // The offsets have one more row than the cells: the last rank writes it
+        std::vector<int64_t> offsets, connectivity;
+        for (uint64_t p = 0; p < mine_cells; p++) offsets.push_back(static_cast<int64_t>(first + p));
+        connectivity = offsets;
+        if (last_rank(distributed)) offsets.push_back(static_cast<int64_t>(n_cells));
+        write_dataset(group, "Offsets", n_cells + 1, 1, vertices ? first : 0, offsets.size(), offsets.data(), dxpl,
+                      false, serial, io_threads);
+        write_dataset(group, "Connectivity", n_cells, 1, vertices ? first : 0, connectivity.size(), connectivity.data(),
+                      dxpl, false, serial, io_threads);
+    }
+    Handle cell_data(H5Gcreate2(top, "CellData", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "CellData");
+    Handle point_data(H5Gcreate2(top, "PointData", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "PointData");
+    const std::vector<int64_t> ids(cloud.id.begin(), cloud.id.end());
+    write_dataset(point_data, "ID", total, 1, first, n, ids.data(), dxpl, false, serial, io_threads);
+    annotate(point_data, "ID", *particle_field_description("ID"));
+    const size_t n_columns = n > 0 ? cloud.values.size() / n : 0;
+    std::vector<double> column;
+    for (const auto & field : particles->fields) {
+        const uint32_t n_comp = field.n_components == 1 ? 1 : 3;
+        column.assign(n * n_comp, 0.0);
+        for (uint64_t p = 0; p < n; p++) {
+            for (uint32_t c = 0; c < field.n_components; c++) {
+                column[p * n_comp + c] = cloud.values[p * n_columns + field.first + c];
+            }
+        }
+        write_dataset(point_data, field.name.c_str(), total, static_cast<int>(n_comp), first, n, column.data(), dxpl,
+                      false, serial, io_threads);
+        if (const auto d = particle_field_description(field.name)) annotate(point_data, field.name, *d);
+        h5::cell_methods(point_data, field.name, N_DIM == 2 ? "area: point" : "volume: point");
+    }
+}
+
 #else
 
 void DataWriter::write_vtkhdf(const std::string &, const Block &, const Values &) {
@@ -506,5 +621,9 @@ void DataWriter::write_vtkhdf(const std::string &, const Block &, const Values &
 }
 
 void DataWriter::build_vtkhdf_cells() {}
+
+void DataWriter::write_particles(const std::string &, const Block &, const ParticleCloud &) {
+    throw std::logic_error("DataWriter: VTKHDF output without HDF5");
+}
 
 #endif

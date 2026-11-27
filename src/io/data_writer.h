@@ -27,10 +27,12 @@
 #include "input.h"
 
 #include "data.h"
+#include "file_format.h"
 #include "field_units.h"
 #include "global_order.h"
 #include "mesh.h"
 #include "output_clock.h"
+#include "particle_cloud.h"
 #include "pinned_mirrors.h"
 #include "snapshot_block.h"
 #include "vtkhdf_series.h"
@@ -201,6 +203,12 @@ struct CellSubset {
 };
 
 /**
+ * @brief Units and long name of a field of particle snapshots (a particle variable), or none for a quantity
+ *        (units unknown).
+ */
+std::optional<FieldDescription> particle_field_description(const std::string & name);
+
+/**
  * @brief Writes snapshots either every `interval` steps or every
  *        `time_interval` units of simulation time. Time-based writers also
  *        constrain the time step so that snapshots land exactly on output times.
@@ -231,6 +239,21 @@ class DataWriter {
                   const std::vector<std::string> & restart_variables = {},
                   const CellSubset * subset = nullptr,
                   const std::string & prefix = "");
+
+        /**
+         * @brief Also write the particles at every snapshot (particle_fields): a VTKHDF point cloud of their
+         *        positions, ids and these fields, each rank's particles at its offset in the file.
+         * @param capture This rank's particles of the snapshot being written.
+         * @param region The region they are in, for the log, or empty for every particle.
+         */
+        void set_particles(std::vector<ParticleField> particle_fields, std::function<ParticleCloud()> capture,
+                           const std::string & region);
+        /** @brief Whether it writes the particles as a block of the mesh's file (ParaView 6.0 and later). */
+        bool combines_particles() const { return combined && particles; }
+        /** @brief Whether it writes particles. */
+        bool writes_particles() const { return static_cast<bool>(particles); }
+        /** @brief The file ParaView opens for the particle snapshots (.vtkhdf, or .vtkhdf.series), or empty. */
+        std::string particle_index_file() const;
 
         /**
          * @brief Write files on a background thread ([output] async), and
@@ -371,13 +394,31 @@ class DataWriter {
                           const std::string & reason);
         /** @brief Start sizing and hashing this rank's files of the snapshot just written, in the background. */
         void hash_written();
+        struct InFlight;
+        /** @brief Start sizing and hashing the files of w, in the background, and record them in order. */
+        void queue_hashing(std::unique_ptr<InFlight> w);
+        /**
+         * @brief The particles of the snapshot at (step, t): written by every rank of a distributed mesh, in the
+         *        background when asynchronous and not collective.
+         */
+        void write_particle_snapshot(uint64_t step, rtype t, bool force, ParticleCloud cloud);
+        /** @brief The file of particle snapshot number (the step, or with time_interval the snapshot's index). */
+        std::string particle_file(uint64_t number) const;
+        /** @brief Run job after the write in progress: in the background if asynchronous and allowed. */
+        void run_after_pending(std::function<void()> job, bool allow_async);
+        /** @brief VTKHDF files of the mesh alone: version 2 (VTKHDF_OUTPUT) is a collection of the mesh and its particles. */
+        static constexpr int64_t VTKHDF_MESH_VERSION = 1;
+        /** @brief The blocks of the collection. */
+        static constexpr const char * MESH_BLOCK = "mesh";
+        static constexpr const char * PARTICLE_BLOCK = "particles";
+        /** @brief The particle snapshots as the setup banner lists them. */
+        OutputSummary particle_summary() const;
         /**
          * @brief The output records of the hashed snapshots, in order, every rank's
          *        files gathered: those hashed on every rank, or all if wait
          *        (collective on a distributed mesh).
          */
         void record_hashed(bool wait);
-        struct InFlight;
         /** @brief The files of a hashed snapshot, every rank's (collective), each with its hash. */
         void gather_hashes(InFlight & w, bool collective) const;
         /**
@@ -419,6 +460,24 @@ class DataWriter {
         /** @brief The subset of these owned cells, with these fractions of every cell, numbered in global order (collective). */
         void select_subset(const std::vector<uint32_t> & cells, const std::vector<double> & fractions);
         void write_vtkhdf_series(const Index & series) const;
+        /** @brief The snapshots of the .vtkhdf.series index of file_prefix that a run restarted at t keeps. */
+        static Index kept_series(const std::string & file_prefix, rtype t);
+        /**
+         * @brief The snapshots of a series index (of its block, if given) up to t, which rank 0 describes into
+         *        steps (collective): vtkhdf_series::resume.
+         */
+        Index resume_index(const std::string & index, rtype t, const std::string & legacy, const std::string & block,
+                           bool first, std::vector<vtkhdf_series::Step> & steps) const;
+        /** @brief A .vtkhdf.series index of the files of series, named after file_prefix. */
+        static void write_series_index(const std::string & file_prefix, const Index & series);
+        /**
+         * @brief The particles of a snapshot as a VTKHDF PolyData of vertices, a file of its own; each rank's
+         *        after the lower ranks'.
+         */
+        void write_particles(const std::string & filename, const Block & block, const ParticleCloud & cloud);
+        void resume_particles(rtype t);
+        /** @brief The snapshot block of the particles at (step, t). */
+        Block particle_block(uint64_t step, rtype t, bool force) const;
         /** @brief Whether this snapshot writes the series' mesh file. */
         bool writes_vtkhdf_mesh() const { return one_file && !subset_update && !vtkhdf_mesh_ready && !vtkhdf_reuse_mesh; }
         std::string vtkhdf_mesh_file() const { return prefix + "_mesh.vtkhdf"; }
@@ -540,6 +599,19 @@ class DataWriter {
         std::vector<vtkhdf_series::Step> series_steps;
         bool vtkhdf_mesh_ready = false;  // the mesh file is written, or checked
         bool vtkhdf_reuse_mesh = false;  // a continued series: check the mesh file rather than write it
+        // Particle snapshots (particle_fields), and whether the writer has cell fields too
+        struct ParticleOutput {
+            std::vector<ParticleField> fields;
+            std::function<ParticleCloud()> capture;
+            std::string region;
+            std::string prefix;  // of its files
+            std::vector<vtkhdf_series::Step> series_steps;  // rank 0: the snapshots its series index lists
+            Index history;       // its files, without series
+            std::unique_ptr<InFlight> in_flight;
+        };
+        std::unique_ptr<ParticleOutput> particles;
+        bool mesh_output = true;  // false: particle_fields only
+        bool combined = false;    // the series index is a collection of the mesh and the particles
 };
 
 #endif // DATA_WRITER_H

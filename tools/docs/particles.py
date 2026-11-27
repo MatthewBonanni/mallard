@@ -16,7 +16,6 @@ and the particles of examples/particle_bounce against their exact trajectories
 (tools/mallard/restart.py), which carry the particles.
 """
 import argparse
-import csv
 import functools
 import math
 import subprocess
@@ -39,7 +38,7 @@ sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "examples" / "particle_bounce"),
 from mallard import restart  # noqa: E402
 from check_particle_bounce import trajectory, walls_of  # noqa: E402
 from check_particle_centrifuge import spiral  # noqa: E402
-from check_particle_settling import terminal_velocity  # noqa: E402
+from check_particle_settling import read_particles, terminal_velocity  # noqa: E402
 
 THEORY = figstyle.OUT.parent / "theory"
 
@@ -271,9 +270,7 @@ def settling_velocity(binary, d, rho_p, drag="schiller_naumann", periods=6):
     cfg = cfg.replace("t_stop = 0.25", f"t_stop = {periods * tau!r}").replace("Lx = 0.04", "Lx = 0.16").replace(
         "Ly = 0.04", "Ly = 0.16")
     run(binary, cfg, work)
-    with open(Path(work) / "droplets.csv") as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    return -float(rows[1][rows[0].index("v_y")]), v_t
+    return -read_particles(Path(work) / "droplets")[0]["V_Y"], v_t
 
 
 def singh_terminal_velocity(d, rho_p, rho, mu, g, c, gamma=1.4):
@@ -328,8 +325,8 @@ def particle_terminal_velocity(P, args):
 def bounce_run(binary):
     work = Path(tempfile.mkdtemp())
     run(binary, (ROOT / "examples" / "particle_bounce" / "input.toml").read_text() +
-        '\n[[write_data]]\nprefix = "bounce"\nformat = "restart"\ntime_interval = 0.05\n', work)
-    return snapshots(work, "bounce")
+        '\n[[write_data]]\nprefix = "path"\nformat = "restart"\ntime_interval = 0.05\n', work)
+    return snapshots(work, "path")
 
 
 def particle_bounce(P, args):

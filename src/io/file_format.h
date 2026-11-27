@@ -32,8 +32,9 @@ inline constexpr Format RESTART{"restart", 7, 1};
 inline constexpr Format MESH{"HDF5 mesh", 1, 1};
 inline constexpr Format HDF5_OUTPUT{"HDF5 output", 1, 1};
 inline constexpr Format VTU_OUTPUT{"VTU output", 1, 1};
-inline constexpr Format VTKHDF_OUTPUT{"VTKHDF output", 1, 1};
+inline constexpr Format VTKHDF_OUTPUT{"VTKHDF output", 2, 1};
 inline constexpr Format PROBE_OUTPUT{"probe output", 1, 1};
+inline constexpr Format PARTICLE_OUTPUT{"particle output", 1, 1};
 
 /**
  * @brief Throws a std::runtime_error if this build cannot read `version` of

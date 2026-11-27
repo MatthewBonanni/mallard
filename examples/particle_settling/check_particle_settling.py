@@ -2,12 +2,12 @@
 """The particle-settling example (examples/particle_settling): the velocities of
 the particles at the end of the run against their terminal velocity.
 
-    check_particle_settling.py droplets.csv [--input input.toml]
-    check_particle_settling.py smoke.csv --input smoke.toml
+    check_particle_settling.py droplets [--input input.toml]
+    check_particle_settling.py smoke --input smoke.toml
 
 Reads the particles' diameter, density, drag law and gravity, the gas viscosity
 and state and t_stop from the input (by default the input.toml next to this
-script for droplets.csv, smoke.toml for smoke.csv), and computes the terminal
+script for droplets, smoke.toml for smoke), and computes the terminal
 velocity v_t = tau g (1 - rho / rho_p) / f(Re(v_t)) with the drag law's f
 (Stokes: f = 1; Schiller-Naumann: 1 + 0.15 Re^0.687) by fixed-point
 iteration, and the Stokes value for comparison. Particles whose relaxation time
@@ -16,7 +16,6 @@ approach it as e^(-t / tau). A particle more than 1e-3 v_t off (plus the rest
 of its transient) fails. Exits 1 on any failure.
 """
 import argparse
-import csv
 import math
 import sys
 import tomllib
@@ -25,11 +24,19 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
-def read_particles(path):
-    with open(path) as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    head = rows[0]
-    return [dict(zip(head, map(float, r))) for r in rows[1:]]
+def read_particles(prefix):
+    """id, x, y, V_X, V_Y of the particles of the run's last snapshot, PREFIX_particles_<n>.vtkhdf."""
+    import h5py
+
+    path = Path(prefix)
+    files = sorted(path.parent.glob(path.name + "_particles_*.vtkhdf"), key=lambda f: int(f.stem.rsplit("_", 1)[1]))
+    if not files:
+        sys.exit(f"no {prefix}_particles_<n>.vtkhdf: run the example first")
+    with h5py.File(files[-1], "r") as f:
+        g = f["VTKHDF"]
+        points, ids, v = g["Points"][:], g["PointData/ID"][:], g["PointData/V"][:]
+    return [{"id": int(i), "x": float(p[0]), "y": float(p[1]), "V_X": float(u[0]), "V_Y": float(u[1])}
+            for i, p, u in zip(ids, points, v)]
 
 
 def terminal_velocity(d, rho_p, rho, mu, g, drag):
@@ -48,10 +55,10 @@ def terminal_velocity(d, rho_p, rho, mu, g, drag):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("csv", help="the particles file of the run ([particles] file)")
-    ap.add_argument("--input", help="the run's input file (default: input.toml, or smoke.toml for smoke.csv)")
+    ap.add_argument("prefix", help="the prefix of the run's particle snapshots ([[write_data]] prefix)")
+    ap.add_argument("--input", help="the run's input file (default: input.toml, or smoke.toml for smoke)")
     args = ap.parse_args()
-    inp = Path(args.input) if args.input else HERE / ("smoke.toml" if "smoke" in Path(args.csv).name else "input.toml")
+    inp = Path(args.input) if args.input else HERE / ("smoke.toml" if "smoke" in Path(args.prefix).name else "input.toml")
     cfg = tomllib.loads(inp.read_text())
     p, ph, init = cfg["particles"], cfg["physics"], cfg["initialize"]
     rho = init["p"] / (ph["p_ref"] / (ph["rho_ref"] * ph["T_ref"]) * init["T"])
@@ -62,14 +69,14 @@ def main():
     re = rho * v_t * p["diameter"] / ph["mu"]
     print(f"{inp.name}: d = {p['diameter'] * 1e6:g} um, tau = {tau * 1e3:.4g} ms, Re_p = {re:.3g}")
     print(f"terminal velocity: {v_t:.6g} m/s ({drag}), Stokes' law {v_stokes:.6g} m/s")
-    rows = read_particles(args.csv)
+    rows = read_particles(args.prefix)
     transient = math.exp(-t / tau)
     tol = 1e-3 + transient
     failed = 0
     for r in rows:
-        v = -r["v_y"]
+        v = -r["V_Y"]
         err = abs(v - v_t) / v_t
-        ok = err <= tol and abs(r["v_x"]) <= 1e-12 * v_t
+        ok = err <= tol and abs(r["V_X"]) <= 1e-12 * v_t
         failed += not ok
         print(f"  particle {int(r['id'])}: v = {v:.6g} m/s, {err:.1e} of v_t{'' if ok else '  FAIL'}")
     print(f"{len(rows) - failed} of {len(rows)} particles within {tol:.1e} of v_t (rest of the transient {transient:.1e})")

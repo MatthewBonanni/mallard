@@ -78,7 +78,6 @@ Pr = 0.72
 
 [particles]
 type = "solid"
-file = "particles.csv"
 # St = 1: tau = 5 H / U0 = 16.67, d = sqrt(18 mu tau / rho_p)
 density = 2000.0
 diameter = 3.872983346207417e-3

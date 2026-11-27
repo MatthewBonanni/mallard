@@ -2,7 +2,7 @@
 """The particle-centrifuge example (examples/particle_centrifuge): the particles
 at the end of the run against their exact spirals in solid-body rotation.
 
-    check_particle_centrifuge.py particles.csv [--input input.toml]
+    check_particle_centrifuge.py centrifuge [--input input.toml]
 
 In gas rotating at Omega, a particle with Stokes drag and no gravity moves by
 tau z'' + z' = i Omega z (z = x + i y), so z(t) = a e^(l1 t) + b e^(l2 t), with
@@ -15,7 +15,6 @@ the input: Omega from u, the outer radius from [mesh]. Exits 1 on any failure.
 """
 import argparse
 import cmath
-import csv
 import math
 import re
 import sys
@@ -25,10 +24,19 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
-def read_particles(path):
-    with open(path) as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    return [dict(zip(rows[0], map(float, r))) for r in rows[1:]]
+def read_particles(prefix):
+    """id, x, y, V_X, V_Y of the particles of the run's last snapshot, PREFIX_particles_<n>.vtkhdf."""
+    import h5py
+
+    path = Path(prefix)
+    files = sorted(path.parent.glob(path.name + "_particles_*.vtkhdf"), key=lambda f: int(f.stem.rsplit("_", 1)[1]))
+    if not files:
+        sys.exit(f"no {prefix}_particles_<n>.vtkhdf: run the example first")
+    with h5py.File(files[-1], "r") as f:
+        g = f["VTKHDF"]
+        points, ids, v = g["Points"][:], g["PointData/ID"][:], g["PointData/V"][:]
+    return [{"id": int(i), "x": float(p[0]), "y": float(p[1]), "V_X": float(u[0]), "V_Y": float(u[1])}
+            for i, p, u in zip(ids, points, v)]
 
 
 def roots(omega, tau):
@@ -56,7 +64,7 @@ def arrival(z0, omega, tau, r_outer, t_end, dt=1e-3):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("csv", help="the particles file of the run ([particles] file)")
+    ap.add_argument("prefix", help="the prefix of the run's particle snapshots ([[write_data]] prefix)")
     ap.add_argument("--input", default=str(HERE / "input.toml"), help="the run's input file")
     args = ap.parse_args()
     cfg = tomllib.loads(Path(args.input).read_text())
@@ -67,7 +75,7 @@ def main():
     l1, _ = roots(omega, tau)
     print(f"Omega tau = {omega * tau:g}: the spirals grow at {l1.real:.4f} and turn at {l1.imag:.4f} "
           f"({l1.imag / omega:.3f} Omega)")
-    rows = {int(r["id"]): r for r in read_particles(args.csv)}
+    rows = {int(r["id"]): r for r in read_particles(args.prefix)}
     failed = 0
     for k, (x0, y0) in enumerate(p["points"]):
         z0 = complex(x0, y0)

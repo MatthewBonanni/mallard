@@ -11,7 +11,7 @@
 #
 # Run (21,700 steps: under a minute on one CPU thread):
 #   ../../build/src/mallard -i input.toml
-#   python check_particle_settling.py droplets.csv
+#   python check_particle_settling.py droplets
 #
 # Result: after 0.25 s, about ten relaxation times, every droplet falls at
 # 0.25025 m/s, within 2e-5 of the correlation's terminal velocity.
@@ -64,12 +64,17 @@ density = 1000.0         # kg/m^3
 drag = "schiller_naumann"
 gravity = [0.0, -9.81]   # m/s^2, on the particles only
 velocity = [0.0, 0.0]    # released at rest
-file = "droplets.csv"
 
 [particles.lattice]
 lo = [0.005, 0.005]
 hi = [0.035, 0.035]
 n = [3, 3]
+
+# The particles at the start and the end, droplets_particles_<n>.vtkhdf
+[[write_data]]
+prefix = "droplets"
+particle_fields = ["V"]
+time_interval = 0.25
 
 [output]
 check_interval = 5000

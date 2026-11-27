@@ -1,8 +1,9 @@
 {
- "default": "\"\"",
  "dims": [
-  2
+  2,
+  3
  ],
+ "required": true,
  "set_in": [
   "examples/particle_bounce/input.toml",
   "examples/particle_centrifuge/input.toml",
@@ -12,5 +13,5 @@
   "examples/particle_vortex/input.toml",
   "examples/tracer_vortex/input.toml"
  ],
- "type": "string"
+ "type": "array"
 }

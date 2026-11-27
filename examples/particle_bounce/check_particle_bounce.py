@@ -2,7 +2,7 @@
 """The particle-bounce example (examples/particle_bounce): the particles at the
 end of the run against their exact trajectories.
 
-    check_particle_bounce.py particles.csv [--input input.toml]
+    check_particle_bounce.py bounce [--input input.toml]
 
 With Stokes drag in gas at rest, the motion between bounces is exact: along
 each axis, dv/dt = -v / tau + g', so v(s) = v_t + (v0 - v_t) e^(-s/tau) and
@@ -15,7 +15,6 @@ gravity: a particle farther than 1e-6 from its exact position fails. Exits 1
 on any failure.
 """
 import argparse
-import csv
 import math
 import sys
 import tomllib
@@ -25,10 +24,19 @@ HERE = Path(__file__).resolve().parent
 NAMES = {(1, 0): "bottom", (1, 1): "top", (0, 0): "left", (0, 1): "right"}
 
 
-def read_particles(path):
-    with open(path) as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    return [dict(zip(rows[0], map(float, r))) for r in rows[1:]]
+def read_particles(prefix):
+    """id, x, y, V_X, V_Y of the particles of the run's last snapshot, PREFIX_particles_<n>.vtkhdf."""
+    import h5py
+
+    path = Path(prefix)
+    files = sorted(path.parent.glob(path.name + "_particles_*.vtkhdf"), key=lambda f: int(f.stem.rsplit("_", 1)[1]))
+    if not files:
+        sys.exit(f"no {prefix}_particles_<n>.vtkhdf: run the example first")
+    with h5py.File(files[-1], "r") as f:
+        g = f["VTKHDF"]
+        points, ids, v = g["Points"][:], g["PointData/ID"][:], g["PointData/V"][:]
+    return [{"id": int(i), "x": float(p[0]), "y": float(p[1]), "V_X": float(u[0]), "V_Y": float(u[1])}
+            for i, p, u in zip(ids, points, v)]
 
 
 def walls_of(cfg):
@@ -85,7 +93,7 @@ def trajectory(x0, v0, t_end, tau, g_eff, box, walls, samples=None):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("csv", help="the particles file of the run ([particles] file)")
+    ap.add_argument("prefix", help="the prefix of the run's particle snapshots ([[write_data]] prefix)")
     ap.add_argument("--input", default=str(HERE / "input.toml"), help="the run's input file")
     args = ap.parse_args()
     cfg = tomllib.loads(Path(args.input).read_text())
@@ -94,7 +102,7 @@ def main():
     tau = p["density"] * p["diameter"] ** 2 / (18.0 * ph["mu"])
     g_eff = [g * (1.0 - rho / p["density"]) for g in p["gravity"]]
     box = [(0.0, mesh["Lx"]), (0.0, mesh["Ly"])]
-    rows = {int(r["id"]): r for r in read_particles(args.csv)}
+    rows = {int(r["id"]): r for r in read_particles(args.prefix)}
     failed = 0
     for k, seed in enumerate(p["points"]):
         exact = trajectory(seed, p["velocity"], cfg["run"]["t_stop"], tau, g_eff, box, walls_of(cfg))

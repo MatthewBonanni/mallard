@@ -44,6 +44,7 @@ inline constexpr const char * WALL_MODEL_EXCHANGE = "W-WALL-MODEL-EXCHANGE";
 inline constexpr const char * DNS_ETA = "W-DNS-ETA";
 inline constexpr const char * PARTICLE_SIZE = "W-PARTICLE-SIZE";  // particles not much smaller than their cells
 inline constexpr const char * PARTICLE_VOLUME_FRACTION = "W-PARTICLE-VOLUME-FRACTION";  // not a dilute suspension
+inline constexpr const char * PARAVIEW_VERSION = "W-PARAVIEW-VERSION";  // files that older ParaView does not read
 inline constexpr const char * TABLE_PRESSURE = "W-TABLE-PRESSURE";  // a flamelet run far from its table's pressure
 inline constexpr const char * SIZING_FIXED = "W-SIZING-FIXED";  // the memory that does not scale with the cells
 inline constexpr const char * SIZING_PARTS = "W-SIZING-PARTS";  // no partition fits
@@ -118,8 +119,8 @@ inline constexpr auto ALL = std::to_array<Entry>({
     {QUALITY_ASPECT_RATIO, CHECK_PAGE}, {QUALITY_VOLUME_RATIO, CHECK_PAGE}, {CFL_LIMIT, CHECK_PAGE},
     {TFLES_THICKENING, CHECK_PAGE}, {WALL_Y_PLUS, CHECK_PAGE}, {WALL_SPACING, CHECK_PAGE},
     {WALL_MODEL_EXCHANGE, CHECK_PAGE}, {DNS_ETA, CHECK_PAGE}, {PARTICLE_SIZE, CHECK_PAGE},
-    {PARTICLE_VOLUME_FRACTION, CHECK_PAGE}, {TABLE_PRESSURE, CHECK_PAGE}, {SIZING_FIXED, CHECK_PAGE},
-    {SIZING_PARTS, CHECK_PAGE}, {TRIGGER_NEVER, CHECK_PAGE},
+    {PARTICLE_VOLUME_FRACTION, CHECK_PAGE}, {PARAVIEW_VERSION, CHECK_PAGE}, {TABLE_PRESSURE, CHECK_PAGE},
+    {SIZING_FIXED, CHECK_PAGE}, {SIZING_PARTS, CHECK_PAGE}, {TRIGGER_NEVER, CHECK_PAGE},
     {ENV_GPU_AWARE_MPI, CHECK_PAGE}, {ENV_HOST_STAGING, CHECK_PAGE}, {ENV_PLACEMENT, CHECK_PAGE},
     {ENV_THREAD_BINDING, CHECK_PAGE},
     {RUN, RUN_PAGE}, {DIVERGED, RUN_PAGE}, {HEALTH_MARGIN, RUN_PAGE},

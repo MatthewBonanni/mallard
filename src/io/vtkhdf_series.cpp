@@ -318,124 +318,194 @@ std::vector<Step> describe(const std::string & file, size_t max_steps) {
     return out;
 }
 
+namespace {
+
+/**
+ * @brief The arrays, values and steps of these snapshots under top (VTKHDF, or a block of a collection), with the
+ *        files and snapshot blocks of the steps as datasets of datasets named with suffix.
+ */
+void write_tree(hid_t top, hid_t datasets, const std::string & suffix, const std::vector<Step> & steps,
+                const std::filesystem::path & dir) {
+    const Step & last = steps.back();
+    Handle last_file(H5Fopen((dir / last.file).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose,
+                     "opening " + last.file);
+    Handle last_top(H5Gopen2(last_file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
+    const bool poly = h5::read_strings_attribute(last_top, "Type").at(0) == "PolyData";
+    const size_t n = steps.size();
+    for (const char * name : {"CellData", "PointData", "FieldData"}) {
+        if (H5Lexists(top, name, H5P_DEFAULT) <= 0) {
+            Handle g(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
+        }
+    }
+    // A mesh that every step shares is written once, at offsets 0
+    bool shared_mesh = true;
+    for (const auto & [path, src] : last.arrays) {
+        if (!is_mesh(path)) continue;
+        for (const Step & s : steps) shared_mesh = shared_mesh && s.arrays.contains(path) && s.arrays.at(path) == src;
+    }
+    for (const auto & [path, value] : last.values) {
+        const bool field = path.starts_with("FieldData/");
+        std::vector<double> values;
+        for (const Step & s : steps) {
+            values.push_back(s.values.contains(path) ? s.values.at(path) : 0.0);
+            if (!field && shared_mesh) break;
+        }
+        Handle source(H5Dopen2(last_top, path.c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
+        Handle type(H5Dget_type(source), H5Tclose, "H5Dget_type");
+        Handle group = group_of(top, path);
+        write_values(group, leaf(path), type, values);
+        Handle dset(H5Dopen2(group, leaf(path).c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
+        copy_attributes(source, dset);
+    }
+    std::map<std::string, Layout> layouts;
+    for (const auto & [path, src] : last.arrays) {
+        bool shared = shared_mesh;
+        if (!is_mesh(path)) {
+            shared = std::all_of(steps.begin(), steps.end(),
+                                 [&](const Step & s) { return s.arrays.contains(path) && s.arrays.at(path) == src; });
+        }
+        for (const Step & s : steps) {
+            if (!s.arrays.contains(path)) throw std::runtime_error(s.file + " has no " + path + ", which " + last.file + " has");
+        }
+        layouts[path] = write_array(top, path, steps, shared, dir);
+    }
+
+    Handle group(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating Steps");
+    h5::write_attribute<int64_t>(group, "NSteps", static_cast<int64_t>(n));
+    std::vector<double> times;
+    for (const Step & s : steps) times.push_back(s.t);
+    h5::write_rows(group, "Values", n, 1, 0, n, times.data(), H5P_DEFAULT);
+    if (H5Lexists(last_top, "FieldData", H5P_DEFAULT) > 0 && H5Lexists(last_top, "FieldData/TIME", H5P_DEFAULT) > 0) {
+        Handle time(H5Dopen2(last_top, "FieldData/TIME", H5P_DEFAULT), H5Dclose, "opening FieldData/TIME");
+        Handle values(H5Dopen2(group, "Values", H5P_DEFAULT), H5Dclose, "opening Steps/Values");
+        copy_attributes(time, values);
+    }
+    const auto column = [&](const char * name, auto row_of, int cols = 1) {
+        std::vector<int64_t> values;
+        for (size_t s = 0; s < n; s++) {
+            for (int k = 0; k < cols; k++) values.push_back(static_cast<int64_t>(row_of(s, k)));
+        }
+        h5::write_rows(group, name, n, cols, 0, n, values.data(), H5P_DEFAULT);
+    };
+    const auto first_row = [&](const std::string & path, size_t s) { return layouts.at(path).first[s]; };
+    column("NumberOfParts", [](size_t, int) { return 1; });
+    column("PartOffsets", [&](size_t s, int) { return shared_mesh ? 0 : s; });
+    column("PointOffsets", [&](size_t s, int) { return first_row("Points", s); });
+    if (poly) {
+        // Each step's offsets of a kind of cells have one more row than its cells
+        column("CellOffsets", [&](size_t s, int k) {
+            return first_row(std::string(POLY_KINDS[size_t(k)]) + "/Offsets", s) - (shared_mesh ? 0 : s);
+        }, 4);
+        column("ConnectivityIdOffsets",
+               [&](size_t s, int k) { return first_row(std::string(POLY_KINDS[size_t(k)]) + "/Connectivity", s); }, 4);
+    } else {
+        column("CellOffsets", [&](size_t s, int) { return first_row("Types", s); });
+        column("ConnectivityIdOffsets", [&](size_t s, int) { return first_row("Connectivity", s); });
+    }
+    for (const char * data : {"CellData", "PointData", "FieldData"}) {
+        Handle offsets(H5Gcreate2(group, (std::string(data) + "Offsets").c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
+                       H5Gclose, data);
+        const std::string prefix = std::string(data) + "/";
+        for (const auto & [path, layout] : layouts) {
+            if (!path.starts_with(prefix)) continue;
+            std::vector<int64_t> rows(layout.first.begin(), layout.first.end());
+            h5::write_rows(offsets, leaf(path).c_str(), n, 1, 0, n, rows.data(), H5P_DEFAULT);
+        }
+        if (prefix != "FieldData/") continue;
+        for (const auto & [path, value] : last.values) {
+            if (!path.starts_with(prefix)) continue;
+            std::vector<int64_t> rows(n);
+            for (size_t s = 0; s < n; s++) rows[s] = static_cast<int64_t>(s);
+            h5::write_rows(offsets, leaf(path).c_str(), n, 1, 0, n, rows.data(), H5P_DEFAULT);
+        }
+    }
+    std::vector<std::string> blocks, files;
+    for (const Step & s : steps) {
+        blocks.push_back(s.block);
+        files.push_back(s.file);
+    }
+    if (std::any_of(blocks.begin(), blocks.end(), [](const std::string & b) { return !b.empty(); })) {
+        write_strings(datasets, (snapshot_block::DATASET + suffix).c_str(), blocks);
+    }
+    write_strings(datasets, (FILES_DATASET + suffix).c_str(), files);
+}
+
+/** @brief The root and VTKHDF attributes of the last snapshot's file. */
+struct LastFile {
+    Handle file, root, top;
+    LastFile(const std::filesystem::path & dir, const Step & last)
+        : file(H5Fopen((dir / last.file).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + last.file),
+          root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /"),
+          top(H5Gopen2(file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF") {}
+};
+
+/** @brief The index file under its temporary name, sized for the root attributes of last. */
+hid_t create_index(const std::string & index, const LastFile & last) {
+    Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
+    Handle fcpl(h5::file_creation(fapl, largest_attribute(last.root)), H5Pclose, "H5Pcreate");
+    return H5Fcreate(partial_name(index).c_str(), H5F_ACC_TRUNC, fcpl, fapl);
+}
+
+/** @brief Give the index file the root attributes of last and the index mark. */
+void mark_index(hid_t file, const LastFile & last) {
+    Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
+    copy_attributes(last.root, root);
+    h5::write_int_attribute(root, INDEX_ATTRIBUTE, 1);
+}
+
+} // namespace
+
 void write_index(const std::string & index, const std::vector<Step> & steps) {
     if (steps.empty()) throw std::logic_error("vtkhdf_series: an index of no snapshots");
     const std::lock_guard<std::mutex> lock(h5::mutex());
     const std::filesystem::path dir = std::filesystem::path(index).parent_path();
-    const Step & last = steps.back();
-    Handle last_file(H5Fopen((dir / last.file).string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose,
-                     "opening " + last.file);
-    Handle last_root(H5Gopen2(last_file, "/", H5P_DEFAULT), H5Gclose, "opening /");
-    Handle last_top(H5Gopen2(last_file, "VTKHDF", H5P_DEFAULT), H5Gclose, "opening VTKHDF");
-    const bool poly = h5::read_strings_attribute(last_top, "Type").at(0) == "PolyData";
-    const size_t n = steps.size();
-
     {
-        Handle fapl(H5Pcreate(H5P_FILE_ACCESS), H5Pclose, "H5Pcreate");
-        Handle fcpl(h5::file_creation(fapl, largest_attribute(last_root)), H5Pclose, "H5Pcreate");
-        Handle file(H5Fcreate(partial_name(index).c_str(), H5F_ACC_TRUNC, fcpl, fapl), H5Fclose, "creating " + index);
+        const LastFile last(dir, steps.back());
+        Handle file(create_index(index, last), H5Fclose, "creating " + index);
+        mark_index(file, last);
+        Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
+        copy_attributes(last.top, top);
+        write_tree(top, file, "", steps, dir);
+    }
+    publish_file("the VTKHDF series index", index);
+}
+
+void write_collection(const std::string & index, const int64_t version, const std::vector<Block> & blocks) {
+    for (const Block & b : blocks) {
+        if (b.steps.empty()) throw std::logic_error("vtkhdf_series: a block of no snapshots");
+    }
+    const std::lock_guard<std::mutex> lock(h5::mutex());
+    const std::filesystem::path dir = std::filesystem::path(index).parent_path();
+    const std::vector<int64_t> collection_version = {2, 1};
+    {
+        const LastFile last(dir, blocks.front().steps.back());
+        Handle file(create_index(index, last), H5Fclose, "creating " + index);
+        mark_index(file, last);
         {
             Handle root(H5Gopen2(file, "/", H5P_DEFAULT), H5Gclose, "opening /");
-            copy_attributes(last_root, root);
-            h5::write_int_attribute(root, INDEX_ATTRIBUTE, 1);
+            check(H5Adelete(root, "version"), "H5Adelete");
+            h5::write_int_attribute(root, "version", static_cast<int>(version));
         }
-        Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
-        copy_attributes(last_top, top);
-        for (const char * name : {"CellData", "PointData", "FieldData"}) {
-            Handle g(H5Gcreate2(top, name, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, name);
+        Handle gcpl(H5Pcreate(H5P_GROUP_CREATE), H5Pclose, "H5Pcreate");
+        check(H5Pset_link_creation_order(gcpl, H5P_CRT_ORDER_TRACKED | H5P_CRT_ORDER_INDEXED),
+              "H5Pset_link_creation_order");
+        Handle top(H5Gcreate2(file, "VTKHDF", H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, "creating VTKHDF");
+        h5::write_array_attribute(top, "Version", collection_version);
+        h5::write_string_scalar_attribute(top, "Type", "PartitionedDataSetCollection");
+        Handle assembly(H5Gcreate2(top, "Assembly", H5P_DEFAULT, gcpl, H5P_DEFAULT), H5Gclose, "creating Assembly");
+        for (size_t i = 0; i < blocks.size(); i++) {
+            const Block & b = blocks[i];
+            const LastFile block_last(dir, b.steps.back());
+            Handle group(H5Gcreate2(top, b.name.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose,
+                         "creating block " + b.name);
+            copy_attributes(block_last.top, group);
+            h5::set_attribute<int64_t>(group, "Index", static_cast<int64_t>(i));
+            check(H5Adelete(group, "Version"), "H5Adelete");
+            h5::write_array_attribute(group, "Version", collection_version);
+            check(H5Lcreate_soft(("/VTKHDF/" + b.name).c_str(), assembly, b.name.c_str(), H5P_DEFAULT, H5P_DEFAULT),
+                  "linking block " + b.name);
+            write_tree(group, file, block_suffix(b.name, i == 0), b.steps, dir);
         }
-
-        // A mesh that every step shares is written once, at offsets 0
-        bool shared_mesh = true;
-        for (const auto & [path, src] : last.arrays) {
-            if (!is_mesh(path)) continue;
-            for (const Step & s : steps) shared_mesh = shared_mesh && s.arrays.contains(path) && s.arrays.at(path) == src;
-        }
-        for (const auto & [path, value] : last.values) {
-            const bool field = path.starts_with("FieldData/");
-            std::vector<double> values;
-            for (const Step & s : steps) {
-                values.push_back(s.values.contains(path) ? s.values.at(path) : 0.0);
-                if (!field && shared_mesh) break;
-            }
-            Handle source(H5Dopen2(last_top, path.c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
-            Handle type(H5Dget_type(source), H5Tclose, "H5Dget_type");
-            Handle group = group_of(top, path);
-            write_values(group, leaf(path), type, values);
-            Handle dset(H5Dopen2(group, leaf(path).c_str(), H5P_DEFAULT), H5Dclose, "opening " + path);
-            copy_attributes(source, dset);
-        }
-        std::map<std::string, Layout> layouts;
-        for (const auto & [path, src] : last.arrays) {
-            bool shared = shared_mesh;
-            if (!is_mesh(path)) {
-                shared = std::all_of(steps.begin(), steps.end(),
-                                     [&](const Step & s) { return s.arrays.contains(path) && s.arrays.at(path) == src; });
-            }
-            for (const Step & s : steps) {
-                if (!s.arrays.contains(path)) throw std::runtime_error(s.file + " has no " + path + ", which " + last.file + " has");
-            }
-            layouts[path] = write_array(top, path, steps, shared, dir);
-        }
-
-        Handle group(H5Gcreate2(top, "Steps", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT), H5Gclose, "creating Steps");
-        h5::write_attribute<int64_t>(group, "NSteps", static_cast<int64_t>(n));
-        std::vector<double> times;
-        for (const Step & s : steps) times.push_back(s.t);
-        h5::write_rows(group, "Values", n, 1, 0, n, times.data(), H5P_DEFAULT);
-        if (H5Lexists(last_top, "FieldData", H5P_DEFAULT) > 0 && H5Lexists(last_top, "FieldData/TIME", H5P_DEFAULT) > 0) {
-            Handle time(H5Dopen2(last_top, "FieldData/TIME", H5P_DEFAULT), H5Dclose, "opening FieldData/TIME");
-            Handle values(H5Dopen2(group, "Values", H5P_DEFAULT), H5Dclose, "opening Steps/Values");
-            copy_attributes(time, values);
-        }
-        const auto column = [&](const char * name, auto row_of, int cols = 1) {
-            std::vector<int64_t> values;
-            for (size_t s = 0; s < n; s++) {
-                for (int k = 0; k < cols; k++) values.push_back(static_cast<int64_t>(row_of(s, k)));
-            }
-            h5::write_rows(group, name, n, cols, 0, n, values.data(), H5P_DEFAULT);
-        };
-        const auto first_row = [&](const std::string & path, size_t s) { return layouts.at(path).first[s]; };
-        column("NumberOfParts", [](size_t, int) { return 1; });
-        column("PartOffsets", [&](size_t s, int) { return shared_mesh ? 0 : s; });
-        column("PointOffsets", [&](size_t s, int) { return first_row("Points", s); });
-        if (poly) {
-            // Each step's offsets of a kind of cells have one more row than its cells
-            column("CellOffsets", [&](size_t s, int k) {
-                return first_row(std::string(POLY_KINDS[size_t(k)]) + "/Offsets", s) - (shared_mesh ? 0 : s);
-            }, 4);
-            column("ConnectivityIdOffsets",
-                   [&](size_t s, int k) { return first_row(std::string(POLY_KINDS[size_t(k)]) + "/Connectivity", s); }, 4);
-        } else {
-            column("CellOffsets", [&](size_t s, int) { return first_row("Types", s); });
-            column("ConnectivityIdOffsets", [&](size_t s, int) { return first_row("Connectivity", s); });
-        }
-        for (const char * data : {"CellData", "PointData", "FieldData"}) {
-            Handle offsets(H5Gcreate2(group, (std::string(data) + "Offsets").c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT),
-                           H5Gclose, data);
-            const std::string prefix = std::string(data) + "/";
-            for (const auto & [path, layout] : layouts) {
-                if (!path.starts_with(prefix)) continue;
-                std::vector<int64_t> rows(layout.first.begin(), layout.first.end());
-                h5::write_rows(offsets, leaf(path).c_str(), n, 1, 0, n, rows.data(), H5P_DEFAULT);
-            }
-            if (prefix != "FieldData/") continue;
-            for (const auto & [path, value] : last.values) {
-                if (!path.starts_with(prefix)) continue;
-                std::vector<int64_t> rows(n);
-                for (size_t s = 0; s < n; s++) rows[s] = static_cast<int64_t>(s);
-                h5::write_rows(offsets, leaf(path).c_str(), n, 1, 0, n, rows.data(), H5P_DEFAULT);
-            }
-        }
-        std::vector<std::string> blocks, files;
-        for (const Step & s : steps) {
-            blocks.push_back(s.block);
-            files.push_back(s.file);
-        }
-        if (std::any_of(blocks.begin(), blocks.end(), [](const std::string & b) { return !b.empty(); })) {
-            write_strings(file, snapshot_block::DATASET, blocks);
-        }
-        write_strings(file, FILES_DATASET, files);
     }
     publish_file("the VTKHDF series index", index);
 }
@@ -453,7 +523,16 @@ std::vector<std::string> members(const std::string & index) {
     {
         const std::lock_guard<std::mutex> lock(h5::mutex());
         Handle h5file(H5Fopen(index.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + index);
-        files = h5::read_string_rows(h5file, FILES_DATASET);
+        // The plain index's, or every block's of a collection
+        H5G_info_t info;
+        check(H5Gget_info(h5file, &info), "H5Gget_info");
+        for (hsize_t i = 0; i < info.nlinks; i++) {
+            const ssize_t size = H5Lget_name_by_idx(h5file, ".", H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
+            std::string name(static_cast<size_t>(std::max<ssize_t>(size, 0)), '\0');
+            H5Lget_name_by_idx(h5file, ".", H5_INDEX_NAME, H5_ITER_INC, i, name.data(), name.size() + 1, H5P_DEFAULT);
+            if (!name.starts_with(FILES_DATASET)) continue;
+            for (std::string & f : h5::read_string_rows(h5file, name.c_str())) files.push_back(std::move(f));
+        }
     }
     const fs::path path(index), dir = path.parent_path();
     for (std::string & f : files) f = (dir / f).string();
@@ -462,12 +541,14 @@ std::vector<std::string> members(const std::string & index) {
     return files;
 }
 
-std::vector<Step> resume(const std::string & index, double t, const std::string & legacy) {
+std::vector<Step> resume(const std::string & index, double t, const std::string & legacy, const std::string & block,
+                         bool first) {
     namespace fs = std::filesystem;
     if (!fs::exists(index)) return {};
     const auto kept = [t](double t_entry) { return t_entry <= t * (1.0 + 1.0e-12) + 1.0e-300; };
     std::vector<Step> out;
     if (!is_index(index)) {
+        if (!first) return {};
         std::error_code error;
         fs::rename(index, legacy, error);
         if (error) throw std::runtime_error("Could not rename the series file " + index + " to " + legacy + ": " + error.message());
@@ -481,8 +562,19 @@ std::vector<Step> resume(const std::string & index, double t, const std::string 
     {
         const std::lock_guard<std::mutex> lock(h5::mutex());
         Handle h5file(H5Fopen(index.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "opening " + index);
-        files = h5::read_string_rows(h5file, FILES_DATASET);
-        Handle steps(H5Gopen2(h5file, "VTKHDF/Steps", H5P_DEFAULT), H5Gclose, "opening VTKHDF/Steps");
+        // A block of a collection, or the plain index of the series that the first block continues
+        std::string group = "VTKHDF";
+        if (!block.empty() && H5Lexists(h5file, ("VTKHDF/" + block).c_str(), H5P_DEFAULT) > 0) {
+            group += "/" + block;
+        } else if (!block.empty() && !first) {
+            return {};
+        }
+        const std::string name = FILES_DATASET + (group == "VTKHDF" ? std::string() : block_suffix(block, first));
+        if (H5Lexists(h5file, name.c_str(), H5P_DEFAULT) <= 0 || H5Lexists(h5file, (group + "/Steps").c_str(), H5P_DEFAULT) <= 0) {
+            return {};
+        }
+        files = h5::read_string_rows(h5file, name.c_str());
+        Handle steps(H5Gopen2(h5file, (group + "/Steps").c_str(), H5P_DEFAULT), H5Gclose, "opening " + group + "/Steps");
         times = h5::read_rows<double>(steps, "Values", 0, files.size(), 1, H5P_DEFAULT);
     }
     // A file of several steps (a series of Mallard 0.11 and earlier) is described once
@@ -503,7 +595,10 @@ std::vector<Step> describe(const std::string &, size_t) { throw std::logic_error
 void write_index(const std::string &, const std::vector<Step> &) { throw std::logic_error("VTKHDF series without HDF5"); }
 bool is_index(const std::string &) { return false; }
 std::vector<std::string> members(const std::string &) { return {}; }
-std::vector<Step> resume(const std::string &, double, const std::string &) { return {}; }
+void write_collection(const std::string &, int64_t, const std::vector<Block> &) {
+    throw std::logic_error("VTKHDF series without HDF5");
+}
+std::vector<Step> resume(const std::string &, double, const std::string &, const std::string &, bool) { return {}; }
 
 #endif
 
