@@ -234,6 +234,27 @@ void end_phase() {
     }
 }
 
+std::array<Usage, 2> counted() {
+    if (!state.active) return {};
+    return {usage(state.spaces[0]), usage(state.spaces[1])};
+}
+
+void resume(const std::array<Usage, 2> & counts) {
+    if (!state.active) return;
+    for (size_t s = 0; s < 2; s++) {
+        Space & space = state.spaces[s];
+        space.usage = counts[s];
+        if (space.usage.phases.empty()) {
+            start_phase(space);
+            continue;
+        }
+        space.at_phase_peak = space.usage.phases.back();
+        space.usage.phases.pop_back();
+        space.phase_peak = 0;
+        for (const uint64_t b : space.at_phase_peak) space.phase_peak += b;
+    }
+}
+
 Usage Tracker::device() const { return usage(state.spaces[0]); }
 
 Usage Tracker::host() const { return usage(state.spaces[1]); }

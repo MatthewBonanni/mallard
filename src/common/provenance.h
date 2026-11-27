@@ -109,6 +109,9 @@ void read_start_file(const std::string & kind, const std::string & path, const s
 /** @brief A large file read that carries no identity (a remap source mesh): its size and modification time. */
 void read_large_file(const std::string & kind, const std::string & path);
 
+/** @brief The paths of the files this rank recorded as read (read_file and the like) since start_run, in order. */
+std::vector<std::string> read_paths();
+
 /**
  * @brief The block's files: each file every rank read, once, with its path as given and resolved, its size,
  *        and its SHA-256 or identity (collective; rank 0 hashes).

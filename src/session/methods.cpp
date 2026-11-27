@@ -27,6 +27,7 @@
 #include "run_control.h"
 #include "run_ctl.h"
 #include "session.h"
+#include "solver/setup_cache.h"
 #include "units.h"
 
 namespace session {
@@ -62,6 +63,8 @@ std::string case_json(const Context & context, const std::vector<std::string> * 
     json::Object o;
     o.add("schema", CASE_SCHEMA).add("version", CASE_VERSION).add("input", context.path()).add("dimension", N_DIM);
     o.raw("mesh_files_read", std::to_string(context.mesh_files_read()));
+    const SetupCache * setups = context.setup_cache();
+    o.add("meshes_built", setups ? setups->meshes_built() : 0).add("setups_run", setups ? setups->setups_run() : 0);
     if (changed) {
         std::string list = "[";
         for (const std::string & key : *changed) list += (list.size() > 1 ? "," : "") + json::quote(key);

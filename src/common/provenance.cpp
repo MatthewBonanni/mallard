@@ -607,6 +607,12 @@ void read_large_file(const std::string & kind, const std::string & path) {
     state().reads.push_back(ReadFile::of(ReadFile::How::SIZE, kind, path));
 }
 
+std::vector<std::string> read_paths() {
+    std::vector<std::string> paths;
+    for (const ReadFile & f : state().reads) paths.push_back(f.path);
+    return paths;
+}
+
 void set_read_files() {
     namespace fs = std::filesystem;
     State & s = state();

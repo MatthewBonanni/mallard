@@ -24,6 +24,7 @@
 #include "interfaces.h"
 #include "log.h"
 #include "mesh_block.h"
+#include "solver/setup_cache.h"
 #include "solver/solver.h"
 
 namespace session {
@@ -68,10 +69,25 @@ void differences(const Input & a, const Input & b, const std::string & path, std
     if (!(a == b)) out.push_back(path);
 }
 
+/** @brief What a check's result depends on besides the case. */
+std::string check_key(const CheckOptions & o, const std::string & restart) {
+    json::Object key;
+    key.add("ranks", o.ranks).add("throughput", o.throughput).add("steps", o.steps).add("n_worst", uint64_t(o.n_worst));
+    key.add("mesh_fields", o.mesh_fields).add("all_stencils", o.all_stencils).add("region", o.stencil_region);
+    std::string cells;
+    for (const uint64_t c : o.stencil_cells) cells += std::to_string(c) + ",";
+    key.add("cells", cells).add("weights", o.stencil_weights).add("catalog", o.catalog_file).add("view", o.view_dir);
+    key.add("input", o.input_file).add("partial", o.partial).add("memory", o.memory).add("memory_name", o.memory_name);
+    key.add("memory_gpu", o.memory_gpu).add("restart", restart);
+    return key.str();
+}
+
 } // namespace
 
 Context::Context(bool resident) : keep(resident) {
-    if (keep) mesh_files = std::make_unique<MeshFileCache>();
+    if (!keep) return;
+    mesh_files = std::make_unique<MeshFileCache>();
+    setups = std::make_unique<SetupCache>(mesh_files.get());
 }
 
 Context::~Context() = default;
@@ -81,6 +97,8 @@ void Context::open(const std::string & path, const std::optional<std::string> & 
     text = text_in;
     opened = true;
     results.clear();
+    last_check.reset();
+    if (setups) setups->clear();
 }
 
 std::vector<std::string> Context::update(const std::string & text_in) {
@@ -94,6 +112,7 @@ std::vector<std::string> Context::update(const std::string & text_in) {
     }
     text = text_in;
     results.clear();
+    last_check.reset();
     return changed;
 }
 
@@ -102,6 +121,8 @@ void Context::close() {
     input_path.clear();
     text.reset();
     results.clear();
+    last_check.reset();
+    if (setups) setups->clear();
 }
 
 Input Context::fresh_input() const { return text ? parse_input_string(*text, input_path) : parse_input(input_path); }
@@ -125,20 +146,40 @@ void Context::remember(const std::string & key, const std::string & result) {
     if (keep) results.emplace_back(key, result);
 }
 
+const CheckResult * Context::checked(const std::string & key) const {
+    return last_check && last_check->first == key ? &last_check->second : nullptr;
+}
+
+void Context::remember_check(const std::string & key, const CheckResult & result) {
+    if (keep) last_check.emplace(key, result);
+}
+
 CheckResult check_case(Context & context, const CheckOptions & options, const std::string & restart,
                        const bool environment) {
+    // A check that takes no steps and writes nothing answers the same until the text changes
+    const bool repeatable = options.steps == 0 && options.mesh_fields.empty() && options.catalog_file.empty() &&
+                            options.view_dir.empty();
+    const std::string key = check_key(options, restart);
     CheckResult out;
-    Solver solver;
-    try {
-        if (context.is_open()) {
-            Input input = context.fresh_input();
-            if (!restart.empty()) Solver::start_from_restart(input, restart);
-            out.report = solver.check(input, options);
-            out.catalog = key_catalog(resolve_input(solver.resolved_input()));
+    if (const CheckResult * known = repeatable ? context.checked(key) : nullptr) {
+        out = *known;
+    } else {
+        try {
+            if (context.is_open()) {
+                Input input = context.fresh_input();
+                if (!restart.empty()) Solver::start_from_restart(input, restart);
+                SetupCache * setups = context.setup_cache();
+                std::unique_ptr<Solver> own = setups ? nullptr : std::make_unique<Solver>();
+                Solver & solver = setups ? setups->solver(input) : *own;
+                out.report = solver.check(input, options);
+                out.catalog = key_catalog(resolve_input(solver.resolved_input()));
+                if (setups) setups->checked(out.report.setup_done, options.steps > 0);
+            }
+        } catch (const InputError & e) {
+            out.report.input_file = options.input_file;
+            out.report.error(diagnostic_code::INPUT, options.input_file + ": " + error_text(e));
         }
-    } catch (const InputError & e) {
-        out.report.input_file = options.input_file;
-        out.report.error(diagnostic_code::INPUT, options.input_file + ": " + error_text(e));
+        if (repeatable) context.remember_check(key, out);
     }
     out.files = provenance::files_read();
     if (environment) check_environment(out.report);

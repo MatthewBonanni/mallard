@@ -169,9 +169,9 @@ namespace {
 void forget_lookups(Input & v, const std::string & path = "") {
     if (v.is_table()) {
         auto & table = v.as_table();
-        table.forget_lookups();
         table.set_path(path);
         for (auto & entry : table.entries()) forget_lookups(entry.second, path.empty() ? entry.first : path + "." + entry.first);
+        table.forget_lookups();
     } else if (v.is_array()) {
         auto & array = v.as_array();
         for (size_t i = 0; i < array.size(); i++) forget_lookups(array[i], path + "[" + std::to_string(i) + "]");
@@ -616,6 +616,11 @@ Input parse_input_string(const std::string & text, const std::string & name) {
     check_nesting(input);
     forget_lookups(input);
     return input;
+}
+
+Input unrecorded(Input value) {
+    forget_lookups(value);
+    return value;
 }
 
 std::vector<Diagnostic> unused_keys(const Input & input) {

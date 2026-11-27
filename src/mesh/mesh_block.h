@@ -168,6 +168,8 @@ class MeshFileCache {
         MeshFileCache & operator=(const MeshFileCache &) = delete;
         /** @brief Mesh files read from disk since it was made. */
         uint64_t files_read() const { return reads; }
+        /** @brief The absolute paths of the files asked for since it was made, in order, whether read or kept. */
+        const std::vector<std::string> & files_asked() const { return asked; }
         /** @brief The file's block, read only if absent or changed. */
         MeshBlock block(const std::string & filename, MeshBlock (*read)(const std::string &));
 
@@ -179,6 +181,7 @@ class MeshFileCache {
             MeshBlock block;
         };
         std::vector<Entry> entries;
+        std::vector<std::string> asked;
         uint64_t reads = 0;
 };
 

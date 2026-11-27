@@ -75,6 +75,8 @@
 #include "stencils.h"
 #include "particles.h"
 
+class SetupCache;
+
 struct ForceMonitor {
     std::string zone;
     std::string file;
@@ -1009,6 +1011,10 @@ class Solver {
         void check_initial(CheckReport & report, const CheckOptions & options);
         /** @brief The parts of the check a run records at setup (check_summary), with the memory after setup. */
         std::string setup_check();
+        /**
+         * @brief [run]: sets only what the time loop and the check read, never what a later part of the setup reads
+         *        (that part reads its key itself), so mallard session runs it alone after an edit of [run].
+         */
         void init_run_parameters();
         void init_output(region::Regions & regions);
         /** @brief The writers of a [[write_data]] entry: one per region, or of the whole mesh. */
@@ -1088,7 +1094,8 @@ class Solver {
         void write_end_record(const RunEnd & end);
         /** @brief The status at this step, throughput since the last progress row; no diagnostics or memory. */
         RunStatus run_status() const;
-        void record_mesh_provenance() const;
+        void record_mesh_provenance();
+        std::array<std::string, 3> mesh_provenance;  // type, file, hash, as record_mesh_provenance gave them
         /** @brief Provenance lines of the CSV files and the run log's start record. */
         void write_provenance();
         // Run health (solver_health.cpp)
@@ -1351,6 +1358,12 @@ class Solver {
 
         Input input;
         bool check_only = false;  // within check()
+        SetupCache * setup_cache = nullptr;  // mallard session's stages of earlier setups (setup_cache.h), if any
+        // With a setup cache, what the checks of the same setup share: the mesh's quality, its view without outlines
+        mutable std::optional<MeshQuality> kept_quality;
+        mutable std::optional<MeshView> kept_view;
+        friend class SetupCache;
+        friend class SetupStages;
         struct SetupError {
             std::exception_ptr error;
             std::string element;  // of an array of tables ("write_data[2]"), or empty

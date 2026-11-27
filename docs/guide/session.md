@@ -38,7 +38,13 @@ Each request with a one-shot command runs the same code as that command, so its 
 
 Params are always by name. A flag is `true` (`{"partial": true}`); other values are numbers or strings as on the command line. Relative paths are relative to the session's working directory, as for the one-shot commands.
 
-The session never writes the input file: `case.update` takes the text of the editor, saved or not. A check after an edit reads the mesh file again only if the file itself changed (its size or modification time); the case's `mesh_files_read` counts the reads. An unchanged case answers a repeated request from memory.
+The session never writes the input file: `case.update` takes the text of the editor, saved or not. A check after an edit sets up again only the stages of the setup whose reads changed, and answers exactly as the one-shot check of the edited text would:
+
+- **[run] alone.** An edit of what only `[run]`'s own settings read (`cfl`, `dt`, `t_stop`, `n_steps`, ...), or of keys no stage reads, is checked on the setup already there: under a second on millions of cells, where a full setup takes tens of seconds.
+- **Outside [mesh].** Any other edit that leaves what the mesh stage read unchanged sets the case up again on the mesh already built.
+- **The mesh.** An edit the mesh stage read builds the mesh again, reading the file again only if the file itself changed (its size or modification time).
+
+A stage counts as unchanged when every key it looked up holds the same value on the same line (an edit that moves lines sets up again the stages that read the keys below it), every table it read whole is the same, and every file it read has the same size and modification time. The case counts the work: `mesh_files_read` (files read), `meshes_built`, and `setups_run` (setups past the mesh). `case.check` and `case.keys` share one setup, and an unchanged case answers a repeated request from memory.
 
 While a request runs, the session sends `$/progress` notifications naming the request and the setup phase it starts. Warnings raised outside a result's diagnostics come as a `$/log` notification with a `diagnostics` list.
 
