@@ -335,13 +335,15 @@ class Particles {
         bool probes_due(uint64_t step) const { return probes.due(step); }
 
         /**
-         * @brief Lower step_limit to the next step after step that some probe samples, or to the next step with
-         *        [[particles.crossings]], which the host writes after every step, and step_limit or t_limit to
-         *        the next output of [[particles.trajectories]].
+         * @brief Lower step_limit to the next step after step that some probe or [[particles.fluxes]] entry
+         *        samples, or to the next step with [[particles.crossings]], which the host writes after every
+         *        step, and step_limit or t_limit to the next output of [[particles.trajectories]].
          */
         void probe_limits(uint64_t step, uint64_t & step_limit, rtype & t_limit) const {
             probes.due_limits(step, step_limit);
-            if (!crossings.empty()) step_limit = std::min(step_limit, step + 1);
+            for (const auto & c : crossings) {
+                step_limit = std::min(step_limit, c.interval > 0 ? (step / c.interval + 1) * c.interval : step + 1);
+            }
             for (const auto & tr : trajectories) {
                 if (tr.clock.interval > 0) {
                     step_limit = std::min(step_limit, (step / tr.clock.interval + 1) * tr.clock.interval);
@@ -365,6 +367,21 @@ class Particles {
 
         /** @brief The files of [[particles.crossings]]. */
         std::vector<std::string> crossing_files() const;
+
+        /** @brief Whether some entry of [[particles.fluxes]] writes a row after this step. */
+        bool fluxes_due(uint64_t step) const;
+
+        /**
+         * @brief Write the rows of [[particles.fluxes]] due at step, at t: the crossings counted since each entry's
+         *        previous row (collective).
+         */
+        void write_fluxes(uint64_t step, double t);
+
+        /** @brief A restart at t: the next rows of [[particles.fluxes]] count the crossings from t. */
+        void resume_fluxes(double t);
+
+        /** @brief The files of [[particles.fluxes]]. */
+        std::vector<std::string> flux_files() const;
 
         /** @brief Whether some entry of [[particles.trajectories]] is due after step, at t. */
         bool trajectories_due(uint64_t step, rtype t) const;
@@ -513,10 +530,16 @@ class Particles {
         void init_trajectories(const Input & input, const Input & table, region::Regions & regions,
                                const std::vector<std::array<double, N_DIM>> & points);
 
-        /** @brief Read [[particles.crossings]] and set up their files and device events. */
+        /** @brief Whether some entry of [[particles.crossings]] writes a row per crossing. */
+        bool records_crossings() const;
+
+        /** @brief The header of the files of [[particles.fluxes]]. */
+        std::string flux_header() const;
+
+        /** @brief Read [[particles.crossings]] and [[particles.fluxes]] and set up their files and device events. */
         void init_crossings(const Input & input, const Input & table, region::Regions & regions);
 
-        // [[particles.crossings]]
+        // [[particles.crossings]], then [[particles.fluxes]]
         std::vector<particles::Crossing> crossings;
         particles::CrossingEvents events;
         std::vector<particles::Surface> surfaces;

@@ -1115,8 +1115,13 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
     for (const auto & c : crossings) {
         std::string fields;
         for (const auto & f : c.fields) fields += ", " + f.name;
-        lines.emplace_back("Particle crossings", c.name + ": " + (c.exits ? "leaving through " : "crossing ") + c.region +
-                                                     fields + " -> " + c.file);
+        const std::string what = (c.exits ? "leaving through " : "crossing ") + c.region;
+        if (c.interval > 0) {
+            lines.emplace_back("Particle fluxes", c.name + ": " + what + ", every " + std::to_string(c.interval) +
+                                                      " steps -> " + c.file);
+        } else {
+            lines.emplace_back("Particle crossings", c.name + ": " + what + fields + " -> " + c.file);
+        }
     }
     for (const auto & tr : trajectories) {
         std::string line = tr.name + ": ";

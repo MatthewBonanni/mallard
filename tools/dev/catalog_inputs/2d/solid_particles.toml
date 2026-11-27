@@ -1,5 +1,6 @@
 # For the key catalog only (tools/dev/input_catalog.py): solid particles with
-# every key of [particles], [[particles.walls]], [[particles.crossings]] and [[particles.trajectories]] given.
+# every key of [particles], [[particles.walls]], [[particles.crossings]], [[particles.trajectories]] and
+# [[particles.fluxes]] given.
 
 [run]
 n_steps = 1
@@ -87,3 +88,9 @@ file = "near.csv"
 [[particles.trajectories]]
 name = "all"
 time_interval = 0.01
+
+[[particles.fluxes]]
+name = "deposition"
+region = "left"
+interval = 10
+file = "deposition.csv"

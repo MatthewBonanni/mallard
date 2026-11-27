@@ -225,7 +225,10 @@ void Solver::apply_restart(const RestartData & restart, const std::string & file
     }
     if (checkpoint_writer) checkpoint_writer->resume(step, t);
     probes.resume(step, t);
-    if (particles) particles->resume_trajectories(t);
+    if (particles) {
+        particles->resume_trajectories(t);
+        particles->resume_fluxes(static_cast<double>(t));
+    }
 }
 
 void Solver::apply_output_state(RestartData state) {

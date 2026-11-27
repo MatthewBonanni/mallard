@@ -11,6 +11,7 @@ its progress on the terminal and in a machine-readable run record.
 | Solution snapshots | `PREFIX.vtkhdf`, the series, which indexes `PREFIX_<n>.vtkhdf` (`<n>`: the step, or with `time_interval` the snapshot's index), a file per snapshot, and the mesh in `PREFIX_mesh.vtkhdf`; with `series = false` `PREFIX_<n>.vtkhdf` and `PREFIX.vtkhdf.series`; VTU: `.vtu`, `.pvtu`, `.pvd` | `[[write_data]]` | [Solution snapshots](#solution-snapshots-write_data) |
 | Particle snapshots | `PREFIX_particles_<n>.vtkhdf`, a file per snapshot, indexed with the mesh's as blocks of `PREFIX.vtkhdf`; alone, or with `particles = "separate"`, by `PREFIX_particles.vtkhdf` (`series = false`: `PREFIX_particles.vtkhdf.series`) | `[[write_data]]` with `particle_fields` | [Particle snapshots](#particle-snapshots) |
 | Particle crossings | `particle_crossings_<name>.csv` | `[[particles.crossings]]` | [Particle crossings](particles.md#particle-crossings) |
+| Particle fluxes | `particle_fluxes_<name>.csv` | `[[particles.fluxes]]` | [Particle fluxes](particles.md#particle-fluxes) |
 | Particle trajectories | `particle_trajectories_<name>.csv` | `[[particles.trajectories]]` | [Particle trajectories](particles.md#particle-trajectories) |
 | Restart files | `PREFIX_<step>.restart` | `[[write_data]]` with `format = "restart"` | [Initialization and restarts](initialization.md#restarts) |
 | Terminal output | standard output (errors: standard error) | always; `[output] check_interval` sets the progress rows | [Terminal output](#terminal-output) |
@@ -513,7 +514,8 @@ in 2D. The positions are the snapshot's points and its time is the snapshot's,
 so `x`, `y`, `z` and `t` are not listed. `region`, a volume (an area in 2D),
 keeps the particles inside it, as it keeps the cells; it must be analytic and
 not move. A surface or curve has no particles in it: count the particles
-crossing it with [`[[particles.crossings]]`](particles.md#particle-crossings).
+crossing it with [`[[particles.crossings]]`](particles.md#particle-crossings),
+or count them per interval with [`[[particles.fluxes]]`](particles.md#particle-fluxes).
 
 Each snapshot's particles are a file of their own,
 `PREFIX_particles_<n>.vtkhdf` (`<n>` numbered as the mesh's snapshots), and a

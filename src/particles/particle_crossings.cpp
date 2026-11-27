@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iomanip>
 #include <numeric>
+#include <span>
 
 #include "comm.h"
 #include "common_io.h"
@@ -30,123 +31,146 @@ using particles::EMPTY;
 namespace {
 
 const std::string DOCS = "docs/guide/particles.md#particle-crossings";
+const std::string FLUX_DOCS = "docs/guide/particles.md#particle-fluxes";
 
 } // namespace
 
 void Particles::init_crossings(const Input & input, const Input & table, region::Regions & regions) {
-    if (!contains_optional(table, "crossings")) return;
-    const auto entries = find_value<std::vector<Input>>(table, "crossings");
-    if (entries.size() > particles::MAX_CROSSINGS) {
-        throw InputError(Diagnostic{.key = "particles.crossings", .line = line_of(table, "crossings"),
-                                    .message = "has " + std::to_string(entries.size()) + " entries, at most " +
-                                               std::to_string(particles::MAX_CROSSINGS),
-                                    .docs = DOCS});
-    }
+    if (!contains_optional(table, "crossings") && !contains_optional(table, "fluxes")) return;
     const auto h_action = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), walker.face_action);
     std::vector<uint32_t> mask(mesh->n_faces, 0u);
     bool any_exits = false;
+    size_t n_recorded_pieces = 0;
+    bool recorded_exits = false;
     const bool resume = find_value_or<std::string>(input, "initialize", "type", "") == "restart";
-    for (size_t k = 0; k < entries.size(); k++) {
-        const Input & e = entries[k];
-        const std::string where = "particles.crossings[" + std::to_string(k) + "]";
-        particles::Crossing c;
-        c.name = find_value<std::string>(e, "name");
-        for (const auto & other : crossings) {
-            if (other.name == c.name) {
-                throw InputError(Diagnostic{.key = where + ".name", .line = line_of(e, "name"),
-                                            .message = "\"" + c.name + "\" names two entries", .docs = DOCS});
+    for (const bool tally : {false, true}) {
+        const std::string key = tally ? "fluxes" : "crossings";
+        if (!contains_optional(table, key)) continue;
+        const std::string docs = tally ? FLUX_DOCS : DOCS;
+        const auto entries = find_value<std::vector<Input>>(table, key);
+        if (entries.size() > particles::MAX_CROSSINGS) {
+            throw InputError(Diagnostic{.key = "particles." + key, .line = line_of(table, key),
+                                        .message = "has " + std::to_string(entries.size()) + " entries, at most " +
+                                                   std::to_string(particles::MAX_CROSSINGS),
+                                        .docs = docs});
+        }
+        const size_t first = crossings.size();
+        for (size_t k = 0; k < entries.size(); k++) {
+            const Input & e = entries[k];
+            const std::string where = "particles." + key + "[" + std::to_string(k) + "]";
+            particles::Crossing c;
+            c.name = find_value<std::string>(e, "name");
+            for (size_t j = first; j < crossings.size(); j++) {
+                if (crossings[j].name == c.name) {
+                    throw InputError(Diagnostic{.key = where + ".name", .line = line_of(e, "name"),
+                                                .message = "\"" + c.name + "\" names two entries", .docs = docs});
+                }
             }
-        }
-        c.file = find_value_or<std::string>(e, "file", "particle_crossings_" + c.name + ".csv");
-        const Input & value = e.at("region");
-        const region::Region & region = regions.get(value, where + ".region");
-        c.region = value.is_string() ? value.as_string() : region.summary();
-        auto fail = [&](const std::string & message, const std::string & fix) {
-            return InputError(Diagnostic{.key = where + ".region", .line = line_of(e, "region"), .message = message,
-                                         .fix = fix, .docs = DOCS});
-        };
-        if (region.dimension() != N_DIM - 1 || region.moving() || region.pieces().empty()) {
-            throw fail("must be a boundary zone or a surface (a curve in 2D) that does not move",
-                       "Name a boundary zone, or give the surface of a region of shapes, e.g. "
-                       "{type = \"boundary\", of = ...}");
-        }
-        size_t n_zones = 0;
-        for (const auto & piece : region.pieces()) n_zones += piece.zones.empty() ? 0u : 1u;
-        if (n_zones != 0 && n_zones != region.pieces().size()) {
-            throw fail("mixes boundary zones and other surfaces", "Give each its own entry");
-        }
-        c.exits = n_zones > 0;
-        const uint32_t entry = static_cast<uint32_t>(k);
-        if (c.exits) {
-            any_exits = true;
-            bool leaves = false;
-            for (const auto & piece : region.pieces()) {
-                for (const std::string & name : piece.zones) {
-                    for (const FaceZone & zone : mesh->h_face_zones()) {
-                        if (zone.get_name() != name) continue;
-                        for (uint32_t i = 0; i < zone.n_faces(); i++) {
-                            const uint32_t f = zone.h_faces(i);
-                            mask[f] |= 1u << entry;
-                            leaves = leaves || h_action(f) == particles::EXIT || h_action(f) == particles::STICK;
+            c.file = find_value_or<std::string>(e, "file", "particle_" + key + "_" + c.name + ".csv");
+            if (tally) {
+                c.interval = find_value_or<uint64_t>(e, "interval", 1);
+                if (c.interval == 0) {
+                    throw InputError(Diagnostic{.key = where + ".interval", .line = line_of(e, "interval"),
+                                                .message = "must be positive", .docs = docs});
+                }
+            }
+            const Input & value = e.at("region");
+            const region::Region & region = regions.get(value, where + ".region");
+            c.region = value.is_string() ? value.as_string() : region.summary();
+            auto fail = [&](const std::string & message, const std::string & fix) {
+                return InputError(Diagnostic{.key = where + ".region", .line = line_of(e, "region"), .message = message,
+                                             .fix = fix, .docs = docs});
+            };
+            if (region.dimension() != N_DIM - 1 || region.moving() || region.pieces().empty()) {
+                throw fail("must be a boundary zone or a surface (a curve in 2D) that does not move",
+                           "Name a boundary zone, or give the surface of a region of shapes, e.g. "
+                           "{type = \"boundary\", of = ...}");
+            }
+            size_t n_zones = 0;
+            for (const auto & piece : region.pieces()) n_zones += piece.zones.empty() ? 0u : 1u;
+            if (n_zones != 0 && n_zones != region.pieces().size()) {
+                throw fail("mixes boundary zones and other surfaces", "Give each its own entry");
+            }
+            c.exits = n_zones > 0;
+            const uint32_t entry = static_cast<uint32_t>(crossings.size());
+            if (tally) events.tallied |= 1u << entry;
+            if (c.exits) {
+                any_exits = true;
+                recorded_exits = recorded_exits || !tally;
+                bool leaves = false;
+                for (const auto & piece : region.pieces()) {
+                    for (const std::string & name : piece.zones) {
+                        for (const FaceZone & zone : mesh->h_face_zones()) {
+                            if (zone.get_name() != name) continue;
+                            for (uint32_t i = 0; i < zone.n_faces(); i++) {
+                                const uint32_t f = zone.h_faces(i);
+                                mask[f] |= 1u << entry;
+                                leaves = leaves || h_action(f) == particles::EXIT || h_action(f) == particles::STICK;
+                            }
                         }
                     }
                 }
-            }
-            leaves = distributed ? comm::allreduce(uint32_t(leaves), comm::Op::MAX) > 0 : leaves;
-            if (!leaves) {
-                throw fail("\"" + c.region + "\" is a boundary no particle leaves through: they reflect off it",
-                           "Name an inlet, outlet or far-field zone, or a wall of [[particles.walls]] that catches "
-                           "particles");
-            }
-        } else {
-            for (const auto & piece : region.pieces()) {
-                if (piece.carriers.size() != 1 || piece.edges || piece.cells >= 0 ||
-                    piece.inside.size() + piece.outside.size() > particles::MAX_CLIPS) {
-                    throw fail("is a surface particle crossings do not follow: the boundary of a region of shapes "
-                               "(clipped to at most " + std::to_string(particles::MAX_CLIPS) + " others) is",
-                               "Use {type = \"boundary\", of = ...} of a region of shapes, a flat disk or rectangle");
+                leaves = distributed ? comm::allreduce(uint32_t(leaves), comm::Op::MAX) > 0 : leaves;
+                if (!leaves) {
+                    throw fail("\"" + c.region + "\" is a boundary no particle leaves through: they reflect off it",
+                               "Name an inlet, outlet or far-field zone, or a wall of [[particles.walls]] that catches "
+                               "particles");
                 }
-                auto shapes = [&](const uint32_t filled) {
-                    if (region.filled()[filled].kind != region::Filled::Kind::SHAPES) {
-                        throw fail("is a surface of the mesh or of the solution, which crossings do not follow",
-                                   "Use a surface of a region of shapes");
+            } else {
+                for (const auto & piece : region.pieces()) {
+                    if (piece.carriers.size() != 1 || piece.edges || piece.cells >= 0 ||
+                        piece.inside.size() + piece.outside.size() > particles::MAX_CLIPS) {
+                        throw fail("is a surface particle crossings do not follow: the boundary of a region of shapes "
+                                   "(clipped to at most " + std::to_string(particles::MAX_CLIPS) + " others) is",
+                                   "Use {type = \"boundary\", of = ...} of a region of shapes, a flat disk or rectangle");
                     }
-                    return region.with_root(filled).device();
-                };
-                if (surfaces.size() == particles::MAX_SURFACES) {
-                    throw fail("adds more than " + std::to_string(particles::MAX_SURFACES) +
-                                   " pieces of surfaces over every entry",
-                               "Use fewer surfaces");
+                    auto shapes = [&](const uint32_t filled) {
+                        if (region.filled()[filled].kind != region::Filled::Kind::SHAPES) {
+                            throw fail("is a surface of the mesh or of the solution, which crossings do not follow",
+                                       "Use a surface of a region of shapes");
+                        }
+                        return region.with_root(filled).device();
+                    };
+                    if (surfaces.size() == particles::MAX_SURFACES) {
+                        throw fail("adds more than " + std::to_string(particles::MAX_SURFACES) +
+                                       " pieces of surfaces over every entry",
+                                   "Use fewer surfaces");
+                    }
+                    particles::Surface s;
+                    s.carrier = shapes(piece.carriers[0]);
+                    for (const uint32_t f : piece.inside) {
+                        s.clip_inside[s.n_clips] = true;
+                        s.clip[s.n_clips++] = shapes(f);
+                    }
+                    for (const uint32_t f : piece.outside) s.clip[s.n_clips++] = shapes(f);
+                    s.entry = entry;
+                    s.sign = piece.flip ? -1.0 : 1.0;
+                    surfaces.push_back(s);
+                    n_recorded_pieces += tally ? 0 : 1;
                 }
-                particles::Surface s;
-                s.carrier = shapes(piece.carriers[0]);
-                for (const uint32_t f : piece.inside) {
-                    s.clip_inside[s.n_clips] = true;
-                    s.clip[s.n_clips++] = shapes(f);
-                }
-                for (const uint32_t f : piece.outside) s.clip[s.n_clips++] = shapes(f);
-                s.entry = entry;
-                s.sign = piece.flip ? -1.0 : 1.0;
-                surfaces.push_back(s);
             }
-        }
-        std::vector<std::string> names;
-        if (contains_optional(e, "fields")) names = find_value<std::vector<std::string>>(e, "fields");
-        const Resolved resolved = resolve_fields(names, where + ".fields", line_of(e, "fields"), DOCS);
-        c.fields = resolved.fields;
-        c.columns = resolved.columns;
-        if (comm::is_root() && output_files_enabled()) {
-            create_parent_directories("the particle crossings file", c.file);
-            const bool append = resume && std::filesystem::exists(c.file) && std::filesystem::file_size(c.file) > 0;
-            std::ofstream out(c.file, append ? std::ios::app : std::ios::trunc);
-            if (!out) throw cannot_write("the particle crossings file", c.file);
-            if (!append) out << record_header(c.fields, c.exits ? "" : ",direction") << "\n";
-        }
-        crossings.push_back(std::move(c));
+            if (!tally) {
+                std::vector<std::string> names;
+                if (contains_optional(e, "fields")) names = find_value<std::vector<std::string>>(e, "fields");
+                const Resolved resolved = resolve_fields(names, where + ".fields", line_of(e, "fields"), DOCS);
+                c.fields = resolved.fields;
+                c.columns = resolved.columns;
+            }
+            if (comm::is_root() && output_files_enabled()) {
+                const std::string what = tally ? "the particle fluxes file" : "the particle crossings file";
+                create_parent_directories(what, c.file);
+                const bool append = resume && std::filesystem::exists(c.file) && std::filesystem::file_size(c.file) > 0;
+                std::ofstream out(c.file, append ? std::ios::app : std::ios::trunc);
+                if (!out) throw cannot_write(what, c.file);
+                if (!append) out << (tally ? flux_header() : record_header(c.fields, c.exits ? "" : ",direction")) << "\n";
+            }
+            crossings.push_back(std::move(c));
+    }
     }
 
-    // Each particle crosses each piece at most once per step, and leaves once
-    const size_t rows = size_t(capacity) * (surfaces.size() + (any_exits ? 1 : 0));
+    // Each particle crosses each recorded piece at most once per step, and leaves once
+    const size_t rows = size_t(capacity) * (n_recorded_pieces + (recorded_exits ? 1 : 0));
+    events.tally = Kokkos::View<uint64_t *[2], Kokkos::LayoutRight>("particle_fluxes_tally", crossings.size());
     events.count = Kokkos::View<uint32_t>("particle_crossings_count");
     events.id = Kokkos::View<uint64_t *>("particle_crossings_id", rows);
     events.slot = Kokkos::View<uint32_t *>("particle_crossings_slot", rows);
@@ -240,7 +264,7 @@ void Particles::detect_crossings() {
 }
 
 void Particles::evaluate_crossings() {
-    if (crossings.empty()) return;
+    if (!records_crossings()) return;
     const auto recorded = events;
     const auto xs = x;
     const auto a = aux;
@@ -270,8 +294,12 @@ void Particles::evaluate_crossings() {
     });
 }
 
+bool Particles::records_crossings() const {
+    return std::any_of(crossings.begin(), crossings.end(), [](const auto & c) { return c.interval == 0; });
+}
+
 void Particles::write_crossings(const uint64_t step, const double t, const double dt) {
-    if (crossings.empty()) return;
+    if (!records_crossings()) return;
     auto h_count = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), events.count);
     const uint32_t n = h_count();
     if (n > events.slot.extent(0)) {
@@ -326,6 +354,7 @@ void Particles::write_crossings(const uint64_t step, const double t, const doubl
     size_t at = 0;
     for (size_t e = 0; e < crossings.size(); e++) {
         particles::Crossing & c = crossings[e];
+        if (c.interval > 0) continue;
         const size_t begin = at;
         while (at < order.size() && rows[stride * order[at]] == double(e)) at++;
         if (c.started && begin == at) continue;
@@ -359,6 +388,63 @@ std::string Particles::record_header(const std::vector<ParticleField> & fields, 
 
 std::vector<std::string> Particles::crossing_files() const {
     std::vector<std::string> out;
-    for (const auto & c : crossings) out.push_back(c.file);
+    for (const auto & c : crossings) {
+        if (c.interval == 0) out.push_back(c.file);
+    }
+    return out;
+}
+
+bool Particles::fluxes_due(const uint64_t step) const {
+    return std::any_of(crossings.begin(), crossings.end(),
+                       [&](const auto & c) { return c.interval > 0 && step % c.interval == 0; });
+}
+
+std::string Particles::flux_header() const {
+    std::string out = "step,t,t_start,parcels_out,parcels_in,parcels_net";
+    if (is_solid) out += ",particles_out,particles_in,particles_net,mass_out,mass_in,mass_net,mass_rate";
+    return out;
+}
+
+void Particles::write_fluxes(const uint64_t step, const double t) {
+    if (!fluxes_due(step)) return;
+    const auto h_tally = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), events.tally);
+    std::vector<uint64_t> sums(h_tally.data(), h_tally.data() + h_tally.size());
+    if (distributed) comm::allreduce(std::span<uint64_t>(sums), comm::Op::SUM);
+    const double parcel = static_cast<double>(weight), mass = static_cast<double>(weight) * static_cast<double>(solid.mass());
+    for (size_t e = 0; e < crossings.size(); e++) {
+        particles::Crossing & c = crossings[e];
+        if (c.interval == 0 || step % c.interval != 0) continue;
+        h_tally(e, 0) = h_tally(e, 1) = 0;
+        const double t_start = c.t_start;
+        c.t_start = t;
+        if (!comm::is_root() || !output_files_enabled()) continue;
+        std::ofstream out(c.file, std::ios::app);
+        if (!out) throw cannot_write("the particle fluxes file", c.file);
+        if (!c.started) out << provenance::csv_comment() << "\n";
+        c.started = true;
+        const uint64_t n_out = sums[2 * e], n_in = sums[2 * e + 1];
+        const int64_t net = static_cast<int64_t>(n_out) - static_cast<int64_t>(n_in);
+        out << std::setprecision(17) << step << "," << t << "," << t_start << "," << n_out << "," << n_in << "," << net;
+        if (is_solid) {
+            for (const double unit : {parcel, mass}) {
+                out << "," << unit * static_cast<double>(n_out) << "," << unit * static_cast<double>(n_in) << ","
+                    << unit * static_cast<double>(net);
+            }
+            out << "," << mass * static_cast<double>(net) / (t - t_start);
+        }
+        out << "\n";
+    }
+    Kokkos::deep_copy(events.tally, h_tally);
+}
+
+void Particles::resume_fluxes(const double t) {
+    for (auto & c : crossings) c.t_start = t;
+}
+
+std::vector<std::string> Particles::flux_files() const {
+    std::vector<std::string> out;
+    for (const auto & c : crossings) {
+        if (c.interval > 0) out.push_back(c.file);
+    }
     return out;
 }
