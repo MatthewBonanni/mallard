@@ -459,6 +459,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     Kokkos::deep_copy(x, h_x);
     Kokkos::deep_copy(aux, h_aux);
     Kokkos::deep_copy(n_removed, h_removed);
+    init_crossings(input, table, regions);
 }
 
 void Particles::evaluate_gas(const ParticleView & x_stage, Kokkos::View<rtype *[N_CONSERVATIVE]> W,
@@ -789,6 +790,10 @@ void Particles::write_probes(const uint64_t step, const double t) {
 
 void Particles::relocate() {
     if (capacity == 0) return;
+    detect_crossings();
+    const auto exits = exit_mask;
+    const auto recorded = events;
+    const auto starts = crossing_start;
     const Walker w = walker;
     const auto ids = id;
     const auto start = cell;
@@ -830,6 +835,11 @@ void Particles::relocate() {
                 }
                 continue;
             }
+            if (exits.extent(0) > 0 && action != particles::LOST && exits(static_cast<uint32_t>(face))) {
+                const double x0[3] = {starts(s, 0), starts(s, 1), starts(s, 2)};
+                particles::record_exit(recorded, w, exits(static_cast<uint32_t>(face)), ids(s), s, c,
+                                       static_cast<uint32_t>(face), p, x0);
+            }
             Kokkos::atomic_inc(&removed(action == particles::EXIT ? 0 : action == particles::STICK ? 2 : 1));
             ids(s) = EMPTY;
             return;
@@ -838,6 +848,8 @@ void Particles::relocate() {
         if (inertia) FOR_I_DIM pos(wd * s + N_DIM + i) = v[i];
         start(s) = c;
     });
+    evaluate_crossings();
+    remember_positions();
 }
 
 void Particles::migrate() {
@@ -930,6 +942,7 @@ void Particles::migrate() {
         const auto removed = n_removed;
         gated::parallel_for("particle_lost", 1, KOKKOS_LAMBDA(const int) { removed(1) += lost; });
     }
+    remember_positions();
 }
 
 particles::Validity Particles::validity(const double limit) const {
@@ -1098,5 +1111,11 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
     }
     for (const auto & q : quantities.summary()) lines.emplace_back("Particle quantity", q);
     for (const auto & p : probes.summary()) lines.emplace_back("Particle probe", p);
+    for (const auto & c : crossings) {
+        std::string fields;
+        for (const auto & f : c.fields) fields += ", " + f.name;
+        lines.emplace_back("Particle crossings", c.name + ": " + (c.exits ? "leaving through " : "crossing ") + c.region +
+                                                     fields + " -> " + c.file);
+    }
     return lines;
 }

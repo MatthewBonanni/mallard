@@ -461,6 +461,20 @@ and particle-only series a plain temporal `PolyData` index:
 5.12 remains supported by a key. The collection index is rewritten from the
 two blocks' step lists, as the plain index is (`vtkhdf_series::write_collection`).
 
+Crossings (`[[particles.crossings]]`) are events, not states, so they are
+appended on the device during the step and written by the host after it.
+`relocate` records them: before the walk, a kernel compares each particle's
+position at the step's start (kept per slot with its id, after relocation and
+migration) with its unrelocated end, which is continuous across periodic
+faces, against each surface piece's carrier (regula falsi along the straight
+path, then the clips); in the walk, a particle removed at a face of a recorded
+zone is recorded with the point where its path meets the face's plane. A
+second kernel evaluates the fields from the slot before migration can reuse
+it. The host reads the count after every step (a step graph launch per step),
+gathers the events to rank 0 and sorts them by entry, id and fraction of the
+step, which makes the files rank-count independent. Events are few next to the
+particles, so this gather does not contradict the snapshots' design.
+
 ## Not in this layer
 
 - **Graphable migration** (above): distributed runs with particles are not

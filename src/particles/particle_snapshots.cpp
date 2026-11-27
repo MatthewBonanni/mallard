@@ -24,8 +24,8 @@ const std::string DOCS = "docs/guide/output.md#particle-snapshots";
 
 } // namespace
 
-uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const region::RegionView<> * region,
-                                 const std::string & key, const size_t line) {
+Particles::Resolved Particles::resolve_fields(const std::vector<std::string> & names, const std::string & key,
+                                              const size_t line, const std::string & docs) const {
     std::vector<std::string> variables = particles::base_variables();
     for (const auto & name : quantity_names()) variables.push_back(name);
     auto index = [&](const std::string & name) -> int64_t {
@@ -38,12 +38,12 @@ uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const r
     }
     for (const char * vector : {"U", "V"}) accepted.push_back(vector);
     std::sort(accepted.begin(), accepted.end());
-    Snapshot s;
-    std::vector<uint32_t> columns;
+    Resolved s;
+    std::vector<uint32_t> & columns = s.columns;
     for (const auto & name : names) {
         auto error = [&](const std::string & message, const std::string & fix) {
             return InputError(Diagnostic{.key = key, .line = line, .message = message, .valid = accepted,
-                                         .suggestion = suggest_value(name, accepted), .fix = fix, .docs = DOCS});
+                                         .suggestion = suggest_value(name, accepted), .fix = fix, .docs = docs});
         };
         for (const auto & f : s.fields) {
             if (f.name == name) throw error("lists \"" + name + "\" twice", "Remove one");
@@ -64,8 +64,8 @@ uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const r
                         "[[particles.quantities]]; a vector goes by its name without _X");
         }
         if (found[0] <= static_cast<int64_t>(particles::VAR_T)) {
-            throw error("\"" + name + "\": the positions are the snapshot's points, and its time is the snapshot's",
-                        "Remove it: every particle snapshot holds the positions and ids");
+            throw error("\"" + name + "\": every record holds the positions, time and ids",
+                        "Remove it");
         }
         const bool temperature = found[0] == particles::VAR_TEMPERATURE || (found[0] == particles::VAR_TP && !heated);
         if (temperature && R <= 0.0) {
@@ -81,6 +81,16 @@ uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const r
             s.gas = s.gas || gas;
         }
     }
+    return s;
+}
+
+uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const region::RegionView<> * region,
+                                 const std::string & key, const size_t line) {
+    const Resolved resolved = resolve_fields(names, key, line, DOCS);
+    const std::vector<uint32_t> & columns = resolved.columns;
+    Snapshot s;
+    s.fields = resolved.fields;
+    s.gas = resolved.gas;
     s.n_columns = static_cast<uint32_t>(columns.size());
     s.filtered = region != nullptr;
     if (region) s.region = *region;

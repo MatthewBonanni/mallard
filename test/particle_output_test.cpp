@@ -438,7 +438,7 @@ TEST(ParticleSnapshotsTest, InputErrorsNameTheKey) {
     EXPECT_NE(unknown.find("\"U_Q\" is no particle variable or quantity"), std::string::npos) << unknown;
     EXPECT_NE(unknown.find("particle_fields"), std::string::npos) << unknown;
     const std::string position = error(prefix + "particle_fields = [\"x\"]\ninterval = 1\n");
-    EXPECT_NE(position.find("positions are the snapshot's points"), std::string::npos) << position;
+    EXPECT_NE(position.find("every record holds the positions"), std::string::npos) << position;
     const std::string ball = N_DIM == 3 ? "{type = \"sphere\", center = [0.5, 0.5, 0.25], radius = 0.3}"
                                         : "{type = \"disk\", center = [0.5, 0.5], radius = 0.3}";
     const std::string surface = error(prefix + "particle_fields = [\"U\"]\nregion = {type = \"boundary\", of = " + ball +

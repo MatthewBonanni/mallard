@@ -80,6 +80,7 @@ set(MALLARD_TEST_SOURCES
     gated_test.cpp
     statistical_convergence_test.cpp
     particle_output_test.cpp
+    particle_crossings_test.cpp
     particles_coupling_test.cpp
     particles_test.cpp
     viscous_order_test.cpp
