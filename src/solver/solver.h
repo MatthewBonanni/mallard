@@ -1049,6 +1049,7 @@ class Solver {
         void allocate_time_stepping();  // Stages and face buffers of the right-hand side
         void init_particles(region::Regions & regions);  // [particles], before allocate_time_stepping
         void write_particle_probes();   // [[particles.probes]] due at this step
+        void write_particle_trajectories();  // [[particles.trajectories]] due at this step
         /** @brief Enqueue the particle snapshot of data_writers[k] into its pinned mirrors (capturable). */
         void stage_particle_snapshot(size_t k);
         std::unique_ptr<Particles> particles;

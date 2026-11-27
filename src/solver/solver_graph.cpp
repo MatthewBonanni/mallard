@@ -1332,7 +1332,7 @@ step_queue::Horizon Solver::step_horizon() const {
         for (const auto & writer : data_writers) writer->due_limits(step, h.step_limit, h.t_limit);
     }
     probes.due_limits(step, h.step_limit, h.t_limit);
-    if (particles) particles->probe_limits(step, h.step_limit);
+    if (particles) particles->probe_limits(step, h.step_limit, h.t_limit);
     if (!statistics_on_device()) statistics.due_limits(step, h.step_limit);
     // The chemistry balancing's window ends after a step the host takes
     const uint64_t window = reacting ? cell_chemistry.steps_to_balance_window() : 0;

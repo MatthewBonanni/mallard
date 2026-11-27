@@ -1,5 +1,5 @@
 # For the key catalog only (tools/dev/input_catalog.py): solid particles with
-# every key of [particles], [[particles.walls]] and [[particles.crossings]] given.
+# every key of [particles], [[particles.walls]], [[particles.crossings]] and [[particles.trajectories]] given.
 
 [run]
 n_steps = 1
@@ -75,3 +75,15 @@ file = "caught.csv"
 [[particles.crossings]]
 name = "ring"
 region = {type = "boundary", of = {type = "disk", center = [0.5, 0.5], radius = 0.2}}
+
+[[particles.trajectories]]
+name = "near"
+interval = 1
+fraction = 1.0
+region = {type = "disk", center = [0.5, 0.5], radius = 0.1}
+fields = ["V"]
+file = "near.csv"
+
+[[particles.trajectories]]
+name = "all"
+time_interval = 0.01

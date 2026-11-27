@@ -140,17 +140,7 @@ void Particles::init_crossings(const Input & input, const Input & table, region:
             const bool append = resume && std::filesystem::exists(c.file) && std::filesystem::file_size(c.file) > 0;
             std::ofstream out(c.file, append ? std::ios::app : std::ios::trunc);
             if (!out) throw cannot_write("the particle crossings file", c.file);
-            if (!append) {
-                out << "step,t,id,x,y" << (N_DIM == 3 ? ",z" : "") << (c.exits ? "" : ",direction");
-                for (const auto & f : c.fields) {
-                    if (f.n_components == 1) {
-                        out << "," << f.name;
-                    } else {
-                        for (uint32_t i = 0; i < f.n_components; i++) out << "," << f.name << "_" << "XYZ"[i];
-                    }
-                }
-                out << "\n";
-            }
+            if (!append) out << record_header(c.fields, c.exits ? "" : ",direction") << "\n";
         }
         crossings.push_back(std::move(c));
     }
@@ -353,6 +343,18 @@ void Particles::write_crossings(const uint64_t step, const double t, const doubl
             out << "\n";
         }
     }
+}
+
+std::string Particles::record_header(const std::vector<ParticleField> & fields, const std::string & extra) {
+    std::string out = std::string("step,t,id,x,y") + (N_DIM == 3 ? ",z" : "") + extra;
+    for (const auto & f : fields) {
+        if (f.n_components == 1) {
+            out += "," + f.name;
+        } else {
+            for (uint32_t i = 0; i < f.n_components; i++) out += "," + f.name + "_" + "XYZ"[i];
+        }
+    }
+    return out;
 }
 
 std::vector<std::string> Particles::crossing_files() const {

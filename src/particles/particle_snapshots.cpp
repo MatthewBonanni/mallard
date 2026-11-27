@@ -86,9 +86,13 @@ Particles::Resolved Particles::resolve_fields(const std::vector<std::string> & n
 
 uint32_t Particles::add_snapshot(const std::vector<std::string> & names, const region::RegionView<> * region,
                                  const std::string & key, const size_t line) {
-    const Resolved resolved = resolve_fields(names, key, line, DOCS);
+    return add_staging(resolve_fields(names, key, line, DOCS), region, NO_MEMBERSHIP);
+}
+
+uint32_t Particles::add_staging(const Resolved & resolved, const region::RegionView<> * region, const uint32_t bit) {
     const std::vector<uint32_t> & columns = resolved.columns;
     Snapshot s;
+    s.bit = bit;
     s.fields = resolved.fields;
     s.gas = resolved.gas;
     s.n_columns = static_cast<uint32_t>(columns.size());
@@ -122,11 +126,14 @@ void Particles::stage_snapshot(const uint32_t k) {
     const particles::Solid sphere = solid;
     const particles::QuantityFunctor q = quantities.functor();
     const region::RegionView<> where = snap.region;
+    const auto members = trajectory_members;
+    const uint32_t bit = snap.bit;
     gated::parallel_for("particle_snapshot", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         const rtype * values = xs.data() + size_t(w) * s;
         const double p[3] = {static_cast<double>(values[0]), static_cast<double>(values[1]),
                              N_DIM == 3 ? static_cast<double>(values[N_DIM - 1]) : 0.0};
-        const bool inside = ids(s) != EMPTY && (!filtered || where.distance(p) < 0.0);
+        const bool member = bit == NO_MEMBERSHIP || (ids(s) < members.extent(0) && ((members(ids(s)) >> bit) & 1u));
+        const bool inside = ids(s) != EMPTY && member && (!filtered || where.distance(p) < 0.0);
         out_id(s) = inside ? ids(s) : EMPTY;
         if (!inside) return;
         rtype Ws[N_CONSERVATIVE];

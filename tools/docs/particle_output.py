@@ -7,7 +7,8 @@ From short runs of examples/particle_vortex (a 2D build with HDF5, about a
 minute on 2 CPU threads): particle snapshots of [[write_data]] over the gas
 speed of a VTU snapshot at the same times (particle_snapshots), and the
 crossings of the boundary of the core probe's disk against the probe's count
-(particle_crossings). The particle files are read with h5py.
+(particle_crossings), and the trajectories of a fraction of the particles
+colored by their temperature (particle_trajectories). The particle files are read with h5py.
 """
 import argparse
 import csv
@@ -21,7 +22,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 
 import figstyle
 from figstyle import bare
@@ -154,7 +155,44 @@ def particle_crossings(P, args):
     return fig
 
 
-GUIDE_RUNS = {"particle_crossings": particle_crossings, "particle_snapshots": particle_snapshots}
+@functools.cache
+def trajectory_run(binary):
+    """A quarter of the particles of examples/particle_vortex every 10 steps, with their temperature."""
+    work = Path(tempfile.mkdtemp())
+    run(binary, vortex_input('[[particles.trajectories]]\nname = "sample"\ninterval = 10\nfraction = 0.25\n'
+                             'fields = ["T_P"]\n'), work)
+    return read_csv(work / "particle_trajectories_sample.csv")
+
+
+def particle_trajectories(P, args):
+    rows = trajectory_run(args.mallard)
+    fig, ax = plt.subplots(figsize=(5.8, 5.4))
+    segments, values = [], []
+    for i in np.unique(rows["id"]):
+        sel = rows["id"] == i
+        x, y, T = rows["x"][sel], rows["y"][sel], rows["T_P"][sel]
+        for k in range(len(x) - 1):
+            if abs(x[k + 1] - x[k]) < 0.5 and abs(y[k + 1] - y[k]) < 0.5:  # not across a periodic side
+                segments.append([(x[k], y[k]), (x[k + 1], y[k + 1])])
+                values.append(0.5 * (T[k] + T[k + 1]))
+        ax.plot(x[0], y[0], "o", color=P["fg"], ms=3)
+    lines = LineCollection(segments, array=np.array(values), cmap="plasma", linewidths=1.4)
+    lines.set_clim(0.4, 1 / 1.4)
+    ax.add_collection(lines)
+    ax.plot([0, 0.5, 0.5, 0, 0], [0, 0, 0.5, 0.5, 0], color=P["mesh"], lw=0.8)
+    bare(ax)
+    ax.set_xlim(-0.01, 0.51)
+    ax.set_ylim(-0.01, 0.51)
+    cb = fig.colorbar(lines, ax=ax, fraction=0.04, pad=0.02)
+    cb.set_label("particle temperature T_P", fontsize=11)
+    cb.ax.tick_params(labelsize=10)
+    cb.outline.set_visible(False)
+    ax.set_title(f"{len(np.unique(rows['id'])):g} of 81 particles, t = 0 to 10, in their vortex", fontsize=12)
+    return fig
+
+
+GUIDE_RUNS = {"particle_crossings": particle_crossings, "particle_snapshots": particle_snapshots,
+              "particle_trajectories": particle_trajectories}
 
 
 def figures(mallard=None, names=None):
