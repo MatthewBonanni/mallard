@@ -247,10 +247,12 @@ void Solver::setup_from_input() {
     t_wall_setup = 0.0;
     run_health.setup_phases.clear();
 
+    mesh_read = false;
+
     logging::section("Setup");
     independently("", [&] { init_run_parameters(); });
     timed_phase("mesh", [&] {
-        independently("", [&] {
+        mesh_read = independently("", [&] {
             init_mesh();
             record_mesh_provenance();
         });

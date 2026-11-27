@@ -307,9 +307,20 @@ error E-KEY-UNUSED: input.toml: keys that are unknown or unused with these setti
   docs/guide/input_files.md#e-key-unused
 ```
 
-When another error stops the setup first, the keys with a suggestion are
-listed under it as possible misspellings. `mallard reactor` checks its input
-the same way.
+When another error stops the setup first, a run lists the keys with a
+suggestion under it as possible misspellings (`mallard reactor` checks its
+input the same way). `mallard check` then reports
+only the keys Mallard does not know: not in the key catalog
+(`docs/input-keys/`, which `mallard list keys` lists), named like none of its
+keys, and not a species or data column of a table such as `Y` or `units`, so
+that the valid keys of the sections the setup did not reach are not reported.
+
+When the errors that stop the setup are all of independent entries (a
+`[[boundaries]]` or `[[write_data]]` entry, or zones no entry covers),
+`mallard check` sets up again without them (a failed boundary entry, or an
+uncovered zone, as a symmetry plane), until the setup ends or stops on another
+error, and reports the errors of the sections after them too. If it ends, the
+keys it did not read are reported as after a complete setup.
 
 ## Error messages
 
@@ -514,9 +525,9 @@ An input still being written fails on what it does not have yet: a required key 
 
 | Code | What it means | What to do |
 |---|---|---|
-| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to |
+| <a id="e-input"></a>`E-INPUT` | The setup stopped on an invalid input: a syntax error, a value of the wrong type or dimension, a missing key, a zone without a condition. The message names the key and its line, what it accepts, and the docs of the key | Fix the key; the report covers only what the setup got to, past the failed entries (see [Unknown and unused keys](#unknown-and-unused-keys)) |
 | <a id="e-setup"></a>`E-SETUP` | The setup stopped on another error: a file it cannot read, a mesh it cannot partition, memory it cannot allocate | The message says what failed |
-| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up | Fix or remove it. A run rejects the same keys |
+| <a id="e-key-unused"></a>`E-KEY-UNUSED` | A key that no setting reads: misspelled, in the wrong table, or of an option not chosen. The message gives its line and the closest key the setup looked up. After a setup stopped by an error, only the keys Mallard does not know ([Unknown and unused keys](#unknown-and-unused-keys)) | Fix or remove it. A run rejects the same keys |
 | <a id="w-key-deprecated"></a>`W-KEY-DEPRECATED` | A key renamed or replaced in a later release, still read for now | `mallard input upgrade input.toml` rewrites it ([Inputs from older releases](#inputs-from-older-releases)) |
 | <a id="e-catalog-write"></a>`E-CATALOG-WRITE` | `--catalog FILE` cannot be written | Check the path and its permissions |
 | <a id="e-ranks"></a>`E-RANKS` | `--ranks N` in a check run under `mpirun` on another number of ranks | Check serially (memory is then scaled to N ranks) or on N ranks |
@@ -555,8 +566,8 @@ An input still being written fails on what it does not have yet: a required key 
 | `diagnostics` | `[{severity, code, message, docs, key, element, line, column, missing}]`, in the order found: `key` is the key path the diagnostic is about, with the element of an array of tables by index or by name (`boundaries[1].T`, `boundaries[name = "inlet"].T`), `element` that element (`boundaries[1]`), and `line` and `column` where its value (or, for a key not set, its table) is in the input, each `null` where unknown; `missing` marks a missing piece |
 | `unused_keys` | `[{key, line, suggestion}]` (`null` where unknown) |
 | `boundaries` | `[{zone, condition, faces, details, turbulence}]` |
-| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone) |
-| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh) |
+| `unassigned` | `[{zone, faces}]`: the zones whose faces have no condition, as the `E-INPUT` error names them (the setup stops; `--view` then draws the mesh alone); if the setup stopped before the boundaries, once it read the mesh, the zones no entry names |
+| `periodic` | `[{zones, map, translation, angle, center, axis, faces, area, node_offset_max, node_offset_relative}]`, one per pair the mesh joined: `zones` (`null` for a generated mesh's sides joined without names), `map` (`translation` or `rotation`; `angle` in degrees about `axis` through `center`), the faces joined (one per face of each zone) and their `area` (2D: length), and the largest distance between a node and its partner's image, in m and over the mean face size (round-off for a periodic mesh). Given whenever the setup read the mesh, also if it stopped later |
 | `regions`, `case_view`, `case_view_images`, `initial_file` | `[{name, of_mesh, dimension, measure, per_radian, cells, exact, resolution}]`; the case view's ParaView file, and its images ([The case view](#the-case-view)); the file of `--initial` ([The initial state before a run](#the-initial-state-before-a-run)) |
 | `geometry_only`, `view` | Whether `--geometry-only` set up the geometry alone; with `--view`, the case view's files, every block's metadata and each boundary's frame (`mallard-case-view`, the [session](session.md)'s `case.view`), `null` without it ([Block metadata](#block-metadata)) |
 | `boundary_values` | With `--boundary-values`: each entry's file and the range of each column (`mallard-boundary-values`; [Boundary values](#boundary-values)), else `null` |

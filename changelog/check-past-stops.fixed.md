@@ -1,0 +1,1 @@
+- `mallard check` no longer reports `E-KEY-UNUSED` for valid keys of the sections a setup stopped by an error never reached: it then reports only keys Mallard does not know (in no table of the key catalog, named like none of its keys), so that a misspelled key such as `run.cfll` is still reported, with or without a suggestion (#1312).

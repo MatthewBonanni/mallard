@@ -380,24 +380,6 @@ int files_main(const cli::Args & args) {
 
 int list_templates_main(const cli::Args &) { return case_template::new_case({}, true, false, false); }
 
-namespace {
-
-/** @brief A key path from its catalog file name, which percent-encodes it (tools/dev/input_catalog.py). */
-std::string key_of_file(const std::string & stem) {
-    std::string key;
-    for (size_t i = 0; i < stem.size(); i++) {
-        if (stem[i] == '%' && i + 2 < stem.size()) {
-            key += static_cast<char>(std::stoi(stem.substr(i + 1, 2), nullptr, 16));
-            i += 2;
-        } else {
-            key += stem[i];
-        }
-    }
-    return key;
-}
-
-}  // namespace
-
 json::Value general_key_catalog() {
     for (const std::filesystem::path & dir : data_dirs()) {
         const std::filesystem::path catalog = dir / "docs" / "input-keys";
@@ -405,7 +387,7 @@ json::Value general_key_catalog() {
         std::vector<std::pair<std::string, std::filesystem::path>> files;
         for (const auto & entry : std::filesystem::directory_iterator(catalog)) {
             if (entry.path().extension() != ".json") continue;
-            files.emplace_back(key_of_file(entry.path().stem().string()), entry.path());
+            files.emplace_back(catalog_key_of_file(entry.path().stem().string()), entry.path());
         }
         std::sort(files.begin(), files.end());
         json::Value out;

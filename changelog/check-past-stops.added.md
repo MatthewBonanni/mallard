@@ -1,0 +1,1 @@
+- `mallard check` goes on past the errors of independent entries that stop the setup (`[[boundaries]]` and `[[write_data]]` entries, zones without a condition), setting up again without them, so that it reports the errors of later sections too; its JSON report gives `unassigned` and `periodic` whenever the setup read the mesh, also if it stopped before the boundaries (#1312).

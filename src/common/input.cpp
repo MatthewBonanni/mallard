@@ -7,6 +7,7 @@
 
 #include "input.h"
 
+#include "build_info.h"
 #include "common_io.h"
 
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -621,6 +623,112 @@ std::vector<Diagnostic> unused_keys(const Input & input) {
     collect_lookups(input, "", lookups);
     std::vector<Diagnostic> out;
     collect_unused(input, "", lookups, out);
+    std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
+    return out;
+}
+
+std::string catalog_key_of_file(const std::string & stem) {
+    std::string key;
+    for (size_t i = 0; i < stem.size(); i++) {
+        if (stem[i] == '%' && i + 2 < stem.size()) {
+            key += static_cast<char>(std::stoi(stem.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else {
+            key += stem[i];
+        }
+    }
+    return key;
+}
+
+const std::set<std::string> & catalog_keys() {
+    static const std::set<std::string> keys = [] {
+        std::set<std::string> out;
+        for (const std::filesystem::path & dir : data_dirs()) {
+            const std::filesystem::path catalog = dir / "docs" / "input-keys";
+            std::error_code ec;
+            if (!std::filesystem::is_directory(catalog, ec)) continue;
+            for (const auto & entry : std::filesystem::directory_iterator(catalog, ec)) {
+                if (entry.path().extension() == ".json") out.insert(catalog_key_of_file(entry.path().stem().string()));
+            }
+            break;
+        }
+        return out;
+    }();
+    return keys;
+}
+
+namespace {
+
+std::vector<std::string> dotted_parts(const std::string & path) {
+    std::vector<std::string> parts;
+    for (size_t start = 0; start <= path.size();) {
+        const size_t end = std::min(path.find('.', start), path.size());
+        parts.push_back(path.substr(start, end - start));
+        start = end + 1;
+    }
+    return parts;
+}
+
+/** @brief What unknown_keys knows of Mallard's keys. */
+struct Vocabulary {
+    const std::set<std::string> & catalog;
+    std::set<std::string> names;  // of every part of a catalog key, and of every key setup looked up
+    Lookups lookups;
+
+    bool known(const std::string & key) const {
+        static const std::set<std::string> free_form = {"X", "Y", "rhoY", "lewis", "units"};
+        const std::string path = catalog_path(key);
+        if (catalog.count(path)) return true;
+        const std::vector<std::string> parts = dotted_parts(path);
+        return names.count(parts.back()) ||
+               std::any_of(parts.begin(), parts.end() - 1, [](const std::string & p) { return free_form.count(p) > 0; });
+    }
+};
+
+/** @brief The unknown keys under v (at path); read: whether setup read v itself, so that its tables' lookups count. */
+void collect_unknown(const Input & v, const std::string & path, const bool read, const Vocabulary & vocabulary,
+                     std::vector<Diagnostic> & out) {
+    if (v.is_table()) {
+        const auto & table = v.as_table();
+        const auto & made = table.lookups_made();
+        for (const auto & [key, value] : table.entries()) {
+            const std::string at = join(path, key);
+            const bool looked_up = read && (made.all || made.keys.count(key));
+            if (looked_up || vocabulary.known(at)) {
+                collect_unknown(value, at, looked_up, vocabulary, out);
+                continue;
+            }
+            const auto location = value.location();
+            if (!location.is_ok()) continue;
+            Diagnostic d;
+            d.key = at;
+            d.line = location.first_line_number();
+            d.message = "unknown";
+            d.suggestion = suggest(table, path, key, vocabulary.lookups);
+            const std::string section = d.key.substr(0, d.key.find_first_of(".["));
+            d.docs = section == d.key ? "docs/input.md" : docs_of(d.key);
+            out.push_back(std::move(d));
+        }
+    } else if (v.is_array()) {
+        const auto & array = v.as_array();
+        for (size_t i = 0; i < array.size(); i++) {
+            collect_unknown(array[i], path + "[" + std::to_string(i) + "]", read, vocabulary, out);
+        }
+    }
+}
+
+} // namespace
+
+std::vector<Diagnostic> unknown_keys(const Input & input, const std::set<std::string> & catalog) {
+    if (catalog.empty()) return {};
+    Vocabulary vocabulary{catalog, {}, {}};
+    for (const std::string & key : catalog) {
+        for (const std::string & part : dotted_parts(key)) vocabulary.names.insert(part);
+    }
+    collect_lookups(input, "", vocabulary.lookups);
+    for (const auto & entry : vocabulary.lookups) vocabulary.names.insert(entry.first);
+    std::vector<Diagnostic> out;
+    collect_unknown(input, "", true, vocabulary, out);
     std::stable_sort(out.begin(), out.end(), [](const Diagnostic & a, const Diagnostic & b) { return a.line < b.line; });
     return out;
 }

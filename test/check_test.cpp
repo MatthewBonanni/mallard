@@ -300,6 +300,25 @@ TEST(CheckBoundaries, PeriodicPairsGiveTheirMapFacesAreaAndHowWellTheyMatch) {
     EXPECT_LT(p.node_offset_relative, roundoff(1e-10));
 }
 
+TEST(CheckBoundaries, ZonesWithoutAConditionAndPeriodicPairsAreGivenWheneverTheMeshWasRead) {
+    std::vector<std::string> zones = {"bottom"};
+    if (N_DIM == 3) zones.insert(zones.end(), {"back", "front"});
+    const std::string input = box("1.0", "t_stop = 0.5\ncfl = 0.8\n", "[[periodic]]\nzones = [\"left\", \"right\"]\n", zones);
+    std::string before = input;
+    before.replace(before.find("type = \"euler\""), 14, "type = \"eulerr\"");
+    // Stopped by the zone itself, and by [physics], before the boundaries
+    for (const std::string & text : {input, before}) {
+        const CheckReport r = check(text);
+        EXPECT_FALSE(r.setup_done);
+        ASSERT_EQ(r.unassigned.size(), 1u) << first_error(r);
+        EXPECT_EQ(r.unassigned[0].zone, "top");
+        EXPECT_EQ(r.unassigned[0].faces, N_DIM == 3 ? 32u : 16u);
+        ASSERT_EQ(r.periodic.size(), 1u) << first_error(r);
+        EXPECT_EQ(r.periodic[0].zone_a, "left");
+        EXPECT_EQ(r.periodic[0].faces, N_DIM == 3 ? 16u : 8u);
+    }
+}
+
 TEST(CheckTimeStep, MatchesTheUniformGridFormulaAndFindsTheFastestRegion) {
     // dt = cfl h / (|u| + |v| + 2a) on a uniform 2D grid (docs/input.md); the
     // flow is 3 times faster for x > 1.5, so that is where dt is set
