@@ -12,6 +12,7 @@
 #include "region.h"
 #include "gated.h"
 #include "region_clip.h"
+#include "box_tree.h"
 #include "region_sampler.h"
 
 #include <algorithm>
@@ -19,7 +20,9 @@
 #include <cctype>
 #include <cmath>
 #include <limits>
+#include <iterator>
 #include <map>
+#include <numeric>
 #include <utility>
 
 #include "comm.h"
@@ -366,27 +369,34 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
         box[0][k] -= 1e-6 * scale;
         box[1][k] += 1e-6 * scale;
     }
-    auto outside = [&](const uint32_t c) {
-        Vec lo = {INF, INF, INF}, hi = {-INF, -INF, -INF};
-        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
-            double x[3];
-            HostNodes{mesh, c}(k, x);
-            for (size_t d = 0; d < 3; d++) {
-                lo[d] = std::min(lo[d], x[d]);
-                hi[d] = std::max(hi[d], x[d]);
-            }
-        }
+    // Straight cells whose node box lies outside the bounds are 0 without sampling; curved cells are always sampled
+    std::vector<uint32_t> cells;
+    if (box == EVERYWHERE) {
+        cells.resize(mesh.n_cells);
+        std::iota(cells.begin(), cells.end(), 0u);
+    } else {
         // 2D: x and y only, as every user of the bounds reads them: the cells lie at z = 0 whatever a center's z
+        ::Box query;
         for (size_t d = 0; d < N_DIM; d++) {
-            if (hi[d] < box[0][d] || lo[d] > box[1][d]) return true;
+            query.lo[d] = box[0][d];
+            query.hi[d] = box[1][d];
         }
-        return false;
-    };
+        mesh.cell_tree().overlapping(query, cells);
+        if (mesh.curved_geometry) {
+            std::vector<uint32_t> curved, both;
+            for (uint32_t c = 0; c < mesh.n_cells; c++) {
+                if (mesh.curved_geometry->cell_is_curved(c)) curved.push_back(c);
+            }
+            std::set_union(cells.begin(), cells.end(), curved.begin(), curved.end(), std::back_inserter(both));
+            cells = std::move(both);
+        }
+    }
     std::vector<double> fractions(mesh.n_cells, 0.0);
     using HostSpace = Kokkos::DefaultHostExecutionSpace;
     gated::parallel_for("region_cell_fractions",
-                         Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, mesh.n_cells),
-                         [&](const uint32_t i_cell) {
+                         Kokkos::RangePolicy<HostSpace, Kokkos::Schedule<Kokkos::Dynamic>>(0, cells.size()),
+                         [&](const size_t k_cell) {
+        const uint32_t i_cell = cells[k_cell];
         double inside = 0.0, total = 0.0;
         if (mesh.curved_geometry && mesh.curved_geometry->cell_is_curved(i_cell)) {
             const HostCone cone{mesh, i_cell};
@@ -396,8 +406,6 @@ std::vector<double> shape_fractions(const Mesh & mesh, const Region & region, co
                 const double a[3] = {lo[0], N_DIM == 2 ? 0.0 : lo[1], 0.0}, b[3] = {hi[0], N_DIM == 2 ? 1.0 : hi[1], 1.0};
                 sampler::cone(shape, mesh.axisymmetric, cone, k, a, b, inside, total);
             }
-        } else if (outside(i_cell)) {
-            return;
         } else {
             sampler::clipped_cell(shape, planes, mesh.axisymmetric, mesh.h_n_nodes_of_cell(i_cell), HostNodes{mesh, i_cell},
                                   inside, total);

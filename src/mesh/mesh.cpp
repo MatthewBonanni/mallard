@@ -11,6 +11,7 @@
 
 #include "mesh.h"
 #include "mesh_block.h"
+#include "box_tree.h"
 
 #include "input.h"
 #include "log.h"
@@ -646,6 +647,11 @@ const VertexNeighbors & Mesh::vertex_neighbors() const {
     return *m_vertex_neighbors;
 }
 
+const BoxTree & Mesh::cell_tree() const {
+    if (!m_cell_tree) m_cell_tree = std::make_shared<const BoxTree>(cell_boxes(*this, n_cells));
+    return *m_cell_tree;
+}
+
 VertexNeighbors Mesh::build_vertex_neighbors() const {
     const KeyCells keys(*this);
     auto row = [&](uint32_t a, uint32_t b) {
@@ -815,6 +821,7 @@ void Mesh::release_setup_data() {
     nodes_of_face = {};
     offsets_nodes_of_face = {};
     m_vertex_neighbors.reset();
+    m_cell_tree.reset();
     for (auto & zone : m_face_zones) zone.faces = {};
 }
 

@@ -357,6 +357,20 @@ TEST(RegionMotionTest, MovingFractionsFollowCurvedWalls) {
         EXPECT_GT(cut, 0.0) << "no curved cell is cut at t " << t;
     }
 }
+
+TEST(RegionMotionTest, RegionsInTheBulgeOfACurvedCellPastItsNodesHaveFractions) {
+    // The outer wall's nodes at 84 and 96 degrees reach y = 1.3764 and its arc 1.384: the disk lies past every node
+    const std::string file = write_temp_shared("mallard_region_bulge_annulus.msh", annulus_gmsh(4, 30));
+    const auto solver = solver_on("type = \"file\"\nfilename = \"" + file + "\"\n"
+                                  "[[mesh.curved]]\nzone = \"outer\"\ntype = \"circle\"\ncenter = [0.0, 0.0]\nradius = 1.384\n",
+                                  {"inner", "outer"});
+    const Mesh & mesh = *solver->get_mesh();
+    const std::vector<double> f = region::cell_fractions(mesh, read("{type = \"disk\", center = [0.0, 1.3805], radius = 0.003}"));
+    double area = 0.0;
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) area += f[c] * double(mesh.h_cell_volume(c));
+    const double disk = std::numbers::pi * 0.003 * 0.003;
+    EXPECT_NEAR(area, disk, 0.1 * disk);
+}
 #endif
 
 TEST(RegionMotionTest, BooleansOfTheMeshNestAsDeepAsTheFractionsStack) {

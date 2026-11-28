@@ -1,0 +1,1 @@
+- Regions of shapes find the cells within their bounds through a tree of the mesh's cell boxes, built once, instead of a pass over every cell per region: many small region writers, sources or probes no longer cost a pass over the mesh each. The fractions, and so every output, are unchanged (#1173).
