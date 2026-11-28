@@ -307,8 +307,23 @@ solver.finish()
 - **The input is the record.** A case is TOML: `Case.from_toml_file(path)` or
   `Case.from_toml(text)` for one a script writes; the run log and every output
   file record its exact text, so `mallard -i` on it reruns the run. There is
-  no other way to configure a run from Python.
-- **Calls.** `setup()`, `step()`, `advance_to(t)`, `finish()`, `run()`,
+  no other way to configure a run from Python but writing that text:
+  `case.set(key, value)` returns the case with one key set (`"run.cfl"`,
+  `"probes[0].interval"`; a bool, int, float, str, or a list or dict of them),
+  changing only that key's line, so `toml()` stays the whole input, and
+  `case.save(path)` writes it to a file and returns the case of that file
+  ([C++](cpp_api.md#building-a-case-in-code)).
+
+    ```python
+    import os
+    base = mallard.Case.from_toml_file("input.toml")
+    for cfl in (0.3, 0.5, 0.7):
+        os.makedirs(f"cfl_{cfl}", exist_ok=True)
+        case = base.set("run.cfl", cfl).set("write_data[0].prefix", f"cfl_{cfl}/flow")
+        mallard.Solver(case.set("output.run_log", f"cfl_{cfl}/mallard.jsonl").save(f"cfl_{cfl}/input.toml")).run()
+    ```
+
+- **Calls.** `setup()`, `step()`, `step(n)`, `advance_to(t)`, `finish()`, `run()`,
   `time()`, `step_count()`, `finished()`, `monitors()`, `monitor(name)`,
   `statistics()`, as in [C++](cpp_api.md#running-a-case); failures raise
   `mallard.Error`, with the message `mallard` prints and its `code`.
@@ -326,13 +341,24 @@ solver.finish()
   `on_stage(f)` calls `f(solver, stage)` at each stage of the time integrator
   (`stage.step`, `stage.index`, `stage.time`); `remove_callback(id)`. An
   exception in a callback ends the run as an error and is raised from the call
-  that stepped.
+  that stepped. `on_progress(f)` calls `f(progress)` with each progress row
+  (`step`, `time`, `dt`, `fraction`, `eta`, `diagnostics`, `written`, `json`),
+  `on_output(f)` calls `f(output)` with each file written (`kind`, `path`,
+  `reason`, `files`, `json`) and `on_record(f)` calls `f(record)` with every
+  record of the run log (`type`, `json`); they keep the GPU's step queue, and
+  get their record only ([C++](cpp_api.md#progress-output-and-the-run-log)).
+- **Console output.** `set_log(sink)` sends what the solver prints to
+  `sink(message)` (`message.level`: `"info"`, `"warning"` or `"error"`;
+  `message.code`, `message.text`) instead of the terminal;
+  `set_log(lambda message: None)` silences it, `set_log(None)` prints again.
 - **One session per process.** Kokkos starts once per process, and a process
   runs cases of one dimension: run others in another process
   (`multiprocessing`, a job array). The session ends when Python exits.
 - **MPI.** Start the script with `mpirun -n 4 python3 script.py` on a build
   with MPI: every call is collective, fields hold each rank's owned cells
   (`GLOBAL_ID` places them), and `monitors()` are the same on every rank.
+  Callbacks run on every rank, but `on_output` and `on_record` on rank 0, which
+  writes the run log.
   To run on some of the ranks only, for instance beside another code, give the
   session an [mpi4py](https://mpi4py.readthedocs.io) communicator
   (`uv pip install "mallard-python[mpi]"`): every rank of it starts the session

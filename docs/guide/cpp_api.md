@@ -65,6 +65,7 @@ with `-DMallard_ENABLE_LIBRARY=OFF` leaves the library out.
 |---|---|
 | `setup()` | The setup of `mallard -i`: mesh, physics, numerics, output, the initial state, then the start of the run (its first output and progress row). The other calls do it first if you do not |
 | `step()` | One step. Returns `false` once the case's stop condition (`[run]` `n_steps` or `t_stop`, a [trigger](running.md#triggers), a [stop request](running.md)) is reached |
+| `step(n)` | `n` steps, as `n` calls of `step()` take them but queued on the GPU ahead of the host; returns as `step()` does, stopping early at the stop condition |
 | `advance_to(t)` | Steps until the time is `t`, the last step landing exactly on it as on `t_stop`; returns as `step()` does |
 | `finish()` | Ends the run: the final output, the summary and the run log's end record; returns the exit status `mallard -i` would. Before the stop condition, the run ends as stopped by the program (`outcome = "stopped"`, `cause = "caller"`) |
 | `run()` | The whole run of `mallard -i`: steps to the stop condition, then `finish()` |
@@ -76,6 +77,37 @@ run whatever the program asks; set it to the longest run you want.
 `advance_to` adds landing times, so a run stepped with it takes different steps
 from one with only `t_stop`, as an output time does; `step()` alone takes
 exactly the steps of `mallard -i`.
+
+## Building a case in code
+
+`case.set(key, value)` returns the case with one key set: its TOML text with
+that key's line changed, or the key added after its table's last key (a new
+table, with its keys, at the end). The rest of the text stays as it was, so
+`toml()` is still the whole input, which the run records and `mallard -i`
+reruns bit for bit. Keys are paths of bare keys, an element of an array of
+tables by its index; values are booleans, integers, floats (written so they
+read back exactly), strings and arrays of them (`{0.5, 0.5}`, a
+`std::vector`), or `mallard::Value::toml("...")` for any other TOML value. Keys
+are checked when the run is set up, as a file's are: a misspelled key is an
+error. `case.save(path)` writes the text to a file and returns the case of that
+file, for runs that should build from the input on disk.
+
+```cpp
+const mallard::Case base = mallard::Case::from_toml_file("input.toml");
+for (const double cfl : {0.3, 0.5, 0.7}) {
+    const std::string dir = "cfl_" + std::to_string(cfl);
+    std::filesystem::create_directories(dir);
+    const mallard::Case c = base.set("run.cfl", cfl)
+                                .set("write_data[0].prefix", dir + "/flow")
+                                .set("output.run_log", dir + "/mallard.jsonl");
+    mallard::Solver solver(c.save(dir + "/input.toml"));
+    solver.run();
+}
+```
+
+A key the line cannot hold alone (a dotted key, a key of an inline table, a
+value written over several lines) has the whole text reformatted, comments
+kept.
 
 ## Fields
 
@@ -142,6 +174,40 @@ solver.on_step([](mallard::Solver & s) {
 });
 ```
 
+### Progress, output and the run log
+
+`on_progress(f)` calls `f(progress)` with each row of the progress table: the
+run log's progress record (`step`, `time`, `dt`, `cfl`, `fraction` of the run
+done, `wall`, `wall_per_step`, `cells_per_second`, `eta`, the row's
+`diagnostics` such as `min_rho` and `max_mach`, the files `written` since the
+last row) and its `json`. `on_output(f)` calls `f(output)` with each file or
+series completely written (`kind`, `path`, `reason`, `writer`, the `files` with
+their sizes, `json`), and `on_record(f)` calls `f(record)` with every record of
+the [run log](output.md#run-record-mallardjsonl) as it is written (`type`, `json`), whether or
+not the case writes a run log file. These run where the host acts anyway, so
+they keep the GPU's step queue and CUDA graphs; they get their record only and
+may not call the solver. Progress rows come every `[output] check_interval`
+steps and at the start and end of the run.
+
+```cpp
+solver.on_progress([](const mallard::Progress & p) { std::cout << p.step << " " << p.fraction << "\n"; });
+solver.on_output([](const mallard::Output & o) { std::cout << "wrote " << o.path << "\n"; });
+```
+
+## Console output
+
+`set_log(sink)` sends what the solver prints (the setup, the progress table,
+the summary, warnings and errors) to `sink` instead of stdout and stderr: each
+line, and each warning and error with its diagnostic code, as a
+`mallard::LogMessage` (`level`, `code`, `text`), without color. A sink that
+does nothing silences the solver; an empty one (the default) prints again. The
+run log and output files are the same either way.
+
+```cpp
+std::ofstream log("solver.log");
+solver.set_log([&](const mallard::LogMessage & m) { log << m.text << "\n"; });
+```
+
 ## Statistics
 
 `statistics()` gives the [statistics](statistics.md) means' averaging so far:
@@ -171,7 +237,9 @@ Build Mallard with `-DMallard_ENABLE_MPI=ON` and start the program with
 `mpirun` as you would `mallard`. Every call of `Solver` is collective: make it on
 every rank. `monitors()` gives the same values on every rank; fields hold each
 rank's owned cells, which `GLOBAL_ID` places in the whole mesh. Callbacks run on
-every rank.
+every rank, but `on_output` and `on_record` run on rank 0, which writes the run
+log and knows every file. Rank 0 prints the console output, and every rank its
+errors, to its sink.
 
 To run on some of the processes only, for instance beside another code, initialize
 MPI in your program and give the session a communicator:

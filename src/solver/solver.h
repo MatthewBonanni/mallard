@@ -255,6 +255,14 @@ class Solver {
          */
         void set_stage_hook(std::function<void(const State &, rtype, int)> hook);
 
+        /**
+         * @brief Called on every rank with each progress row's status, complete as the run log's progress record has
+         *        it, and the files the row counts (the library API's progress callbacks).
+         */
+        void set_progress_hook(std::function<void(const RunStatus &, const std::string &)> hook) {
+            progress_hook = std::move(hook);
+        }
+
         /** @brief The state at a step boundary, with the chemistry's pending half step applied, on the device. */
         State boundary_state();
 
@@ -1249,6 +1257,7 @@ class Solver {
         rtype pause_time = std::numeric_limits<rtype>::infinity();
         std::function<void()> step_hook;
         std::function<void(const State &, rtype, int)> stage_hook;
+        std::function<void(const RunStatus &, const std::string &)> progress_hook;
         bool host_step_next = false;  // the state was set: the next step on the host, from it
 
         // Divergence: the state at the start of the last step whose state was valid

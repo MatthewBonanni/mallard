@@ -9,7 +9,10 @@ import atexit
 import importlib
 import importlib.machinery
 import importlib.util
+import json
+import math
 import os
+import re
 import sys
 import weakref
 
@@ -100,12 +103,53 @@ class Case:
         """The input file of from_toml_file, else ""."""
         return self._path
 
+    def set(self, key, value):
+        """This case with one key set, a new case: its TOML text with that key's line changed (or added), so toml()
+        stays the run's whole record. key is a path of bare keys, an element of an array of tables by its index
+        ("run.n_steps", "probes[0].interval"); value is a bool, int, float, str, or a list or dict of them."""
+        text = _any_extension().case_set(self._text, self._path or self._name, key, _toml_value(value))
+        return Case(text, "", self._name)
+
+    def save(self, path):
+        """Writes toml() to path and returns the case of that file, which a run then builds from."""
+        path = os.fspath(path)
+        own = f"{path}.tmp{os.getpid()}"
+        with open(own, "wb") as f:
+            f.write(self._text.encode("utf-8"))
+        os.replace(own, path)
+        return Case.from_toml_file(path)
+
     def dimension(self):
         """2 or 3, as mallard tells which solver runs the case."""
         return _any_extension().case_dimension(self._text, self._path or self._name)
 
     def __repr__(self):
         return f"Case({self._path!r})" if self._path else f"Case.from_toml(<{len(self._text)} characters>)"
+
+
+def _toml_value(value):
+    """A Python value as TOML text."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        if math.isinf(value):
+            return "inf" if value > 0 else "-inf"
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        items = []
+        for k, v in value.items():
+            k = str(k)
+            items.append(f"{k if re.fullmatch(r'[A-Za-z0-9_-]+', k) else json.dumps(k)} = {_toml_value(v)}")
+        return "{" + ", ".join(items) + "}"
+    raise TypeError(f"a case's value is a bool, int, float, str, list or dict, not {type(value).__name__}")
 
 
 _session = None
@@ -207,6 +251,12 @@ class DeviceArray:
         return f"DeviceArray({self.name!r}, shape={self.shape}, dtype={self.dtype}, device={self.device})"
 
 
+# Each kind of callback: the extension's setter, and whether the callback gets the solver
+_HOOKS = {"step": ("set_step_hook", True), "stage": ("set_stage_hook", True),
+          "progress": ("set_progress_hook", False), "output": ("set_output_hook", False),
+          "record": ("set_record_hook", False)}
+
+
 class Solver:
     """Runs a case, as mallard::Solver in C++: setup(), then step() or advance_to(t), then finish(); run() is the
     run of mallard -i, with the same output and results bit for bit. Under MPI every call is collective."""
@@ -224,8 +274,9 @@ class Solver:
                                "another process")
         self.case = case
         self._core = _session._module.Solver(case.toml(), case.path(), case._name)
-        self._step_callbacks, self._stage_callbacks, self._next_id = {}, {}, 1
-        self._hooked = (False, False)
+        self._callbacks = {kind: {} for kind in _HOOKS}
+        self._next_id = 1
+        self._hooked = {kind: False for kind in _HOOKS}
         _solvers.add(self)
 
     def close(self):
@@ -236,9 +287,10 @@ class Solver:
         """The setup of mallard -i, then the start of the run (its first output and progress row)."""
         self._core.setup()
 
-    def step(self):
-        """One step; False once the case's stop condition is reached."""
-        return self._core.step()
+    def step(self, n=1):
+        """n steps (queued on the device ahead of the host: the same results as n calls); False once the case's
+        stop condition is reached."""
+        return self._core.step(int(n))
 
     def advance_to(self, t):
         """Steps until the time is t, landing on it; False once the case's stop condition is reached."""
@@ -296,25 +348,48 @@ class Solver:
 
     def on_step(self, f):
         """Calls f(solver) after every step; returns an id for remove_callback."""
-        return self._register(self._step_callbacks, f)
+        return self._register("step", f)
 
     def on_stage(self, f):
         """Calls f(solver, stage) at each stage of the time integrator; field() views the stage's state there.
         Steps run kernel by kernel on the host while one is registered."""
-        return self._register(self._stage_callbacks, f)
+        return self._register("stage", f)
+
+    def on_progress(self, f):
+        """Calls f(progress) with each progress row (step, time, dt, cfl, fraction, eta, diagnostics, written, json)
+        on every rank, keeping the device queue; f gets the record only, and may not call the solver."""
+        return self._register("progress", f)
+
+    def on_output(self, f):
+        """Calls f(output) with each output completely written (kind, path, reason, writer, files, json), on rank 0;
+        f may not call the solver."""
+        return self._register("output", f)
+
+    def on_record(self, f):
+        """Calls f(record) with each record of the run log (type, json) as rank 0 writes it, on rank 0; f may not
+        call the solver."""
+        return self._register("record", f)
 
     def remove_callback(self, callback_id):
         """Removes a callback; unknown ids are ignored."""
-        self._step_callbacks.pop(callback_id, None)
-        self._stage_callbacks.pop(callback_id, None)
+        for callbacks in self._callbacks.values():
+            callbacks.pop(callback_id, None)
         self._install()
 
-    def _register(self, callbacks, f):
+    def set_log(self, sink):
+        """Where the solver's console output goes: None (the default) prints it, as mallard -i does; else
+        sink(message) gets every line, warning and error (message.level "info", "warning" or "error", message.code,
+        message.text), without color, and nothing is printed: lambda message: None silences the solver."""
+        if sink is not None and not callable(sink):
+            raise TypeError("a log sink must be callable, or None")
+        self._core.set_log(sink)
+
+    def _register(self, kind, f):
         if not callable(f):
             raise TypeError("a callback must be callable")
         callback_id = self._next_id
         self._next_id += 1
-        callbacks[callback_id] = f
+        self._callbacks[kind][callback_id] = f
         self._install()
         return callback_id
 
@@ -322,22 +397,21 @@ class Solver:
         # Through a weak reference: callbacks that hold the solver leave no cycle through the extension
         me = weakref.ref(self)
 
-        def steps():
-            s = me()
-            for f in list(s._step_callbacks.values()):
-                f(s)
+        def hook(kind, with_solver):
+            def call(*args):
+                s = me()
+                for f in list(s._callbacks[kind].values()):
+                    if with_solver:
+                        f(s, *args)
+                    else:
+                        f(*args)
+            return call
 
-        def stages(stage):
-            s = me()
-            for f in list(s._stage_callbacks.values()):
-                f(s, stage)
-
-        hooked = (bool(self._step_callbacks), bool(self._stage_callbacks))
-        if hooked[0] != self._hooked[0]:
-            self._core.set_step_hook(steps if hooked[0] else None)
-        if hooked[1] != self._hooked[1]:
-            self._core.set_stage_hook(stages if hooked[1] else None)
-        self._hooked = hooked
+        for kind, (setter, with_solver) in _HOOKS.items():
+            hooked = bool(self._callbacks[kind])
+            if hooked != self._hooked[kind]:
+                getattr(self._core, setter)(hook(kind, with_solver) if hooked else None)
+                self._hooked[kind] = hooked
 
     @staticmethod
     def _wrap(array, info):

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <utility>
 
 #include <unistd.h>
 
@@ -29,6 +30,23 @@ namespace logging {
 namespace {
 
 bool phase_open = false;
+Sink sink;
+std::string pending_line;  // stdout's text after its last newline, for the sink
+
+/** @brief Text for stdout: the console's, else the sink's line by line. */
+void out(std::string_view text, bool flush) {
+    if (!sink) {
+        std::cout << text;
+        if (flush) std::cout << std::flush;
+        return;
+    }
+    pending_line += text;
+    for (size_t end = pending_line.find('\n'); end != std::string::npos; end = pending_line.find('\n')) {
+        const std::string line = pending_line.substr(0, end);
+        pending_line.erase(0, end + 1);
+        sink(Level::INFO, "", line);
+    }
+}
 // Wide enough for the longest setup phase, "mesh quality and resolution"
 constexpr size_t PHASE_WIDTH = static_cast<size_t>(KEY_WIDTH) + 10;
 
@@ -137,7 +155,7 @@ size_t decimal_point(std::string_view s) { return number_cell(s).point; }
 
 void close_phase() {
     if (phase_open) {
-        std::cout << "\n";
+        out("\n", false);
         phase_open = false;
     }
 }
@@ -180,12 +198,18 @@ std::vector<std::string> align_decimals(std::vector<std::string> column) {
 
 bool color_stdout() {
     static const bool on = want_color(STDOUT_FILENO);
-    return on;
+    return on && !sink;
 }
 
 bool color_stderr() {
     static const bool on = want_color(STDERR_FILENO);
-    return on;
+    return on && !sink;
+}
+
+Sink set_sink(Sink s) {
+    std::swap(sink, s);
+    pending_line.clear();
+    return s;
 }
 
 std::string style(std::string_view text, Style s) {
@@ -197,7 +221,7 @@ std::string style(std::string_view text, Style s, bool on) { return paint(text, 
 void line(std::string_view text) {
     if (!comm::is_root()) return;
     close_phase();
-    std::cout << text << std::endl;
+    out(std::string(text) + "\n", true);
 }
 
 void section(std::string_view title, std::string_view right) {
@@ -258,19 +282,19 @@ void begin_phase(std::string_view name) {
     close_phase();
     std::string padded(name);
     if (padded.size() < PHASE_WIDTH) padded.resize(PHASE_WIDTH, ' ');
-    std::cout << "  " << padded << std::flush;
+    out("  " + padded, true);
     phase_open = true;
 }
 
 void end_phase(double seconds) {
     if (!comm::is_root()) return;
     // Something printed since begin_phase moved the time onto its own line
-    if (!phase_open) std::cout << "  " << std::string(PHASE_WIDTH, ' ');
+    if (!phase_open) out("  " + std::string(PHASE_WIDTH, ' '), false);
     // The decimal points of the durations share a column; "2m 05s" ends where "1.23 ms" does
     const std::string text = duration(seconds);
     const size_t point = decimal_point(text), width = columns(text);
     const size_t pad = point == std::string_view::npos ? (width < 10 ? 10 - width : 0) : (point < 4 ? 4 - point : 0);
-    std::cout << std::string(pad, ' ') << text << std::endl;
+    out(std::string(pad, ' ') + text + "\n", true);
     phase_open = false;
 }
 
@@ -363,8 +387,12 @@ void warning(std::string_view code, std::string_view message,
              const std::vector<std::pair<std::string, std::string>> & fields) {
     if (!comm::is_root()) return;
     close_phase();
-    std::cout << std::flush;
-    std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
+    if (sink) {
+        sink(Level::WARNING, code, message);
+    } else {
+        std::cout << std::flush;
+        std::cerr << diagnostic(false, code, message, color_stderr()) << std::endl;
+    }
     json::Object record;
     record.add("type", "warning").add("code", std::string(code)).add("message", message).add(
         "docs", diagnostic_code::docs(code));
@@ -374,9 +402,13 @@ void warning(std::string_view code, std::string_view message,
 
 void error(std::string_view code, std::string_view message) {
     close_phase();
-    std::cout << std::flush;
     std::string prefix = comm::size() > 1 ? format("[rank %d] ", comm::rank()) : "";
-    std::cerr << prefix << diagnostic(true, code, message, color_stderr()) << std::endl;
+    if (sink) {
+        sink(Level::ERROR, code, prefix + std::string(message));
+    } else {
+        std::cout << std::flush;
+        std::cerr << prefix << diagnostic(true, code, message, color_stderr()) << std::endl;
+    }
     run_log::write(json::Object().add("type", "error").add("code", std::string(code)).add("message", message).add(
         "docs", diagnostic_code::docs(code)));
 }

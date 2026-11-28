@@ -14,6 +14,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -36,6 +37,7 @@ std::optional<run_page::Page> page;
 std::string report_file;
 bool ended = false, reported_progress = false;
 std::ostream * progress_out = nullptr;
+RecordHook record_hook;
 
 void write_report() {
     try {
@@ -73,6 +75,7 @@ void write_line(const std::string & line) {
         out.flush();
     }
     if (page) report(line);
+    if (record_hook && comm::is_root()) record_hook(line);
 }
 
 /** @brief The step of the last record that has one (its first "step" is the record's own). */
@@ -188,6 +191,13 @@ void release(const json::Object & start) {
     for (const std::string & line : held) write_line(line);
     held.clear();
 }
+
+RecordHook set_record_hook(RecordHook hook) {
+    std::swap(record_hook, hook);
+    return hook;
+}
+
+bool has_record_hook() { return bool(record_hook); }
 
 void stream_progress(std::ostream * stream) { progress_out = stream; }
 

@@ -119,6 +119,16 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
                          const std::string & unknown_dimension = "");
 
 /**
+ * @brief The text of an input with the key at `key` ("run.n_steps", "probes[0].interval": bare keys, an element of an
+ *        array of tables by its index) set to `value`, a TOML value as written ("0.4", "\"HLLC\"", "[1, 2]"):
+ *        only that key's line changes (a new key goes after its table's last key, a new table and its keys at
+ *        the end); where that is not possible (a dotted key, a key of an inline table, a value over several
+ *        lines) the whole text is reformatted, comments kept. Throws std::invalid_argument for a malformed key
+ *        or value, or a key whose table is not a table of the input (an element past the end of its array).
+ */
+std::string set_value(const std::string & text, const std::string & key, const std::string & value);
+
+/**
  * @brief Changes of behavior that need no rewrite but are worth knowing,
  *        e.g. a changed default the input relies on: one line each, for
  *        `mallard input upgrade` to print. They change neither the file nor
