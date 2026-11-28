@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "mallard/config.h"
 #include "mallard/mallard.h"
 
 #include "comm.h"
@@ -709,4 +710,126 @@ TEST(CppApiTest, ACaseSetInCodeEmitsTheTomlThatReproducesTheRun) {
             EXPECT_EQ(e.code(), "E-INPUT") << key;
         }
     }
+}
+
+TEST(CppApiTest, ATypedConfigEmitsTheTomlThatReproducesTheRun) {
+    namespace config = mallard::config;
+#if Mallard_DIM == 2
+    const char * box = "{type = \"rectangle\", center = [0.3, 0.5], size = [0.2, 0.4]}";
+#else
+    const char * box = "{type = \"box\", center = [0.3, 0.5, 0.5], size = [0.2, 0.4, 0.6]}";
+#endif
+    const auto typed = [&](const std::string & dir) {
+        return mallard::Case::from_toml(case_text(dir, "n_steps = 3\n", 5))
+            .set(config::Run().n_steps(6).cfl(0.3).t_stop(mallard::Quantity(60.0, "ms")))
+            .set(config::Numerics().riemann_solver("HLL").face_reconstruction(
+                config::NumericsFaceReconstruction().type("MUSCL").limiter("barth_jespersen")))
+            .set(config::Probes(1)
+                     .name("left")
+                     .fields({"RHO"})
+                     .region(mallard::Value::toml(box))
+                     .reductions({"max"})
+                     .interval(2)
+                     .reductions_file(dir + "/left.csv"));
+    };
+    // The same keys set one by one: a typed config is only a typed way to write them
+    const auto by_key = [](const std::string & dir) {
+        return mallard::Case::from_toml(case_text(dir, "n_steps = 3\n", 5))
+            .set("run.n_steps", 6)
+            .set("run.cfl", 0.3)
+            .set("run.t_stop", "60.0 ms")
+            .set("numerics.riemann_solver", "HLL")
+            .set("numerics.face_reconstruction.type", "MUSCL")
+            .set("numerics.face_reconstruction.limiter", "barth_jespersen");
+    };
+    const mallard::Case c = typed("typed");
+    const std::string base = by_key("typed").toml();
+    ASSERT_EQ(c.toml().substr(0, base.size()), base);
+    // A new element of an array of tables: its own header at the end
+    EXPECT_EQ(c.toml().substr(base.size()), std::string("\n[[probes]]\nname = \"left\"\nfields = [\"RHO\"]\nregion = ") +
+                                                 box + "\nreductions = [\"max\"]\ninterval = 2\n" +
+                                                 "reductions_file = \"typed/left.csv\"\n");
+
+    // mallard -i on the emitted TOML is the run of the typed case, bit for bit
+    const std::string file = write_case("typed_executable", "n_steps = 1\n");
+    if (comm::is_root()) std::ofstream(file) << typed("typed_executable").toml();
+    comm::barrier();
+    const std::vector<double> reference = executable_run(file);
+    const mallard::Case on_disk = saved("typed", c);
+    mallard::Solver solver(on_disk);
+    EXPECT_EQ(solver.run(), 0);
+    expect_same_values(solver.monitors(), reference);
+    ASSERT_TRUE(solver.monitor("left_max_RHO").has_value());
+    EXPECT_LE(solver.time(), 0.06);
+    EXPECT_EQ(last_restart("typed").fields, last_restart("typed_executable").fields);
+    if (comm::is_root()) {
+        EXPECT_EQ(record("typed", "start")["provenance"]["input"]["text"].string, c.toml());
+    }
+
+    // A table inside an array of tables has no place of its own: its parent's setter places it
+    try {
+        c.set(config::ProbesRegion().type("circle"));
+        ADD_FAILURE() << "no error";
+    } catch (const mallard::Error & e) {
+        EXPECT_EQ(e.code(), "E-INPUT");
+    }
+    // An element past the end of the array is not appended
+    try {
+        c.set(config::Probes(3).interval(1));
+        ADD_FAILURE() << "no error";
+    } catch (const mallard::Error & e) {
+        EXPECT_EQ(e.code(), "E-INPUT");
+    }
+}
+
+TEST(CppApiTest, ACheckReportGivesMallardChecksResultsAsStructs) {
+    const std::string file = write_case("checked", "n_steps = 4\n");
+    const mallard::CheckReport r = mallard::Case::from_toml_file(file).check();
+    EXPECT_TRUE(r.ok) << r.text;
+    EXPECT_TRUE(r.setup_done);
+    EXPECT_NE(r.status, "error");
+    ASSERT_TRUE(r.time_step.has_value());
+    EXPECT_GT(r.time_step->dt, 0.0);
+    EXPECT_EQ(r.time_step->integrator, "SSPRK3");
+    EXPECT_EQ(r.time_step->set_by, "CFL");
+    ASSERT_TRUE(r.cost.has_value());
+    EXPECT_EQ(r.cost->n_steps, 4u);
+    EXPECT_EQ(r.boundaries.size(), static_cast<size_t>(2 * Mallard_DIM));
+    EXPECT_NE(r.resolved.find("[run]"), std::string::npos);
+    const json::Value j = json::parse(r.json);
+    EXPECT_EQ(j["status"].string, r.status);
+    EXPECT_EQ(j["diagnostics"].array.size(), r.diagnostics.size());
+    EXPECT_NE(r.text.find("time step"), std::string::npos) << r.text;
+    // A check writes no files
+    EXPECT_FALSE(fs::exists("checked/mallard.jsonl"));
+
+    // An invalid input is a report of its errors: an unused key with its suggestion, and a setup error
+    std::vector<mallard::LogMessage> logged;
+    mallard::CheckOptions options;
+    options.log = [&](const mallard::LogMessage & m) { logged.push_back(m); };
+    const mallard::CheckReport bad =
+        mallard::Case::from_toml(case_text("checked", "n_steps = 4\n"))
+            .set("run.t_stpo", 0.5)
+            .check(options);
+    EXPECT_FALSE(bad.ok);
+    EXPECT_EQ(bad.status, "error");
+    // Rank 0 prints the setup's lines
+    if (comm::is_root()) {
+        EXPECT_FALSE(logged.empty());
+    }
+    ASSERT_FALSE(bad.unused_keys.empty());
+    const auto unused = std::find_if(bad.unused_keys.begin(), bad.unused_keys.end(),
+                                     [](const mallard::CheckUnusedKey & k) { return k.key == "run.t_stpo"; });
+    ASSERT_NE(unused, bad.unused_keys.end());
+    EXPECT_EQ(unused->suggestion, "run.t_stop");
+    EXPECT_TRUE(std::any_of(bad.diagnostics.begin(), bad.diagnostics.end(), [](const mallard::CheckDiagnostic & d) {
+        return d.code == "E-KEY-UNUSED" && d.level == mallard::LogLevel::error && !d.docs.empty();
+    }));
+    const mallard::CheckReport broken =
+        mallard::Case::from_toml(case_text("checked", "n_steps = 4\n")).set("mesh.type", "nonsense").check(options);
+    EXPECT_FALSE(broken.ok);
+    EXPECT_FALSE(broken.setup_done);
+    EXPECT_FALSE(broken.time_step.has_value());
+    EXPECT_TRUE(std::any_of(broken.diagnostics.begin(), broken.diagnostics.end(),
+                            [](const mallard::CheckDiagnostic & d) { return d.code == "E-INPUT"; }));
 }

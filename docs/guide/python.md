@@ -309,7 +309,8 @@ solver.finish()
   file record its exact text, so `mallard -i` on it reruns the run. There is
   no other way to configure a run from Python but writing that text:
   `case.set(key, value)` returns the case with one key set (`"run.cfl"`,
-  `"probes[0].interval"`; a bool, int, float, str, or a list or dict of them),
+  `"probes[0].interval"`, the array's length appending an element; a bool,
+  int, float, str, or a list or dict of them),
   changing only that key's line, so `toml()` stays the whole input, and
   `case.save(path)` writes it to a file and returns the case of that file
   ([C++](cpp_api.md#building-a-case-in-code)).
@@ -323,6 +324,30 @@ solver.finish()
         mallard.Solver(case.set("output.run_log", f"cfl_{cfl}/mallard.jsonl").save(f"cfl_{cfl}/input.toml")).run()
     ```
 
+- **Typed configs.** `mallard.config` has a class per table of the input,
+  generated from the key catalog, with a keyword per key, typed and documented
+  as [the input reference](../input.md) documents it; `case.set(table)` sets
+  every key it holds through `case.set(key, value)`, so the TOML stays the
+  record. Classes, element indices and nesting are those of
+  [C++](cpp_api.md#typed-configs); a table keyword also takes a dict of its
+  keys, a key with a physical dimension a number in SI units, a string with its
+  unit or `(value, unit)`, and `config.Inline({...})` writes an inline table
+  as given (keys the catalog does not list for that table).
+
+    ```python
+    from mallard import config
+    case = (mallard.Case.from_toml_file("input.toml")
+            .set(config.Run(cfl=0.5, t_stop=(2.0, "ms")))
+            .set(config.Numerics(face_reconstruction={"type": "TENO", "order": 5}))
+            .set(config.Probes(1, name="wake", fields=["P"], point=[0.5, 0.1], file="wake.csv")))
+    ```
+
+- **Checking.** `case.check()` is `mallard check` on the case, as a report:
+  `status`, `ok`, `diagnostics`, `unused_keys` (`key`, `line`,
+  `suggestion`), `boundaries`, `time_step`, `resolution`, `memory`, `cost`,
+  `resolved`, and the whole report as `text` and `json`
+  ([C++](cpp_api.md#checking-a-case)); `check(ranks=8, memory="a100-80")`
+  takes `mallard check`'s options, `log=` a sink for the setup's output.
 - **Calls.** `setup()`, `step()`, `step(n)`, `advance_to(t)`, `finish()`, `run()`,
   `time()`, `step_count()`, `finished()`, `monitors()`, `monitor(name)`,
   `statistics()`, as in [C++](cpp_api.md#running-a-case); failures raise

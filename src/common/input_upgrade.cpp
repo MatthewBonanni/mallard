@@ -11,6 +11,7 @@
 
 #include "input_upgrade.h"
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <iostream>
@@ -218,19 +219,27 @@ std::vector<Concrete> matches(V & root, const std::string & dotted_path) {
     return out;
 }
 
-/** @brief The node at `key`, or nullptr; with `create`, missing tables on the way are made. */
+/**
+ * @brief The node at `key`, or nullptr; with `create`, missing tables on the way are made, and with `append` also
+ *        the element just past the end of an array of tables (a new array for element 0).
+ */
 template <typename V>
-V * at(V & root, const Concrete & key, bool create = false) {
+V * at(V & root, const Concrete & key, bool create = false, bool append = false) {
     V * node = &root;
     for (const auto & [name, index] : key) {
         if (!node->is_table()) return nullptr;
         if (!entries_of(*node).contains(name)) {
-            if (!create || index >= 0) return nullptr;
-            entries_of(*node)[name] = V(typename V::table_type{});
+            if (!create || (index >= 0 && !(append && index == 0))) return nullptr;
+            entries_of(*node)[name] = index >= 0 ? V(typename V::array_type{}) : V(typename V::table_type{});
         }
         node = &entries_of(*node).at(name);
         if (index >= 0) {
-            if (!node->is_array() || static_cast<size_t>(index) >= node->size()) return nullptr;
+            if (!node->is_array()) return nullptr;
+            if (append && static_cast<size_t>(index) == node->size() &&
+                std::all_of(node->as_array().begin(), node->as_array().end(), [](const V & e) { return e.is_table(); })) {
+                node->as_array().push_back(V(typename V::table_type{}));
+            }
+            if (static_cast<size_t>(index) >= node->size()) return nullptr;
             node = &node->at(static_cast<size_t>(index));
         }
     }
@@ -868,7 +877,7 @@ std::string set_value(const std::string & text, const std::string & key, const s
     }
     OrderedValue root = parse_toml<toml::ordered_type_config>(text);
     OrderedValue expected = root;
-    OrderedValue * table = at(expected, parent(path), true);
+    OrderedValue * table = at(expected, parent(path), true, true);
     if (table == nullptr || !table->is_table()) {
         throw std::invalid_argument("cannot set " + key + ": " + to_string(parent(path)) + " is not a table of the input");
     }
@@ -900,9 +909,12 @@ std::string set_value(const std::string & text, const std::string & key, const s
     } else if (const auto end = end_of_table(lines, parent(path))) {
         lines.insert(lines.begin() + static_cast<long>(*end), line_text);
         edited = true;
-    } else if (plain) {
+    } else if (!parent(path).empty()) {
+        // A new table, or a new element of an array of tables: its header at the end, which the check below
+        // confirms names it (an element of an earlier element of an array is not the one a header names)
+        const bool element = parent(path).back().second >= 0;
         if (!lines.empty() && lines.back().find_first_not_of(" \t") != std::string::npos) lines.push_back("");
-        lines.push_back("[" + dotted(parent(path)) + "]");
+        lines.push_back((element ? "[[" : "[") + dotted(parent(path)) + (element ? "]]" : "]"));
         lines.push_back(line_text);
         edited = true;
     }

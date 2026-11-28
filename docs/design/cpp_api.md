@@ -149,9 +149,42 @@ documented way to write the `Input` tree: each object writes its keys into a
   the invariant above;
 - the typed objects are generated from the key catalog (`docs/input-keys`,
   which records every key, its type, default, dimension and accepted values from
-  the lookups setup makes), so they cannot drift from what setup reads. A
-  generator in `tools/dev/` writes `include/mallard/config.h` from the catalog;
-  CI checks it is current as it checks the catalog.
+  the lookups setup makes), so they cannot drift from what setup reads.
+  `tools/dev/input_config.py` writes `include/mallard/config.h` and the
+  Python module `tools/mallard/config.py` from the catalog and the key rows of
+  `docs/input.md` (each setter's documentation); `precheck.sh` runs it with
+  `--check`, so a catalog rebuild that changes a key fails until both are
+  regenerated.
+
+Slice 5 implements them as collectors, not a schema of their own. A class per
+table (`config::Run`, `config::NumericsFaceReconstruction`) holds `(key, Value)`
+pairs relative to its table in the order set (`config::Table`, hand-written in
+`mallard.h`); a child table's setter takes the child by value and prefixes its
+keys, so the same class serves a table wherever it sits. Top-level tables carry
+their path, an element of a top-level array of tables its index (`Probes(1)`),
+a named table its name (`Regions("jet")`); tables inside those have no path
+and are placed only by their parent. `Case::set(table)` is one
+`Case::set(key, value)` per pair, so every typed value goes through the same
+text edit and setup checks it as a file's. Types come from the catalog: `bool`,
+`std::int64_t`, `double`, `std::string_view`, `mallard::Quantity` for a key
+with a dimension (a number in SI units or the key's documented unit, or
+`"5 mm"`, which setup converts and checks), `Value` for keys of several types
+(expressions, arrays, a region's name or inline table). The catalog does not
+say which tables are arrays of tables; the generator takes those the catalog
+types as arrays, the `[[...]]` headings of `docs/input.md`, and the tables an
+input of the catalog writes as an array. Tables whose keys are all species
+(`X`, `Y`) are maps: `.X("O2", 0.21)`. The catalog holds only keys some input
+sets up, so a table's setters cover those keys (a region's parameters of every
+type are not all there); the parent's `Value` setter and `Case::set(key,
+value)` cover the rest. Appending to an array of tables (`probes[n]` of `n`
+probes, the index a typed element takes) is part of `set_value`: the element is
+created and its `[[...]]` header written at the end of the text.
+
+The check report (`Case::check()`) is `Solver::check` on the case's input, as
+`mallard check` runs it, converted to public structs that mirror the sections
+of its JSON (diagnostics, unused keys, boundaries, time step, resolution,
+memory, cost, resolved input), with the whole report's text and JSON beside
+them; an input error is a diagnostic of the report, as in `mallard check`.
 
 `Case::set(key, value)` (slice 3) edits the text by key path, for every key
 until the generated objects exist and for those they do not cover. It returns
@@ -362,5 +395,5 @@ no Rust API:
    a `Session` on a communicator (mpi4py's in Python, `mallard-python[mpi]`),
    and the reader moved into the extension.
 5. Typed configs generated from the key catalog over `Case::set`, and the
-   check report and resolved input as structs.
+   check report (with the resolved input's text) as structs.
 6. Plugin API (#336) on the same package.

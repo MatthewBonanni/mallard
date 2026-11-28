@@ -103,12 +103,37 @@ class Case:
         """The input file of from_toml_file, else ""."""
         return self._path
 
-    def set(self, key, value):
+    def set(self, key, value=None):
         """This case with one key set, a new case: its TOML text with that key's line changed (or added), so toml()
         stays the run's whole record. key is a path of bare keys, an element of an array of tables by its index
-        ("run.n_steps", "probes[0].interval"); value is a bool, int, float, str, or a list or dict of them."""
+        ("run.n_steps", "probes[0].interval"; the array's length appends an element); value is a bool, int, float,
+        str, or a list or dict of them. key may instead be a typed config of mallard.config, without value: every
+        key it holds is set, in the order of its class's keywords (case.set(config.Run(dt="1 us", n_steps=100)))."""
+        from ._config import Table
+        if isinstance(key, Table):
+            if value is not None:
+                raise TypeError("Case.set(table) takes no value")
+            if not key.path:
+                raise ValueError(f"{type(key).__name__} is a table inside an array of tables or a named table: set it "
+                                 "through its parent's keyword, which places it")
+            case = self
+            for k, v in key.entries():
+                case = case.set(f"{key.path}.{k}", v)
+            return case
+        if value is None:
+            raise TypeError("Case.set(key, value) takes a value")
         text = _any_extension().case_set(self._text, self._path or self._name, key, _toml_value(value))
         return Case(text, "", self._name)
+
+    def check(self, ranks=0, throughput=0.0, steps=0, memory="", log=None):
+        """mallard check on the case, as a CheckReport (status, ok, diagnostics, unused_keys, boundaries,
+        time_step, resolution, memory, cost, resolved, and the whole report as text and json): its setup without
+        the run. An invalid input gives a report of its errors, not an exception. ranks, throughput, steps and
+        memory are mallard check's options; log, a function of a LogMessage, takes the setup's console output
+        (as Solver.set_log). Starts a session if none is started."""
+        session = _session or _session_for(self.dimension())
+        return session._module.case_check(self._text, self._path, self._name, int(ranks), float(throughput),
+                                          int(steps), str(memory), log)
 
     def save(self, path):
         """Writes toml() to path and returns the case of that file, which a run then builds from."""
@@ -203,6 +228,18 @@ def _comm_address(comm):
     return MPI._addressof(comm)
 
 
+def _session_for(dim):
+    """The session, started with Kokkos' defaults if none is; a session of the other dimension is an error."""
+    if not _session:
+        if _session is False:
+            raise RuntimeError("the mallard.Session has ended: Kokkos starts once per process")
+        Session(dim=dim)
+    elif _session.dim != dim:
+        raise RuntimeError(f"a {dim}D case in a process whose session runs the {_session.dim}D solver: run it in "
+                           "another process")
+    return _session
+
+
 def _default_dimension():
     dims = [d for d in (2, 3) if _has_extension(d)]
     return dims[0] if dims else 2
@@ -264,16 +301,9 @@ class Solver:
     def __init__(self, case):
         if not isinstance(case, Case):
             raise TypeError("mallard.Solver takes a mallard.Case (Case.from_toml_file or Case.from_toml)")
-        dim = case.dimension()
-        if not _session:
-            if _session is False:
-                raise RuntimeError("the mallard.Session has ended: Kokkos starts once per process")
-            Session(dim=dim)
-        elif _session.dim != dim:
-            raise RuntimeError(f"a {dim}D case in a process whose session runs the {_session.dim}D solver: run it in "
-                               "another process")
+        session = _session_for(case.dimension())
         self.case = case
-        self._core = _session._module.Solver(case.toml(), case.path(), case._name)
+        self._core = session._module.Solver(case.toml(), case.path(), case._name)
         self._callbacks = {kind: {} for kind in _HOOKS}
         self._next_id = 1
         self._hooked = {kind: False for kind in _HOOKS}
