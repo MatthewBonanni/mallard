@@ -397,7 +397,61 @@ registry work of #502.
 
 **Validity.** `mallard check` reports particles above a tenth of their cell's
 size and volume fractions above 1% at the initial state; the run-health checks
-during the run, and the liquid's critical point (#760), are left for later.
+during the run are left for later.
+
+## Evaporating droplets (#760)
+
+`particles::Droplet` (`particle_evaporation.h`) is a solid particle
+(`Solid::motion`, the drag and forces at a per-droplet diameter) of a
+`Liquid` in the gas `Mixture`. Three decisions shape it.
+
+**Conserved block values.** After the position a droplet's block holds its
+momentum `P = M v`, energy `E = M (c_l (T_p - T_b) + |v|^2 / 2)` and mass
+`M`, not `v`, `T_p` and `d`. The gas receives the opposite of their stage
+rates, so the gas and the droplets conserve mass, momentum and energy to
+round-off whatever the integrator, as for solid particles; with `v` and `T_p`
+in the block, the products `M v` and `M e` would be conserved only to the
+integrator's order once `M` changes. Rebounds and periodic rotations act on
+`P` directly (rotated as a vector; converted to `v` only for a rebound), so
+relocation adds no rounding to it.
+
+**One energy reference.** The liquid's enthalpy is
+`h_l(T) = h_v(T_b) - L_b + c_l (T - T_b)` from the mechanism's vapor enthalpy
+(formation included), so the latent heat at any temperature is
+`h_v(T) - h_l(T)` (Kirchhoff) and the gas, whose `rho E` carries formation
+enthalpies, and the liquid share one reference: the gas receives
+`-(dE + dM h_l(T_b))` and its vapor `-dM`. The input refuses a liquid whose
+Kirchhoff latent heat vanishes below the critical temperature.
+
+**Stiff temperature, finite mass.** The droplet temperature relaxes to its
+wet-bulb value on the heat-up time `rho_l c_l d^2 / (6 k Nu)`, far below the
+gas step for small droplets. The first stage linearizes `dT/dt` by a backward
+difference of the heating at `T_p` and stores the equilibrium and relaxation
+time (`T_EQ`, `TAU_T`); stages integrate it exponentially above
+`EXPONENTIAL_ABOVE`, as the velocity is. The evaporation rate is capped at
+the step's starting mass over `dt`; a capped droplet stops heating and
+evaporates within the step at its temperature, which keeps a vanishing
+droplet's temperature bounded. Below `minimum_mass` (from `minimum_diameter`)
+a droplet's rates are zero, and `remove_evaporated`, after the step and
+before relocation (in `take_step` and in the recorded step graph), deposits
+its remains through the coupling's `Deposition` and empties its slot
+(`n_removed(3)`).
+
+The gas film uses the mechanism's tables on the device: `ThermoTable` for
+`R`, `c_p` and `h_v`, `TransportTable::properties` for `mu`, `k` and the
+vapor's mixture-averaged diffusivity, with `n_species` doubles of work memory
+per slot (`work`). The composition at a droplet is its cell's average
+(`cell_scalars`), the one per-cell composition the solver keeps; reconstructing
+species to the droplet's position would need their gradients at every stage.
+The vapor source is the deposition's mass column, so deposition carries
+`N_CONSERVATIVE` columns as before, and the ledger leaves the gas totals
+unchecked for two-way droplets.
+
+The critical point bounds the model rather than describing it: the boiling
+temperature `T_b(p)` from the saturation curve stops at `T_crit`, the transfer
+is evaluated at `min(T_p, T_crit)`, and seeded temperatures must be below
+`T_crit`. Real-fluid surface equilibrium, multicomponent liquids, internal
+conduction and evaporation of droplets touching walls are left out.
 
 ## Particle probes (#756)
 
@@ -417,9 +471,11 @@ every few steps of a large run.
 Restart files carry the particles as named arrays (version 6), written by rank
 0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
 holding each particle), `PARTICLE_X` (positions, exact in double precision),
-`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_Q_<name>` (quantities)
+`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_M`, `PARTICLE_P`
+and `PARTICLE_E` (the block values of droplets, restored exactly), `PARTICLE_Q_<name>` (quantities)
 and `PARTICLE_REMOVED` (the counts of particles that left the domain, that
-were lost, and that stuck to walls). The device copies them into pinned host mirrors with the other restart
+were lost, that stuck to walls, and of droplets that evaporated; files with
+the first two or three counts restart too). The device copies them into pinned host mirrors with the other restart
 data (`Particles::stage_output`, capturable), so a restart staged by the step
 graph holds the particles of its own step. On a restart each rank takes the
 particles of the cells it owns, so the file restarts on any rank count, and a
@@ -449,11 +505,13 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   scale of #291 and comes with injection.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
 - **Further models** (#757 follow-ups): thermophoresis, the Basset force,
-  splashing, mass transfer (evaporation), drag and heat transfer in mixtures,
+  splashing, drag and heat transfer of solid particles in mixtures,
   and validation against DNS of particle-laden flow.
 - **Of #758:** four-way coupling (collisions), statistics and probes of the
-  dispersed-phase fields, run-health warnings, and mass and species sources
-  (with evaporation, #760).
+  dispersed-phase fields, and run-health warnings.
+- **Of #760:** multicomponent liquids, internal conduction, real-fluid
+  (supercritical) droplets, the species composition reconstructed to the
+  droplet's position, wall films, and a ledger term for the droplets.
 - **Of #756:** probes through surfaces (fluxes of particles), histograms, the
   residence time per visit and visit counts, crossings located within a stage,
   and probes staged in the step graph.

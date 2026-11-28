@@ -41,12 +41,12 @@ inline constexpr uint32_t MAX_REGIONS = 4;
 /**
  * @brief The variables of particle expressions, by index: x, y, (z), t, the gas
  *        at the particle RHO, U_X, U_Y, (U_Z), P, T, the particle velocity V_X,
- *        V_Y, (V_Z) and temperature T_P, then the quantities, then in(region)
- *        of each region read.
+ *        V_Y, (V_Z), temperature T_P and diameter D_P, then the quantities,
+ *        then in(region) of each region read.
  */
 inline constexpr uint32_t VAR_T = N_DIM, VAR_RHO = N_DIM + 1, VAR_U = N_DIM + 2, VAR_P = 2 * N_DIM + 2,
                           VAR_TEMPERATURE = 2 * N_DIM + 3, VAR_V = 2 * N_DIM + 4, VAR_TP = 3 * N_DIM + 4,
-                          N_BASE_VARIABLES = 3 * N_DIM + 5;
+                          VAR_DP = 3 * N_DIM + 5, N_BASE_VARIABLES = 3 * N_DIM + 6;
 inline constexpr uint32_t MAX_VARIABLES = N_BASE_VARIABLES + MAX_QUANTITIES + MAX_REGIONS;
 
 /** @brief The names of the first N_BASE_VARIABLES variables. */
@@ -54,20 +54,21 @@ std::vector<std::string> base_variables();
 
 /**
  * @brief The first N_BASE_VARIABLES variables: the position x, the time t, the
- *        gas state W = [rho, u, p] at the particle with T = p / (rho R) (NaN
- *        if R is 0), the particle velocity v, and the particle temperature
- *        *Tp, or T if Tp is null.
+ *        gas state W = [rho, u, p] at the particle and its temperature T (NaN
+ *        where expressions have none), the particle velocity v, the particle
+ *        temperature *Tp, or T if Tp is null, and its diameter d (NaN for tracers).
  */
 KOKKOS_INLINE_FUNCTION void fill_base(double * vars, const rtype * x, const double t, const rtype * W, const rtype * v,
-                                      const rtype * Tp, const double R) {
+                                      const double * Tp, const double T, const double d) {
     FOR_I_DIM vars[i] = static_cast<double>(x[i]);
     vars[VAR_T] = t;
     vars[VAR_RHO] = static_cast<double>(W[0]);
     FOR_I_DIM vars[VAR_U + i] = static_cast<double>(W[1 + i]);
     vars[VAR_P] = static_cast<double>(W[N_DIM + 1]);
-    vars[VAR_TEMPERATURE] = R > 0.0 ? vars[VAR_P] / (vars[VAR_RHO] * R) : Kokkos::Experimental::quiet_NaN_v<double>;
+    vars[VAR_TEMPERATURE] = T;
     FOR_I_DIM vars[VAR_V + i] = static_cast<double>(v[i]);
-    vars[VAR_TP] = Tp ? static_cast<double>(*Tp) : vars[VAR_TEMPERATURE];
+    vars[VAR_TP] = Tp ? *Tp : T;
+    vars[VAR_DP] = d;
 }
 
 /** @brief A quantity on the device. */

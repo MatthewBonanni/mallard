@@ -4,6 +4,7 @@
  ],
  "required": true,
  "set_in": [
+  "tools/dev/catalog_inputs/2d/droplets.toml",
   "tools/dev/catalog_inputs/2d/mixture_sponges.toml"
  ],
  "type": "number"
