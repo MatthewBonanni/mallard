@@ -1392,6 +1392,22 @@ TEST(TENO3DSetup, AShapeKeyedByItsCallerTakesTheTableOfItsLowestGlobalIdAndStays
     EXPECT_NE(shape[0], k);
 }
 
+TEST(TENO3DSetup, CellsOfAStructuredBlockTakeTheKeysOfTheirSearch) {
+    // Cells deep in a structured block key their search by index: the keys are the walk's
+    if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 14\nNy = 13\nNz = 12\nLx = 0.7\nLy = 0.9\nLz = 1.1\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"back\", \"front\"]\n"));
+    mesh->copy_host_to_device();
+    ASSERT_FALSE(mesh->structured_blocks.empty());
+    const BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const auto by_block = teno::ShapeKeys(*mesh, bd, 32, 4, 256).keys(mesh->n_reconstructed());
+    mesh->structured_blocks.clear();
+    const auto walked = teno::ShapeKeys(*mesh, bd, 32, 4, 256).keys(mesh->n_reconstructed());
+    ASSERT_EQ(by_block.size(), walked.size());
+    for (size_t c = 0; c < walked.size(); c++) EXPECT_TRUE(by_block[c] == walked[c]) << c;
+}
+
 TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
     // A digest of the keys of a box periodic in x, with walls, of sizes that are
     // not exact in binary, against the host builds' value: GPU CI runs it on the device

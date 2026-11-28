@@ -63,6 +63,10 @@ struct ShapeSearch {
     Kokkos::View<uint8_t *> behind;  // (cell): has a face with boundary behind it (teno_setup::boundary_behind; 2D)
     uint32_t n_translations = 0, n_complete = 0, n_large = 0, n_small = 0;
     uint32_t cap = 0;  // visits per search
+    // (cell): the strides of its structured block if its search's layers are the block's cells within
+    // box_layers indices of it (a lattice's vertex neighbors, unshifted), else 0; empty without such cells
+    Kokkos::View<uint32_t *[2]> box;
+    uint32_t box_layers = 0;
     teno_setup::SlotArray<uint32_t> cell, lattice, order;
     teno_setup::SlotArray<int64_t> q;
     teno_setup::SlotArray<uint64_t> hash;
@@ -194,6 +198,9 @@ class ShapeKeys {
                     const teno_setup::TableBatch & out, const Kokkos::View<uint8_t *> & bad) const;
 
     private:
+        /** @brief The search's lattice boxes (ShapeSearch::box). */
+        void lattice_boxes();
+
         const Mesh & mesh;
         ShapeSearch s;
         uint32_t slots = 0;

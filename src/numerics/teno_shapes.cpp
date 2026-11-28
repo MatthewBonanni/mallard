@@ -163,8 +163,32 @@ KOKKOS_FUNCTION ShapeSearch::Result ShapeSearch::search(const uint32_t c, const 
             depth++;
         }
     };
-    reach(n_large, 64);
-    reach(8 * n_small, 6);
+    if (box.extent(0) > 0 && box(c, 0) != 0) {
+        // The same layers by index: shell d holds the cells d indices away
+        const int64_t s1 = box(c, 0), s2 = box(c, 1);
+        const int64_t layers = Kokkos::min(box_layers, layer_limit);
+        for (int64_t d = 1; d <= layers; d++) {
+            const int64_t dk = N_DIM == 3 ? d : 0;
+            for (int64_t k = -dk; k <= dk; k++) {
+                for (int64_t j = -d; j <= d; j++) {
+                    const bool face = Kokkos::abs(k) == d || Kokkos::abs(j) == d;
+                    for (int64_t i = -d; i <= d; i += face ? 1 : 2 * d) {
+                        const uint32_t nb = uint32_t(int64_t(c) + i + j * s1 + k * s2);
+                        uint64_t slot = hash_slot(nb, mask);
+                        while (w.hash[slot] != EMPTY) slot = (slot + 1) & mask;
+                        w.hash[slot] = uint64_t(nb) | (uint64_t(r.n) << 32);
+                        w.cell[r.n] = nb;
+                        w.lattice[r.n] = LATTICE_ZERO;
+                        r.n++;
+                    }
+                }
+            }
+            end[n_end++] = r.n;
+        }
+    } else {
+        reach(n_large, 64);
+        reach(8 * n_small, 6);
+    }
     r.layers = n_end - 1;
     if (full || !unique) return r;
     r.walked = true;
@@ -402,6 +426,7 @@ ShapeKeys::ShapeKeys(const Mesh & mesh_in, const BoundaryData & boundaries, cons
 
     s.shape = Kokkos::View<uint64_t *>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_shape"), n_cells);
     compute_shapes(s, n_cells);
+    lattice_boxes();
 #if N_DIM == 2
     const std::vector<uint8_t> behind = teno_setup::boundary_behind(mesh, boundaries);
     s.behind = Kokkos::View<uint8_t *>("teno_shape_behind", n_cells);
@@ -498,6 +523,87 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
     std::vector<ShapeKey> keys(n);
     for (uint32_t c = 0; c < n; c++) keys[c] = ShapeKey{h_out(c, 0), h_out(c, 1)};
     return keys;
+}
+
+void ShapeKeys::lattice_boxes() {
+    const uint32_t n = mesh.n_cells;
+    // The search's layers on a lattice, where layer d ends at (2 d + 1)^N_DIM cells
+    auto lattice_end = [](const uint32_t d) {
+        uint32_t e = 1;
+        for (int a = 0; a < N_DIM; a++) e *= 2 * d + 1;
+        return e;
+    };
+    std::vector<uint32_t> end = {1};
+    bool full = false;
+    auto reach = [&](const uint32_t n_min, const uint32_t max_layers) {
+        for (uint32_t d = 0; d < max_layers && end[d] <= n_min && !full; d++) {
+            if (d + 1 == end.size()) {
+                const uint32_t next = lattice_end(d + 1);
+                if (next > s.cap) {
+                    full = true;
+                    break;
+                }
+                end.push_back(next);
+            }
+        }
+    };
+    reach(s.n_large, 64);
+    reach(8 * s.n_small, 6);
+    const uint32_t depth = static_cast<uint32_t>(end.size() - 1);
+    if (full || depth == 0 || mesh.structured_blocks.empty()) return;
+    // Regular cells: inside their block, their vertex neighbors exactly the block's cells one index away, unshifted
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    const auto & offsets = neighbors.h_offsets;
+    const auto & cells = neighbors.h_cells;
+    const auto & shift = neighbors.h_shift;
+    constexpr uint32_t N_AROUND = N_DIM == 3 ? 26 : 8;
+    auto h_box = Kokkos::View<uint32_t *[2]>::host_mirror_type("teno_shape_boxes", n);
+    bool any = false;
+    const int64_t r = int64_t(depth) - 1;
+    for (const StructuredBlock & b : mesh.structured_blocks) {
+        const int64_t n0 = b.n[0], n1 = b.n[1], n2 = N_DIM == 3 ? int64_t(b.n[N_DIM - 1]) : 1;
+        const int64_t total = n0 * n1 * n2;
+        if (b.first + uint64_t(total) > n || n0 < 2 * int64_t(depth) + 1 || n1 < 2 * int64_t(depth) + 1) continue;
+        std::vector<uint8_t> regular(size_t(total), 0);
+        gated::parallel_for("teno_shape_regular", Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>(0, total), [&](const int64_t t) {
+            const int64_t i = t % n0, j = (t / n0) % n1, k = t / (n0 * n1);
+            if (i == 0 || i == n0 - 1 || j == 0 || j == n1 - 1) return;
+            if (N_DIM == 3 && (k == 0 || k == n2 - 1)) return;
+            const uint32_t c = b.first + uint32_t(t);
+            if (offsets(c + 1) - offsets(c) != N_AROUND) return;
+            for (uint32_t m = offsets(c); m < offsets(c + 1); m++) {
+                const int64_t u = int64_t(cells(m)) - int64_t(b.first);
+                if (u < 0 || u >= total || shift(m) != 0) return;
+                const int64_t ui = u % n0 - i, uj = (u / n0) % n1 - j, uk = u / (n0 * n1) - k;
+                if (std::abs(ui) > 1 || std::abs(uj) > 1 || std::abs(uk) > 1 || (ui == 0 && uj == 0 && uk == 0)) return;
+            }
+            regular[size_t(t)] = 1;
+        });
+        // Cells whose cells within r indices are all regular: an erosion along each axis
+        std::vector<uint8_t> in = regular;
+        std::vector<uint8_t> tmp(static_cast<size_t>(total));
+        const int64_t stride[3] = {1, n0, n0 * n1}, extent[3] = {n0, n1, n2};
+        for (int a = 0; a < N_DIM; a++) {
+            for (int64_t t = 0; t < total; t++) {
+                const int64_t x = (t / stride[a]) % extent[a];
+                uint8_t all = 1;
+                for (int64_t o = -r; o <= r && all; o++) {
+                    all = x + o >= 0 && x + o < extent[a] && in[size_t(t + o * stride[a])];
+                }
+                tmp[size_t(t)] = all;
+            }
+            std::swap(in, tmp);
+        }
+        for (int64_t t = 0; t < total; t++) {
+            if (!in[size_t(t)]) continue;
+            h_box(b.first + uint32_t(t), 0) = uint32_t(n0);
+            h_box(b.first + uint32_t(t), 1) = uint32_t(n0 * n1);
+            any = true;
+        }
+    }
+    if (!any) return;
+    s.box = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace::memory_space(), h_box);
+    s.box_layers = depth;
 }
 
 std::vector<uint8_t> ShapeKeys::reach(const std::vector<uint32_t> & cells, bool & complete) const {
