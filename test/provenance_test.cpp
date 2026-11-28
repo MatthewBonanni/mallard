@@ -280,9 +280,19 @@ TEST(RunLogTest, RecordsFollowTheSchema) {
 
     const Value & end = records.back();
     EXPECT_EQ(end["type"].string, "end");
-    EXPECT_EQ(key_set(end), (std::set<std::string>{"type", "outcome", "cause", "reason", "step", "t", "last_snapshot",
-                                                   "last_restart", "steps", "wall", "wall_setup", "wall_stepping",
-                                                   "wall_diagnostics", "wall_output", "cells_per_second"}));
+    std::set<std::string> end_keys{"type",          "outcome",      "cause",       "reason",
+                                   "step",          "t",            "last_snapshot", "last_restart",
+                                   "steps",         "wall",         "wall_setup",  "wall_stepping",
+                                   "wall_diagnostics", "wall_output", "cells_per_second"};
+    // Step graph captures (CUDA only, absent when step graphs are off, e.g. under compute-sanitizer)
+    if (end.find("wall_capture")) {
+#ifndef KOKKOS_ENABLE_CUDA
+        ADD_FAILURE() << "wall_capture outside a CUDA build";
+#endif
+        EXPECT_GT(end["wall_capture"].number, 0.0);
+        end_keys.insert("wall_capture");
+    }
+    EXPECT_EQ(key_set(end), end_keys);
     EXPECT_EQ(end["step"].number, 4);
     EXPECT_EQ(end["outcome"].string, "finished");
     EXPECT_EQ(end["cause"].string, "n_steps");

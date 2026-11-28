@@ -1238,6 +1238,39 @@ the base on the A100, on OpenMP (orders 3, 5 and 6; hexahedra, tetrahedra and pr
 the tables in the caches the A100 and OpenMP write are the same bytes. What remains: the decode's search of
 every layer (#1178), the per-cell geometry (#1166) and the keys (#1167).
 
+### 21. Step graph captures out of the throughput; lock arrays copied after a failed capture only
+
+The capture of a step graph is a one-time cost, made in the second time step (the first runs kernel by kernel),
+that time stepping used to count: over the 100 steps of the performance set it was 1 to 2 ms per step, 40% of
+`air_3d`'s step at main. Time stepping, and so every throughput and wall time per step reported, now leaves it out,
+and the end record gives it as `wall_capture`.
+
+That cost had grown. Without relocatable device code every translation unit holds its own copy of the pointers
+to desul's lock arrays, which Kokkos sets at the unit's first kernel launch with a copy on the legacy stream;
+made inside a stream capture, that copy invalidates it (`lock_arrays.h`). Every capture used to copy them to
+every unit first. Under CUDA's lazy loading (the default since CUDA 12.2) a copy to a unit's symbols loads all
+of its device code, so the first capture loaded the code of every source file, also of features a run does not
+use: at main, `air_3d` (MUSCL) spent 160 ms there, `cell_chemistry` 59 ms, `region_motion` 51 ms, `teno`
+13 ms and 50 smaller units, as those units grew (fat binaries 45.5 MB at 0.10.0, 69.6 MB at main). Counted as
+time stepping, it made `air_3d` and `sphere_3d` look 13 to 14% slower than at 0.10.0, while their steps are
+faster. The capture now runs first, and only a capture that fails (on any rank) copies every unit's lock arrays
+and is tried again: the units whose kernels a step graph captures have launched them in the first steps, except
+kernels only in conditional bodies none of those steps took.
+
+One A100 (CUDA 13.5), 0.10.0 and main with the capture timed alike: throughput over time stepping, best of 6
+runs in 3 interleaved rounds, and the capture (`wall_capture`, median of 2 runs):
+
+| one A100 | throughput 0.10.0 | main | this change | capture 0.10.0 | main | this change |
+|---|---:|---:|---:|---:|---:|---:|
+| `air_3d` | 52.8M | 56.6M | 56.5M | 60 ms | 166 ms | 0.6 ms |
+| `sphere_3d` | 24.3M | 24.6M | 24.5M | 67 ms | 174 ms | 0.6 ms |
+| `teno5_3d` | 6.07M | 8.64M | 8.64M | 49 ms | 170 ms | 2.4 ms |
+| `flame_3d` | 6.73M | 6.84M | 6.84M | 45 ms | 111 ms | 1.4 ms |
+
+Results are bitwise those of main (snapshots after 100 steps of `air_3d`, `sphere_3d`, `teno5_3d` and
+`flame_3d`). `StepQueueTest.ACaptureThatAUnitsFirstKernelLaunchFailsIsTriedAgain` makes the first capture fail
+as such a launch does; `StepQueueTest.TheStepGraphsCaptureIsLeftOutOfTimeStepping` makes it a second slower.
+
 ## Scaling (one node)
 
 A100-80GB GPUs of one node (NVLink), one rank per GPU, Hilbert partitions, GPU-aware MPI; steady time per step

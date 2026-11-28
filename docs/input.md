@@ -2019,7 +2019,7 @@ per step, the throughput in cell updates per second, the estimated time remainin
 density and pressure, the maximum Mach number, with TENO the percentage of troubled cells, and
 the files written since the previous row; a row under the column names gives their units
 ([Terminal output](guide/output.md#terminal-output)). The run ends with a summary of wall
-time (setup, time stepping, diagnostics, output), average throughput and the files written.
+time (setup, time stepping, step graph capture, diagnostics, output), average throughput over time stepping and the files written.
 
 Only rank 0 prints, except for errors, which go to stderr from any rank and carry the rank in
 parallel runs. Output on a terminal is colored unless `NO_COLOR` is set (`CLICOLOR_FORCE=1`
