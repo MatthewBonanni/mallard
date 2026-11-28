@@ -1606,11 +1606,19 @@ void Probes::add_snapshot(const Input & input, const Mesh & mesh, region::Region
     add(input, mesh, regions, species_names, resume, viscous, entry, &snapshot, &cell_data);
 }
 
+void Probes::add_internal(const Input & input, const Mesh & mesh, region::Regions & regions,
+                          const std::vector<std::string> & species_names, bool viscous, const Input & entry,
+                          const std::vector<Data> & cell_data) {
+    add(input, mesh, regions, species_names, resumed, viscous, entry, nullptr, &cell_data, -1, true);
+}
+
 void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data, const int32_t copy) {
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, const int32_t copy,
+                 const bool internal) {
     auto probe_ptr = std::make_unique<Probe>();
     Probe & p = *probe_ptr;
+    p.internal = internal;
     std::string key;
     if (snapshot) {
         p.name = snapshot->name;
@@ -2202,7 +2210,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     p.reconstruction = reconstruction;
     if (p.nodes.located) p.locations = p.nodes.locations(mesh);
-    if (!p.measures.empty()) {
+    if (!p.measures.empty() && !p.internal) {
         run_log::write(json::Object().add("type", "probe").add("probe", p.name).raw("sampling", p.sampling_json()), true);
     }
     on_root(distributed, [&] {
@@ -2224,7 +2232,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             std::vector<std::pair<std::string, Dimension>> columns = {
                 {"step", dim::none}, {"t", dim::time}, {measure_name(p.geometry), measure}};
             columns.insert(columns.end(), reduction_columns.begin(), reduction_columns.end());
-            p.out_reductions = open_csv(p.reductions_file, resume, columns);
+            p.out_reductions = p.internal ? std::make_shared<std::ofstream>() : open_csv(p.reductions_file, resume, columns);
         }
         if (p.spectra && p.spectra->needs_samples()) {
             p.out_spectra = open_csv(p.spectra->samples_file(), resume, p.spectra->sample_columns());
@@ -2331,7 +2339,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
 
 std::string Probes::set_interval(const std::string & name, uint64_t steps, bool snapshot, const bool apply) {
     for (auto & p : probes) {
-        if (p->name != name || p->snapshot != snapshot) continue;
+        if (p->name != name || p->snapshot != snapshot || p->internal) continue;
         if (p->interval == 0) return "is written every time_interval; set that instead";
         if (steps == 0) return "interval must be positive";
         if (!apply) return "";
@@ -2343,7 +2351,7 @@ std::string Probes::set_interval(const std::string & name, uint64_t steps, bool 
 
 std::string Probes::set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot, const bool apply) {
     for (auto & p : probes) {
-        if (p->name != name || p->snapshot != snapshot) continue;
+        if (p->name != name || p->snapshot != snapshot || p->internal) continue;
         if (p->interval > 0) return "is written every interval steps; set that instead";
         if (!(value > 0.0_r)) return "time_interval must be positive";
         if (p->spectra) return "keeps its time_interval: its spectra need equally spaced samples";
@@ -3118,7 +3126,7 @@ void Probes::write_probe(Probe & p, const uint64_t step, const rtype t, const Pr
                 }
             }
         }
-        if (!p.reductions.empty()) p.write_reductions(step, t);
+        if (!p.reductions.empty() && !p.internal) p.write_reductions(step, t);
     }
 }
 
@@ -3192,7 +3200,7 @@ std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>
     std::vector<std::pair<std::string, std::vector<std::pair<std::string, Dimension>>>> all;
     size_t left = RECORDED;
     for (const auto & p : probes) {
-        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        if (p->snapshot || p->internal || p->monitored.empty() || left == 0) continue;
         const size_t n = std::min(left, p->monitored.size());
         all.emplace_back(p->name, std::vector<std::pair<std::string, Dimension>>(p->monitored.begin(),
                                                                                  p->monitored.begin() + long(n)));
@@ -3205,7 +3213,7 @@ std::vector<MonitorValues> Probes::recorded() const {
     std::vector<MonitorValues> all;
     size_t left = RECORDED;
     for (const auto & p : probes) {
-        if (p->snapshot || p->monitored.empty() || left == 0) continue;
+        if (p->snapshot || p->internal || p->monitored.empty() || left == 0) continue;
         const size_t n = std::min(left, p->monitored.size());
         left -= n;
         if (p->last.size() != p->monitored.size()) continue;
@@ -4223,6 +4231,7 @@ std::vector<OutputSummary> Probes::summary() const {
     std::vector<OutputSummary> items;
     for (const auto & pp : probes) {
         const Probe & p = *pp;
+        if (p.internal) continue;
         std::string vars;
         for (const auto & v : p.variables) vars += (vars.empty() ? "" : ", ") + v;
         const size_t n = p.from_region && !p.resampled ? p.quadrature.n_global : p.geometry.nodes.size();
@@ -4295,6 +4304,7 @@ std::vector<case_view::Block> Probes::view_blocks() const {
 void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t step) {
     if (!comm::is_root() || !output_files_enabled()) return;
     for (auto & p : probes) {
+        if (p->internal) continue;
         if (p->out) {
             *p->out << csv_line << "# " << snapshot_block::PROBE_SAMPLING << " " << p->sampling_json() << "\n"
                     << std::flush;
@@ -4342,6 +4352,7 @@ void Probes::annotate(const std::string & csv_line, [[maybe_unused]] uint64_t st
 std::vector<std::string> Probes::files() const {
     std::vector<std::string> files;
     for (const auto & p : probes) {
+        if (p->internal) continue;
         if (p->write_samples) files.push_back(p->file);
         if (!p->reductions.empty()) files.push_back(p->reductions_file);
         if (p->spectra && p->spectra->needs_samples()) files.push_back(p->spectra->samples_file());

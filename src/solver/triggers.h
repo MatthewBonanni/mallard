@@ -49,6 +49,7 @@ class Triggers {
             Action action = Action::STOP;
             std::string writer;   // WRITE: the [[write_data]] prefix
             std::string message;  // LOG: the text, with {<variable>} replaced by its value
+            std::string resolved;  // LOG: the text with each {<region reduction>} as the name of its variable
             std::vector<std::pair<std::string, std::string>> settings;  // SET: (key, value), as mallard ctl set
         };
 
@@ -74,6 +75,24 @@ class Triggers {
         static const std::vector<std::string> & built_in();
 
         /**
+         * @brief The reductions over one region that conditions (and the {...} of log messages) read, as
+         *        `max(T, "domain")`: an internal probe of the region, named region_probe(k) for the k-th, reduces
+         *        its fields every step.
+         */
+        struct RegionReduction {
+            std::string region;
+            std::vector<std::string> fields;
+            std::vector<std::string> reductions;
+            size_t trigger = 0;  // the first trigger that reads it, for errors
+            std::string key;     // of that trigger: when or do
+            std::string call;    // as it first reads it
+        };
+        /** @brief The region reductions of [[triggers]], one per region in the order they appear. Throws InputError. */
+        static std::vector<RegionReduction> region_reductions(const Input & input);
+        /** @brief The name of the internal probe of the k-th region reduction. */
+        static std::string region_probe(size_t k) { return "__trigger_region_" + std::to_string(k); }
+
+        /**
          * @brief Read [[triggers]]. monitored names the values the solver passes after
          *        the built-in ones; writers the [[write_data]] prefixes; statistics
          *        whether the run has [statistics]. Throws InputError.
@@ -85,6 +104,8 @@ class Triggers {
         size_t size() const { return triggers.size(); }
         const Trigger & operator[](size_t i) const { return triggers[i]; }
         const std::vector<std::string> & variables() const { return names; }
+        /** @brief Variable v as conditions write it: `max(T, "domain")` for a region reduction. */
+        const std::string & shown(size_t v) const { return shown_names[v]; }
 
         /**
          * @brief Each condition at values (by variables(), NaN where not yet known),
@@ -147,6 +168,8 @@ class Triggers {
     private:
         std::vector<Trigger> triggers;
         std::vector<std::string> names;
+        std::vector<std::string> shown_names;
+        std::vector<std::string> visible;  // the names but region reductions', for messages
 };
 
 /** @brief A monitored value's name in conditions: characters other than letters, digits and _ become _. */

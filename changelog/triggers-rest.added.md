@@ -1,0 +1,1 @@
+- Trigger conditions reduce a field over a region themselves: `when = 'max(T, "domain") > 2500'` (also `integral`, `mean`, `favre`, `min`, `rms`, over a named region, a cell zone or a boundary zone, and in a log message's `{...}`), reduced every step on the device without a `[[probes]]` entry.

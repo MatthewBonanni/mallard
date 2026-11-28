@@ -67,6 +67,35 @@ std::vector<uint64_t> Solver::monitored_steps() const {
     return steps;
 }
 
+void Solver::add_trigger_probes(region::Regions & regions) {
+    const std::vector<Triggers::RegionReduction> regional = Triggers::region_reductions(input);
+    for (size_t k = 0; k < regional.size(); k++) {
+        const Triggers::RegionReduction & r = regional[k];
+        Input::array_type fields, reductions;
+        for (const auto & f : r.fields) fields.push_back(f);
+        for (const auto & f : r.reductions) reductions.push_back(f);
+        const Input entry(Input::table_type{{"name", Triggers::region_probe(k)},
+                                            {"region", r.region},
+                                            {"fields", fields},
+                                            {"reductions", reductions},
+                                            {"interval", 1}});
+        try {
+            probes.add_internal(input, *mesh, regions, species_names, is_viscous(), entry, data);
+        } catch (const InputError & e) {
+            const std::vector<Input> entries = find_value<std::vector<Input>>(input, "triggers");
+            std::string what = e.diagnostic.key.empty() ? e.what() : e.diagnostic.message;
+            const std::string own = "probes[name = \"" + Triggers::region_probe(k) + "\"]";
+            for (size_t at = what.find(own); at != std::string::npos; at = what.find(own)) what.replace(at, own.size(), "probe");
+            throw InputError({.key = "triggers[" + std::to_string(r.trigger) + "]." + r.key,
+                              .line = line_of(entries[r.trigger], r.key),
+                              .message = "\"" + r.call + "\": " + what,
+                              .valid = e.diagnostic.valid,
+                              .fix = e.diagnostic.fix,
+                              .docs = "docs/guide/running.md#triggers"});
+        }
+    }
+}
+
 void Solver::init_triggers() {
     const std::vector<Convergence::Monitored> all = monitored();
     convergence.init(input, all, find_value_or<std::string>(input, "initialize", "type", "") == "restart");
@@ -300,7 +329,7 @@ void Solver::act_on_triggers() {
         const Triggers::Trigger & trigger = triggers[i];
         json::Object read;
         if (!values.empty()) {
-            for (const uint16_t v : trigger.used) read.add(triggers.variables()[v], values[v]);
+            for (const uint16_t v : trigger.used) read.add(triggers.shown(v), values[v]);
         }
         logging::event(step, double(t), "trigger", trigger.name + ": " + Triggers::describe(trigger),
                        {{"name", json::quote(trigger.name)},
