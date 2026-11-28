@@ -15,6 +15,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -693,6 +694,9 @@ class TENO : public FaceReconstruction {
         /** @brief Local cells that some stencil (central or sector) of the cells with tables flagged in cells reads. */
         std::vector<uint8_t> stencil_cells(const std::vector<uint8_t> & cells) const;
 
+        /** @brief Local cells holding the boundary faces that the stencils' images mirror across. */
+        std::vector<uint32_t> mirror_face_cells() const;
+
         /**
          * @brief Metric (3 x 3, row-major) in which the stencil candidates of
          *        cell i are ranked by distance: the identity unless the
@@ -730,6 +734,17 @@ class TENO : public FaceReconstruction {
          *        i.e. whose tables depend on those cells' geometry.
          */
         std::vector<uint32_t> cells_within_reach(const std::vector<uint32_t> & changed) const;
+
+        /**
+         * @brief Tables set up on a mesh that held more cells, whose cells and faces this one numbers
+         *        new_cell and new_face (-1: not here). Set before init(), which then takes them over instead
+         *        of setting them up (Solver::drop_unread_halo); its cells with tables must be those of `from`.
+         */
+        struct Carried {
+            std::unique_ptr<TENO> from;
+            std::vector<int32_t> new_cell, new_face;
+        };
+        std::optional<Carried> carried;
 
         // Setup: on the host only (tests), the cells per device batch (0: from the device memory), and
         // cells refitted after taking their stencil shape's tables (tests)
@@ -780,6 +795,7 @@ class TENO : public FaceReconstruction {
         uint64_t options_key() const;
         uint64_t cache_key() const;
         bool load_cache();
+        bool carry_tables();
         void round_to_single();
 
         void choose_rows();

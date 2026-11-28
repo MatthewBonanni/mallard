@@ -44,6 +44,8 @@ MUSCL needs two layers, fifth-order TENO eight on these triangles, about
 four times as many halo cells. The halo cells' state is exchanged at every
 stage.*
 
+TENO builds as many layers as its stencil searches visit, so that its stencils are those of a serial run, but its stencils read only some of the cells in the outer layers. Once its tables are set up, each rank rebuilds its mesh with the halo cells it receives at every stage and carries the tables over, so the halo cells that no stencil reads take no memory during the run; the run report's "cells received per exchange" counts those kept.
+
 The layers beyond the first hold only what the stencils read: the cells' state and geometry. Face states, face quadrature points and the weights of the viscous gradients are stored for the owned cells and halo layer 1 alone, so a halo cell takes about half the memory of an owned one.
 
 The pieces come from one of three partitioners, chosen with `partitioner` in a `[parallel]` table of the input. All three give the same results bit for bit:

@@ -845,6 +845,8 @@ class Solver {
             CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: step graphs gate their bodies
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
+        /** @brief Tests only: keep the halo the setup searched, which drop_unread_halo would trim. */
+        void set_keep_unread_halo(bool keep) { keep_unread_halo = keep; }
         /**
          * @brief false gives each part of stage_scratch its own memory instead of sharing it, so that tests
          *        compare the two bit for bit. Call before init().
@@ -1240,6 +1242,9 @@ class Solver {
         bool distribute = true;
         int halo_layers = 0;
         std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
+        curved::Surfaces curved_surfaces;               // of the local mesh, during init only
+        std::optional<TENO::Carried> carried_tables;    // for the next init_numerics (drop_unread_halo)
+        bool keep_unread_halo = false;                  // set_keep_unread_halo
         std::string partitioner;
         Distribution distribution;
         HaloExchange halo;
@@ -1247,6 +1252,16 @@ class Solver {
         int base_halo_layers() const;
         bool halo_too_shallow();
         void trim_halo();
+        /**
+         * @brief Rebuild the local mesh with the owned and received cells only, and set the boundaries and
+         *        numerics up on it again, carrying the TENO tables over.
+         */
+        void drop_unread_halo();
+        /**
+         * @brief Curved meshes, in drop_unread_halo: the kept cells take the geometry exchange_halo_geometry gave
+         *        them, as the trim reorients the faces of the halo's new edge, which curved cell rules sum over.
+         */
+        void keep_halo_geometry(Mesh & trimmed, const std::vector<int32_t> & new_cell) const;
         uint32_t n_gradient_cells() const;
         void describe_partition_surface();
         void init_rhs_split();

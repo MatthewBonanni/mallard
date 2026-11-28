@@ -73,8 +73,14 @@ std::string box_input(const std::string & mesh, const std::string & recon, const
 TEST(MPI3DTest, TENOOnHexahedraMatchesSerial) {
     // Order 5 needs five distinct cell planes across a planar partition
     // interface; a halo that cuts the stencil search short must be deepened
-    // rather than reported as a rank-deficient stencil
-    expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"));
+    // rather than reported as a rank-deficient stencil. The deep halo the searches
+    // visited is then dropped down to the cells received, with the tables carried over
+    expect_matches_serial(blast_input("cartesian", "type = \"TENO\"\norder = 5\n"), [](const Solver & solver) {
+        const Distribution & dist = solver.get_distribution();
+        uint64_t received = 0;
+        for (const auto & cells : dist.recv_cells) received += cells.size();
+        EXPECT_EQ(received, solver.get_mesh()->n_cells - solver.get_mesh()->n_owned());
+    });
 }
 
 TEST(MPI3DTest, TENOPlacesPlanarFacePointsAlikeWithAndWithoutStepGraphs) {

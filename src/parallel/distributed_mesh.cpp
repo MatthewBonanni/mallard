@@ -980,3 +980,135 @@ std::shared_ptr<Mesh> DistributedMesh::local_mesh(int halo_layers, Distribution 
         static_cast<uint32_t>(std::count_if(dist.layer.begin(), dist.layer.end(), [&](uint8_t l) { return l < halo_layers; }));
     return mesh;
 }
+
+std::shared_ptr<Mesh> restrict_local_mesh(const Mesh & mesh, Distribution & dist, const std::vector<uint8_t> & keep,
+                                          std::vector<int32_t> & new_cell, std::vector<int32_t> & new_face) {
+    const uint32_t n_owned = mesh.n_owned();
+    if (keep.size() != mesh.n_cells ||
+        !std::all_of(keep.begin(), keep.begin() + n_owned, [](uint8_t k) { return k; })) {
+        throw std::logic_error("restrict_local_mesh: every owned cell must be kept");
+    }
+    new_cell.assign(mesh.n_cells, -1);
+    std::vector<uint32_t> old_cell;
+    for (uint32_t c = 0; c < mesh.n_cells; c++) {
+        if (!keep[c]) continue;
+        new_cell[c] = static_cast<int32_t>(old_cell.size());
+        old_cell.push_back(c);
+    }
+    const uint32_t n_kept = static_cast<uint32_t>(old_cell.size());
+
+    // The kept cells' nodes, in their present order
+    std::vector<int32_t> new_node(mesh.n_nodes, -1);
+    for (const uint32_t c : old_cell) {
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) new_node[mesh.h_node_of_cell(c, k)] = 0;
+    }
+    std::vector<uint32_t> old_node;
+    for (uint32_t n = 0; n < mesh.n_nodes; n++) {
+        if (new_node[n] < 0) continue;
+        new_node[n] = static_cast<int32_t>(old_node.size());
+        old_node.push_back(n);
+    }
+    std::vector<std::array<rtype, N_DIM>> nodes(old_node.size());
+    for (size_t j = 0; j < old_node.size(); j++) FOR_I_DIM nodes[j][i] = mesh.h_node_coords(old_node[j], i);
+    CellNodes cells;
+    cells.offsets.reserve(n_kept + 1);
+    for (const uint32_t c : old_cell) {
+        for (uint32_t k = 0; k < mesh.h_n_nodes_of_cell(c); k++) {
+            cells.nodes.push_back(static_cast<uint32_t>(new_node[mesh.h_node_of_cell(c, k)]));
+        }
+        cells.offsets.push_back(static_cast<uint32_t>(cells.nodes.size()));
+    }
+    // Faces towards dropped cells join the partition zone
+    std::vector<Mesh::BoundaryFace> boundary_faces;
+    for (const FaceZone & zone : mesh.h_face_zones()) {
+        if (zone.get_type() != FaceZoneType::BOUNDARY || zone.get_name() == PARTITION_ZONE) continue;
+        for (size_t i = 0; i < zone.h_faces.extent(0); i++) {
+            const uint32_t f = zone.h_faces(i);
+            if (!keep[static_cast<uint32_t>(mesh.h_cells_of_face(f, 0))]) continue;
+            Mesh::BoundaryFace face{{}, zone.get_name()};
+            for (uint32_t k = 0; k < mesh.h_n_nodes_of_face(f); k++) {
+                face.nodes.push_back(static_cast<uint32_t>(new_node[mesh.h_node_of_face(f, k)]));
+            }
+            boundary_faces.push_back(std::move(face));
+        }
+    }
+    // Periodic classes keyed by their first kept node
+    PeriodicNodes classes{mesh.periodic_zones, mesh.periodic_translations, mesh.periodic_rotation, {}, {}};
+    if (!mesh.h_node_key.empty()) {
+        std::vector<int32_t> class_key(mesh.n_nodes, -1);
+        classes.key.resize(old_node.size());
+        classes.lattice.resize(old_node.size());
+        for (uint32_t j = 0; j < old_node.size(); j++) {
+            int32_t & key = class_key[mesh.h_node_key[old_node[j]]];
+            if (key < 0) key = static_cast<int32_t>(j);
+            classes.key[j] = static_cast<uint32_t>(key);
+            classes.lattice[j] = mesh.h_node_lattice[old_node[j]];
+        }
+    }
+
+    Distribution kept;
+    kept.n_owned = dist.n_owned;
+    kept.halo_layers = dist.halo_layers;
+    kept.neighbors = dist.neighbors;
+    kept.send_cells = dist.send_cells;
+    for (const uint32_t c : old_cell) {
+        kept.global_cell.push_back(dist.global_cell[c]);
+        kept.layer.push_back(dist.layer[c]);
+    }
+    for (const auto & recv : dist.recv_cells) {
+        std::vector<uint32_t> cells_of;
+        for (const uint32_t c : recv) {
+            if (new_cell[c] < 0) throw std::logic_error("restrict_local_mesh: a received cell is dropped");
+            cells_of.push_back(static_cast<uint32_t>(new_cell[c]));
+        }
+        kept.recv_cells.push_back(std::move(cells_of));
+    }
+
+    auto out = std::make_shared<Mesh>();
+    out->set_type(mesh.get_type());
+    out->cell_order_choice = mesh.cell_order_choice;
+    out->structured_blocks = mesh.structured_blocks;
+    out->h_global_cell_id = kept.global_cell;
+    out->n_global_cells = mesh.n_global_cells;
+    for (const uint32_t n : old_node) out->h_global_node_id.push_back(mesh.h_global_node_id[n]);
+    out->n_global_nodes = mesh.n_global_nodes;
+    out->n_owned_cells = mesh.n_owned_cells;
+    out->n_interior_cells = mesh.n_interior_cells;
+    out->high_order_faces = mesh.high_order_faces;
+    out->init_from_connectivity(std::move(nodes), std::move(cells), boundary_faces, PARTITION_ZONE, std::move(classes));
+    out->cell_zone_names = mesh.cell_zone_names;
+    for (uint32_t c = 0; c < mesh.h_cell_zone.size(); c++) {
+        if (keep[c]) out->h_cell_zone.push_back(mesh.h_cell_zone[c]);
+    }
+    // Every kept cell keeps its faces in their local order
+    new_face.assign(mesh.n_faces, -1);
+    for (const uint32_t c : old_cell) {
+        const uint32_t d = static_cast<uint32_t>(new_cell[c]);
+        if (out->h_n_faces_of_cell(d) != mesh.h_n_faces_of_cell(c)) {
+            throw std::logic_error("restrict_local_mesh: faces differ");
+        }
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) {
+            int32_t & f = new_face[mesh.h_face_of_cell(c, k)];
+            const int32_t g = static_cast<int32_t>(out->h_face_of_cell(d, k));
+            if (f >= 0 && f != g) throw std::logic_error("restrict_local_mesh: a face splits");
+            f = g;
+        }
+    }
+    out->n_reconstructed_cells = mesh.n_reconstructed_cells;
+    for (uint32_t k = 0; k < out->h_offsets_faces_of_cell(out->n_reconstructed()); k++) {
+        out->n_state_faces_count = std::max(out->n_state_faces_count, out->h_faces_of_cell(k) + 1);
+    }
+    // Cells keep all their vertex neighbors up to the first that lost one
+    const VertexNeighbors & neighbors = mesh.vertex_neighbors();
+    uint32_t complete = 0;
+    for (; complete < std::min(n_kept, mesh.n_complete()) && old_cell[complete] == complete; complete++) {
+        bool whole = true;
+        for (uint32_t k = neighbors.h_offsets(complete); k < neighbors.h_offsets(complete + 1); k++) {
+            whole = whole && keep[neighbors.h_cells(k)];
+        }
+        if (!whole) break;
+    }
+    out->n_complete_cells = complete;
+    dist = std::move(kept);
+    return out;
+}
