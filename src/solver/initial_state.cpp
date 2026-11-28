@@ -1101,7 +1101,7 @@ InputError constant_missing(const Input & init, const std::string & key) {
 } // namespace
 
 struct InitialState::Impl {
-    const Mesh & mesh;
+    const Mesh * mesh;
     Euler physics;
     const MixtureModel * mixture = nullptr;
     bool from_cells = false;
@@ -1118,7 +1118,7 @@ struct InitialState::Impl {
     std::vector<std::string> names = {"x", "y", "z"};
     const Input * region_names = nullptr;  // [regions]
 
-    Impl(const Mesh & m, const Euler & p, const MixtureModel * mix, bool cells) :
+    Impl(const Mesh * m, const Euler & p, const MixtureModel * mix, bool cells) :
         mesh(m), physics(p), mixture(mix), from_cells(cells) {}
 
     int32_t add_program(const std::string & where, const std::size_t line, const std::string & text,
@@ -1381,7 +1381,7 @@ bool InitialState::layered(const Input & input) {
     return init.contains("regions") || init.contains("data") || init.contains("turbulence");
 }
 
-InitialState::InitialState(const Input & input, const Mesh & mesh, const Euler & physics,
+InitialState::InitialState(const Input & input, const Mesh * mesh, const Euler & physics,
                            const MixtureModel * mixture, const bool base_from_cells) :
     impl(std::make_unique<Impl>(mesh, physics, mixture, base_from_cells)) {
     const Input & init = input.at("initialize");
@@ -1509,7 +1509,7 @@ InitialState::~InitialState() = default;
 
 void InitialState::apply(const StateView::host_mirror_type & U, const SpeciesView::host_mirror_type & rhoY,
                          const Kokkos::View<rtype *>::host_mirror_type & T_seed) const {
-    const Mesh & mesh = impl->mesh;
+    const Mesh & mesh = *impl->mesh;
     const uint32_t n_species = impl->mixture ? impl->mixture->n_species() : 0;
     const uint32_t n_vars = N_CONSERVATIVE + n_species;
 

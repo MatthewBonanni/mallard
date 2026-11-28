@@ -274,9 +274,7 @@ CheckFields Solver::check_resolution(CheckReport & r) {
     return fields;
 }
 
-void Solver::init_check_inputs() {
-    check_inputs = {};
-    const uint32_t n_owned = mesh->n_owned();
+void Solver::read_check_inputs(region::Regions & regions) const {
     const Input * check = input.contains("check") ? &input.at("check") : nullptr;
     if (check && check->contains("regions")) {
         const Input & list = check->at("regions");
@@ -289,7 +287,7 @@ void Solver::init_check_inputs() {
         for (size_t i = 0; i < list.as_array().size(); i++) {
             const Input & value = list.as_array()[i];
             const std::string key = "check.regions[" + std::to_string(i) + "]";
-            const region::Region & region = used_regions->get(value, key);
+            const region::Region & region = regions.get(value, key);
             region::require_full_dimension(region, value, key);
             if (region.moving() || region.solution()) {
                 throw InputError({.key = key,
@@ -298,6 +296,21 @@ void Solver::init_check_inputs() {
                                              "region of fixed cells",
                                   .fix = "Give a region of shapes, a cell zone or a boolean of them"});
             }
+        }
+    }
+    if (check && check->contains("statistics")) find_value<std::string>(input, "check", "statistics");
+}
+
+void Solver::init_check_inputs() {
+    check_inputs = {};
+    read_check_inputs(*used_regions);
+    const uint32_t n_owned = mesh->n_owned();
+    const Input * check = input.contains("check") ? &input.at("check") : nullptr;
+    if (check && check->contains("regions")) {
+        const Input & list = check->at("regions");
+        for (size_t i = 0; i < list.as_array().size(); i++) {
+            const Input & value = list.as_array()[i];
+            const std::string key = "check.regions[" + std::to_string(i) + "]";
             const std::vector<double> & f = used_regions->fractions(value, key);
             check_inputs.regions.emplace_back(value.is_string() ? value.as_string() : key,
                                               std::vector<double>(f.begin(), f.begin() + n_owned));

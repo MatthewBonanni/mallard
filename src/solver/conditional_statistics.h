@@ -59,6 +59,10 @@ class ConditionalStatistics {
             bool nccl = false;
         };
 
+        /** @brief Reads and checks entry index of [[statistics.conditional]] without the mesh. */
+        void read(const Input & entry, uint32_t index, uint64_t interval_in, rtype t_start_in,
+                  region::Regions * regions);
+
         /**
          * @brief Read entry index of [[statistics.conditional]], sampling every interval steps from t_start;
          *        restart files carry it under its index.

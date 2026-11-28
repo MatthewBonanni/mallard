@@ -48,9 +48,9 @@ struct Field {
  *
  * @param table The turbulence table.
  * @param where Its key path, for messages.
- * @param mesh The mesh.
+ * @param mesh The mesh, or null to read and check the keys alone (no modes).
  */
-Field read(const Input & table, const std::string & where, const Mesh & mesh);
+Field read(const Input & table, const std::string & where, const Mesh * mesh);
 
 } // namespace synthetic_turbulence
 

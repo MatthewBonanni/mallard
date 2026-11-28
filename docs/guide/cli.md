@@ -385,32 +385,38 @@ Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-
 ```text
 Usage: mallard input resolve input.toml > full.toml
 
-Sets up the case as mallard check does and writes to standard output the input
-the run uses: every key the setup reads, with the value it takes, whether the
-input sets it, a numerics preset fills it or it is the default. Renamed keys are
-under their new names, quantities with units are plain numbers in the units the
-key documents, keys are sorted and comments dropped. Keys the setup does not
-read are left out, and so are tables the input leaves out, whose presence can
-turn a feature on.
+Writes to standard output the input the run uses: every key the setup reads,
+with the value it takes, whether the input sets it, a numerics preset fills it
+or it is the default. It runs the setup's input phase alone, which reads every
+key and decides from them without the mesh, so it takes the same time on any
+mesh and needs no mesh file (with none, --dim states the dimension); mallard
+check finds the errors only the mesh shows. Renamed keys are under their new
+names, quantities with units are plain numbers in the units the key documents,
+keys are sorted and comments dropped. Keys the setup does not read are left out,
+and so are tables the input leaves out, whose presence can turn a feature on.
 
 The result runs bitwise the same as the input and resolves to itself. Every
 output file's run block holds the same text (input.resolved), so a run's results
 carry the full input that made them.
 
 Options:
-  --restart FILE  The input of the run as started from this restart file.
-  --kokkos-*      Kokkos options, e.g. --kokkos-num-threads=8 (threads per rank)
-                  or --kokkos-device-id=1 (the GPU; by default each rank gets
-                  its own).
-  -h, --help      Show this page.
+  --restart FILE      The input of the run as started from this restart file.
+  --format toml|json  toml (default), or JSON: the resolved input as text, the
+                      numerics preset as run blocks record it, and the Preset
+                      row of mallard check.
+  --kokkos-*          Kokkos options, e.g. --kokkos-num-threads=8 (threads per
+                      rank) or --kokkos-device-id=1 (the GPU; by default each
+                      rank gets its own).
+  -h, --help          Show this page.
 
 Examples:
   $ mallard input resolve input.toml > full.toml
   $ diff <(mallard input resolve a.toml) <(mallard input resolve b.toml)
+  $ mallard input resolve input.toml --format json
 
 Exit status:
   0  the resolved input was written
-  1  errors in the input or the setup, as mallard check reports them
+  1  errors in the input, or keys it does not use
   2  usage error
 
 Documentation: https://matthewbonanni.github.io/mallard/docs/guide/cli/#mallard-input-resolve

@@ -206,6 +206,9 @@ class Particles {
                   const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
                   const Euler * gas);
 
+        /** @brief Reads and checks [particles] without the mesh; init reads it again. */
+        void read(const Input & input, region::Regions & regions, const Euler * gas);
+
         /** @brief The values of the particle block of a State: width() per slot. */
         size_t n_values() const { return size_t(capacity) * width; }
 
@@ -340,6 +343,26 @@ class Particles {
     private:
         /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
         uint32_t persistent() const { return width + quantities.n_aux(); }
+
+        /** @brief The velocity and temperature particles are seeded with, if given, and the first quantity column. */
+        struct Start {
+            std::array<rtype, N_DIM> v{};
+            rtype T = 0.0_r;
+            bool v_given = false, T_given = false;
+            uint32_t first_quantity = N_DIM;
+        };
+        /** @brief Reads the type, the solid's properties, the quantities and the probes of [particles]. */
+        Start read_settings(const Input & input, region::Regions & regions, const Euler * gas);
+
+        /** @brief An entry of [[particles.walls]]. */
+        struct Wall {
+            std::string where;
+            size_t line = 0;
+            std::vector<std::string> zones;
+            bool stick = false;
+            rtype coefficients[2] = {1.0_r, 1.0_r};
+        };
+        std::vector<Wall> wall_entries(const Input & table) const;
 
         /** @brief Read [[particles.walls]] into the face actions and restitution coefficients. */
         void read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action);

@@ -57,6 +57,8 @@ struct CellSampler;
  */
 class Spectra {
     public:
+        /** @brief Reads and checks [statistics.spectra] (table) of the run (input) without the mesh. */
+        void read(const Input & table, const Input & input, uint64_t interval_in, rtype t_start_in);
         /** @brief Read [statistics.spectra] (table) of the run (input), sampling every interval steps from t_start. */
         void init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
                   const Mesh & mesh, uint64_t interval, rtype t_start, bool use_nccl = false);

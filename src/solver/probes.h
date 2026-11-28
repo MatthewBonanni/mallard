@@ -201,6 +201,13 @@ class Probes {
         void add_snapshot(const Input & input, const Mesh & mesh, region::Regions & regions,
                           const std::vector<std::string> & species_names, bool resume, bool viscous,
                           const Input & entry, const Snapshot & snapshot, const std::vector<Data> & cell_data);
+        /** @brief Reads and checks [[probes]] without the mesh; fields registered with it are checked by init. */
+        void read(const Input & input, region::Regions & regions, const std::vector<std::string> & species_names,
+                  bool viscous);
+        /** @brief Reads and checks a snapshot entry of [[write_data]] without the mesh. */
+        void read_snapshot(const Input & input, region::Regions & regions,
+                           const std::vector<std::string> & species_names, bool viscous, const Input & entry,
+                           const Snapshot & snapshot);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
 
@@ -726,8 +733,12 @@ class Probes {
             void write_reductions(uint64_t step, rtype t) const;
             void write_spectra(uint64_t step, rtype t);
         };
+        /** @brief The probes of [[probes]]; with a null mesh, read and checked only. */
+        void add_entries(const Input & input, const Mesh * mesh, region::Regions & regions,
+                         const std::vector<std::string> & species_names, bool resume, bool viscous,
+                         const std::vector<Data> * cell_data);
         /** @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all). */
-        void add(const Input & input, const Mesh & mesh, region::Regions & regions,
+        void add(const Input & input, const Mesh * mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
                  const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */

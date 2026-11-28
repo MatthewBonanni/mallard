@@ -177,28 +177,22 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
 
 } // namespace
 
-void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, const BoundaryData & boundaries,
-                     const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
-                     const Euler * gas) {
-    mesh = std::move(mesh_in);
+Particles::Start Particles::read_settings(const Input & input, region::Regions & regions, const Euler * gas) {
     const Input & table = input.at("particles");
     record_options("particles.type", {"solid", "tracer"});
     const std::string type = find_value<std::string>(table, "type");
     if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
     is_solid = type == "solid";
     file = find_value_or<std::string>(table, "file", "");
-    distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
-    std::array<rtype, N_DIM> v_seed{};
-    rtype T_seed = 0.0_r;
-    bool v_given = false, T_given = false;
+    Start start;
     if (is_solid) {
         solid = read_solid(input, table, gas);
         heated = solid.heated();
         if (contains_optional(table, "velocity")) {
             const std::vector<rtype> v = read_vector(table, "velocity", dim::velocity);
-            FOR_I_DIM v_seed[i] = v[i];
-            v_given = true;
+            FOR_I_DIM start.v[i] = v[i];
+            start.v_given = true;
         }
         if (contains_optional(table, "temperature")) {
             if (!heated) {
@@ -208,13 +202,35 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
                                             .fix = "Give specific_heat, or remove temperature",
                                             .docs = SOLID_DOCS});
             }
-            T_seed = positive(table, "temperature", dim::temperature);
-            T_given = true;
+            start.T = positive(table, "temperature", dim::temperature);
+            start.T_given = true;
         }
     }
-    const uint32_t first_quantity = is_solid ? 2 * N_DIM + (heated ? 1 : 0) : N_DIM;
-    quantities.init(table, regions, first_quantity, R > 0.0);
+    start.first_quantity = is_solid ? 2 * N_DIM + (heated ? 1 : 0) : N_DIM;
+    quantities.init(table, regions, start.first_quantity, R > 0.0);
     probes.init(table, regions, quantities);
+    return start;
+}
+
+void Particles::read(const Input & input, region::Regions & regions, const Euler * gas) {
+    read_settings(input, regions, gas);
+    const Input & table = input.at("particles");
+    wall_entries(table);
+    seed_points(table);
+    find_value_or<uint64_t>(table, "capacity", 0);
+}
+
+void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, const BoundaryData & boundaries,
+                     const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
+                     const Euler * gas) {
+    mesh = std::move(mesh_in);
+    const Input & table = input.at("particles");
+    distributed = distribution != nullptr;
+    const Start start = read_settings(input, regions, gas);
+    const std::array<rtype, N_DIM> v_seed = start.v;
+    const rtype T_seed = start.T;
+    const bool v_given = start.v_given, T_given = start.T_given;
+    const uint32_t first_quantity = start.first_quantity;
     width = first_quantity + quantities.n_integrated();
     const uint32_t n_aux = quantities.n_aux();
     n_owned = mesh->n_owned();
@@ -540,8 +556,7 @@ void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReco
     });
 }
 
-void Particles::read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action) {
-    const uint32_t n_faces = mesh->n_faces;
+std::vector<Particles::Wall> Particles::wall_entries(const Input & table) const {
     if (!is_solid) {
         if (contains_optional(table, "walls")) {
             throw InputError(Diagnostic{.key = "particles.walls",
@@ -550,61 +565,72 @@ void Particles::read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mi
                                         .fix = "Remove [[particles.walls]], or set type = \"solid\"",
                                         .docs = SOLID_DOCS});
         }
-        return;
+        return {};
     }
+    std::vector<Wall> walls;
+    if (!contains_optional(table, "walls")) return walls;
+    const auto entries = find_value<std::vector<Input>>(table, "walls");
+    record_options("particles.walls.interaction", {"rebound", "stick"});
+    for (size_t k = 0; k < entries.size(); k++) {
+        const Input & e = entries[k];
+        Wall wall;
+        wall.where = "particles.walls[" + std::to_string(k) + "]";
+        wall.line = line_of(e, "zones");
+        wall.zones = find_value<std::vector<std::string>>(e, "zones");
+        const std::string interaction = find_value_or<std::string>(e, "interaction", "rebound");
+        if (interaction != "rebound" && interaction != "stick") {
+            throw not_accepted(e, wall.where + ".interaction", interaction, {"rebound", "stick"});
+        }
+        wall.stick = interaction == "stick";
+        if (!wall.stick) {
+            const char * keys[2] = {"restitution", "tangential_restitution"};
+            for (size_t j = 0; j < 2; j++) {
+                wall.coefficients[j] = find_real_or(e, keys[j], dim::none, 1.0_r);
+                if (!(wall.coefficients[j] >= 0.0_r && wall.coefficients[j] <= 1.0_r)) {
+                    throw InputError(Diagnostic{.key = wall.where + "." + keys[j], .line = line_of(e, keys[j]),
+                                                .message = "must be in [0, 1]", .docs = SOLID_DOCS});
+                }
+            }
+        }
+        walls.push_back(wall);
+    }
+    return walls;
+}
+
+void Particles::read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action) {
+    const std::vector<Wall> walls = wall_entries(table);
+    if (!is_solid) return;
+    const uint32_t n_faces = mesh->n_faces;
     restitution = Kokkos::View<rtype *[2]>("particle_restitution", n_faces);
     auto h_restitution = Kokkos::create_mirror_view(restitution);
     Kokkos::deep_copy(h_restitution, 1.0_r);
-    if (contains_optional(table, "walls")) {
-        const auto entries = find_value<std::vector<Input>>(table, "walls");
-        record_options("particles.walls.interaction", {"rebound", "stick"});
-        for (size_t k = 0; k < entries.size(); k++) {
-            const Input & e = entries[k];
-            const std::string where = "particles.walls[" + std::to_string(k) + "]";
-            const auto zones = find_value<std::vector<std::string>>(e, "zones");
-            const std::string interaction = find_value_or<std::string>(e, "interaction", "rebound");
-            if (interaction != "rebound" && interaction != "stick") {
-                throw not_accepted(e, where + ".interaction", interaction, {"rebound", "stick"});
-            }
-            const bool stick = interaction == "stick";
-            rtype coefficients[2] = {1.0_r, 1.0_r};
-            if (!stick) {
-                const char * keys[2] = {"restitution", "tangential_restitution"};
-                for (int j = 0; j < 2; j++) {
-                    coefficients[j] = find_real_or(e, keys[j], dim::none, 1.0_r);
-                    if (!(coefficients[j] >= 0.0_r && coefficients[j] <= 1.0_r)) {
-                        throw InputError(Diagnostic{.key = where + "." + keys[j], .line = line_of(e, keys[j]),
-                                                    .message = "must be in [0, 1]", .docs = SOLID_DOCS});
+    for (const Wall & wall : walls) {
+        for (const std::string & name : wall.zones) {
+            // [walls, other boundary faces] of the zone on all ranks
+            std::array<uint64_t, 2> faces{0, 0};
+            for (const FaceZone & zone : mesh->h_face_zones()) {
+                if (zone.get_name() != name) continue;
+                for (uint32_t i = 0; i < zone.n_faces(); i++) {
+                    const uint32_t f = zone.h_faces(i);
+                    if (action(f) == particles::REFLECT || action(f) == particles::STICK) {
+                        faces[0]++;
+                        action(f) = wall.stick ? particles::STICK : particles::REFLECT;
+                        h_restitution(f, 0) = wall.coefficients[0];
+                        h_restitution(f, 1) = wall.coefficients[1];
+                    } else if (action(f) == particles::EXIT) {
+                        faces[1]++;
                     }
                 }
             }
-            for (const std::string & name : zones) {
-                // [walls, other boundary faces] of the zone on all ranks
-                std::array<uint64_t, 2> faces{0, 0};
-                for (const FaceZone & zone : mesh->h_face_zones()) {
-                    if (zone.get_name() != name) continue;
-                    for (uint32_t i = 0; i < zone.n_faces(); i++) {
-                        const uint32_t f = zone.h_faces(i);
-                        if (action(f) == particles::REFLECT || action(f) == particles::STICK) {
-                            faces[0]++;
-                            action(f) = stick ? particles::STICK : particles::REFLECT;
-                            h_restitution(f, 0) = coefficients[0];
-                            h_restitution(f, 1) = coefficients[1];
-                        } else if (action(f) == particles::EXIT) {
-                            faces[1]++;
-                        }
-                    }
-                }
-                if (distributed) faces = comm::allreduce(faces, comm::Op::SUM);
-                if (faces[0] == 0 || faces[1] > 0) {
-                    throw InputError(Diagnostic{.key = where + ".zones",
-                                                .line = line_of(e, "zones"),
-                                                .message = "\"" + name + "\" " +
-                                                           (faces[0] + faces[1] == 0
-                                                                ? "is not a boundary of the mesh"
-                                                                : "is not a wall or symmetry boundary"),
-                                                .docs = SOLID_DOCS});
-                }
+            if (distributed) faces = comm::allreduce(faces, comm::Op::SUM);
+            if (faces[0] == 0 || faces[1] > 0) {
+                throw InputError(Diagnostic{.key = wall.where + ".zones",
+                                            .line = wall.line,
+                                            .message = "\"" + name + "\" " +
+                                                       (faces[0] + faces[1] == 0
+                                                            ? "is not a boundary of the mesh"
+                                                            : "is not a wall or symmetry boundary"),
+                                            .docs = SOLID_DOCS});
             }
         }
     }

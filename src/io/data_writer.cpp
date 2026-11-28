@@ -134,12 +134,8 @@ class HashQueue {
 
 } // namespace
 
-void DataWriter::init(const Input & input,
-                      std::vector<Data> & data,
-                      std::shared_ptr<Mesh> mesh_in,
-                      const std::vector<std::string> & restart_variables,
-                      const CellSubset * cell_subset,
-                      const std::string & prefix_in) {
+DataWriter::Settings DataWriter::read(const Input & input) {
+    Settings out;
     if (!input.contains("prefix")) {
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
@@ -153,33 +149,95 @@ void DataWriter::init(const Input & input,
                                                   : "specify exactly one of interval and time_interval",
                           .fix = "Use interval for every N steps, or time_interval for every T of simulated time"});
     }
-    prefix = prefix_in.empty() ? find_value<std::string>(input, "prefix") : prefix_in;
+    out.prefix = find_value<std::string>(input, "prefix");
     if (has_interval) {
-        interval = find_value<uint64_t>(input, "interval");
-        if (interval == 0) {
+        out.interval = find_value<uint64_t>(input, "interval");
+        if (out.interval == 0) {
             throw InputError({.key = "write_data.interval",
                               .line = line_of(input, "interval"),
                               .message = "must be positive",
                               .fix = "Give the number of steps between files"});
         }
     } else {
-        time_interval = find_real(input, "time_interval", dim::time);
-        if (!(time_interval > 0.0_r)) {
+        out.time_interval = find_real(input, "time_interval", dim::time);
+        if (!(out.time_interval > 0.0_r)) {
             throw InputError({.key = "write_data.time_interval",
                               .line = line_of(input, "time_interval"),
                               .message = "must be positive",
                               .fix = "Give the simulated time between files"});
         }
     }
+    if (contains_optional(input, "format")) {
+        out.format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"),
+                                 line_of(input, "format"))
+                         ->second;
+    } else {
+        std::vector<std::string> names;
+        for (const auto & entry : FORMAT_TYPES) names.push_back(entry.first);
+        std::sort(names.begin(), names.end());
+        record_options("write_data.format", names);
+    }
+    const bool restart = out.format == DataFormat::RESTART;
+    if (!restart) {
+        if (!input.contains("fields")) {
+            throw missing_key(input, "write_data.fields", "Add fields = [\"RHO\", \"U\", \"P\"], for example");
+        }
+        out.fields = find_value<std::vector<std::string>>(input, "fields");
+        if (out.fields.empty()) {
+            throw InputError({.key = "write_data.fields",
+                              .line = line_of(input, "fields"),
+                              .message = "is empty",
+                              .fix = "List the fields to write, e.g. [\"RHO\", \"U\", \"P\"]"});
+        }
+    }
+    if (input.contains("series")) {
+        if (input.contains("format") && out.format != DataFormat::VTKHDF) {
+            throw InputError("write_data.series is for format = \"vtkhdf\".");
+        }
+        out.series = find_value<bool>(input, "series");
+    }
+    const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
+    out.compression =
+        find_option(COMPRESSION_TYPES, "write_data.compression", compression_str, line_of(input, "compression"))->second;
+    if (input.contains("chunk_cells")) {
+        if (!restart || out.compression == Compression::NONE) {
+            throw InputError("write_data.chunk_cells is for compressed restart files.");
+        }
+        out.chunk_cells = find_value<uint64_t>(input, "chunk_cells");
+        if (out.chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
+    }
+    if (input.contains("relative_error")) {
+        if (restart) {
+            throw InputError("write_data.relative_error: restart files are lossless.");
+        }
+        if (out.compression == Compression::NONE) {
+            throw InputError("write_data.relative_error needs compression = \"zlib\".");
+        }
+        out.relative_error = double(find_real(input, "relative_error", dim::none));
+        if (!(out.relative_error > 0.0 && out.relative_error < 1.0)) {
+            throw InputError("write_data.relative_error must be between 0 and 1.");
+        }
+    }
+    return out;
+}
+
+void DataWriter::init(const Input & input,
+                      std::vector<Data> & data,
+                      std::shared_ptr<Mesh> mesh_in,
+                      const std::vector<std::string> & restart_variables,
+                      const CellSubset * cell_subset,
+                      const std::string & prefix_in) {
+    const Settings settings = read(input);
+    prefix = prefix_in.empty() ? settings.prefix : prefix_in;
+    interval = settings.interval;
+    time_interval = settings.time_interval;
 
     this->mesh = mesh_in;
     owned_by_id = mesh->cells_by_global_id();
     std::erase_if(owned_by_id, [&](uint32_t c) { return c >= mesh->n_owned(); });
     const bool many_writers = mesh->n_global_cells > 0 && comm::size() > 1;
-    if (contains_optional(input, "format")) {
-        format = find_option(FORMAT_TYPES, "write_data.format", find_value<std::string>(input, "format"),
-                             line_of(input, "format"))
-                     ->second;
+    if (settings.format) {
+        format = *settings.format;
     } else if (!have_hdf5() || (many_writers && !have_parallel_hdf5())) {
         format = DataFormat::VTU;
         static bool told = false;
@@ -194,24 +252,13 @@ void DataWriter::init(const Input & input,
         format = DataFormat::VTKHDF;
     }
 
-    std::vector<std::string> variables;
+    std::vector<std::string> variables = settings.fields;
     if (format == DataFormat::RESTART) {
         if (restart_variables.empty()) {
             variables.assign(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
         } else {
             variables = restart_variables;
         }
-    } else {
-        if (!input.contains("fields")) {
-            throw missing_key(input, "write_data.fields", "Add fields = [\"RHO\", \"U\", \"P\"], for example");
-        }
-        variables = find_value<std::vector<std::string>>(input, "fields");
-    }
-    if (variables.empty()) {
-        throw InputError({.key = "write_data.fields",
-                          .line = line_of(input, "fields"),
-                          .message = "is empty",
-                          .fix = "List the fields to write, e.g. [\"RHO\", \"U\", \"P\"]"});
     }
     auto unknown_variable = [&](const std::string & var, const std::string & message) {
         std::vector<std::string> names;
@@ -292,14 +339,7 @@ void DataWriter::init(const Input & input,
                               .fix = "Use format = \"vtu\", run on one rank, or rebuild against a parallel HDF5"});
         }
     }
-    one_file = format == DataFormat::VTKHDF;
-    if (input.contains("series")) {
-        if (input.contains("format") && format != DataFormat::VTKHDF) {
-            throw InputError("write_data.series is for format = \"vtkhdf\".");
-        }
-        const bool series = find_value<bool>(input, "series");
-        one_file = one_file && series;
-    }
+    one_file = format == DataFormat::VTKHDF && settings.series.value_or(true);
 
     if (cell_subset) {
         if (format != DataFormat::VTU && format != DataFormat::VTKHDF) {
@@ -325,10 +365,7 @@ void DataWriter::init(const Input & input,
         if (!subset_update) select_subset(cell_subset->cells, cell_subset->fractions);
     }
 
-    const std::string compression_str = find_value_or<std::string>(input, "compression", "none");
-    const auto compression_it =
-        find_option(COMPRESSION_TYPES, "write_data.compression", compression_str, line_of(input, "compression"));
-    compression = compression_it->second;
+    compression = settings.compression;
     if (compression != Compression::NONE) {
         const bool hdf5 = format == DataFormat::HDF5 || format == DataFormat::VTKHDF;
         if (hdf5 ? !have_hdf5_deflate() : !compression::have_zlib()) {
@@ -338,25 +375,8 @@ void DataWriter::init(const Input & input,
                                            "Mallard_ENABLE_ZLIB=ON).");
         }
     }
-    if (input.contains("chunk_cells")) {
-        if (format != DataFormat::RESTART || compression == Compression::NONE) {
-            throw InputError("write_data.chunk_cells is for compressed restart files.");
-        }
-        chunk_cells = find_value<uint64_t>(input, "chunk_cells");
-        if (chunk_cells == 0) throw InputError("write_data.chunk_cells must be positive.");
-    }
-    if (input.contains("relative_error")) {
-        if (format == DataFormat::RESTART) {
-            throw InputError("write_data.relative_error: restart files are lossless.");
-        }
-        if (compression == Compression::NONE) {
-            throw InputError("write_data.relative_error needs compression = \"zlib\".");
-        }
-        relative_error = double(find_real(input, "relative_error", dim::none));
-        if (!(relative_error > 0.0 && relative_error < 1.0)) {
-            throw InputError("write_data.relative_error must be between 0 and 1.");
-        }
-    }
+    if (settings.chunk_cells > 0) chunk_cells = settings.chunk_cells;
+    relative_error = settings.relative_error;
 
     if (output_files_enabled()) create_parent_directories("the output", prefix);
 }

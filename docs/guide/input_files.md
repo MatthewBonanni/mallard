@@ -709,7 +709,8 @@ match it.
 `mallard list keys` shows that catalog as tables, one per input table, with
 each key's type, units, default and accepted values; `mallard list keys
 input.toml` shows the catalog of one case (what `--catalog` writes, with
-whether the input sets each key), and a section keeps one table or key path:
+whether the input sets each key, read without the mesh), and a section keeps one
+table or key path:
 
 ```bash
 mallard list keys numerics                  # every [numerics] key there is
@@ -855,6 +856,19 @@ absence is a choice of its own (one of alternative keys such as `X` and `Y`, a
 full.toml` runs bitwise the same as `input.toml`, and resolves to `full.toml`
 again, so comparing two resolved inputs (`diff`) shows every setting in which
 two runs differ.
+
+The setup reads every key in its input phase, before the mesh, so `mallard
+input resolve` runs that phase alone: it takes a fraction of a second on any
+mesh and needs no mesh file (without one, `--dim 2` or `--dim 3` says which
+solver reads the input). What only the mesh can show, such as a boundary zone
+the mesh lacks or a probe outside the domain, is for `mallard check`. With
+`--format json` it writes the resolved input as a string with the numerics
+preset as the run block records it (`preset`) and the Preset row of `mallard
+check` (`preset_summary`), both `null` without a preset:
+
+```sh
+mallard input resolve input.toml --format json
+```
 
 Every output file's [run block](output.md#run-block) holds the same text,
 `input.resolved`, next to the input file's own text: the results of a run carry

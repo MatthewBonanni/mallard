@@ -43,6 +43,74 @@ static const std::unordered_map<std::string, InitType> INIT_TYPES = {
     {"remap", InitType::REMAP}
 };
 
+namespace {
+
+InitType init_type(const Input & input) {
+    if (!input.contains("initialize")) {
+        throw InputError({.key = "initialize",
+                          .message = "the [initialize] table is missing; it sets the initial flow",
+                          .fix = N_DIM == 3 ? "Add [initialize] with u = [ux, uy, uz], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y, z"
+                                            : "Add [initialize] with u = [ux, uy], p and T (a uniform flow), or "
+                                              "type = \"analytical\" for expressions of x, y"});
+    }
+    const std::string type = find_value_or<std::string>(input, "initialize", "type", "constant");
+    return find_option(INIT_TYPES, "initialize.type", type, line_of(input.at("initialize"), "type"))->second;
+}
+
+std::string restart_file(const Input & input) {
+    if (!input.at("initialize").contains("file")) {
+        throw missing_key(input.at("initialize"), "initialize.file",
+                          "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
+    }
+    return find_value<std::string>(input, "initialize", "file");
+}
+
+struct UniformState {
+    std::vector<rtype> u;
+    rtype p, T;
+    std::vector<double> Y;
+};
+
+UniformState uniform_state(const Input & input, const MixtureModel * mixture) {
+    const Input & init = input.at("initialize");
+    for (const char * key : {"u", "p", "T"}) {
+        if (!init.contains(key)) {
+            Diagnostic d = missing_key(init, std::string("initialize.") + key).diagnostic;
+            d.message = "missing; a uniform initial state (type = \"constant\") needs u, p and T";
+            throw InputError(d);
+        }
+    }
+    UniformState s;
+    s.u = find_real_vector(input, "initialize", "u", dim::velocity);
+    if (s.u.size() != N_DIM) {
+        throw InputError({.key = "initialize.u",
+                          .line = line_of(init, "u"),
+                          .message = "has " + logging::count(s.u.size(), "component") + ", but this build is " +
+                                     std::to_string(N_DIM) + "D",
+                          .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
+    }
+    s.p = find_real(input, "initialize", "p", dim::pressure);
+    s.T = find_real(input, "initialize", "T", dim::temperature);
+    if (mixture) s.Y = mixture->mass_fractions(init, "initialize");
+    return s;
+}
+
+} // namespace
+
+void Solver::read_initialize() const {
+    if (state_reader) return;
+    const InitType type = init_type(input);
+    const bool layered = InitialState::layered(input);
+    if (type == InitType::CONSTANT && !layered) uniform_state(input, mixture_model.get());
+    if (type == InitType::RESTART) restart_file(input);
+    if (type == InitType::REMAP) remap::read(input);
+    const bool from_file = type == InitType::RESTART || type == InitType::REMAP;
+    if (layered || type == InitType::ANALYTICAL) {
+        [[maybe_unused]] const InitialState state(input, nullptr, physics, mixture_model.get(), from_file);
+    }
+}
+
 void Solver::init_solution() {
     if (state_reader) {
         apply_output_state(state_reader(*mesh));
@@ -52,32 +120,23 @@ void Solver::init_solution() {
         initial_state = "output, at step " + std::to_string(step) + ", t = " + logging::real(double(t));
         return;
     }
-    if (!input.contains("initialize")) {
-        throw InputError({.key = "initialize",
-                          .message = "the [initialize] table is missing; it sets the initial flow",
-                          .fix = N_DIM == 3 ? "Add [initialize] with u = [ux, uy, uz], p and T (a uniform flow), or "
-                                              "type = \"analytical\" for expressions of x, y, z"
-                                            : "Add [initialize] with u = [ux, uy], p and T (a uniform flow), or "
-                                              "type = \"analytical\" for expressions of x, y"});
-    }
-    const std::string type_str = find_value_or<std::string>(input, "initialize", "type", "constant");
-    auto it = find_option(INIT_TYPES, "initialize.type", type_str, line_of(input.at("initialize"), "type"));
-    initial_state = type_str;
-    const bool from_file = it->second == InitType::RESTART || it->second == InitType::REMAP;
+    const InitType type = init_type(input);
+    initial_state = find_value_or<std::string>(input, "initialize", "type", "constant");
+    const bool from_file = type == InitType::RESTART || type == InitType::REMAP;
     const bool layered = InitialState::layered(input);
-    if (it->second == InitType::CONSTANT && !layered) {
+    if (type == InitType::CONSTANT && !layered) {
         init_solution_constant();
-    } else if (it->second == InitType::RESTART) {
+    } else if (type == InitType::RESTART) {
         init_solution_restart();
-    } else if (it->second == InitType::REMAP) {
+    } else if (type == InitType::REMAP) {
         init_solution_remap();
     }
-    if (!from_file && !(it->second == InitType::CONSTANT && !layered)) {
-        const InitialState state(input, *mesh, physics, mixture_model.get(), false);
+    if (!from_file && !(type == InitType::CONSTANT && !layered)) {
+        const InitialState state(input, mesh.get(), physics, mixture_model.get(), false);
         state.apply(h_conservatives, h_species, h_T_seed);
         if (layered) initial_state = state.summary();
     } else if (layered) {
-        const InitialState state(input, *mesh, physics, mixture_model.get(), true);
+        const InitialState state(input, mesh.get(), physics, mixture_model.get(), true);
         state.apply(h_conservatives, h_species, h_T_seed);
         initial_state += "; " + state.summary();
     }
@@ -94,11 +153,7 @@ void Solver::init_solution() {
 }
 
 void Solver::init_solution_restart() {
-    if (!input.at("initialize").contains("file")) {
-        throw missing_key(input.at("initialize"), "initialize.file",
-                          "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
-    }
-    const std::string file = find_value<std::string>(input, "initialize", "file");
+    const std::string file = restart_file(input);
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells
     const bool distributed = mesh->n_global_cells > 0;
@@ -320,29 +375,12 @@ void Solver::apply_output_state(RestartData state) {
 }
 
 void Solver::init_solution_constant() {
-    const Input & init = input.at("initialize");
-    for (const char * key : {"u", "p", "T"}) {
-        if (!init.contains(key)) {
-            Diagnostic d = missing_key(init, std::string("initialize.") + key).diagnostic;
-            d.message = "missing; a uniform initial state (type = \"constant\") needs u, p and T";
-            throw InputError(d);
-        }
-    }
-    std::vector<rtype> u = find_real_vector(input, "initialize", "u", dim::velocity);
-    if (u.size() != N_DIM) {
-        throw InputError({.key = "initialize.u",
-                          .line = line_of(init, "u"),
-                          .message = "has " + logging::count(u.size(), "component") + ", but this build is " +
-                                     std::to_string(N_DIM) + "D",
-                          .fix = N_DIM == 3 ? "Write u = [ux, uy, uz]" : "Write u = [ux, uy]"});
-    }
-    const rtype p = find_real(input, "initialize", "p", dim::pressure);
-    const rtype T = find_real(input, "initialize", "T", dim::temperature);
+    const UniformState s = uniform_state(input, mixture_model.get());
     if (is_mixture()) {
-        const std::vector<double> Y = mixture_model->mass_fractions(init, "initialize");
         rtype cons[N_CONSERVATIVE];
         std::vector<rtype> rhoY(species_names.size());
-        mixture_model->conservatives(static_cast<double>(p), static_cast<double>(T), u.data(), Y, cons, rhoY.data());
+        mixture_model->conservatives(static_cast<double>(s.p), static_cast<double>(s.T), s.u.data(), s.Y, cons,
+                                     rhoY.data());
         for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {
             FOR_I_CONSERVATIVE h_conservatives(i_cell, i) = cons[i];
             for (size_t k = 0; k < rhoY.size(); k++) h_species(i_cell, k) = rhoY[k];
@@ -350,9 +388,9 @@ void Solver::init_solution_constant() {
         return;
     }
     rtype W[N_CONSERVATIVE];
-    W[0] = physics.get_density_from_pressure_temperature(p, T);
-    FOR_I_DIM W[1 + i] = u[i];
-    W[N_DIM + 1] = p;
+    W[0] = physics.get_density_from_pressure_temperature(s.p, s.T);
+    FOR_I_DIM W[1 + i] = s.u[i];
+    W[N_DIM + 1] = s.p;
     rtype cons[N_CONSERVATIVE];
     physics.compute_conservatives_from_W(cons, W);
     for (uint32_t i_cell = 0; i_cell < mesh->n_cells; ++i_cell) {

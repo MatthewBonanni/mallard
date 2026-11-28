@@ -22,6 +22,7 @@
 #include "commands.h"
 #include "diagnostic_code.h"
 #include "input.h"
+#include "json.h"
 #include "log.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
@@ -69,6 +70,33 @@ void apply_command_line_settings(Solver & solver, const std::vector<std::string>
 }
 
 /**
+ * @brief The resolved input of the input phase of the setup, which reads every key without the mesh,
+ *        as TOML or, in JSON, with the numerics preset; or the input's errors.
+ */
+std::string resolved_text(Solver & solver, const Input & parsed, const bool as_json, std::string & error,
+                          std::string & code) {
+    solver.read_keys(parsed);
+    const std::vector<Diagnostic> unused = unused_keys(solver.resolved_input());
+    if (!unused.empty()) {
+        code = diagnostic_code::KEY_UNUSED;
+        error = "keys that are unknown or unused with these settings (mallard check lists them all):";
+        for (const Diagnostic & key : unused) error += "\n  " + describe(key);
+        return "";
+    }
+    const ResolvedInput resolved = resolve_input(solver.resolved_input());
+    if (!as_json) return resolved.toml;
+    const numerics_preset::Resolution & preset = solver.get_numerics_preset();
+    json::Object out;
+    out.add("version", 1).add("resolved", resolved.toml).raw("preset", preset.json(resolved));
+    if (preset.name.empty()) {
+        out.raw("preset_summary", "null");
+    } else {
+        out.add("preset_summary", preset.summary(resolved));
+    }
+    return out.str() + "\n";
+}
+
+/**
  * @brief With check: checks the case, and with resolve writes its resolved input (and nothing else) to stdout.
  *        With jsonl, stdout gets only the run's progress records and the text goes to stderr.
  */
@@ -100,7 +128,15 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
         try {
             print_header(input_file);
             Solver solver;
-            if (check) {
+            if (resolve) {
+                Input input = parse_input(input_file);
+                if (!restart_file.empty()) Solver::start_from_restart(input, restart_file);
+                const std::string text =
+                    resolved_text(solver, input, args.value_or("--format", "toml") == "json", error, code);
+                if (comm::is_root()) std::cout.rdbuf(out);
+                std::cout << text << std::flush;
+                status = error.empty() ? 0 : 1;
+            } else if (check) {
                 CheckReport report;
                 try {
                     if (!input_file.empty()) {
@@ -109,30 +145,12 @@ int solve(const cli::Args & args, const std::string & input_file, const CheckOpt
                         report = solver.check(input, *check);
                     }
                 } catch (const InputError & e) {
-                    if (resolve) throw;
                     report.input_file = input_file;
                     report.error(diagnostic_code::INPUT, input_file + ": " + error_text(e));
                 }
-                if (!resolve) check_environment(report);
-                if (resolve && report.ok()) {
-                    if (comm::is_root()) std::cout.rdbuf(out);
-                    std::cout << report.resolved << std::flush;
-                } else if (resolve) {
-                    for (const CheckDiagnostic & d : report.diagnostics) {
-                        if (d.severity != report::Status::ERROR || d.code == diagnostic_code::KEY_UNUSED) continue;
-                        if (error.empty()) code = d.code;
-                        error += (error.empty() ? "" : "\n") + d.message;
-                    }
-                    if (error.empty()) code = diagnostic_code::KEY_UNUSED;
-                    if (!report.unused.empty()) {
-                        error += std::string(error.empty() ? "" : "\n") +
-                                 "keys that are unknown or unused with these settings (mallard check lists them all):";
-                        for (const Diagnostic & key : report.unused) error += "\n  " + describe(key);
-                    }
-                } else {
-                    if (json && comm::is_root()) std::cout.rdbuf(out);
-                    print_check(report, json);
-                }
+                check_environment(report);
+                if (json && comm::is_root()) std::cout.rdbuf(out);
+                print_check(report, json);
                 status = report.ok() ? 0 : 1;
             } else {
                 binding::report();
@@ -269,7 +287,8 @@ int check_main(const cli::Args & args) {
 }
 
 int resolve_main(const cli::Args & args) {
-    CheckOptions options;
-    options.input_file = args.positional[0];
-    return solve(args, options.input_file, &options, true);
+    if (const std::string f = args.value_or("--format", "toml"); f != "toml" && f != "json") {
+        return cli::usage_error(*cli::command("input resolve"), "--format takes toml or json, not " + f);
+    }
+    return solve(args, args.positional[0], nullptr, true);
 }

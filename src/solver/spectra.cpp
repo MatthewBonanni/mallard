@@ -106,9 +106,7 @@ bool Spectra::homogeneous(size_t axis) const {
     return std::find(directions.begin(), directions.end(), axis) != directions.end();
 }
 
-void Spectra::init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
-                   const Mesh & mesh, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
-    use_nccl = use_nccl_;
+void Spectra::read(const Input & table, const Input & input, uint64_t interval_in, rtype t_start_in) {
     const std::string key = "statistics.spectra";
     interval = find_value_or<uint64_t>(table, "interval", interval_in);
     if (interval == 0) throw InputError(key + ".interval must be positive.");
@@ -142,9 +140,6 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
         add_pair(add_field(product.substr(0, star)), add_field(product.substr(star + 1)), product);
     }
     if (pairs.empty()) throw InputError(key + ": list at least one of fields and products.");
-    std::vector<int32_t> h_codes;
-    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key));
-    codes = to_device(h_codes, "spectra_codes");
 
     // The mesh: a generated box of quadrilaterals or hexahedra
     if (find_value_or<std::string>(input, "mesh", "type", "file") != "cartesian") {
@@ -207,6 +202,16 @@ void Spectra::init(const Input & table, const Input & input, const std::vector<s
         }
         n_shells = shell_of(std::sqrt(k_max2), dk) + 1;
     }
+}
+
+void Spectra::init(const Input & table, const Input & input, const std::vector<std::string> & species_names,
+                   const Mesh & mesh, uint64_t interval_in, rtype t_start_in, const bool use_nccl_) {
+    use_nccl = use_nccl_;
+    const std::string key = "statistics.spectra";
+    read(table, input, interval_in, t_start_in);
+    std::vector<int32_t> h_codes;
+    for (const auto & name : fields) h_codes.push_back(CellSampler::code(name, species_names, key));
+    codes = to_device(h_codes, "spectra_codes");
 
     // Cells to slabs: owned cells by their (i, j, k), checked against their centroids
     distributed = mesh.n_global_cells > 0;

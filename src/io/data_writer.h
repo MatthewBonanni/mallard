@@ -18,6 +18,7 @@
 #include <iosfwd>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -217,6 +218,22 @@ class DataWriter {
         DataWriter & operator=(const DataWriter &) = delete;
         /** @brief Waits for a snapshot still being written. */
         ~DataWriter();
+
+        /** @brief A [[write_data]] entry's settings, as read without the mesh or the fields. */
+        struct Settings {
+            std::string prefix;
+            uint64_t interval = 0;
+            rtype time_interval = 0.0;
+            std::optional<DataFormat> format;  // empty: the default of the build and ranks
+            std::vector<std::string> fields;   // empty for restart files
+            std::optional<bool> series;
+            Compression compression = Compression::NONE;
+            uint64_t chunk_cells = 0;  // 0: the default
+            double relative_error = 0.0;
+        };
+
+        /** @brief Reads and checks a [[write_data]] entry without the mesh or the fields. */
+        static Settings read(const Input & input);
 
         /**
          * @brief Set up from a [[write_data]] entry.

@@ -70,6 +70,20 @@ class Triggers {
             std::vector<double> times;  // the numbers its condition compares t with
         };
 
+        /** @brief A [[triggers]] entry as read, before its condition and actions are checked against the run. */
+        struct Entry {
+            Input input;
+            std::string where;  // triggers[i]
+            std::string name;
+            std::string when;
+            std::vector<std::string> actions;
+            double hold = 0.0;
+            bool repeat = false;
+        };
+
+        /** @brief Reads [[triggers]] without the run's monitored values, writers or statistics. */
+        static std::vector<Entry> read(const Input & input);
+
         /** @brief Names of the variables before the monitored values, in this order. */
         static const std::vector<std::string> & built_in();
 
