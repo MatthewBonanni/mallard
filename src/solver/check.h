@@ -179,6 +179,7 @@ struct CheckReport {
     std::vector<Diagnostic> unused;  // each also a KEY_UNUSED diagnostic
     bool setup_done = false;
     std::string resolved;  // the input with every key explicit (resolve_input), once setup is done
+    std::vector<KeyRecord> keys;  // the records of resolved's keys, once setup is done
     std::string input_file;
     CheckEnvironment environment;
 

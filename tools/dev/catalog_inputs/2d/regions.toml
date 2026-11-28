@@ -1,0 +1,110 @@
+# For the key catalog only (tools/dev/input_catalog.py): a region of every type
+# with each of its keys, transforms, copies and booleans, so that the typed
+# configs' region class has a setter for every key a region takes.
+
+[run]
+n_steps = 1
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+type = "analytical"
+rho = "1.0"
+p = "1.0 + 0.5 * x"
+u = ["0.0", "0.0"]
+
+[[boundaries]]
+name = "left"
+type = "symmetry"
+
+[[boundaries]]
+name = "right"
+type = "symmetry"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "euler"
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[regions]
+sphere = { type = "sphere", center = [0.5, 0.5], radius = 0.2, scale = [1.0, 0.8], rotate = 30.0, pivot = [0.5, 0.5], translate = [0.05, 0.0] }
+disks = { type = "disk", center = [0.2, 0.2], radius = 0.05, repeat = [{ count = 3, translate = [0.2, 0.0] }, { count = 2, rotate = 90.0, pivot = [0.5, 0.5] }] }
+ellipsoid = { type = "ellipsoid", center = [0.5, 0.5], semi_axes = [0.3, 0.2, 0.1], edge = 0.05 }
+cylinder = { type = "cylinder", center = [0.5, 0.5, 0.0], axis = [0.0, 0.0, 1.0], radius = 0.3, inner_radius = 0.1, length = 1.0 }
+annulus = { type = "annulus", center = [0.5, 0.5], radius = 0.3, inner_radius = 0.2 }
+cone = { type = "cone", base = [0.5, 0.1, 0.0], axis = [0.0, 1.0, 0.0], length = 0.8, base_radius = 0.3, top_radius = 0.1 }
+rectangle = { type = "rectangle", center = [0.5, 0.5], size = [0.4, 0.2] }
+polygon = { type = "polygon", vertices = [[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]] }
+torus = { type = "torus", center = [0.5, 0.5, 0.0], axis = [0.0, 0.0, 1.0], major_radius = 0.3, minor_radius = 0.1 }
+half_space = { type = "half_space", point = [0.5, 0.5], normal = [1.0, 0.0] }
+implicit = { type = "implicit", f = "sqrt((x - 0.5)^2 + (y - 0.5)^2) - 0.25" }
+stl = { type = "stl", file = "regions.stl", units = "m" }
+obj = { type = "obj", file = "regions.obj", units = "m" }
+circle = { type = "circle", center = [0.5, 0.5], radius = 0.3, flip = true }
+ellipse = { type = "ellipse", center = [0.5, 0.5], semi_axes = [0.3, 0.2] }
+hollow = { type = "rectangle", center = [0.5, 0.5], size = [0.6, 0.6], filled = false }
+union = { type = "union", regions = ["rectangle", { type = "sphere", center = [0.2, 0.8], radius = 0.1 }] }
+intersection = { type = "intersection", regions = ["sphere", "half_space"] }
+difference = { type = "difference", a = "annulus", b = { type = "rectangle", center = [0.5, 0.2], size = [0.2, 0.2] } }
+edges = { type = "boundary", of = "union", resolution = 2 }
+inside = { type = "interior", of = "circle" }
+hot = { type = "where", condition = "P > 1.25" }
+front = { type = "isosurface", field = "P", value = 1.25 }
+
+[check]
+regions = ["sphere", "disks", "ellipsoid", "cylinder", "annulus", "cone", "rectangle", "polygon", "torus",
+           "half_space", "implicit", "stl", "obj", "union", "intersection", "difference", "inside"]
+
+[[probes]]
+name = "circle"
+fields = ["P"]
+region = "circle"
+reductions = ["mean"]
+
+[[probes]]
+name = "ellipse"
+fields = ["P"]
+region = "ellipse"
+reductions = ["mean"]
+
+[[probes]]
+name = "hollow"
+fields = ["P"]
+region = "hollow"
+reductions = ["mean"]
+
+[[probes]]
+name = "edges"
+fields = ["P"]
+region = "edges"
+reductions = ["mean"]
+
+[[probes]]
+name = "hot"
+fields = ["P"]
+region = "hot"
+reductions = ["mean"]
+
+[[probes]]
+name = "front"
+fields = ["P"]
+region = "front"
+reductions = ["mean"]

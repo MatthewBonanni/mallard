@@ -4,6 +4,8 @@
   3
  ],
  "set_in": [
-  "tools/dev/catalog_inputs/2d/check.toml"
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/regions.toml",
+  "tools/dev/catalog_inputs/3d/regions.toml"
  ]
 }

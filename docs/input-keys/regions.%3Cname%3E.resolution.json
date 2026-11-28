@@ -1,6 +1,11 @@
 {
  "dims": [
-  2
+  2,
+  3
  ],
- "set_in": []
+ "required": true,
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/regions.toml"
+ ],
+ "type": "integer"
 }

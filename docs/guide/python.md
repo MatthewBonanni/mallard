@@ -332,7 +332,9 @@ solver.finish()
   [C++](cpp_api.md#typed-configs); a table keyword also takes a dict of its
   keys, a key with a physical dimension a number in SI units, a string with its
   unit or `(value, unit)`, and `config.Inline({...})` writes an inline table
-  as given (keys the catalog does not list for that table).
+  as given. Every region is a `config.Region` (`config.Regions("jet", ...)`
+  in `[regions]`); a list of regions mixes them with names:
+  `region=config.Region(type="union", regions=["jet", config.Region(type="sphere", center=[0.5, 0.5], radius=0.1)])`.
 
     ```python
     from mallard import config
@@ -345,9 +347,13 @@ solver.finish()
 - **Checking.** `case.check()` is `mallard check` on the case, as a report:
   `status`, `ok`, `diagnostics`, `unused_keys` (`key`, `line`,
   `suggestion`), `boundaries`, `time_step`, `resolution`, `memory`, `cost`,
-  `resolved`, and the whole report as `text` and `json`
+  `resolved`, `keys`, and the whole report as `text` and `json`
   ([C++](cpp_api.md#checking-a-case)); `check(ranks=8, memory="a100-80")`
   takes `mallard check`'s options, `log=` a sink for the setup's output.
+  `keys` is the resolved input key by key: each `mallard.InputKey` has its
+  `path`, `catalog_path`, `value` (TOML text, in plain units), `set`, and its
+  record in the key catalog, `type`, `dimension`, `unit`, `required`,
+  `default` and `values`: `{k.path: k for k in case.check().keys}`.
 - **Calls.** `setup()`, `step()`, `step(n)`, `advance_to(t)`, `finish()`, `run()`,
   `time()`, `step_count()`, `finished()`, `monitors()`, `monitor(name)`,
   `statistics()`, as in [C++](cpp_api.md#running-a-case); failures raise

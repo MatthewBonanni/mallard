@@ -212,7 +212,8 @@ std::string without_indices(const std::string & path) {
 
 std::string join(const std::string & table, const std::string & key) { return table.empty() ? key : table + "." + key; }
 
-/** @brief A key path as the catalog lists it: no array indices, and regions.<name> for every named region. */
+} // namespace
+
 std::string catalog_path(const std::string & path) {
     std::string out = without_indices(path);
     const std::string prefix = "regions.";
@@ -220,6 +221,8 @@ std::string catalog_path(const std::string & path) {
     const size_t end = out.find('.', prefix.size());
     return prefix + "<name>" + (end == std::string::npos ? "" : out.substr(end));
 }
+
+namespace {
 
 using Lookups = std::multimap<std::string, std::string>;  // key -> path of the table it was looked up in
 

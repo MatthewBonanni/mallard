@@ -32,7 +32,8 @@
   "examples/vortex_ring_3d/input.toml",
   "tools/dev/catalog_inputs/3d/flamelet.toml",
   "tools/dev/catalog_inputs/3d/flamelet_tfles.toml",
-  "tools/dev/catalog_inputs/3d/flamelet_transported.toml"
+  "tools/dev/catalog_inputs/3d/flamelet_transported.toml",
+  "tools/dev/catalog_inputs/3d/regions.toml"
  ],
  "type": "number"
 }

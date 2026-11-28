@@ -442,6 +442,25 @@ struct CheckCost {
 };
 
 /**
+ * @brief A key of the resolved input, with its record in the key catalog: what setup read for it (its type,
+ *        physical dimension, default, accepted values) and the value the run uses. Each key setup looked up has
+ *        one, the keys the input leaves out at their defaults; so do tables, without a type or value.
+ */
+struct InputKey {
+    std::string path;                 ///< "boundaries[0].p"
+    std::string catalog_path;         ///< as the key catalog and the typed configs list it: "boundaries.p"
+    std::string value;                ///< as TOML, in the key's plain units ("1e5"): the input's, or the default
+    bool set = false;                 ///< the input sets it, else value is its default
+    std::string type;                 ///< "bool", "integer", "number", "string", "array"; empty for a table, or a key
+                                      ///< read without a type
+    std::string dimension;            ///< "pressure (kg m^-1 s^-2)"; empty if it has none
+    std::string unit;                 ///< the unit of a plain number of it ("Pa", "deg"); empty if dimensionless
+    bool required = false;
+    std::string default_value;        ///< as TOML; empty if required or set by the run (from the mesh, ...)
+    std::vector<std::string> values;  ///< the accepted values of a closed set, else empty
+};
+
+/**
  * @brief `mallard check`'s report as structs (docs/guide/input_files.md#checking-an-input), with the whole report
  *        as its text and as JSON (`mallard check --format json`), environment section aside.
  */
@@ -457,6 +476,7 @@ struct CheckReport {
     std::optional<CheckMemory> memory;        ///< after a setup
     std::optional<CheckCost> cost;            ///< after a setup
     std::string resolved;  ///< the input with every key explicit (`mallard input resolve`), after a setup
+    std::vector<InputKey> keys;  ///< every key of resolved, and every table, with its record, in its order
     std::string text;      ///< the report as `mallard check` prints it, without color
     std::string json;      ///< the report as `mallard check --format json` writes it
 };

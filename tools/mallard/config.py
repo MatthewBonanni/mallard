@@ -12,6 +12,153 @@ from typing import Literal
 from ._config import Inline, Table
 
 
+class RegionRepeatRotate(Table):
+    """[region.repeat.rotate]: the keys of this table its parent's keyword takes."""
+    _keys = {
+        'angle': ('angle', 'value', None),
+        'axes': ('axes', 'value', None),
+        'axis': ('axis', 'value', None),
+    }
+
+    def __init__(self, *, angle: object = None, axes: object = None, axis: object = None):
+        r"""
+        angle: A key of a region (docs/input.md#regions). 3D.
+        axes: A key of a region (docs/input.md#regions). 3D.
+        axis: A key of a region (docs/input.md#regions). 3D.
+        """
+        super().__init__("", {'angle': angle, 'axes': axes, 'axis': axis})
+
+class RegionRepeat(Table):
+    """[region.repeat]: the keys of this table its parent's keyword takes."""
+    _keys = {
+        'count': ('count', 'value', None),
+        'pivot': ('pivot', 'value', None),
+        'rotate': ('rotate', 'table', 'RegionRepeatRotate'),
+        'translate': ('translate', 'value', None),
+    }
+
+    def __init__(self, *, count: int | None = None, pivot: object = None, rotate: RegionRepeatRotate | dict | Inline | str | None = None, translate: object = None):
+        r"""
+        count: A key of a region (docs/input.md#regions). Required.
+        pivot: A key of a region (docs/input.md#regions).
+        rotate: A key of a region (docs/input.md#regions).
+        translate: A key of a region (docs/input.md#regions).
+        """
+        super().__init__("", {'count': count, 'pivot': pivot, 'rotate': rotate, 'translate': translate})
+
+class RegionRotate(Table):
+    """[region.rotate]: the keys of this table its parent's keyword takes."""
+    _keys = {
+        'angle': ('angle', 'value', None),
+        'axes': ('axes', 'value', None),
+        'axis': ('axis', 'value', None),
+    }
+
+    def __init__(self, *, angle: object = None, axes: object = None, axis: object = None):
+        r"""
+        angle: A key of a region (docs/input.md#regions). 3D.
+        axes: A key of a region (docs/input.md#regions). 3D.
+        axis: A key of a region (docs/input.md#regions). 3D.
+        """
+        super().__init__("", {'angle': angle, 'axes': axes, 'axis': axis})
+
+class Region(Table):
+    """A region (docs/input.md#regions): the keys of every region of the input, which every region key (region, the parts of a boolean, the lists of regions) takes; Regions places one in [regions]."""
+    _keys = {
+        'a': ('a', 'table', 'Region'),
+        'axis': ('axis', 'value', None),
+        'b': ('b', 'table', 'Region'),
+        'base': ('base', 'value', None),
+        'base_radius': ('base_radius', 'value', None),
+        'center': ('center', 'value', None),
+        'condition': ('condition', 'value', None),
+        'edge': ('edge', 'value', None),
+        'f': ('f', 'value', None),
+        'field': ('field', 'value', None),
+        'file': ('file', 'value', None),
+        'filled': ('filled', 'value', None),
+        'flip': ('flip', 'value', None),
+        'inner_radius': ('inner_radius', 'value', None),
+        'length': ('length', 'value', None),
+        'major_radius': ('major_radius', 'value', None),
+        'minor_radius': ('minor_radius', 'value', None),
+        'normal': ('normal', 'value', None),
+        'of': ('of', 'table', 'Region'),
+        'pivot': ('pivot', 'value', None),
+        'point': ('point', 'value', None),
+        'radius': ('radius', 'value', None),
+        'reference': ('reference', 'value', None),
+        'regions': ('regions', 'array', 'Region'),
+        'repeat': ('repeat', 'table', 'RegionRepeat'),
+        'resolution': ('resolution', 'value', None),
+        'rotate': ('rotate', 'table', 'RegionRotate'),
+        'scale': ('scale', 'value', None),
+        'semi_axes': ('semi_axes', 'value', None),
+        'size': ('size', 'value', None),
+        'top_radius': ('top_radius', 'value', None),
+        'translate': ('translate', 'value', None),
+        'type': ('type', 'value', None),
+        'units': ('units', 'value', None),
+        'value': ('value', 'value', None),
+        'vertices': ('vertices', 'value', None),
+    }
+
+    def __init__(self, *, a: Region | dict | Inline | str | None = None, axis: object = None, b: Region | dict | Inline | str | None = None, base: object = None, base_radius: object = None, center: object = None, condition: str | None = None, edge: object = None, f: str | None = None, field: str | None = None, file: str | None = None, filled: object = None, flip: bool | None = None, inner_radius: object = None, length: object = None, major_radius: object = None, minor_radius: object = None, normal: object = None, of: Region | dict | Inline | str | None = None, pivot: object = None, point: object = None, radius: object = None, reference: object = None, regions: list | None = None, repeat: RegionRepeat | dict | Inline | str | None = None, resolution: object = None, rotate: RegionRotate | dict | Inline | str | None = None, scale: object = None, semi_axes: object = None, size: object = None, top_radius: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'box', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None, units: str | None = None, value: object = None, vertices: object = None):
+        r"""
+        a: A key of the region types difference. 2D.
+        axis: A key of the region types cylinder, cone, frustum, torus. 2D.
+        b: A key of the region types difference. 2D.
+        base: A key of the region types cone, frustum. 2D.
+        base_radius: A key of the region types cone, frustum. 2D.
+        center: A key of the region types sphere, disk, ellipsoid, cylinder, annulus, box, rectangle, circle,
+            ellipse, torus.
+        condition: A key of the region types where. Required; 2D.
+        edge: A key of a region (docs/input.md#regions).
+        f: A key of the region types implicit. Required; 2D.
+        field: A key of the region types isosurface. Required; 2D.
+        file: A key of the region types stl, obj. Required; 2D.
+        filled: A key of a region (docs/input.md#regions).
+        flip: A key of a region (docs/input.md#regions).
+        inner_radius: A key of the region types cylinder, annulus.
+        length: A key of the region types cylinder, cone, frustum. 2D.
+        major_radius: A key of the region types torus. 2D.
+        minor_radius: A key of the region types torus. 2D.
+        normal: A key of the region types annulus, rectangle, disk, circle, ellipse, half_space.
+        of: A key of the region types boundary, interior. 2D.
+        pivot: Center of `scale` and `rotate` (default the origin).
+        point: A key of the region types half_space. 2D.
+        radius: A key of the region types sphere, disk, cylinder, annulus, circle.
+        reference: A key of the region types rectangle, circle, ellipse. 3D.
+        regions: A key of the region types union, intersection, difference. 2D.
+        repeat: Copies of the region (after its transforms), whose union it becomes: `{count = N, translate =
+            [...]}` (copy `j` translated `j` times) or `{count = N, rotate = ..., pivot = [...]}` (rotated `j`
+            times, `rotate` as above but an angle about an axis; `pivot` default the origin), or a list of them,
+            which repeats the copies of the levels before it (copy `k` numbered with the first level listed
+            fastest). Regions of primitives only; default none. Arrays of copies.
+        resolution: A key of a region (docs/input.md#regions).
+        rotate: 3D: `{axis = [...], angle = degrees}` or `{axes = [[...], [...], [...]]}` (the region's x, y, z
+            axes in world coordinates, orthonormal and right-handed); 2D: an angle in degrees, counterclockwise;
+            about `pivot`.
+        scale: A number, or one factor per axis; about `pivot`.
+        semi_axes: A key of the region types ellipsoid.
+        size: A key of the region types box, rectangle.
+        top_radius: A key of the region types cone, frustum. 2D.
+        translate: A displacement.
+        type: A key of a region (docs/input.md#regions). One of annulus, boundary, box, circle, cone, cylinder,
+            difference, disk, ellipse, ellipsoid, frustum, half_space, implicit, interior, intersection, isosurface,
+            obj, polygon, rectangle, sphere, stl, torus, union, where; required.
+        units: A key of the region types stl, obj. Required; 2D.
+        value: A key of the region types isosurface. 2D.
+        vertices: A key of the region types polygon.
+        """
+        super().__init__("", {'a': a, 'axis': axis, 'b': b, 'base': base, 'base_radius': base_radius, 'center': center, 'condition': condition, 'edge': edge, 'f': f, 'field': field, 'file': file, 'filled': filled, 'flip': flip, 'inner_radius': inner_radius, 'length': length, 'major_radius': major_radius, 'minor_radius': minor_radius, 'normal': normal, 'of': of, 'pivot': pivot, 'point': point, 'radius': radius, 'reference': reference, 'regions': regions, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'semi_axes': semi_axes, 'size': size, 'top_radius': top_radius, 'translate': translate, 'type': type, 'units': units, 'value': value, 'vertices': vertices})
+
+class Regions(Region):
+    """[regions.NAME]: a named region, which region keys take by its name: the keywords of Region the case sets in the named table."""
+
+    def __init__(self, name, *, a: Region | dict | Inline | str | None = None, axis: object = None, b: Region | dict | Inline | str | None = None, base: object = None, base_radius: object = None, center: object = None, condition: str | None = None, edge: object = None, f: str | None = None, field: str | None = None, file: str | None = None, filled: object = None, flip: bool | None = None, inner_radius: object = None, length: object = None, major_radius: object = None, minor_radius: object = None, normal: object = None, of: Region | dict | Inline | str | None = None, pivot: object = None, point: object = None, radius: object = None, reference: object = None, regions: list | None = None, repeat: RegionRepeat | dict | Inline | str | None = None, resolution: object = None, rotate: RegionRotate | dict | Inline | str | None = None, scale: object = None, semi_axes: object = None, size: object = None, top_radius: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'box', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None, units: str | None = None, value: object = None, vertices: object = None):
+        Table.__init__(self, f"regions.{name}", {'a': a, 'axis': axis, 'b': b, 'base': base, 'base_radius': base_radius, 'center': center, 'condition': condition, 'edge': edge, 'f': f, 'field': field, 'file': file, 'filled': filled, 'flip': flip, 'inner_radius': inner_radius, 'length': length, 'major_radius': major_radius, 'minor_radius': minor_radius, 'normal': normal, 'of': of, 'pivot': pivot, 'point': point, 'radius': radius, 'reference': reference, 'regions': regions, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'semi_axes': semi_axes, 'size': size, 'top_radius': top_radius, 'translate': translate, 'type': type, 'units': units, 'value': value, 'vertices': vertices})
+
 class BoundariesDataScale(Table):
     """[boundaries.data.scale]: the keys of this table its parent's keyword takes."""
     _keys = {
@@ -71,48 +218,6 @@ class InitializeDataScale(Table):
         velocity: 2D.
         """
         super().__init__("", {'density': density, 'length': length, 'temperature': temperature, 'velocity': velocity})
-
-class InitializeRegionsRegion(Table):
-    """[initialize.regions.region]: the keys of this table its parent's keyword takes."""
-    _keys = {
-        'center': ('center', 'value', None),
-        'edge': ('edge', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'normal': ('normal', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'point': ('point', 'value', None),
-        'radius': ('radius', 'value', None),
-        'repeat': ('repeat', 'value', None),
-        'resolution': ('resolution', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'size': ('size', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-    }
-
-    def __init__(self, *, center: object = None, edge: object = None, filled: object = None, flip: bool | None = None, normal: object = None, pivot: object = None, point: object = None, radius: object = None, repeat: object = None, resolution: object = None, rotate: object = None, scale: object = None, size: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'box', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None):
-        r"""
-        center: A key of the input.
-        edge: A key of the input.
-        filled: A key of the input.
-        flip: Default false.
-        normal: 2D.
-        pivot: A key of the input.
-        point: 2D.
-        radius: A key of the input.
-        repeat: A key of the input.
-        resolution: A key of the input.
-        rotate: A key of the input.
-        scale: A key of the input.
-        size: 2D.
-        translate: A key of the input.
-        type: One of annulus, boundary, box, circle, cone, cylinder, difference, disk, ellipse, ellipsoid,
-            frustum, half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl,
-            torus, union, where; required.
-        """
-        super().__init__("", {'center': center, 'edge': edge, 'filled': filled, 'flip': flip, 'normal': normal, 'pivot': pivot, 'point': point, 'radius': radius, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'size': size, 'translate': translate, 'type': type})
 
 class InitializeRegionsTurbulence(Table):
     """[initialize.regions.turbulence]: the keys of this table its parent's keyword takes."""
@@ -202,42 +307,6 @@ class OutputMixtureProgress(Table):
         """
         super().__init__('output.mixture.progress', {'T_burnt': T_burnt, 'T_unburnt': T_unburnt, 'species': species})
 
-class ParticlesProbesRegion(Table):
-    """[particles.probes.region]: the keys of this table its parent's keyword takes."""
-    _keys = {
-        'center': ('center', 'value', None),
-        'edge': ('edge', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'radius': ('radius', 'value', None),
-        'repeat': ('repeat', 'value', None),
-        'resolution': ('resolution', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-    }
-
-    def __init__(self, *, center: object = None, edge: object = None, filled: object = None, flip: bool | None = None, pivot: object = None, radius: object = None, repeat: object = None, resolution: object = None, rotate: object = None, scale: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None):
-        r"""
-        center: 2D.
-        edge: 2D.
-        filled: 2D.
-        flip: Default false; 2D.
-        pivot: 2D.
-        radius: 2D.
-        repeat: 2D.
-        resolution: 2D.
-        rotate: 2D.
-        scale: 2D.
-        translate: 2D.
-        type: One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-            half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-            union, where; required; 2D.
-        """
-        super().__init__("", {'center': center, 'edge': edge, 'filled': filled, 'flip': flip, 'pivot': pivot, 'radius': radius, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'translate': translate, 'type': type})
-
 class ParticlesQuantitiesWinding(Table):
     """[particles.quantities.winding]: the keys of this table its parent's keyword takes."""
     _keys = {
@@ -249,56 +318,6 @@ class ParticlesQuantitiesWinding(Table):
         point: Length (m), a number in SI units or a quantity with its unit; required; 2D.
         """
         super().__init__("", {'point': point})
-
-class ProbesRegionRegions(Table):
-    """[[probes.region.regions]]: the keys of this array of tables its parent's keyword takes."""
-    _keys = {
-        'center': ('center', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'radius': ('radius', 'value', None),
-        'repeat': ('repeat', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-    }
-
-    def __init__(self, *, center: object = None, filled: object = None, flip: bool | None = None, pivot: object = None, radius: object = None, repeat: object = None, rotate: object = None, scale: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None):
-        r"""
-        center: 2D.
-        filled: 2D.
-        flip: Default false; 2D.
-        pivot: 2D.
-        radius: 2D.
-        repeat: 2D.
-        rotate: 2D.
-        scale: 2D.
-        translate: 2D.
-        type: One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-            half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-            union, where; required; 2D.
-        """
-        super().__init__("", {'center': center, 'filled': filled, 'flip': flip, 'pivot': pivot, 'radius': radius, 'repeat': repeat, 'rotate': rotate, 'scale': scale, 'translate': translate, 'type': type})
-
-class RegionsRepeat(Table):
-    """[regions.NAME.repeat]: the keys of this table its parent's keyword takes."""
-    _keys = {
-        'count': ('count', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'translate': ('translate', 'value', None),
-    }
-
-    def __init__(self, *, count: int | None = None, pivot: object = None, rotate: object = None, translate: object = None):
-        r"""
-        count: Required; 2D.
-        pivot: 2D.
-        rotate: 2D.
-        translate: 2D.
-        """
-        super().__init__("", {'count': count, 'pivot': pivot, 'rotate': rotate, 'translate': translate})
 
 class BoundariesData(Table):
     """[[boundaries.data]]: the keys of this array of tables its parent's keyword takes."""
@@ -452,13 +471,13 @@ class InitializeData(Table):
         'name': ('name', 'value', None),
         'neighbors': ('neighbors', 'value', None),
         'reference': ('reference', 'table', 'InitializeDataReference'),
-        'region': ('region', 'value', None),
+        'region': ('region', 'table', 'Region'),
         'scale': ('scale', 'table', 'InitializeDataScale'),
         'type': ('type', 'value', None),
         'units': ('units', 'value', None),
     }
 
-    def __init__(self, *, at: list | None = None, columns: list | None = None, coordinates: object = None, file: str | None = None, interpolation: Literal['cubic', 'linear'] | str | None = None, name: str | None = None, neighbors: object = None, reference: InitializeDataReference | dict | Inline | str | None = None, region: object = None, scale: InitializeDataScale | dict | Inline | str | None = None, type: Literal['points', 'table'] | str | None = None, units: object = None):
+    def __init__(self, *, at: list | None = None, columns: list | None = None, coordinates: object = None, file: str | None = None, interpolation: Literal['cubic', 'linear'] | str | None = None, name: str | None = None, neighbors: object = None, reference: InitializeDataReference | dict | Inline | str | None = None, region: Region | dict | Inline | str | None = None, scale: InitializeDataScale | dict | Inline | str | None = None, type: Literal['points', 'table'] | str | None = None, units: object = None):
         r"""
         at: One expression of `x`, `y`, `z` per coordinate, where a point reads the data (default: the file's
             metadata, else the coordinates, if named `x`, `y`, `z`). 2D.
@@ -525,13 +544,13 @@ class InitializeRegions(Table):
         'name': ('name', 'value', None),
         'p': ('p', 'value', None),
         'priority': ('priority', 'value', None),
-        'region': ('region', 'table', 'InitializeRegionsRegion'),
+        'region': ('region', 'table', 'Region'),
         'rho': ('rho', 'value', None),
         'turbulence': ('turbulence', 'table', 'InitializeRegionsTurbulence'),
         'u': ('u', 'value', None),
     }
 
-    def __init__(self, *, C: str | None = None, T: object = None, X: object = None, Y: object = None, Z: object = None, balance: object = None, cells: Literal['center', 'volume_fraction'] | str | None = None, name: str | None = None, p: object = None, priority: int | None = None, region: InitializeRegionsRegion | dict | Inline | str | None = None, rho: object = None, turbulence: InitializeRegionsTurbulence | dict | Inline | str | None = None, u: object = None):
+    def __init__(self, *, C: str | None = None, T: object = None, X: object = None, Y: object = None, Z: object = None, balance: object = None, cells: Literal['center', 'volume_fraction'] | str | None = None, name: str | None = None, p: object = None, priority: int | None = None, region: Region | dict | Inline | str | None = None, rho: object = None, turbulence: InitializeRegionsTurbulence | dict | Inline | str | None = None, u: object = None):
         r"""
         C: Required.
         T: Values inside: numbers, quantities with units, or expressions. At most two of `rho`, `p`, `T`; one
@@ -876,10 +895,10 @@ class ParticlesProbes(Table):
         'file': ('file', 'value', None),
         'interval': ('interval', 'value', None),
         'name': ('name', 'value', None),
-        'region': ('region', 'table', 'ParticlesProbesRegion'),
+        'region': ('region', 'table', 'Region'),
     }
 
-    def __init__(self, *, fields: list | None = None, file: str | None = None, interval: int | None = None, name: str | None = None, region: ParticlesProbesRegion | dict | Inline | str | None = None):
+    def __init__(self, *, fields: list | None = None, file: str | None = None, interval: int | None = None, name: str | None = None, region: Region | dict | Inline | str | None = None):
         r"""
         fields: Expressions as in `[[particles.quantities]]`, the quantities among their variables, default none
             (the count only). 2D.
@@ -933,134 +952,6 @@ class ParticlesWalls(Table):
         """
         super().__init__("", {'interaction': interaction, 'restitution': restitution, 'tangential_restitution': tangential_restitution, 'zones': zones})
 
-class ProbesRegion(Table):
-    """[probes.region]: the keys of this table its parent's keyword takes."""
-    _keys = {
-        'a': ('a', 'value', None),
-        'b': ('b', 'value', None),
-        'center': ('center', 'value', None),
-        'edge': ('edge', 'value', None),
-        'field': ('field', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'radius': ('radius', 'value', None),
-        'regions': ('regions', 'array', 'ProbesRegionRegions'),
-        'repeat': ('repeat', 'value', None),
-        'resolution': ('resolution', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-        'value': ('value', 'value', None),
-    }
-
-    def __init__(self, *, a: object = None, b: object = None, center: object = None, edge: object = None, field: str | None = None, filled: object = None, flip: bool | None = None, pivot: object = None, radius: object = None, regions: list[ProbesRegionRegions] | None = None, repeat: object = None, resolution: object = None, rotate: object = None, scale: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None, value: object = None):
-        r"""
-        a: 2D.
-        b: 2D.
-        center: 2D.
-        edge: 2D.
-        field: Required; 2D.
-        filled: 2D.
-        flip: Default false; 2D.
-        pivot: 2D.
-        radius: 2D.
-        regions: 2D.
-        repeat: 2D.
-        resolution: 2D.
-        rotate: 2D.
-        scale: 2D.
-        translate: 2D.
-        type: One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-            half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-            union, where; required; 2D.
-        value: 2D.
-        """
-        super().__init__("", {'a': a, 'b': b, 'center': center, 'edge': edge, 'field': field, 'filled': filled, 'flip': flip, 'pivot': pivot, 'radius': radius, 'regions': regions, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'translate': translate, 'type': type, 'value': value})
-
-class Regions(Table):
-    """[regions.NAME]: the keys of this table the case sets in the named table."""
-    _keys = {
-        'center': ('center', 'value', None),
-        'condition': ('condition', 'value', None),
-        'edge': ('edge', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'inner_radius': ('inner_radius', 'value', None),
-        'length': ('length', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'radius': ('radius', 'value', None),
-        'repeat': ('repeat', 'table', 'RegionsRepeat'),
-        'resolution': ('resolution', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'size': ('size', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-    }
-
-    def __init__(self, name, *, center: object = None, condition: str | None = None, edge: object = None, filled: object = None, flip: bool | None = None, inner_radius: object = None, length: object = None, pivot: object = None, radius: object = None, repeat: RegionsRepeat | dict | Inline | str | None = None, resolution: object = None, rotate: object = None, scale: object = None, size: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None):
-        r"""
-        center: 2D.
-        condition: Required; 2D.
-        edge: 2D.
-        filled: 2D.
-        flip: Default false; 2D.
-        inner_radius: 2D.
-        length: 2D.
-        pivot: 2D.
-        radius: 2D.
-        repeat: 2D.
-        resolution: 2D.
-        rotate: 2D.
-        scale: 2D.
-        size: 2D.
-        translate: 2D.
-        type: One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-            half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-            union, where; required; 2D.
-        """
-        super().__init__(f"regions.{name}", {'center': center, 'condition': condition, 'edge': edge, 'filled': filled, 'flip': flip, 'inner_radius': inner_radius, 'length': length, 'pivot': pivot, 'radius': radius, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'size': size, 'translate': translate, 'type': type})
-
-class SourcesRegion(Table):
-    """[sources.region]: the keys of this table its parent's keyword takes."""
-    _keys = {
-        'center': ('center', 'value', None),
-        'condition': ('condition', 'value', None),
-        'edge': ('edge', 'value', None),
-        'filled': ('filled', 'value', None),
-        'flip': ('flip', 'value', None),
-        'pivot': ('pivot', 'value', None),
-        'repeat': ('repeat', 'value', None),
-        'resolution': ('resolution', 'value', None),
-        'rotate': ('rotate', 'value', None),
-        'scale': ('scale', 'value', None),
-        'size': ('size', 'value', None),
-        'translate': ('translate', 'value', None),
-        'type': ('type', 'value', None),
-    }
-
-    def __init__(self, *, center: object = None, condition: str | None = None, edge: object = None, filled: object = None, flip: bool | None = None, pivot: object = None, repeat: object = None, resolution: object = None, rotate: object = None, scale: object = None, size: object = None, translate: object = None, type: Literal['annulus', 'boundary', 'circle', 'cone', 'cylinder', 'difference', 'disk', 'ellipse', 'ellipsoid', 'frustum', 'half_space', 'implicit', 'interior', 'intersection', 'isosurface', 'obj', 'polygon', 'rectangle', 'sphere', 'stl', 'torus', 'union', 'where'] | str | None = None):
-        r"""
-        center: 2D.
-        condition: Required; 2D.
-        edge: 2D.
-        filled: 2D.
-        flip: Default false; 2D.
-        pivot: 2D.
-        repeat: 2D.
-        resolution: 2D.
-        rotate: 2D.
-        scale: 2D.
-        size: 2D.
-        translate: 2D.
-        type: One of annulus, boundary, circle, cone, cylinder, difference, disk, ellipse, ellipsoid, frustum,
-            half_space, implicit, interior, intersection, isosurface, obj, polygon, rectangle, sphere, stl, torus,
-            union, where; required; 2D.
-        """
-        super().__init__("", {'center': center, 'condition': condition, 'edge': edge, 'filled': filled, 'flip': flip, 'pivot': pivot, 'repeat': repeat, 'resolution': resolution, 'rotate': rotate, 'scale': scale, 'size': size, 'translate': translate, 'type': type})
-
 class StatisticsConditional(Table):
     """[[statistics.conditional]]: the keys of this array of tables its parent's keyword takes."""
     _keys = {
@@ -1070,12 +961,12 @@ class StatisticsConditional(Table):
         'interval': ('interval', 'value', None),
         'on': ('on', 'value', None),
         'range': ('range', 'value', None),
-        'region': ('region', 'value', None),
+        'region': ('region', 'table', 'Region'),
         't_start': ('t_start', 'quantity', None),
         'weight': ('weight', 'value', None),
     }
 
-    def __init__(self, *, bins: list | None = None, fields: list | None = None, file: str | None = None, interval: int | None = None, on: str | None = None, range: list | None = None, region: object = None, t_start: float | str | tuple | None = None, weight: Literal['mass', 'volume'] | str | None = None):
+    def __init__(self, *, bins: list | None = None, fields: list | None = None, file: str | None = None, interval: int | None = None, on: str | None = None, range: list | None = None, region: Region | dict | Inline | str | None = None, t_start: float | str | tuple | None = None, weight: Literal['mass', 'volume'] | str | None = None):
         r"""
         bins: Equal bins of each range: an integer for every variable, or an array of one per variable, 1 to
             65536 and at most 1048576 in all (default 50). 3D.
@@ -1251,20 +1142,20 @@ class Boundaries(Table):
 class Check(Table):
     """[check]: the keys of this table the case sets."""
     _keys = {
-        'regions': ('regions', 'value', None),
+        'regions': ('regions', 'array', 'Region'),
         'statistics': ('statistics', 'value', None),
     }
 
-    def __init__(self, *, regions: object = None, statistics: str | None = None):
+    def __init__(self, *, regions: list | None = None, statistics: str | None = None):
         r"""
         regions: Filled regions (names of `[regions]` or of the mesh's cell zones, or inline tables) the report
             also gives its values for, each on its own rows. Default: every cell zone of the mesh. Regions that move
-            or are defined by the solution are errors. 2D.
+            or are defined by the solution are errors.
         statistics: A file of an earlier run of the case on this mesh (a restart file, or a VTKHDF or XDMF
             snapshot of the whole mesh) whose `[statistics]` averages give the dissipation, instead of the initial
             state's or the forcing's: `nu <STRAIN_RATE^2>` (`2 nu <S_ij S_ij>`) from `MEAN_STRAIN_RATE` and
             `COV_STRAIN_RATE_STRAIN_RATE` (`fields = ["STRAIN_RATE"]`, `products = ["STRAIN_RATE*STRAIN_RATE"]`),
-            else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none. Required; 2D.
+            else `nu <omega^2>` from `MEAN_ENSTROPHY`; its last snapshot. Default none. Required.
         """
         super().__init__('check', {'regions': regions, 'statistics': statistics})
 
@@ -1911,7 +1802,7 @@ class Probes(Table):
         'reductions': ('reductions', 'value', None),
         'reductions_file': ('reductions_file', 'value', None),
         'reference': ('reference', 'value', None),
-        'region': ('region', 'table', 'ProbesRegion'),
+        'region': ('region', 'table', 'Region'),
         'rotate': ('rotate', 'value', None),
         'samples': ('samples', 'value', None),
         'sampling': ('sampling', 'value', None),
@@ -1923,7 +1814,7 @@ class Probes(Table):
         'type': ('type', 'value', None),
     }
 
-    def __init__(self, index, *, average: bool | None = None, boundary: object = None, boundary_type: object = None, copies: Literal['combined', 'each'] | str | None = None, end: object = None, fields: list | None = None, file: str | None = None, format: Literal['csv', 'hdf5', 'vtkhdf', 'vtp'] | str | None = None, interval: int | None = None, moment_center: list | None = None, n_points: int | None = None, name: str | None = None, pivot: object = None, point: object = None, reductions: list | None = None, reductions_file: str | None = None, reference: object = None, region: ProbesRegion | dict | Inline | str | None = None, rotate: object = None, samples: bool | None = None, sampling: Literal['cell', 'point'] | str | None = None, scale: object = None, spectra: object = None, start: object = None, time_interval: object = None, translate: object = None, type: Literal['arc', 'circle', 'curve', 'line', 'point', 'points', 'polyline'] | str | None = None):
+    def __init__(self, index, *, average: bool | None = None, boundary: object = None, boundary_type: object = None, copies: Literal['combined', 'each'] | str | None = None, end: object = None, fields: list | None = None, file: str | None = None, format: Literal['csv', 'hdf5', 'vtkhdf', 'vtp'] | str | None = None, interval: int | None = None, moment_center: list | None = None, n_points: int | None = None, name: str | None = None, pivot: object = None, point: object = None, reductions: list | None = None, reductions_file: str | None = None, reference: object = None, region: Region | dict | Inline | str | None = None, rotate: object = None, samples: bool | None = None, sampling: Literal['cell', 'point'] | str | None = None, scale: object = None, spectra: object = None, start: object = None, time_interval: object = None, translate: object = None, type: Literal['arc', 'circle', 'curve', 'line', 'point', 'points', 'polyline'] | str | None = None):
         r"""
         average: `true`: write the running time averages of the samples instead (columns `MEAN_<variable>`),
             sampled on the `[statistics]` schedule (below); default `false`.
@@ -2101,7 +1992,7 @@ class Sources(Table):
     """[[sources]]: the keys of this array of tables the case sets in its element index (its length appends one)."""
     _keys = {
         'name': ('name', 'value', None),
-        'region': ('region', 'table', 'SourcesRegion'),
+        'region': ('region', 'table', 'Region'),
         'rho': ('rho', 'value', None),
         'rhoE': ('rhoE', 'value', None),
         'rhoY': ('rhoY', 'value', None),
@@ -2109,7 +2000,7 @@ class Sources(Table):
         'total': ('total', 'value', None),
     }
 
-    def __init__(self, index, *, name: str | None = None, region: SourcesRegion | dict | Inline | str | None = None, rho: object = None, rhoE: object = None, rhoY: object = None, rhou: object = None, total: bool | None = None):
+    def __init__(self, index, *, name: str | None = None, region: Region | dict | Inline | str | None = None, rho: object = None, rhoE: object = None, rhoY: object = None, rhou: object = None, total: bool | None = None):
         r"""
         name: `sources[i]`; Name in the terminal output.
         region: everywhere; A region, or the name of one in [`[regions]`](#named-regions-regions): the values
@@ -2137,12 +2028,12 @@ class Sponges(Table):
         'Y': ('Y', 'value', None),
         'balance': ('balance', 'value', None),
         'p': ('p', 'value', None),
-        'region': ('region', 'value', None),
+        'region': ('region', 'table', 'Region'),
         'strength': ('strength', 'value', None),
         'u': ('u', 'value', None),
     }
 
-    def __init__(self, index, *, T: object = None, X: object = None, Y: object = None, balance: str | None = None, p: object = None, region: object = None, strength: object = None, u: object = None):
+    def __init__(self, index, *, T: object = None, X: object = None, Y: object = None, balance: str | None = None, p: object = None, region: Region | dict | Inline | str | None = None, strength: object = None, u: object = None):
         r"""
         T: Reference state: numbers or expressions in `x`, `y`, `z` (`u` has one per component).
         X: (mixtures) Reference composition, numbers or expressions as in `[initialize]`. 2D.
@@ -2243,8 +2134,8 @@ class WriteData(Table):
         'point': ('point', 'value', None),
         'prefix': ('prefix', 'value', None),
         'reference': ('reference', 'value', None),
-        'region': ('region', 'value', None),
-        'regions': ('regions', 'value', None),
+        'region': ('region', 'table', 'Region'),
+        'regions': ('regions', 'array', 'Region'),
         'relative_error': ('relative_error', 'value', None),
         'series': ('series', 'value', None),
         'start': ('start', 'value', None),
@@ -2252,7 +2143,7 @@ class WriteData(Table):
         'type': ('type', 'value', None),
     }
 
-    def __init__(self, index, *, boundary: object = None, boundary_type: object = None, chunk_cells: object = None, compression: Literal['none', 'zlib'] | str | None = None, end: object = None, fields: list | None = None, format: Literal['restart', 'vtkhdf', 'vtu', 'xdmf'] | str | None = None, interval: int | None = None, point: object = None, prefix: str | None = None, reference: object = None, region: object = None, regions: object = None, relative_error: object = None, series: object = None, start: object = None, time_interval: float | str | tuple | None = None, type: str | None = None):
+    def __init__(self, index, *, boundary: object = None, boundary_type: object = None, chunk_cells: object = None, compression: Literal['none', 'zlib'] | str | None = None, end: object = None, fields: list | None = None, format: Literal['restart', 'vtkhdf', 'vtu', 'xdmf'] | str | None = None, interval: int | None = None, point: object = None, prefix: str | None = None, reference: object = None, region: Region | dict | Inline | str | None = None, regions: list | None = None, relative_error: object = None, series: object = None, start: object = None, time_interval: float | str | tuple | None = None, type: str | None = None):
         r"""
         boundary: 3D.
         boundary_type: 3D.
@@ -2328,4 +2219,4 @@ class WriteData(Table):
         super().__init__(f"write_data[{index}]", {'boundary': boundary, 'boundary_type': boundary_type, 'chunk_cells': chunk_cells, 'compression': compression, 'end': end, 'fields': fields, 'format': format, 'interval': interval, 'point': point, 'prefix': prefix, 'reference': reference, 'region': region, 'regions': regions, 'relative_error': relative_error, 'series': series, 'start': start, 'time_interval': time_interval, 'type': type})
 
 
-__all__ = ['Inline', 'Table', 'Boundaries', 'BoundariesData', 'BoundariesDataScale', 'BoundariesDataUnits', 'BoundariesNscbc', 'BoundariesTurbulence', 'BoundariesWallModel', 'Check', 'Chemistry', 'Forces', 'Initialize', 'InitializeData', 'InitializeDataReference', 'InitializeDataScale', 'InitializeMesh', 'InitializeRegions', 'InitializeRegionsRegion', 'InitializeRegionsTurbulence', 'InitializeTurbulence', 'Integrals', 'Les', 'LesCombustion', 'LesCombustionFuel', 'LesCombustionOxidizer', 'Mesh', 'MeshTransform', 'MeshTransformRotate', 'Numerics', 'NumericsErrorControl', 'NumericsFaceReconstruction', 'NumericsHybrid', 'Output', 'OutputMixture', 'OutputMixtureProgress', 'Parallel', 'Particles', 'ParticlesLattice', 'ParticlesProbes', 'ParticlesProbesRegion', 'ParticlesQuantities', 'ParticlesQuantitiesWinding', 'ParticlesWalls', 'Periodic', 'Physics', 'Probes', 'ProbesRegion', 'ProbesRegionRegions', 'Radiation', 'Regions', 'RegionsRepeat', 'Run', 'Source', 'Sources', 'SourcesRegion', 'Sponges', 'Statistics', 'StatisticsConditional', 'StatisticsConvergence', 'StatisticsPhase', 'StatisticsSpectra', 'Triggers', 'WriteData']
+__all__ = ['Inline', 'Table', 'Boundaries', 'BoundariesData', 'BoundariesDataScale', 'BoundariesDataUnits', 'BoundariesNscbc', 'BoundariesTurbulence', 'BoundariesWallModel', 'Check', 'Chemistry', 'Forces', 'Initialize', 'InitializeData', 'InitializeDataReference', 'InitializeDataScale', 'InitializeMesh', 'InitializeRegions', 'InitializeRegionsTurbulence', 'InitializeTurbulence', 'Integrals', 'Les', 'LesCombustion', 'LesCombustionFuel', 'LesCombustionOxidizer', 'Mesh', 'MeshTransform', 'MeshTransformRotate', 'Numerics', 'NumericsErrorControl', 'NumericsFaceReconstruction', 'NumericsHybrid', 'Output', 'OutputMixture', 'OutputMixtureProgress', 'Parallel', 'Particles', 'ParticlesLattice', 'ParticlesProbes', 'ParticlesQuantities', 'ParticlesQuantitiesWinding', 'ParticlesWalls', 'Periodic', 'Physics', 'Probes', 'Radiation', 'Region', 'RegionRepeat', 'RegionRepeatRotate', 'RegionRotate', 'Regions', 'Run', 'Source', 'Sources', 'Sponges', 'Statistics', 'StatisticsConditional', 'StatisticsConvergence', 'StatisticsPhase', 'StatisticsSpectra', 'Triggers', 'WriteData']

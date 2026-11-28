@@ -323,6 +323,22 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         .def_ro("t_stop", &mallard::CheckCost::t_stop)
         .def_ro("n_steps", &mallard::CheckCost::n_steps);
 
+    nb::class_<mallard::InputKey>(m, "InputKey")
+        .def_ro("path", &mallard::InputKey::path)
+        .def_ro("catalog_path", &mallard::InputKey::catalog_path)
+        .def_ro("value", &mallard::InputKey::value)
+        .def_ro("set", &mallard::InputKey::set)
+        .def_ro("type", &mallard::InputKey::type)
+        .def_ro("dimension", &mallard::InputKey::dimension)
+        .def_ro("unit", &mallard::InputKey::unit)
+        .def_ro("required", &mallard::InputKey::required)
+        .def_ro("default", &mallard::InputKey::default_value)
+        .def_ro("values", &mallard::InputKey::values)
+        .def("__repr__", [](const mallard::InputKey & x) {
+            return "InputKey(path='" + x.path + "', value='" + x.value + "', type='" + x.type + "', set=" +
+                   (x.set ? "True" : "False") + ")";
+        });
+
     nb::class_<mallard::CheckReport>(m, "CheckReport")
         .def_ro("status", &mallard::CheckReport::status)
         .def_ro("ok", &mallard::CheckReport::ok)
@@ -335,6 +351,7 @@ NB_MODULE(MALLARD_MODULE(Mallard_DIM), m) {
         .def_ro("memory", &mallard::CheckReport::memory)
         .def_ro("cost", &mallard::CheckReport::cost)
         .def_ro("resolved", &mallard::CheckReport::resolved)
+        .def_ro("keys", &mallard::CheckReport::keys)
         .def_ro("text", &mallard::CheckReport::text)
         .def_ro("json", &mallard::CheckReport::json)
         .def("__repr__", [](const mallard::CheckReport & x) {

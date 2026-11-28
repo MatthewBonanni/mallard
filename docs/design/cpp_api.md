@@ -117,7 +117,9 @@ Later slices add, each additive to the API version:
 - **Diagnostics**: statistics means (slice 2: `MEAN_`/`COV_` fields and
   `Solver::statistics()`, the averaging window) and their convergence, the run
   status (`RunStatus`, as `mallard ctl status` reports it), the check report
-  (`mallard check`) and the resolved input with its key catalog records.
+  (`mallard check`) and the resolved input with its key catalog records
+  (`CheckReport::keys`: `resolve_input`'s `KeyRecord` of each key setup read,
+  as `mallard check --catalog` writes them, with the key's value).
 - **Logging sink** (slice 3): `Solver::set_log(sink)` sends what the solver
   prints (`logging::line` and the setup phases, line by line; warnings and
   errors as messages with their code) to a callback instead of stdout and
@@ -174,9 +176,14 @@ say which tables are arrays of tables; the generator takes those the catalog
 types as arrays, the `[[...]]` headings of `docs/input.md`, and the tables an
 input of the catalog writes as an array. Tables whose keys are all species
 (`X`, `Y`) are maps: `.X("O2", 0.21)`. The catalog holds only keys some input
-sets up, so a table's setters cover those keys (a region's parameters of every
-type are not all there); the parent's `Value` setter and `Case::set(key,
-value)` cover the rest. Appending to an array of tables (`probes[n]` of `n`
+sets up, so a table's setters cover those keys; the parent's `Value` setter and
+`Case::set(key, value)` cover the rest. Regions are a recursive grammar (the
+parts of booleans are regions) found in many tables, which a catalog of key
+paths cannot enumerate: every region is one class, `config::Region`, whose
+keys are those of every region of the catalog (a region takes the same keys
+wherever it is; setup checks them against its type and place), and
+`tools/dev/catalog_inputs/{2d,3d}/regions.toml` set every region type with
+each of its keys, so each key a region takes has a setter. Appending to an array of tables (`probes[n]` of `n`
 probes, the index a typed element takes) is part of `set_value`: the element is
 created and its `[[...]]` header written at the end of the text.
 
@@ -395,5 +402,7 @@ no Rust API:
    a `Session` on a communicator (mpi4py's in Python, `mallard-python[mpi]`),
    and the reader moved into the extension.
 5. Typed configs generated from the key catalog over `Case::set`, and the
-   check report (with the resolved input's text) as structs.
+   check report (with the resolved input's text) as structs; then the resolved
+   input key by key with its catalog records, and one `Region` class with
+   every region key.
 6. Plugin API (#336) on the same package.
