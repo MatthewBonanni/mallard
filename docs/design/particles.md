@@ -380,8 +380,27 @@ the particle sat in its cell. Across rotational periodic faces the
 neighbor's mu turns into the cell's frame as in `Walker::cross`. With width 0
 neither moments nor spreading run.
 
+**Second moments** (#1478). First moments alone leave a particle at offset d
+from its cell's center with covariance -d d^T before the spread, so the spread
+kernel's is sigma^2 I - d d^T: an O(h^2) error whose constant depends on the
+offset (8 h^2 at a cell's center to 37 h^2 near a corner, sigma = 0.08), so a
+study at a fixed position converges unevenly (#1457). The cells also sum the
+second moments M = sum q (x_p - x_c)(x_p - x_c)^T (N_DIM (N_DIM + 1) / 2 more
+columns per value), and add -div Pi / 2 to mu before the move above, Pi = M /
+V and the divergence the same face average, so the move is q - div mu + div div
+Pi / 2: the next term of the Taylor series of a point source about the cell
+center, and a discrete Hessian built from the divergence the first moments
+already use, so it needs no new mesh data and works on any mesh. On a uniform
+Cartesian mesh the pre-spread deposit then has the particle's integral, first
+and second moments exactly, and since the face-flux Laplacian adds exactly 2
+per unit time per direction to the second moment there, the spread has
+covariance sigma^2 I wherever the particle sits; elsewhere the correction is
+consistent and the offset dependence drops to higher order. Pi turns as Q Pi
+Q^T across rotational periodic faces. It costs one more cell kernel and halo
+exchange per deposit; the exact sums need no buffers per column.
+
 **Cost.** Per stage, two kernels over the slots, a prefix sum over the cells and one kernel over the owned cells, then
-with a width one moment pass and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
+with a width two moment passes and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
 the owned cells and (distributed) a halo exchange. A width of two cells is
 16 steps in 2D and 24 in 3D.
 

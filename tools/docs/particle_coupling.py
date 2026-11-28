@@ -5,9 +5,10 @@ guide (docs/images/guide/) and the theory manual (docs/images/theory/).
 
 From short Mallard runs (a 2D build, seconds each on 2 CPU threads): the
 cloud of examples/particle_cloud falling through gas at rest, coupled one way and
-two ways (particle_cloud_coupling), and the deposit of one particle's volume
+two ways (particle_cloud_coupling), the deposit of one particle's volume
 fraction over a Gaussian of deposition_width on meshes of 16 to 128 cells per
-side against the Gaussian itself (particle_deposition). Particle positions
+side against the Gaussian itself (particle_deposition), and its error against
+where the particle sits in its cell (particle_deposition_offset). Particle positions
 are read from restart files (tools/mallard/restart.py), fields from VTU
 snapshots.
 """
@@ -116,13 +117,12 @@ def particle_cloud_coupling(P, args):
 
 # ------------------------------------------------------------ deposition
 
-# The error's constant depends on where the particle sits in its cell (the deposit's covariance is short by
-# d d^T, d its offset from the cell center), so the particle sits a third of a cell from a corner, the same
-# |d| = h / 6 on every mesh of 16 * 2^k cells per side: then the study measures the order, not the offset
-SIGMA, POINT, DIAMETER, DENSITY = 0.08, ((6 + 1 / 3) / 16, (9 + 2 / 3) / 16), 1e-3, 1000.0
+# An arbitrary point: with the second moments deposited, the error does not depend on where the particle sits
+# in its cell (#1478), so a fixed point converges as evenly as any
+SIGMA, POINT, DIAMETER, DENSITY = 0.08, (0.4137, 0.5862), 1e-3, 1000.0
 
 
-def single_particle(n, sigma):
+def single_particle(n, sigma, point=POINT):
     """One coupled particle at rest in a periodic unit box of gas at rest, its fields written after one tiny step."""
     return f"""[run]
 n_steps = 1
@@ -159,7 +159,7 @@ diameter = {DIAMETER}
 density = {DENSITY}
 deposition_width = {sigma}
 velocity = [0.0, 0.0]
-points = [[{POINT[0]}, {POINT[1]}]]
+points = [[{float(point[0])!r}, {float(point[1])!r}]]
 [[write_data]]
 prefix = "deposit"
 format = "vtu"
@@ -168,19 +168,19 @@ interval = 1
 """
 
 
-def gaussian(x, y, sigma):
+def gaussian(x, y, sigma, point=POINT):
     """The volume fraction of the particle spread over a periodic Gaussian about it."""
     volume = math.pi / 6.0 * DIAMETER ** 3
-    dx = x - POINT[0] - np.round(x - POINT[0])
-    dy = y - POINT[1] - np.round(y - POINT[1])
+    dx = x - point[0] - np.round(x - point[0])
+    dy = y - point[1] - np.round(y - point[1])
     return volume * np.exp(-0.5 * (dx * dx + dy * dy) / sigma ** 2) / (2.0 * math.pi * sigma ** 2)
 
 
 @functools.cache
-def deposit(binary, n, sigma):
+def deposit(binary, n, sigma, point=POINT):
     """Cell centers, cell areas, polygons and volume fraction of the deposit on n x n cells."""
     work = Path(tempfile.mkdtemp())
-    run(binary, single_particle(n, sigma), work)
+    run(binary, single_particle(n, sigma, point), work)
     pts, conn, offs, types, arrays = last_snapshot(work, "deposit")
     polys = cell_polygons(pts, conn, offs, types)
     centers = np.array([p.mean(axis=0) for p in polys])
@@ -223,8 +223,51 @@ def particle_deposition(P, args):
     return fig
 
 
+def first_moments_only(n, sigma, point):
+    """The L1 error of the deposit before #1478, first moments alone (NumPy, the same steps as Mallard)."""
+    h = 1.0 / n
+    i, j = int(point[0] // h), int(point[1] // h)
+    q = np.zeros((n, n))
+    q[i, j] = 1.0
+    mu = np.zeros((2, n, n))
+    mu[:, i, j] = (point[0] - (i + 0.5) * h) / h ** 2, (point[1] - (j + 0.5) * h) / h ** 2
+    for ax in (0, 1):
+        q -= 0.5 * h * (np.roll(mu[ax], -1, ax) - np.roll(mu[ax], 1, ax))
+    total = 0.5 * sigma ** 2
+    steps = int(np.ceil(2.0 * total * 4.0 / h ** 2))
+    for _ in range(steps):
+        q = q + total / steps * sum(np.roll(q, 1, a) + np.roll(q, -1, a) - 2 * q for a in (0, 1)) / h ** 2
+    x = (np.arange(n) + 0.5) * h
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    volume = math.pi / 6.0 * DIAMETER ** 3
+    return np.sum(np.abs(q * volume / h ** 2 - gaussian(X, Y, sigma, point))) * h * h / volume
+
+
+def particle_deposition_offset(P, args):
+    fig, ax = plt.subplots(figsize=(6.4, 4.0))
+    ts = np.linspace(0.0, 0.48, 9)
+    for n, color in [(32, P["teal"]), (64, P["blue"])]:
+        h = 1.0 / n
+        points = [((n // 2 + 0.5 + t) * h, (n // 2 + 0.5 + t) * h) for t in ts]
+        volume = math.pi / 6.0 * DIAMETER ** 3
+        errors = []
+        for point in points:
+            c, area, _, alpha = deposit(args.mallard, n, SIGMA, point)
+            errors.append(np.sum(np.abs(alpha - gaussian(c[:, 0], c[:, 1], SIGMA, point)) * area) / volume)
+        ax.plot(ts, np.array(errors) / h ** 2, "o-", color=color, label=f"{n} cells per side, Mallard")
+        ax.plot(ts, [first_moments_only(n, SIGMA, p) / h ** 2 for p in points], "--", color=color, lw=1.1,
+                label=f"{n} cells per side, first moments alone")
+    ax.set_xlim(0, 0.5)
+    ax.set_ylim(0, None)
+    ax.set_xlabel("offset from the cell center along its diagonal, $d_x / h = d_y / h$")
+    ax.set_ylabel(r"$L_1$ error / particle volume / $h^2$")
+    ax.legend(fontsize=9.5, loc="upper left")
+    ax.set_title(f"deposit of one particle, $\\sigma$ = {SIGMA:g}", fontsize=12)
+    return fig
+
+
 GUIDE_RUNS = {"particle_cloud_coupling": particle_cloud_coupling}
-THEORY_RUNS = {"particle_deposition": particle_deposition}
+THEORY_RUNS = {"particle_deposition": particle_deposition, "particle_deposition_offset": particle_deposition_offset}
 
 
 def figures(mallard=None, names=None):

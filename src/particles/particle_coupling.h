@@ -36,11 +36,14 @@ struct Walker;
  * @brief Sums values per slot into the cells holding the slots, then spreads
  *        them over a Gaussian of standard deviation `width`.
  *
- * With a width the cells also sum each value's first moment about their
- * centers, and before spreading move each sum by minus the divergence of its
- * moment density (face averaged, in flux form), so that the deposit has the
- * particles' first moments rather than the cell centers': the spread then
- * converges at second order in the cell size instead of first. *
+ * With a width the cells also sum each value's first and second moments about
+ * their centers, and before spreading move each sum by minus the divergence of
+ * its first-moment density plus half the double divergence of its
+ * second-moment density (face averaged, in flux form), so that the deposit has
+ * the particles' first and second moments rather than the cell centers': the
+ * spread then converges at second order in the cell size instead of first, and
+ * its error does not depend on where the particles sit in their cells.
+ *
  * Each cell's sum is exact, rounded once (exact_sums.h), so it does not
  * depend on the order of the slots, which differs between rank counts. The spreading is width^2 / 2 of diffusion with
  * unit diffusivity, by explicit steps of the face-flux Laplacian over the mesh:
@@ -87,10 +90,10 @@ class Deposition {
     private:
         uint32_t n_owned = 0;
         uint32_t n_columns = 0;
+        uint32_t n_sums = 0;
         uint32_t steps = 0;
         rtype width = 0.0_r;
         Kokkos::View<double **, Kokkos::LayoutRight> values;  // (slot, column)
-        uint32_t n_sums = 0;                                    // columns, then with a width their first moments
         Kokkos::View<uint32_t *> count;                         // (cell): its occupied slots
         Kokkos::View<uint32_t *> ends;                          // (cell): the end of its slots in order
         Kokkos::View<uint32_t *> order;                         // occupied slots, grouped by cell
@@ -101,6 +104,7 @@ class Deposition {
         Kokkos::View<uint8_t *> face_shift;
         PeriodicMaps maps;
         State moments;                        // spreading: first moments per volume, (d n_columns + column)
+        State second_moments;                 // spreading: second moments per volume, (pair n_columns + column)
         Kokkos::View<uint32_t *> faces_of_neighbor;  // the face to each neighbor
         Kokkos::View<rtype *[N_DIM]> face_vectors;   // its unit normal out of the cell, in the cell's frame, times its area
         Kokkos::View<int8_t *> turns;         // 1: rotate the neighbor's vectors into the cell's frame, -1 unrotate

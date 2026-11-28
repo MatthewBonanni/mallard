@@ -458,7 +458,8 @@ one small cell, so the result depends on the mesh. A `deposition_width` in
 meters spreads it over a Gaussian of that width whatever the cells, so coupled
 results converge as the mesh is refined: second order in the cell size at a
 fixed width (the deposit keeps each particle's position within its cell, not
-only its cell). Choose a width of the order of the cell size of the coarsest
+only its cell, and its spread is the Gaussian's wherever in the cell the
+particle sits). Choose a width of the order of the cell size of the coarsest
 mesh you would trust, or of the physical size of the region a particle
 disturbs. The spreading never moves sources across walls or out of the domain,
 and conserves them exactly.
