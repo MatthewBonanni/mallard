@@ -70,6 +70,7 @@ struct WallModelData {
 /** @brief What the setup needs to know of the points of WallModelData (host). */
 struct WallModelPoints {
     std::vector<uint32_t> cells;  // local cells holding points, sorted, unique
+    std::vector<uint32_t> walked; // local cells the walks to them passed through, sorted, unique
     int needed_layers = 0;        // halo depth at which every point lies in a cell with a complete stencil
 };
 

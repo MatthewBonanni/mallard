@@ -304,7 +304,9 @@ TEST(MeshFileTest, PeriodicZonePairsJoinAJitteredGmshMesh) {
     Solver solver;
     solver.init(parse_toml(periodic_file_input(file)));
     const Mesh & mesh = *solver.get_mesh();
-    for (uint32_t f = 0; f < mesh.n_faces; f++) EXPECT_GE(mesh.h_cells_of_face(f, 1), 0);
+    for (uint32_t c = 0; c < mesh.n_owned(); c++) {
+        for (uint32_t k = 0; k < mesh.h_n_faces_of_cell(c); k++) EXPECT_GE(mesh.h_cells_of_face(mesh.h_face_of_cell(c, k), 1), 0);
+    }
     expect_shifts_join_cells(mesh);
     const auto before = solver.integrate_conservatives();
     solver.run();

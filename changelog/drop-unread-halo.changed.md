@@ -1,0 +1,1 @@
+- Distributed TENO runs keep only the halo cells they receive: after the setup, each rank rebuilds its local mesh without the halo cells that the stencil searches visited but no stencil reads, and carries the TENO tables over instead of setting them up again. Results are bitwise unchanged (#1043).

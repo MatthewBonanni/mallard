@@ -162,4 +162,17 @@ class DistributedMesh {
         bool sent = false;                                   // cells, directory and layers are built
 };
 
+/**
+ * @brief The local mesh of the cells marked in keep, which hold every owned
+ *        cell, in their present order and with their nodes and boundary zones;
+ *        faces towards the dropped cells go to PARTITION_ZONE. Kept cells keep
+ *        their faces in their local order and orientation, except faces that
+ *        lose a cell. Restricts dist to the kept cells, which must hold every
+ *        received one, and gives the new index of each cell and face of mesh
+ *        (-1: dropped). Curved geometry, axisymmetry and the device copy are
+ *        the caller's.
+ */
+std::shared_ptr<Mesh> restrict_local_mesh(const Mesh & mesh, Distribution & dist, const std::vector<uint8_t> & keep,
+                                          std::vector<int32_t> & new_cell, std::vector<int32_t> & new_face);
+
 #endif // DISTRIBUTED_MESH_H
