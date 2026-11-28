@@ -442,6 +442,8 @@ class Particles {
         particles::Solid solid;
         particles::Droplet droplet;
         std::string vapor_name;
+        std::string liquid_tables;  // the setup log's line of a library liquid's tables
+        double minimum_diameter = 0.0;
         Kokkos::View<rtype **, Kokkos::LayoutRight> scalars;  // (cell, k): mass fractions of the gas (mixtures)
         Kokkos::View<double **, Kokkos::LayoutRight> work;    // (slot, species): droplets' work memory
         particles::Deposition deposition;

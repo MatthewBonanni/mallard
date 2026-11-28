@@ -38,6 +38,7 @@ std::vector<std::string> base_variables() {
     }
     v.push_back("T_P");
     v.push_back("D_P");
+    for (const char * m : {"RHO_P", "MU_P", "K_P", "SIGMA_P"}) v.push_back(m);
     return v;
 }
 

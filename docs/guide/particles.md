@@ -587,17 +587,22 @@ with those that left the domain, were lost or stuck (`PARTICLE_REMOVED`).
 | `[particles.liquid]` key | Default | Meaning |
 |---|---|---|
 | `species` | required | The vapor species of the mechanism |
-| `density` | required | Liquid density (constant) |
-| `specific_heat` | required | Liquid specific heat (constant) |
-| `latent_heat` | required | Latent heat of vaporization at the boiling point |
-| `boiling_temperature` | required | Boiling temperature at `boiling_pressure` |
+| `fluid` | none | A [named liquid](#named-liquids), whose properties are tables of the temperature; the keys below then replace its tables |
+| `tolerance` | 1e-6 | With `fluid`: the tables' largest relative error |
+| `density` | required without `fluid` | Liquid density (constant) |
+| `specific_heat` | required without `fluid` | Liquid specific heat (constant) |
+| `latent_heat` | required without `fluid` | Latent heat of vaporization at the boiling point |
+| `boiling_temperature` | required without `fluid` | Boiling temperature at `boiling_pressure` |
 | `boiling_pressure` | 101325 Pa | Pressure of the boiling point |
-| `critical_temperature`, `critical_pressure` | required | Critical point; above the boiling point |
-| `antoine` | Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
+| `critical_temperature`, `critical_pressure` | required without `fluid` | Critical point; above the boiling point |
+| `antoine` | the table, or Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
+| `viscosity`, `conductivity`, `surface_tension` | the tables, or none | For particle expressions (`MU_P`, `K_P`, `SIGMA_P`) |
 
-Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`
-and the gas temperature `T`; the CSV `file` has the columns `T_P`, `D_P` and
-the droplet's mass `M_P`. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>`
+Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`,
+density `RHO_P`, the liquid's viscosity `MU_P`, conductivity `K_P` and surface
+tension `SIGMA_P` at `T_P`, and the gas temperature `T`: a droplet's Weber
+number is `RHO * ((U_X - V_X)^2 + (U_Y - V_Y)^2) * D_P / SIGMA_P`. The CSV
+`file` has the columns `T_P`, `D_P` and the droplet's mass `M_P`. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>`
 writes the vapor source per volume and time.
 
 ![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
@@ -610,12 +615,81 @@ carries the vapor `Y_H2O` (left) downstream of the droplets, which lag behind
 it, and the shear tilts the trails; `PARTICLE_SOURCE_RHOY_H2O` (right) is
 each droplet's evaporation rate spread over the deposition width.*
 
+### Named liquids
+
+```toml
+[particles.liquid]
+species = "H2O"
+fluid = "water"        # density, specific heat, latent heat, saturation pressure,
+                       # viscosity, conductivity and surface tension from CoolProp
+```
+
+With `fluid`, every property of the liquid is a function of the droplet's
+temperature, from the triple point up to 0.999 of the critical temperature:
+density, specific heat, latent heat, saturation pressure, viscosity, thermal
+conductivity and surface tension of the saturated liquid. At setup,
+[CoolProp](http://www.coolprop.org) ([Bell et al. 2014](../references.md#bell-2014))
+fills tables of them, as fine as `tolerance` asks (the largest relative error
+of each, 1e-6 by default; a table stops at 8193 knots, where CoolProp's
+conductivity, whose slope jumps where its critical enhancement starts, is
+within 5e-6), and the setup log lists each table's knots and error; the
+droplets read only the tables, on the GPU as on the CPU. Fitting them takes
+about 2 s of setup. The range ends
+below the critical point where a correlation does (ethanol's surface
+tension). The
+boiling point is the saturation temperature at `boiling_pressure` and the
+critical point the end of the tables. A key of `[particles.liquid]` replaces
+its table with a constant, for instance `density = 1000.0`; `latent_heat`
+then is the latent heat at the boiling point, continued by Kirchhoff's law as
+for a liquid given property by property.
+
+The latent heat at the surface is the table's, and the enthalpy of the liquid
+is the integral of its specific heat, from the vapor's enthalpy at the boiling
+point less the latent heat there: the gas and the liquid share one energy
+reference, and gas and droplets conserve energy to round-off as before. The
+diameter follows the density at the droplet's temperature (a heated droplet
+swells).
+
+Named liquids need a build with `-DMallard_ENABLE_COOLPROP=ON`
+([installation](../installation.md#from-source)); in a build without it,
+`fluid` is an error that says so. Liquids given property by property need no
+CoolProp. The vapor `species` must be in the mechanism (`H2O` and `O2` are in
+`mechanisms/h2o2.yaml`, `NH3`, `CH3OH` and `C3H8` in `gri30.yaml`), with
+transport data for a Navier-Stokes gas.
+
+![Saturated-liquid properties of seven library fluids from the triple point to the end of their tables](../images/guide/liquid_library_properties-light.svg#gh-light-mode-only)
+![Saturated-liquid properties of seven library fluids from the triple point to the end of their tables](../images/guide/liquid_library_properties-dark.svg#gh-dark-mode-only)
+
+| `fluid` | CoolProp | Range (K) | Equation of state; viscosity; conductivity; surface tension |
+|---|---|---|---|
+| `ammonia` | Ammonia | 195.5 to 405.2 | Gao et al. (2020); Fenghour et al. (1995); Tufeu et al. (1984); Mulero et al. (2012) |
+| `ethanol` | Ethanol | 159.1 to 513.4 | Schroeder et al. (2014); Kiselev et al. (2005); Assael et al. (2013); Mulero et al. (2012) |
+| `methane` | Methane | 90.7 to 190.4 | Setzmann and Wagner (1991); Quinones-Cisneros and Deiters (2006); Friend et al. (1989); Mulero et al. (2012) |
+| `methanol` | Methanol | 175.6 to 512.9 | de Reuck and Craven (1993); Xiang et al. (2006); Sykioti et al. (2013); Mulero et al. (2012) |
+| `n-decane` | n-Decane | 243.5 to 617.1 | Lemmon and Span (2006); Huber et al. (2004); Huber and Perkins (2005); Mulero et al. (2012) |
+| `n-dodecane` | n-Dodecane | 263.6 to 657.4 | Lemmon and Huber (2004); Huber et al. (2004); Huber et al. (2004); Mulero et al. (2012) |
+| `n-heptane` | n-Heptane | 182.6 to 539.6 | Span and Wagner (2003); Michailidou et al. (2014); Assael et al. (2013); Mulero et al. (2012) |
+| `n-hexane` | n-Hexane | 177.8 to 507.3 | Thol et al. (2019); Michailidou et al. (2013); Assael et al. (2013); Mulero et al. (2012) |
+| `n-octane` | n-Octane | 216.4 to 568.2 | Beckmueller et al. (2019); Huber et al. (2004); Huber and Perkins (2005); Mulero et al. (2012) |
+| `n-pentane` | n-Pentane | 143.5 to 469.2 | Thol et al. (2019); Quinones-Cisneros and Deiters (2006); Vassiliou et al. (2015); Mulero et al. (2012) |
+| `nitrogen` | Nitrogen | 63.2 to 126.1 | Span et al. (2000); Lemmon and Jacobsen (2004); Lemmon and Jacobsen (2004); Mulero et al. (2012) |
+| `oxygen` | Oxygen | 54.4 to 154.4 | Schmidt and Wagner (1985); Lemmon and Jacobsen (2004); Lemmon and Jacobsen (2004); Mulero et al. (2012) |
+| `propane` | Propane | 85.5 to 369.5 | Lemmon et al. (2009); Vogel et al. (1998); Marsh et al. (2002); Mulero et al. (2012) |
+| `toluene` | Toluene | 178.0 to 591.2 | Lemmon and Span (2006); Avgeri et al. (2015); Assael et al. (2012); Mulero et al. (2012) |
+| `water` | Water | 273.2 to 646.4 | Wagner and Pruss (2002); Huber et al. (2009); Huber et al. (2012); Mulero et al. (2012) |
+
 **Pitfalls.**
 
+- Named liquids are saturated liquids: their properties do not depend on the
+  pressure. At 50 bar a compressed liquid is 0.2 to 0.3% denser than the
+  saturated liquid for water, about 2% for n-heptane and n-dodecane at 450 K,
+  and up to 10% near their critical temperature
+  ([design](../design/liquid_library.md#pressure)).
 - The gas composition at a droplet is the average of its cell, not
   reconstructed to its position as the velocity and pressure are.
 - One-component liquids only; the liquid's temperature is uniform (no internal
-  conduction), its density and specific heat constant.
+  conduction), its density and specific heat constant unless it is a
+  [named liquid](#named-liquids).
 - Supercritical droplets are outside the model: properties stop at the
   critical temperature, and a gas above the critical pressure boils the
   droplet at the critical temperature.
@@ -843,4 +917,4 @@ In practice:
 5. Converge the statistic you report in `cfl` (time), the mesh (space) and the
    number of particles.
 
-*Design notes:* [particles](../design/particles.md).
+*Design notes:* [particles](../design/particles.md), [liquid library](../design/liquid_library.md).

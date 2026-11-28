@@ -20,6 +20,7 @@
 #include <Kokkos_Core.hpp>
 
 #include "common.h"
+#include "liquid_curve.h"
 #include "mixture.h"
 #include "particle_forces.h"
 
@@ -31,13 +32,17 @@ enum class Evaporation : uint8_t { D2_LAW, ABRAMZON_SIRIGNANO };
 /**
  * @brief A liquid of one component whose vapor is a species of the mechanism.
  *
- * Constant density and specific heat. The liquid's enthalpy is
- * h_l(T) = h_v(T_b) - L_b + c_l (T - T_b), from the vapor's enthalpy h_v of the
- * mechanism (formation enthalpy included) and the latent heat L_b at the
- * boiling temperature T_b at p_b, so that the latent heat at T,
- * L(T) = h_v(T) - h_l(T), follows Kirchhoff's law and the gas and the liquid
- * share one energy reference. The saturation pressure is Clausius-Clapeyron's
- * through (T_b, p_b) with L_b, or Antoine's log10(p / Pa) = A - B / (T / K + C).
+ * Each property is a constant or, for a liquid of the library, a curve of the
+ * temperature (Curve) in the table of values. The liquid's enthalpy is
+ * h_l(T) = h_ref + h_s(T), h_s the integral of the specific heat from the
+ * boiling temperature T_b at p_b, h_ref = h_v(T_b) - L_b from the vapor's
+ * enthalpy h_v of the mechanism (formation enthalpy included) and the latent
+ * heat L_b at T_b, so that the gas and the liquid share one energy reference.
+ * The latent heat at T is its curve's, or else Kirchhoff's h_v(T) - h_l(T).
+ * The saturation pressure is its curve's, Clausius-Clapeyron's through
+ * (T_b, p_b) with L_b, or Antoine's log10(p / Pa) = A - B / (T / K + C).
+ * Curves hold their end values outside their range, except the enthalpy,
+ * which continues at its end slopes.
  */
 struct Liquid {
     uint32_t vapor = 0;            // species index
@@ -52,9 +57,55 @@ struct Liquid {
     double h_ref = 0.0;            // h_l(T_b)
     bool antoine = false;
     double A = 0.0, B = 0.0, C = 0.0;
+    double viscosity = Kokkos::Experimental::quiet_NaN_v<double>;
+    double conductivity = Kokkos::Experimental::quiet_NaN_v<double>;
+    double surface_tension = Kokkos::Experimental::quiet_NaN_v<double>;
+    // Curves of T, except temperature_curve (of h_s) and boiling_curve (of ln p); viscosity_curve is of ln mu
+    Curve density_curve, enthalpy_curve, temperature_curve, latent_curve, pressure_curve, boiling_curve,
+        viscosity_curve, conductivity_curve, tension_curve;
+    Kokkos::View<const double *> table;
+    Kokkos::View<const double *, Kokkos::HostSpace> host_table;
+
+    /** @brief The table of the curves, on the device or the host, wherever the caller runs. */
+    KOKKOS_INLINE_FUNCTION const double * values() const {
+        const double * v = nullptr;
+        KOKKOS_IF_ON_DEVICE((v = table.data();))
+        KOKKOS_IF_ON_HOST((v = host_table.data();))
+        return v;
+    }
+
+    /** @brief The density at T. */
+    KOKKOS_INLINE_FUNCTION double density_at(const double T) const {
+        return density_curve.given() ? density_curve.value(values(), T) : density;
+    }
+
+    /** @brief The specific heat at T. */
+    KOKKOS_INLINE_FUNCTION double specific_heat_at(const double T) const {
+        if (!enthalpy_curve.given()) return specific_heat;
+        double c;
+        enthalpy_curve.evaluate(values(), T, c);
+        return c;
+    }
+
+    /** @brief The latent heat at T, given h_vapor = h_v(T) - h_ref (Kirchhoff's law without a curve). */
+    KOKKOS_INLINE_FUNCTION double latent_at(const double T, const double h_vapor) const {
+        return latent_curve.given() ? latent_curve.value(values(), T) : h_vapor - sensible(T);
+    }
+
+    /** @brief The viscosity, conductivity and surface tension at T (NaN where the liquid has none). */
+    KOKKOS_INLINE_FUNCTION double viscosity_at(const double T) const {
+        return viscosity_curve.given() ? Kokkos::exp(viscosity_curve.value(values(), T)) : viscosity;
+    }
+    KOKKOS_INLINE_FUNCTION double conductivity_at(const double T) const {
+        return conductivity_curve.given() ? conductivity_curve.value(values(), T) : conductivity;
+    }
+    KOKKOS_INLINE_FUNCTION double surface_tension_at(const double T) const {
+        return tension_curve.given() ? tension_curve.value(values(), T) : surface_tension;
+    }
 
     /** @brief The saturation pressure at T. */
     KOKKOS_INLINE_FUNCTION double saturation_pressure(const double T) const {
+        if (pressure_curve.given()) return Kokkos::exp(pressure_curve.value(values(), T));
         if (antoine) return Kokkos::pow(10.0, A - B / (T + C));
         return boiling_pressure * Kokkos::exp(latent_heat / R_vapor * (1.0 / boiling_temperature - 1.0 / T));
     }
@@ -65,7 +116,17 @@ struct Liquid {
      */
     KOKKOS_INLINE_FUNCTION double boiling_temperature_at(const double p) const {
         double T;
-        if (antoine) {
+        if (pressure_curve.given()) {
+            // The inverse curve, then Newton's iterations on the saturation curve itself
+            const double q = Kokkos::log(p);
+            if (!(q < boiling_curve.s_max)) return critical_temperature;
+            T = boiling_curve.value(values(), q);
+            for (int it = 0; it < 2; it++) {
+                double slope;
+                const double r = pressure_curve.evaluate(values(), T, slope) - q;
+                T = Kokkos::fmax(T - r / slope, pressure_curve.s_min);
+            }
+        } else if (antoine) {
             const double denominator = A - Kokkos::log10(p);
             T = denominator > 0.0 ? B / denominator - C : critical_temperature;
         } else {
@@ -76,7 +137,22 @@ struct Liquid {
     }
 
     /** @brief The sensible enthalpy h_l(T) - h_l(T_b). */
-    KOKKOS_INLINE_FUNCTION double sensible(const double T) const { return specific_heat * (T - boiling_temperature); }
+    KOKKOS_INLINE_FUNCTION double sensible(const double T) const {
+        if (!enthalpy_curve.given()) return specific_heat * (T - boiling_temperature);
+        const double T_in = Kokkos::fmin(Kokkos::fmax(T, enthalpy_curve.s_min), enthalpy_curve.s_max);
+        double c;
+        const double h = enthalpy_curve.evaluate(values(), T_in, c);
+        return h + c * (T - T_in);
+    }
+
+    /** @brief The temperature whose sensible enthalpy is e (inverse of sensible()). */
+    KOKKOS_INLINE_FUNCTION double temperature_of(const double e) const {
+        if (!enthalpy_curve.given()) return boiling_temperature + e / specific_heat;
+        // The inverse curve, then Newton's iterations on the enthalpy itself (exact beyond its range)
+        double T = temperature_curve.value(values(), e);
+        for (int it = 0; it < 2; it++) T -= (sensible(T) - e) / specific_heat_at(T);
+        return T;
+    }
 };
 
 /** @brief F(B) = (1 + B)^0.7 ln(1 + B) / B of Abramzon and Sirignano, the film thickening by the Stefan flow. */
@@ -159,14 +235,26 @@ struct Droplet {
                             TP = 3 * N_DIM + 2, T_EQ = 3 * N_DIM + 3, TAU_T = 3 * N_DIM + 4, M0 = 3 * N_DIM + 5,
                             N_START = 3 * N_DIM + 6 };
 
-    /** @brief The mass of a droplet of diameter d. */
-    KOKKOS_INLINE_FUNCTION double mass_of(const double d) const {
-        return liquid.density * Kokkos::numbers::pi_v<double> / 6.0 * d * d * d;
+    /** @brief The mass of a droplet of diameter d at temperature T. */
+    KOKKOS_INLINE_FUNCTION double mass_of(const double d, const double T) const {
+        return liquid.density_at(T) * Kokkos::numbers::pi_v<double> / 6.0 * d * d * d;
     }
 
-    /** @brief The diameter of a droplet of mass M (0 if M is not positive). */
-    KOKKOS_INLINE_FUNCTION double diameter_of(const double M) const {
-        return M > 0.0 ? Kokkos::cbrt(6.0 * M / (Kokkos::numbers::pi_v<double> * liquid.density)) : 0.0;
+    /** @brief The diameter of a droplet of mass M at temperature T (0 if M is not positive). */
+    KOKKOS_INLINE_FUNCTION double diameter_of(const double M, const double T) const {
+        return M > 0.0 ? Kokkos::cbrt(6.0 * M / (Kokkos::numbers::pi_v<double> * liquid.density_at(T))) : 0.0;
+    }
+
+    /**
+     * @brief A particle's density, viscosity, conductivity and surface tension: a droplet's (drops) at temperature
+     *        T, else the density rho_solid and NaN.
+     */
+    KOKKOS_INLINE_FUNCTION void material(const bool drops, const double rho_solid, const double T, double * m) const {
+        const double nan = Kokkos::Experimental::quiet_NaN_v<double>;
+        m[0] = drops ? liquid.density_at(T) : rho_solid;
+        m[1] = drops ? liquid.viscosity_at(T) : nan;
+        m[2] = drops ? liquid.conductivity_at(T) : nan;
+        m[3] = drops ? liquid.surface_tension_at(T) : nan;
     }
 
     /** @brief The velocity of a droplet whose block values from its momentum on are y (0 without mass). */
@@ -182,7 +270,7 @@ struct Droplet {
         double v2 = 0.0;
         FOR_I_DIM v2 += static_cast<double>(y[MOMENTUM + i]) * static_cast<double>(y[MOMENTUM + i]);
         const double e = static_cast<double>(y[ENERGY]) / M - 0.5 * v2 / (M * M);
-        return liquid.boiling_temperature + e / liquid.specific_heat;
+        return liquid.temperature_of(e);
     }
 
     /** @brief The block values after the position of a droplet of mass M, velocity v and temperature T. */
@@ -215,7 +303,8 @@ struct Droplet {
         const double R_gas = gas.thermo.gas_constant(y_gas);
         Transfer t;
         t.T_gas = p / (rho * R_gas);
-        const double d = diameter_of(M);
+        const double d = diameter_of(M, Tp);
+        const double rho_l = liquid.density_at(Tp), c_l = liquid.specific_heat_at(Tp);
         const double T_boil = liquid.boiling_temperature_at(p);
         const bool boiling = Tp >= T_boil;
         const double Ts = Kokkos::fmax(Kokkos::fmin(Tp, T_boil), gas.thermo.T_low);
@@ -246,10 +335,13 @@ struct Droplet {
         const auto Ts_powers = chemistry::ThermoTable<>::powers(Ts);
         const double h_v = chemistry::GAS_CONSTANT * Ts * gas.thermo.inv_W(k_v) * gas.thermo.h_RT(k_v, Ts_powers);
         t.h_vapor = h_v - liquid.h_ref;
-        t.latent = t.h_vapor - liquid.sensible(Ts);
+        t.latent = liquid.latent_at(Ts, t.h_vapor);
+        t.h_vapor = liquid.sensible(Ts) + t.latent;
         // Drag and forces, in the film's viscosity
         const double cp_gas = gas.thermo.cp_mass(t.T_gas, y_gas);
-        const Solid::Response r = motion.motion(W, G, v, static_cast<rtype>(Tp), static_cast<rtype>(t.T_gas),
+        Solid moving = motion;
+        moving.density = static_cast<rtype>(rho_l);
+        const Solid::Response r = moving.motion(W, G, v, static_cast<rtype>(Tp), static_cast<rtype>(t.T_gas),
                                          static_cast<rtype>(mu_f), static_cast<rtype>(cp_gas / (cp_gas - R_gas)),
                                          static_cast<rtype>(d));
         t.tau = r.tau;
@@ -264,8 +356,8 @@ struct Droplet {
         if (saturated) {
             // Boiling: the heat received evaporates the droplet, and its superheat relaxes at its heating rate
             t.Q = pi * d * k_f * Nu0 * dT;
-            t.heat_up = liquid.density * liquid.specific_heat * d * d / (6.0 * k_f * Nu0);
-            const double superheat = M * liquid.specific_heat * (Tp - Ts) / t.heat_up;
+            t.heat_up = rho_l * c_l * d * d / (6.0 * k_f * Nu0);
+            const double superheat = M * c_l * (Tp - Ts) / t.heat_up;
             t.mdot = Kokkos::fmax(t.Q + superheat, 0.0) / t.latent;
             return t;
         }
@@ -286,7 +378,7 @@ struct Droplet {
             G_T = log_ratio(B_T);
         }
         t.Q = pi * d * k_f * Nu * G_T * dT;
-        t.heat_up = liquid.density * liquid.specific_heat * d * d / (6.0 * k_f * Nu * G_T);
+        t.heat_up = rho_l * c_l * d * d / (6.0 * k_f * Nu * G_T);
         return t;
     }
 
@@ -320,8 +412,8 @@ struct Droplet {
         }
         rtype v[N_DIM];
         velocity(y, v);
-        const double cp = liquid.specific_heat;
         const double Tp = temperature(y);
+        const double cp = liquid.specific_heat_at(Tp);
         // Properties of a droplet driven past its critical temperature are those at it
         const double T_eval = Kokkos::fmin(Tp, liquid.critical_temperature);
         const Transfer t = transfer(W, G, Y, v, T_eval, M, work);
@@ -340,7 +432,7 @@ struct Droplet {
             double tau_T = 0.0;
             const double delta = 1e-6 * T_eval;
             const Transfer cooler = transfer(W, G, Y, v, T_eval - delta, M, work);
-            const double f1 = heating(cooler, M, static_cast<double>(dt)) / (M * cp);
+            const double f1 = heating(cooler, M, static_cast<double>(dt)) / (M * liquid.specific_heat_at(T_eval - delta));
             const double J = (f0 - f1) / delta;
             if (J < 0.0) tau_T = -1.0 / J;
             start[TAU_T] = static_cast<rtype>(tau_T);
