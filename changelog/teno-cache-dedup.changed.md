@@ -1,0 +1,1 @@
+- TENO caches store each distinct table once and their cells refer to it: the 64³ Taylor-Green cache at order 5 shrinks from 8.4 GB to 207 MB, and a cached `mallard post derive` sets up about three times as fast, since the cells of one table are ranked once, by the table's place in the file (#935). Caches of earlier versions are recomputed.

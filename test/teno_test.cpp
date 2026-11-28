@@ -707,7 +707,7 @@ TEST(TENOTest, PackedStencilsAndTheirCacheDoNotDependOnTheSliceWidth) {
     std::filesystem::remove(file_of(cache));
 }
 
-TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) {
+TEST(TENOTest, SinglePrecisionCacheShrinksTheFileAndRunsThatWriteAndReadItAgree) {
     if constexpr (sizeof(rtype) == sizeof(float)) GTEST_SKIP() << "tables are single precision already";
     auto mesh = make_mesh("cartesian_tri", 10, 8);
     BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
@@ -725,12 +725,33 @@ TEST(TENOTest, SinglePrecisionCacheHalvesTheFileAndRunsThatWriteAndReadItAgree) 
     }
     EXPECT_GT(max_diff, 0.0);
     EXPECT_LT(max_diff, 1e-5 * max_value);
-    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.6 * static_cast<double>(std::filesystem::file_size(file_of(full))));
+    // Values take half the bytes; stencils as many
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(single))), 0.8 * static_cast<double>(std::filesystem::file_size(file_of(full))));
     // A cache in the other precision is recomputed, never reinterpreted
     const auto exact_again = teno_outputs(mesh, bd, 4, single, teno::SLICE_SHIFT, true);
     expect_bitwise_equal(exact, exact_again, "double run given a single-precision cache");
     std::filesystem::remove(file_of(single));
     std::filesystem::remove(file_of(full));
+}
+
+TEST(TENOTest, ACacheHoldsEachDistinctTableOnce) {
+    // A periodic lattice: every cell shares one shape's tables, which the cache
+    // stores once instead of once per cell, and reads back bit for bit
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 32\nNy = 32\nLx = 1.0\nLy = 1.0\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    const std::string cache = temp_cache("mallard_teno_cache_distinct.bin");
+    const auto written = teno_outputs(mesh, bd, 4, cache, teno::SLICE_SHIFT, true);
+    const auto loaded = teno_outputs(mesh, bd, 4, cache, teno::SLICE_SHIFT, true);
+    expect_bitwise_equal(written, loaded, "cache written, then read");
+    auto teno = make_teno(mesh, bd, 4);
+    const auto sizes = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), teno->stencil_large_size);
+    double per_cell = 0.0;
+    for (uint32_t c = 0; c < mesh->n_cells; c++) per_cell += double(sizes(c)) * teno->n_dof_large * sizeof(rtype);
+    EXPECT_LT(static_cast<double>(std::filesystem::file_size(file_of(cache))), 0.5 * per_cell);
+    std::filesystem::remove(file_of(cache));
 }
 
 TEST(TENOTest, StencilCacheIsRecomputedForOtherMeshesOrOptionsAndWhenTruncated) {
