@@ -178,6 +178,7 @@ OTHER_GUARDS = [
     ("src/mesh/curved.cpp", "a curved zone on an open surface from an STL or OBJ file is not supported yet"),
     ("src/solver/probes.cpp", "is not supported for a moving region"),
     ("src/common/region_input.cpp", "only filled regions move"),
+    ("src/particles/particles.cpp", "are not available for droplets yet"),
     ("src/solver/solver.cpp", "is not available yet with chemistry.coupling"),
     ("src/solver/solver.cpp", "is not available for gas mixtures yet"),
     ("src/solver/solver.cpp", "is not available for axisymmetric runs yet"),
