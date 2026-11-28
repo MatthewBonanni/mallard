@@ -152,6 +152,7 @@ void set_gate(uint32_t * gate, const uint32_t * parent, const uint32_t * flag) {
 std::string Solver::device_steps_unsupported() const {
     if (step_queue_depth == 0) return "off ([run] step_queue = 0)";
     if (particles && particles->migrates()) return "particles migrate between ranks through the host";
+    if (stage_hook) return "a per-stage callback of the library API is registered";
     return "";
 }
 
@@ -1316,7 +1317,7 @@ step_queue::Horizon Solver::step_horizon() const {
     if (pause_time < std::numeric_limits<rtype>::infinity()) {
         h.at_time(pause_time - precision_tol(1e-9, 1e-5) * Kokkos::abs(pause_time));
     }
-    if (!triggers.empty() && !triggers_on_device()) h.at_step(step + 1);
+    if ((!triggers.empty() && !triggers_on_device()) || step_hook) h.at_step(step + 1);
     // The host takes up the next landing time once a step reaches it
     if (const rtype landing = next_landing_time(); landing < std::numeric_limits<rtype>::infinity()) {
         h.at_time(landing - precision_tol(1e-9, 1e-5) * Kokkos::abs(landing));

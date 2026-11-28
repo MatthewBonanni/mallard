@@ -7,6 +7,7 @@
 
 #include "mallard/mallard.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -22,6 +23,7 @@
 #endif
 
 #include "diagnostic_code.h"
+#include "field_units.h"
 #include "input.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
@@ -69,6 +71,75 @@ std::vector<double> broadcast(const std::vector<double> & values) {
     std::vector<double> out(bytes.size() / sizeof(double));
     if (!out.empty()) std::memcpy(out.data(), bytes.data(), bytes.size());
     return out;
+}
+
+using DeviceMemory = Kokkos::DefaultExecutionSpace::memory_space;
+constexpr bool DEVICE_IS_HOST = Kokkos::SpaceAccessibility<Kokkos::HostSpace, DeviceMemory>::accessible;
+
+constexpr ScalarType SCALAR = sizeof(rtype) == 4 ? ScalarType::float32 : ScalarType::float64;
+
+Device solver_device() {
+    if constexpr (DEVICE_IS_HOST) return Device::host;
+#if defined(KOKKOS_ENABLE_CUDA)
+    return Device::cuda;
+#elif defined(KOKKOS_ENABLE_HIP)
+    return Device::hip;
+#elif defined(KOKKOS_ENABLE_SYCL)
+    return Device::sycl;
+#else
+    return Device::host;
+#endif
+}
+
+int solver_device_id() {
+#if defined(KOKKOS_ENABLE_CUDA)
+    return Kokkos::DefaultExecutionSpace().cuda_device();
+#elif defined(KOKKOS_ENABLE_HIP)
+    return Kokkos::DefaultExecutionSpace().hip_device();
+#else
+    return 0;
+#endif
+}
+
+/** @brief The UDUNITS units of a field, as the output files give them. */
+std::string field_unit(const std::string & name) {
+    if (units::system() != units::System::SI) return "1";
+    if (name == "CENTROID") return "m";
+    if (name == "VOLUME") return N_DIM == 2 ? "m2" : "m3";
+    if (name == "GLOBAL_ID") return "1";
+    const std::optional<FieldDescription> d = field_units::find(name);
+    return d ? d->units() : std::string();
+}
+
+/** @brief A view's first n rows (all columns), in memory `device`. */
+template <typename V>
+Field view_field(const std::string & name, const V & v, uint32_t n, Device device, bool writable) {
+    Field f;
+    f.name = name;
+    f.data = const_cast<void *>(static_cast<const void *>(v.data()));
+    f.type = SCALAR;
+    f.device = device;
+    f.device_id = device == Device::host ? 0 : solver_device_id();
+    f.shape.push_back(n);
+    f.strides.push_back(static_cast<int64_t>(v.stride(0)));
+    if constexpr (V::rank() == 2) {
+        f.shape.push_back(static_cast<int64_t>(v.extent(1)));
+        f.strides.push_back(static_cast<int64_t>(v.stride(1)));
+    }
+    f.writable = writable;
+    return f;
+}
+
+/** @brief Column j of a block's field: its first element, one dimension. */
+Field column(Field block, const std::string & name, int64_t j) {
+    block.name = name;
+    block.unit = field_unit(name);
+    if (block.data) {
+        block.data = static_cast<char *>(block.data) + j * block.strides[1] * static_cast<int64_t>(sizeof(rtype));
+    }
+    block.shape.resize(1);
+    block.strides.resize(1);
+    return block;
 }
 
 } // namespace
@@ -137,10 +208,96 @@ const std::string & Case::path() const { return path_; }
 struct Solver::Impl {
     Case input;
     ::Solver solver;
+    Solver * owner = nullptr;
     bool set_up = false;
     bool ended = false;
 
+    struct Callback {
+        CallbackId id;
+        std::function<void(Solver &)> step;
+        std::function<void(Solver &, const Stage &)> stage;
+    };
+    std::vector<Callback> callbacks;
+    CallbackId next_id = 1;
+    int in_callback = 0;
+    bool stage_hooked = false;
+    const ::State * stage_state = nullptr;  // inside a per-stage callback
+
+    // Host copies, where the solver's memory is a device's, and what the caller writes into
+    StateView::host_mirror_type h_conservatives;
+    SpeciesView::host_mirror_type h_species;
+    Kokkos::View<rtype *[N_PRIMITIVE]>::host_mirror_type h_primitives;
+    Kokkos::View<rtype *[N_DIM]>::host_mirror_type h_centroid;
+    std::vector<Kokkos::View<rtype *, Kokkos::HostSpace>> h_columns;
+    std::vector<uint64_t> global_ids;
+    bool writes_pending = false, conservatives_on_host = false, species_on_host = false;
+    std::vector<std::string> written;
+
     explicit Impl(Case c) : input(std::move(c)) {}
+
+    void not_in_callback(const char * call) const {
+        if (in_callback) {
+            throw std::logic_error(std::string("mallard::Solver::") + call + " inside a callback: callbacks may read fields "
+                                   "and monitors and set the state, not step or end the run");
+        }
+    }
+
+    void install_hooks() {
+        const bool steps = std::any_of(callbacks.begin(), callbacks.end(), [](const Callback & c) { return bool(c.step); });
+        const bool stages = std::any_of(callbacks.begin(), callbacks.end(), [](const Callback & c) { return bool(c.stage); });
+        solver.set_step_hook(steps ? std::function<void()>([this] { step_callbacks(); }) : std::function<void()>());
+        if (stages == stage_hooked) return;
+        stage_hooked = stages;
+        solver.set_stage_hook(stages ? std::function<void(const ::State &, rtype, int)>(
+                                           [this](const ::State & state, rtype t, int index) {
+                                               stage_callbacks(state, t, index);
+                                           })
+                                     : std::function<void(const ::State &, rtype, int)>());
+    }
+
+    void step_callbacks() {
+        in_callback++;
+        struct Leave {
+            int & depth;
+            ~Leave() { depth--; }
+        } leave{in_callback};
+        // A callback registered or removed by another takes effect at the next step
+        const std::vector<Callback> now = callbacks;
+        for (const Callback & c : now) {
+            if (c.step) c.step(*owner);
+        }
+        commit();
+    }
+
+    void stage_callbacks(const ::State & state, rtype t, int index) {
+        in_callback++;
+        stage_state = &state;
+        struct Leave {
+            int & depth;
+            const ::State *& stage;
+            ~Leave() {
+                depth--;
+                stage = nullptr;
+            }
+        } leave{in_callback, stage_state};
+        const Stage stage{solver.get_step(), index, static_cast<double>(t)};
+        const std::vector<Callback> now = callbacks;
+        for (const Callback & c : now) {
+            if (c.stage) c.stage(*owner, stage);
+        }
+    }
+
+    void commit() {
+        if (!writes_pending) return;
+        const ::State state = solver.state();
+        if (conservatives_on_host) Kokkos::deep_copy(state.flow, h_conservatives);
+        if (species_on_host) Kokkos::deep_copy(state.species, h_species);
+        std::string what = "the caller set";
+        for (size_t i = 0; i < written.size(); i++) what += (i ? ", " : " ") + written[i];
+        solver.state_set(what);
+        writes_pending = conservatives_on_host = species_on_host = false;
+        written.clear();
+    }
 
     template <typename F>
     auto run(const char * code, F && f) {
@@ -149,6 +306,8 @@ struct Solver::Impl {
 
     void ensure_setup() {
         if (ended) throw std::logic_error("mallard::Solver: the run has ended (finish)");
+        if (set_up) return;
+        not_in_callback("setup");
         if (set_up) return;
         if (!Kokkos::is_initialized()) {
             throw std::logic_error("mallard::Solver: create a mallard::Session (MPI and Kokkos) first");
@@ -166,21 +325,35 @@ struct Solver::Impl {
     }
 
     bool advance(uint64_t until_step, rtype until_time) {
+        not_in_callback("step");
         ensure_setup();
-        run(diagnostic_code::RUN, [&] { solver.advance_run(until_step, until_time); });
+        h_columns.clear();
+        run(diagnostic_code::RUN, [&] {
+            commit();
+            solver.advance_run(until_step, until_time);
+        });
         return !solver.run_stopped();
     }
 };
 
-Solver::Solver(Case c) : impl(std::make_unique<Impl>(std::move(c))) {}
+Solver::Solver(Case c) : impl(std::make_unique<Impl>(std::move(c))) { impl->owner = this; }
 
 Solver::~Solver() = default;
-Solver::Solver(Solver &&) noexcept = default;
-Solver & Solver::operator=(Solver &&) noexcept = default;
+
+Solver::Solver(Solver && other) noexcept : impl(std::move(other.impl)) {
+    if (impl) impl->owner = this;
+}
+
+Solver & Solver::operator=(Solver && other) noexcept {
+    impl = std::move(other.impl);
+    if (impl) impl->owner = this;
+    return *this;
+}
 
 void Solver::setup() { impl->ensure_setup(); }
 
 bool Solver::step() {
+    impl->not_in_callback("step");
     impl->ensure_setup();
     if (impl->solver.run_stopped()) return false;
     return impl->advance(impl->solver.get_step() + 1, std::numeric_limits<rtype>::infinity());
@@ -192,8 +365,12 @@ bool Solver::advance_to(const double t) {
 }
 
 int Solver::finish() {
+    impl->not_in_callback("finish");
     impl->ensure_setup();
-    const int status = impl->run(diagnostic_code::RUN, [&] { return impl->solver.finish_run(); });
+    const int status = impl->run(diagnostic_code::RUN, [&] {
+        impl->commit();
+        return impl->solver.finish_run();
+    });
     impl->ended = true;
     return status;
 }
@@ -239,6 +416,226 @@ std::optional<Monitor> Solver::monitor(std::string_view name) const {
         if (m.name == name) return std::move(m);
     }
     return std::nullopt;
+}
+
+std::vector<std::string> Solver::field_names() const {
+    if (!impl->set_up) return {};
+    std::vector<std::string> names(CONSERVATIVE_NAMES.begin(), CONSERVATIVE_NAMES.end());
+    const ::Solver & s = impl->solver;
+    for (const std::string & species : s.get_species_names()) names.push_back("RHOY_" + species);
+    names.insert(names.end(), PRIMITIVE_NAMES.begin(), PRIMITIVE_NAMES.end());
+    names.insert(names.end(), {"conservatives", "species", "primitives"});
+    for (const std::string & name : s.get_statistics().variables()) {
+        if (name.rfind("MEAN_", 0) == 0 || name.rfind("COV_", 0) == 0) names.push_back(name);
+    }
+    names.insert(names.end(), {"CENTROID", "VOLUME", "GLOBAL_ID"});
+    return names;
+}
+
+namespace {
+
+/** @brief Where a field name points: a column of a block, a whole block, an average or the geometry. */
+struct FieldSource {
+    enum Kind { CONSERVATIVE, SPECIES, PRIMITIVE, AVERAGE, CENTROID, VOLUME, GLOBAL_ID, NONE } kind = NONE;
+    int column = -1;  // -1: the whole block
+};
+
+FieldSource find_field(const std::string & name, const std::vector<std::string> & species,
+                       const std::vector<std::string> & averages) {
+    for (int i = 0; i < N_CONSERVATIVE; i++) {
+        if (name == CONSERVATIVE_NAMES[size_t(i)]) return {FieldSource::CONSERVATIVE, i};
+    }
+    for (size_t k = 0; k < species.size(); k++) {
+        if (name == "RHOY_" + species[k]) return {FieldSource::SPECIES, int(k)};
+    }
+    for (int i = 0; i < N_PRIMITIVE; i++) {
+        if (name == PRIMITIVE_NAMES[size_t(i)]) return {FieldSource::PRIMITIVE, i};
+    }
+    if (name == "conservatives") return {FieldSource::CONSERVATIVE, -1};
+    if (name == "species") return {FieldSource::SPECIES, -1};
+    if (name == "primitives") return {FieldSource::PRIMITIVE, -1};
+    if (name == "CENTROID") return {FieldSource::CENTROID, -1};
+    if (name == "VOLUME") return {FieldSource::VOLUME, -1};
+    if (name == "GLOBAL_ID") return {FieldSource::GLOBAL_ID, -1};
+    if (std::find(averages.begin(), averages.end(), name) != averages.end()) return {FieldSource::AVERAGE, -1};
+    return {};
+}
+
+/** @brief host's copy of the device view v, allocated at the first call. */
+template <typename H, typename V>
+void copy_to_host(H & host, const V & v) {
+    if (host.span() != v.span()) host = Kokkos::create_mirror(Kokkos::HostSpace(), v);
+    Kokkos::deep_copy(host, v);
+}
+
+} // namespace
+
+Field Solver::field(const std::string_view name_view, const Memory memory) {
+    impl->ensure_setup();
+    Impl & m = *impl;
+    ::Solver & s = m.solver;
+    const std::string name(name_view);
+    std::vector<std::string> averages;
+    for (const std::string & a : s.get_statistics().variables()) {
+        if (a.rfind("MEAN_", 0) == 0 || a.rfind("COV_", 0) == 0) averages.push_back(a);
+    }
+    const FieldSource source = find_field(name, s.get_species_names(), averages);
+    if (source.kind == FieldSource::NONE) {
+        std::string known;
+        for (const std::string & n : field_names()) known += (known.empty() ? "" : ", ") + n;
+        throw Error(diagnostic_code::RUN, "mallard::Solver::field: no field " + name + " in this case; it has " + known + ".");
+    }
+    const uint32_t n = s.get_mesh()->n_owned();
+    const bool host_copy = memory == Memory::host && !DEVICE_IS_HOST;
+    const Device device = host_copy ? Device::host : solver_device();
+    const bool in_stage = m.stage_state != nullptr;
+    if (in_stage && (source.kind == FieldSource::PRIMITIVE || source.kind == FieldSource::AVERAGE)) {
+        throw Error(diagnostic_code::RUN, "mallard::Solver::field: " + name + " is not computed at a stage; a per-stage "
+                                          "callback reads the conservative variables, partial densities and geometry.");
+    }
+    Field block;
+    switch (source.kind) {
+        case FieldSource::CONSERVATIVE:
+        case FieldSource::SPECIES: {
+            const ::State state = in_stage ? *m.stage_state : s.boundary_state();
+            const bool flow = source.kind == FieldSource::CONSERVATIVE;
+            if (!host_copy) {
+                block = flow ? view_field(name, state.flow, n, device, false) : view_field(name, state.species, n, device, false);
+            } else if (flow) {
+                // A host copy written by the caller stays theirs until committed
+                if (!m.conservatives_on_host || in_stage) copy_to_host(m.h_conservatives, state.flow);
+                block = view_field(name, m.h_conservatives, n, device, false);
+            } else {
+                if (!m.species_on_host || in_stage) copy_to_host(m.h_species, state.species);
+                block = view_field(name, m.h_species, n, device, false);
+            }
+            break;
+        }
+        case FieldSource::PRIMITIVE:
+            s.boundary_state();
+            s.update_primitives();
+            Kokkos::fence("mallard_api_primitives");
+            if (host_copy) {
+                copy_to_host(m.h_primitives, s.primitives);
+                block = view_field(name, m.h_primitives, n, device, false);
+            } else {
+                block = view_field(name, s.primitives, n, device, false);
+            }
+            break;
+        case FieldSource::AVERAGE: {
+            const auto column_view = s.get_statistics().device_column(name).values;
+            Kokkos::View<const rtype *, Kokkos::LayoutRight, DeviceMemory, Kokkos::MemoryUnmanaged> v(
+                column_view.data(), column_view.extent(0));
+            if (column_view.stride(0) != 1) throw std::logic_error("mallard::Solver::field: a strided average");
+            if (host_copy) {
+                m.h_columns.emplace_back("mallard_api_" + name, v.extent(0));
+                Kokkos::deep_copy(m.h_columns.back(), v);
+                block = view_field(name, m.h_columns.back(), n, device, false);
+            } else {
+                block = view_field(name, v, n, device, false);
+            }
+            break;
+        }
+        case FieldSource::CENTROID:
+            if (host_copy) {
+                copy_to_host(m.h_centroid, s.get_mesh()->cell_coords);
+                block = view_field(name, m.h_centroid, n, device, false);
+            } else {
+                block = view_field(name, s.get_mesh()->cell_coords, n, device, false);
+            }
+            break;
+        case FieldSource::VOLUME:
+            if (host_copy) {
+                block = view_field(name, s.get_mesh()->h_cell_volume, n, device, false);
+            } else {
+                block = view_field(name, s.get_mesh()->cell_volume, n, device, false);
+            }
+            break;
+        case FieldSource::GLOBAL_ID: {
+            const Mesh & mesh = *s.get_mesh();
+            if (m.global_ids.size() != n) {
+                m.global_ids.resize(n);
+                for (uint32_t i = 0; i < n; i++) m.global_ids[i] = mesh.h_global_cell(i);
+            }
+            block.name = name;
+            block.data = m.global_ids.data();
+            block.type = ScalarType::uint64;
+            block.shape = {int64_t(n)};
+            block.strides = {1};
+            break;
+        }
+        case FieldSource::NONE:
+            break;
+    }
+    if (source.column >= 0) return column(block, name, source.column);
+    const bool is_block = source.kind == FieldSource::CONSERVATIVE || source.kind == FieldSource::SPECIES ||
+                          source.kind == FieldSource::PRIMITIVE;
+    if (!is_block) block.unit = field_unit(name);
+    return block;
+}
+
+Field Solver::writable_field(const std::string_view name_view, const Memory memory) {
+    impl->ensure_setup();
+    Impl & m = *impl;
+    if (m.stage_state) {
+        throw Error(diagnostic_code::RUN, "mallard::Solver::writable_field inside a per-stage callback: the state is "
+                                          "set between steps only.");
+    }
+    const std::string name(name_view);
+    const FieldSource source = find_field(name, m.solver.get_species_names(), {});
+    if (source.kind != FieldSource::CONSERVATIVE && source.kind != FieldSource::SPECIES) {
+        throw Error(diagnostic_code::RUN, "mallard::Solver::writable_field: " + name + " is not part of the state; the "
+                                          "state is the conservative variables (" + CONSERVATIVE_NAMES[0] + ", ...), "
+                                          "the partial densities (RHOY_<species>) and their blocks (conservatives, "
+                                          "species).");
+    }
+    Field f = field(name, memory);
+    f.writable = true;
+    const bool host_copy = memory == Memory::host && !DEVICE_IS_HOST;
+    if (host_copy) (source.kind == FieldSource::CONSERVATIVE ? m.conservatives_on_host : m.species_on_host) = true;
+    m.writes_pending = true;
+    if (std::find(m.written.begin(), m.written.end(), name) == m.written.end()) m.written.push_back(name);
+    return f;
+}
+
+void Solver::commit_state() {
+    impl->ensure_setup();
+    impl->run(diagnostic_code::RUN, [&] { impl->commit(); });
+}
+
+Statistics Solver::statistics() const {
+    Statistics out;
+    out.start = out.end = std::numeric_limits<double>::quiet_NaN();
+    if (!impl->set_up) return out;
+    const ::Statistics & s = impl->solver.get_statistics();
+    if (!s.means_enabled()) return out;
+    out.samples = s.samples();
+    out.start = s.average_start();
+    out.end = s.average_end();
+    out.batches = s.batches_enabled() ? s.batches() : 0;
+    return out;
+}
+
+CallbackId Solver::on_step(std::function<void(Solver &)> f) {
+    if (!f) throw std::invalid_argument("mallard::Solver::on_step: an empty function");
+    const CallbackId id = impl->next_id++;
+    impl->callbacks.push_back({id, std::move(f), {}});
+    impl->install_hooks();
+    return id;
+}
+
+CallbackId Solver::on_stage(std::function<void(Solver &, const Stage &)> f) {
+    if (!f) throw std::invalid_argument("mallard::Solver::on_stage: an empty function");
+    const CallbackId id = impl->next_id++;
+    impl->callbacks.push_back({id, {}, std::move(f)});
+    impl->install_hooks();
+    return id;
+}
+
+void Solver::remove_callback(const CallbackId id) {
+    auto & c = impl->callbacks;
+    c.erase(std::remove_if(c.begin(), c.end(), [&](const Impl::Callback & k) { return k.id == id; }), c.end());
+    impl->install_hooks();
 }
 
 } // namespace mallard

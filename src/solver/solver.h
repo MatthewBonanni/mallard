@@ -244,6 +244,27 @@ class Solver {
         bool run_stopped() const { return !stop_reason().empty(); }
 
         /**
+         * @brief Called after every step the run takes (the library API's per-step callbacks); while set, the
+         *        device queues one step at a time, as for host triggers.
+         */
+        void set_step_hook(std::function<void()> hook) { step_hook = std::move(hook); }
+
+        /**
+         * @brief Called with the stage's state and time at each stage of every step (the library API's per-stage
+         *        callbacks); while set, steps run kernel by kernel on the host, never captured.
+         */
+        void set_stage_hook(std::function<void(const State &, rtype, int)> hook);
+
+        /** @brief The state at a step boundary, with the chemistry's pending half step applied, on the device. */
+        State boundary_state();
+
+        /**
+         * @brief After the caller wrote the owned cells of the state at a step boundary: the step that follows
+         *        starts from it as from a restart, and the run log records `what` (collective).
+         */
+        void state_set(const std::string & what);
+
+        /**
          * @brief Whether run() takes requests from signals and serves the
          *        control socket (the executable does; tests drive run_control
          *        directly).
@@ -440,6 +461,8 @@ class Solver {
         [[noreturn]] void diverged();
         /** @brief One pass of the run's loop: one step taken, or one rejected under error control. */
         void advance_once();
+        /** @brief step_hook after a step, then the chemistry's pending half step as the next step needs it. */
+        void call_step_hook();
         /** @brief What a step that left the state invalid ends in: the divergence report, then its error. */
         [[noreturn]] void stop_diverged();
         /** @brief f() under the solver's communication scope, with the end record of an error it throws. */
@@ -1224,6 +1247,9 @@ class Solver {
         // advance_run's limits, which steps on the device and landing times respect
         uint64_t pause_step = std::numeric_limits<uint64_t>::max();
         rtype pause_time = std::numeric_limits<rtype>::infinity();
+        std::function<void()> step_hook;
+        std::function<void(const State &, rtype, int)> stage_hook;
+        bool host_step_next = false;  // the state was set: the next step on the host, from it
 
         // Divergence: the state at the start of the last step whose state was valid
         bool keep_last_good = true;              // [run] keep_last_good

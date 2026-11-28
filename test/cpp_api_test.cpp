@@ -28,7 +28,7 @@ namespace {
 namespace fs = std::filesystem;
 
 /** @brief A small shock tube with integrals, a region probe and a restart file at the end, its output in dir. */
-std::string case_text(const std::string & dir, const std::string & run, int interval = 1) {
+std::string case_text(const std::string & dir, const std::string & run, int interval = 1, const std::string & extra = "") {
     std::ostringstream s;
     s << "[run]\n" << run << "cfl = 0.4\n";
 #if Mallard_DIM == 2
@@ -51,28 +51,28 @@ std::string case_text(const std::string & dir, const std::string & run, int inte
       << "[integrals]\ninterval = " << interval << "\nfile = \"" << dir << "/integrals.csv\"\n"
       << "[[probes]]\nname = \"box\"\nfields = [\"RHO\", \"P\"]\nregion = " << box << "\nreductions = [\"mean\"]\ninterval = " << interval << "\n"
       << "reductions_file = \"" << dir << "/box.csv\"\n"
-      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 1000000\n";
+      << "[[write_data]]\nprefix = \"" << dir << "/restart\"\nformat = \"restart\"\ninterval = 1000000\n" << extra;
     return s.str();
 }
 
 /** @brief dir, created by rank 0, with the input of case_text written to dir/input.toml. */
-std::string write_case(const std::string & dir, const std::string & run, int interval = 1) {
+std::string write_case(const std::string & dir, const std::string & run, int interval = 1, const std::string & extra = "") {
     if (comm::is_root()) {
         fs::create_directories(dir);
-        std::ofstream(dir + "/input.toml") << case_text(dir, run, interval);
+        std::ofstream(dir + "/input.toml") << case_text(dir, run, interval, extra);
     }
     comm::barrier();
     return dir + "/input.toml";
 }
 
-/** @brief The newest restart file of dir. */
-RestartData last_restart(const std::string & dir) {
+/** @brief The newest restart file of dir: every cell, or only these global cells. */
+RestartData last_restart(const std::string & dir, const std::vector<uint64_t> * cells = nullptr) {
     std::string newest;
     for (const auto & entry : fs::directory_iterator(dir)) {
         const std::string name = entry.path().string();
         if (name.ends_with(".restart") && name > newest) newest = name;
     }
-    return read_restart(newest);
+    return read_restart(newest, cells);
 }
 
 /**
@@ -101,6 +101,41 @@ json::Value record(const std::string & dir, const std::string & type) {
         if (v["type"].string == type) found = v;
     }
     return found;
+}
+
+/** @brief Element (i, j) of a host field. */
+template <typename T = rtype>
+T at(const mallard::Field & f, int64_t i, int64_t j = 0) {
+    return static_cast<const T *>(f.data)[i * f.strides[0] + (f.shape.size() > 1 ? j * f.strides[1] : 0)];
+}
+
+/** @brief A host field's values, row by row. */
+std::vector<rtype> values(const mallard::Field & f) {
+    std::vector<rtype> out;
+    const int64_t n_columns = f.shape.size() > 1 ? f.shape[1] : 1;
+    for (int64_t i = 0; i < f.shape[0]; i++) {
+        for (int64_t j = 0; j < n_columns; j++) out.push_back(at(f, i, j));
+    }
+    return out;
+}
+
+/** @brief The global ids of this rank's owned cells. */
+std::vector<uint64_t> global_ids(mallard::Solver & solver) {
+    const mallard::Field ids = solver.field("GLOBAL_ID", mallard::Memory::host);
+    std::vector<uint64_t> out;
+    for (int64_t i = 0; i < ids.shape[0]; i++) out.push_back(at<uint64_t>(ids, i));
+    return out;
+}
+
+/** @brief The kinds of the run log's event records in dir (rank 0, which writes the log). */
+std::vector<std::string> event_kinds(const std::string & dir) {
+    std::vector<std::string> kinds;
+    std::ifstream in(dir + "/mallard.jsonl");
+    for (std::string line; std::getline(in, line);) {
+        json::Value v = json::parse(line);
+        if (v["type"].string == "event") kinds.push_back(v["kind"].string);
+    }
+    return kinds;
 }
 
 void expect_same_values(const std::vector<mallard::Monitor> & monitors, const std::vector<double> & reference) {
@@ -201,4 +236,168 @@ TEST(CppApiTest, InvalidInputsAreErrorsAsForTheExecutable) {
         EXPECT_EQ(e.code(), "E-KEY-UNUSED");
         EXPECT_NE(std::string(e.what()).find("cfll"), std::string::npos) << e.what();
     }
+}
+
+TEST(CppApiTest, FieldsViewTheSolversStateAndMatchItsRestartFile) {
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("fields", "n_steps = 4\n", 2)));
+    while (solver.step()) {
+    }
+    const mallard::Field rho = solver.field("RHO"), block = solver.field("conservatives");
+    // Views of the solver's memory: a variable is its column of the block, and every view the same memory
+    EXPECT_EQ(rho.data, block.data);
+    EXPECT_EQ(solver.field("RHO").data, rho.data);
+    EXPECT_EQ(static_cast<const char *>(solver.field("RHOE").data) - static_cast<const char *>(rho.data),
+              (N_CONSERVATIVE - 1) * block.strides[1] * static_cast<std::ptrdiff_t>(sizeof(rtype)));
+    ASSERT_EQ(block.shape.size(), 2u);
+    EXPECT_EQ(block.shape[1], N_CONSERVATIVE);
+    EXPECT_EQ(rho.shape, std::vector<int64_t>{block.shape[0]});
+    EXPECT_FALSE(rho.writable);
+    EXPECT_EQ(rho.unit, "kg m-3");
+    EXPECT_EQ(rho.type, sizeof(rtype) == 4 ? mallard::ScalarType::float32 : mallard::ScalarType::float64);
+    const mallard::Field host = solver.field("conservatives", mallard::Memory::host);
+    EXPECT_EQ(host.device, mallard::Device::host);
+    // CPU builds: the host's view is the solver's memory, not a copy
+    if (block.device == mallard::Device::host) {
+        EXPECT_EQ(host.data, block.data);
+    }
+
+    const std::vector<rtype> state = values(host);
+    const mallard::Field P = solver.field("P", mallard::Memory::host);
+    EXPECT_EQ(P.unit, "kg m-1 s-2");
+    for (int64_t i = 0; i < host.shape[0]; i++) {
+        double kinetic = 0.0;
+        for (int d = 0; d < Mallard_DIM; d++) kinetic += 0.5 * std::pow(double(at(host, i, 1 + d)), 2) / double(at(host, i));
+        const double p = 0.4 * (double(at(host, i, N_CONSERVATIVE - 1)) - kinetic);
+        EXPECT_NEAR(double(at(P, i)), p, (sizeof(rtype) == 4 ? 1e-5 : 1e-12) * p) << "cell " << i;
+    }
+    const mallard::Field volume = solver.field("VOLUME", mallard::Memory::host);
+    double total = 0.0;
+    for (int64_t i = 0; i < volume.shape[0]; i++) total += double(at(volume, i));
+    EXPECT_NEAR(comm::allreduce(total, comm::Op::SUM), 1.0, 1e-5);
+    EXPECT_EQ(solver.field("CENTROID").shape[1], Mallard_DIM);
+    const std::vector<uint64_t> ids = global_ids(solver);
+    try {
+        solver.field("RHOO");
+        ADD_FAILURE() << "no error";
+    } catch (const mallard::Error & e) {
+        EXPECT_NE(std::string(e.what()).find("RHOE"), std::string::npos) << e.what();
+    }
+    EXPECT_EQ(solver.finish(), 0);
+
+    const RestartData restart = last_restart("fields", &ids);
+    ASSERT_EQ(restart.fields[0].size(), ids.size());
+    for (size_t v = 0; v < N_CONSERVATIVE; v++) {
+        const std::vector<rtype> & expected = *restart.find(CONSERVATIVE_NAMES[v]);
+        for (size_t i = 0; i < ids.size(); i++) EXPECT_EQ(state[i * N_CONSERVATIVE + v], expected[i]) << CONSERVATIVE_NAMES[v];
+    }
+}
+
+TEST(CppApiTest, AStateSetBetweenStepsIsWhereTheNextStepStartsFrom) {
+    // Steps 4-6 of one run, taken by another from the state the first reached at step 3 (time does not enter
+    // this case): the state set is taken as is, as from a restart
+    mallard::Solver first(mallard::Case::from_toml_file(write_case("first", "n_steps = 6\n", 5)));
+    for (int i = 0; i < 3; i++) first.step();
+    const std::vector<rtype> at_3 = values(first.field("conservatives", mallard::Memory::host));
+
+    mallard::Solver second(mallard::Case::from_toml_file(write_case("second", "n_steps = 3\n", 5)));
+    second.setup();
+    const mallard::Field state = second.writable_field("conservatives", mallard::Memory::host);
+    EXPECT_TRUE(state.writable);
+    for (int64_t i = 0; i < state.shape[0]; i++) {
+        for (int64_t j = 0; j < N_CONSERVATIVE; j++) {
+            static_cast<rtype *>(state.data)[i * state.strides[0] + j * state.strides[1]] =
+                at_3[size_t(i * N_CONSERVATIVE + j)];
+        }
+    }
+    // Writes to the solver's memory are seen by its views before they are committed
+    if (state.device == second.field("RHO").device) {
+        EXPECT_EQ(second.field("RHO").data, state.data);
+    }
+    while (second.step()) {
+    }
+    while (first.step()) {
+    }
+    EXPECT_EQ(values(second.field("conservatives", mallard::Memory::host)),
+              values(first.field("conservatives", mallard::Memory::host)));
+    second.finish();
+    first.finish();
+    if (comm::is_root()) {
+        const std::vector<std::string> kinds = event_kinds("second");
+        EXPECT_EQ(std::count(kinds.begin(), kinds.end(), "state_set"), 1);
+    }
+}
+
+TEST(CppApiTest, PerStepCallbacksSeeEveryStepAndLeaveTheRunBitForBit) {
+    const std::vector<double> reference = executable_run(write_case("executable", "n_steps = 12\n", 5));
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("api", "n_steps = 12\n", 5)));
+    std::vector<uint64_t> steps;
+    solver.on_step([&](mallard::Solver & s) {
+        steps.push_back(s.step_count());
+        s.field("P");
+        EXPECT_THROW(s.step(), std::logic_error);
+    });
+    EXPECT_FALSE(solver.advance_to(1.0));
+    std::vector<uint64_t> expected(12);
+    for (uint64_t i = 0; i < 12; i++) expected[i] = i + 1;
+    EXPECT_EQ(steps, expected);
+    expect_same_values(solver.monitors(), reference);
+    EXPECT_EQ(solver.finish(), 0);
+    const RestartData a = last_restart("executable"), b = last_restart("api");
+    EXPECT_EQ(b.fields, a.fields);
+}
+
+TEST(CppApiTest, PerStageCallbacksSeeEachStageOfTheTimeIntegrator) {
+    const std::vector<double> reference = executable_run(write_case("executable", "n_steps = 6\n", 5));
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("api", "n_steps = 6\n", 5)));
+    solver.setup();
+    const std::vector<rtype> initial = values(solver.field("RHO", mallard::Memory::host));
+    std::vector<mallard::Stage> stages;
+    std::vector<rtype> first_stage;
+    const mallard::CallbackId id = solver.on_stage([&](mallard::Solver & s, const mallard::Stage & stage) {
+        stages.push_back(stage);
+        if (stages.size() == 1) first_stage = values(s.field("RHO", mallard::Memory::host));
+        EXPECT_THROW(s.field("P"), mallard::Error);
+        EXPECT_THROW(s.writable_field("RHO"), mallard::Error);
+    });
+    for (int i = 0; i < 3; i++) solver.step();
+    // SSPRK3: stages at t_n, t_n + dt and t_n + dt / 2
+    ASSERT_EQ(stages.size(), 9u);
+    for (size_t k = 0; k < stages.size(); k++) {
+        EXPECT_EQ(stages[k].index, int(k % 3));
+        EXPECT_EQ(stages[k].step, k / 3);
+    }
+    EXPECT_EQ(stages[0].time, 0.0);
+    EXPECT_EQ(stages[3].time, stages[1].time);
+    EXPECT_EQ(stages[2].time, 0.5 * stages[1].time);
+    EXPECT_EQ(first_stage, initial);
+    // Then the device queue again
+    solver.remove_callback(id);
+    while (solver.step()) {
+    }
+    EXPECT_EQ(stages.size(), 9u);
+    expect_same_values(solver.monitors(), reference);
+    EXPECT_EQ(solver.finish(), 0);
+    const RestartData a = last_restart("executable"), b = last_restart("api");
+    EXPECT_EQ(b.fields, a.fields);
+}
+
+TEST(CppApiTest, StatisticsAveragesAreFieldsAsTheRestartFileHasThem) {
+    const std::string statistics = "[statistics]\nfields = [\"RHO\", \"P\"]\nproducts = [\"RHO*P\"]\ninterval = 1\n";
+    mallard::Solver solver(mallard::Case::from_toml_file(write_case("statistics", "n_steps = 4\n", 5, statistics)));
+    EXPECT_TRUE(std::isnan(solver.statistics().start));
+    while (solver.step()) {
+    }
+    const std::vector<std::string> names = solver.field_names();
+    EXPECT_NE(std::find(names.begin(), names.end(), "COV_RHO_P"), names.end());
+    const mallard::Statistics s = solver.statistics();
+    EXPECT_EQ(s.samples, 4u);
+    EXPECT_EQ(s.end, solver.time());
+    const mallard::Field mean = solver.field("MEAN_RHO", mallard::Memory::host);
+    EXPECT_EQ(mean.unit, "kg m-3");
+    const std::vector<rtype> means = values(mean), covariances = values(solver.field("COV_RHO_P", mallard::Memory::host));
+    const std::vector<uint64_t> ids = global_ids(solver);
+    EXPECT_EQ(solver.finish(), 0);
+    const RestartData restart = last_restart("statistics", &ids);
+    EXPECT_EQ(means, *restart.find("MEAN_RHO"));
+    EXPECT_EQ(covariances, *restart.find("COV_RHO_P"));
 }
