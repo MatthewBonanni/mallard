@@ -715,7 +715,7 @@ class Solver {
          */
         void update_reaction_sensor();
         /** @brief sensor = "reaction": the mixture fraction's streams and the sensor species of [les.combustion]. */
-        void init_reaction_sensor(const Input & combustion);
+        void read_reaction_sensor(const Input & combustion);
         /** @brief PaSR: the reacting fraction kappa of every owned cell (chem_time_scale), once per step in calc_dt. */
         void update_partially_stirred_reactor();
         /**
@@ -983,8 +983,8 @@ class Solver {
     protected:
         /**
          * @brief The input phase of the setup, before the mesh is read: reads [run], [physics] (and the
-         *        mechanism), [mesh], [parallel], [[periodic]], [[boundaries]] and [numerics], and decides
-         *        from them.
+         *        mechanism), [mesh], [parallel], [[periodic]], [[boundaries]], [numerics] and [les], and
+         *        decides from them.
          *        The mesh phase that follows applies the decisions.
          */
         void read_input();
@@ -1311,6 +1311,7 @@ class Solver {
         void init_axisymmetric_weights();
         /** @brief Axisymmetric runs: the r-weighted flux points of the curved faces (flux_normals, h_weights). */
         void revolve_curved_flux_points(const Kokkos::View<rtype **, Kokkos::HostSpace> & h_weights);
+        void read_les();
         void init_les();
         /** @brief Exchange points of the modeled walls (after the boundary data). */
         void init_wall_model(const std::vector<int32_t> & face_bc, const std::vector<BoundaryCondition> & bcs);
