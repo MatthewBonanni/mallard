@@ -1,0 +1,103 @@
+# For the key catalog only (tools/dev/input_catalog.py): solid particles with
+# injectors giving every key of [[particles.injectors]] and of each size
+# distribution.
+
+[run]
+n_steps = 1
+dt = 1e-3
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+p = 1.0
+T = 1.0
+u = [0.0, 0.0]
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+mu = 0.01
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "solid"
+density = 1000.0
+specific_heat = 1.0
+temperature = 1.0
+seed = 7
+capacity = 1000
+
+[[particles.injectors]]
+name = "nozzle"
+point = [0.5, 0.5]
+rate = 1000.0
+start = 0.0
+end = 1.0
+velocity = [0.1, 0.0]
+diameter = 0.01
+weight = 2.0
+temperature = 1.2
+
+[[particles.injectors]]
+name = "wall"
+region = "left"
+mass_flow = 1e-3
+speed = 0.1
+direction = [1.0, 0.2]
+cone_angle = 10.0
+diameter = {distribution = "rosin_rammler", size = 0.01, spread = 3.0, basis = "mass", min = 0.002, max = 0.05}
+
+[[particles.injectors]]
+name = "cloud"
+region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "log_normal", median = 0.01, sigma = 0.5, basis = "number"}
+
+[[particles.injectors]]
+name = "jet"
+point = [0.2, 0.5]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "nukiyama_tanasawa", size = 0.01, spread = 1.0, exponent = 2.0, basis = "number"}
+
+[[particles.injectors]]
+name = "even"
+point = [0.8, 0.5]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "uniform", min = 0.005, max = 0.02, basis = "number"}
+
+[[particles.injectors]]
+name = "measured"
+point = [0.5, 0.2]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "table", diameters = [0.005, 0.01, 0.02], pdf = [0.0, 1.0, 0.0], basis = "number"}

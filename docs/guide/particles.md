@@ -12,8 +12,10 @@ statistics of the particles in a region. With
 [two-way coupling](#two-way-coupling) solid particles act on the gas,
 [evaporating droplets](#evaporating-droplets) give it their vapor, and
 [dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
-Injection during the run and particle output beyond the final positions follow
-in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+[Injectors](#injectors) seed particles during the run, at nozzles, on inlets or
+in regions, with size distributions. Sprays and particle output beyond the
+final positions follow in later releases
+([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 - [Which particles?](#which-particles)
 - [Tracers](#tracers-particles), [seeding](#seeding), [restarts](#restarts) and [boundaries](#boundaries)
@@ -109,13 +111,14 @@ bitwise the same on any number of ranks.
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
 | `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
-| `capacity` | the number of particles | Particles a rank can hold |
+| `capacity` | the number of particles, and those the [injectors](#injectors) emit over the run | Particles a rank can hold |
 
 ### Seeding
 
-Every particle is seeded at the start of the run, from `points`, a
-`lattice`, or both. Ids follow the seeds: the `points` first, in order, then
-the lattice with `x` varying fastest. A seed outside the mesh is an error,
+Seeds enter at the start of the run, from `points`, a `lattice`, or both,
+and [injected](#injectors) particles during it. Ids follow the seeds: the
+`points` first, in order, then the lattice with `x` varying fastest, then the
+injected particles in the order they entered. A seed outside the mesh is an error,
 naming the point; a seed on a face between two cells goes to the one with the
 lowest global id, so every rank count seeds the same particles in the same
 cells.
@@ -645,6 +648,167 @@ the coupling deposits them (over `deposition_width`):
 | `PARTICLE_SOURCE_<A>` | What the particles give the gas per volume and time at the written state, for `<A>` each conservative variable (`RHO`, `RHOU_X`, ..., `RHOE`); with `coupling = "two-way"` |
 
 They are written by `[[write_data]]` and listed by `mallard list fields`.
+
+## Injectors
+
+```toml
+[particles]
+type = "solid"
+density = 800.0
+weight = 1e3                  # droplets per parcel
+
+[[particles.injectors]]
+name = "spray"
+point = [0.0, 0.05]           # the nozzle
+rate = 2e5                    # parcels per second
+speed = 30.0                  # m/s
+direction = [1.0, 0.0]
+cone_angle = 12.0             # half angle, degrees
+start = 0.0
+end = 5e-3
+diameter = {distribution = "rosin_rammler", size = 40e-6, spread = 3.0, basis = "mass", min = 5e-6, max = 150e-6}
+
+[[particles.injectors]]
+name = "dust"
+region = "inlet"              # a boundary zone: along its inward normal
+mass_flow = 1e-4              # kg/s
+speed = 5.0
+diameter = 10e-6
+```
+
+Each `[[particles.injectors]]` seeds particles during the run, after every
+step: `rate` parcels per second (or `mass_flow`, from the mean mass of a
+particle of its size distribution and `weight`) for the part of the step
+between `start` and `end`, carrying fractions of a parcel over to the next
+step so that over the run the count matches the rate. Where:
+
+- `point`: every particle at a nozzle;
+- `region` a boundary zone (or several, `{type = "zones", ...}`): uniformly
+  over the zone's faces, by area, with the velocity along the inward normal
+  unless `direction` is given;
+- `region` a filled region of shapes (a sphere, a box, their booleans) or of
+  the mesh (`"domain"`, a cell zone), inline or by name: uniformly in its
+  volume.
+
+Solid particles leave with `velocity`, or `speed` along `direction`, spread
+uniformly over a cone of half angle `cone_angle` about it (in angle in 2D, in
+solid angle in 3D). `diameter` is a diameter or a size distribution, and
+`weight` and `temperature` default to those of `[particles]`. Tracers take
+none of these: they move with the gas.
+
+![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-light.svg#gh-light-mode-only)
+![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-dark.svg#gh-dark-mode-only)
+
+*Each panel a Mallard run of solid particles of 100 µm into air at rest.
+Left: `region = "inner"`, the inner circle of an annulus, with `speed = 5.0`
+and no `direction`: particles enter uniformly along the circle and move along
+its inward normal (arrows), radially out, after 6 ms. Middle: a filled region,
+the union of a disk and a tilted rectangle, with `velocity = [0.0, 0.0]`:
+particles fill it uniformly in area, whatever cells (gray) it cuts. Right: two
+`point` injectors with `speed = 10.0` along x, after 5 ms: `cone_angle = 15`
+spreads the directions uniformly within ±15° (dotted), `cone_angle = 0`
+sends every particle along `direction`.*
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | Its name: letters, digits and `_` |
+| `point`, `region` | one of them | Where it injects |
+| `rate`, `mass_flow` | one of them | Parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
+| `start`, `end` | 0, never | When it injects |
+| `velocity`, `speed` | one of them (solid particles) | The particles' velocity, or their speed along `direction` |
+| `direction` | the inward normal of a zone | Direction of the velocity with `speed` |
+| `cone_angle` | 0 | Half angle of the cone of velocities, degrees |
+| `diameter` | `[particles] diameter` | A diameter or a size distribution |
+| `weight` | `[particles] weight` | Particles per parcel |
+| `temperature` | `[particles] temperature` | With heat transfer |
+
+![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-light.svg#gh-light-mode-only)
+![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-dark.svg#gh-dark-mode-only)
+
+*Two injectors in one Mallard run of fixed `dt = 1e-3`. Left: `rate = 700`
+is 0.7 parcels per step, so steps inject 0 or 1 parcel (dots), and the
+fraction left over (bottom) is carried to the next step: the count is always
+rate × time injecting minus that fraction, below one parcel. `start = 3.5e-3`
+and `end = 26.5e-3` fall within steps, which inject for the part of the step
+inside the window; after `end` the count stays at 16 of 16.1. Right:
+`mass_flow` with diameters uniform in [20, 40] µm sets a rate of 20 parcels
+per step from the mean mass of a particle; the mass injected follows
+mass_flow × t to within the randomness of the diameters (98.6% after 30
+steps).*
+
+**Size distributions.** `diameter = {distribution = ..., basis = ...}` with:
+
+| `distribution` | Parameters | PDF or CDF |
+|---|---|---|
+| `"rosin_rammler"` | `size` X, `spread` q | 1 - F(d) = exp(-(d/X)^q) |
+| `"log_normal"` | `median`, `sigma` | ln d normal, of standard deviation `sigma` |
+| `"nukiyama_tanasawa"` | `size` X, `spread` q, `exponent` p | f(d) ~ d^p exp(-(d/X)^q) |
+| `"uniform"` | `min`, `max` | f(d) constant |
+| `"table"` | `diameters`, `pdf` | f(d) linear between the points |
+
+`basis` is required: `"number"` makes it the distribution of the particles' diameters;
+`"mass"` that of their mass (Rosin–Rammler fits of sprays usually are),
+whose particles are then mostly the small ones, f by number being f by mass
+over d^3. `min` and `max` clip it, by default at the 1e-9 and 1 - 1e-9
+quantiles in its basis; a distribution by mass whose number of small
+particles diverges (Rosin–Rammler with `spread` below 3) needs a `min`. The
+setup log shows each injector's mean diameter D10 and Sauter mean diameter
+D32.
+
+![The diameters drawn from each of the five size distributions against its density, by number and by mass](../images/guide/particle_size_distributions-light.svg#gh-light-mode-only)
+![The diameters drawn from each of the five size distributions against its density, by number and by mass](../images/guide/particle_size_distributions-dark.svg#gh-dark-mode-only)
+
+*20000 diameters drawn by Mallard from each distribution (histograms)
+against its density (lines), by number (blue) and by mass (orange), both
+normalized. The solid line is the density the input gives, in its `basis`; the
+dashed one follows from it, f by mass being f by number times d³. The same
+parameters by mass put most particles at small diameters (`rosin_rammler`,
+`table`); by number, most of the mass is in the few large particles
+(`uniform` by number is far from uniform by mass). Parameters: `rosin_rammler`
+`size = 40e-6`, `spread = 3.0`, `min = 5e-6`, `max = 100e-6`; `log_normal`
+`median = 20e-6`, `sigma = 0.5`; `nukiyama_tanasawa` `size = 8e-6`,
+`spread = 1.0`, `exponent = 2.0`; `uniform` `min = 10e-6`, `max = 50e-6`;
+`table` `diameters = [10e-6, 30e-6, 60e-6, 90e-6]`, `pdf = [0.0, 1.0, 1.0, 0.0]`.*
+
+![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-light.svg#gh-light-mode-only)
+![A spray from a point injector with a 12° cone into air at rest, its parcels colored by diameter, and the diameters it drew against the Rosin-Rammler distribution by number and by mass](../images/guide/particle_injection-dark.svg#gh-dark-mode-only)
+
+*A point injector (`rate = 1e6`, `speed = 30.0`, `cone_angle = 12.0`) of
+droplets of density 800 kg/m³ into air at rest, after 4 ms (a Mallard run).
+Left: the parcels within the cone, the small ones stopped by drag near the
+nozzle and the large ones carried farthest. Right: the 4000 diameters drawn
+from `{distribution = "rosin_rammler", size = 40e-6, spread = 3.0, basis = "mass", min = 5e-6, max = 150e-6}`
+against its density by mass and by number (`f / d³`), in `ln d`: by mass the
+distribution peaks near `size`, by number the particles are mostly the small
+ones.*
+
+**Reproducibility.** Each injected particle draws its place, direction and
+diameter from random numbers keyed by `[particles] seed`, its injector and its
+count within the injector, not from a sequence: the same particles enter on
+any number of ranks, with step graphs or without, and a restarted run
+continues the injection exactly (restart files carry each injector's count and
+fraction of a parcel). Changing the time step changes when particles enter,
+not what they are.
+
+**Capacity.** By default every rank has slots for every particle the run can
+inject: the seeds and what the injectors emit up to `[run] t_stop` (or
+`n_steps` steps of a fixed `dt`). Without either, an injector with no `end`
+needs `capacity`. For long runs whose particles leave the domain, set
+`capacity` to the most that are in it at once: a run that runs out of slots
+stops, naming it. `mallard check` reports each injector (where, along what,
+its rate, mass flow and parcels over the run) in its JSON
+(`particle_injectors`).
+
+**Pitfalls.**
+
+- Particles enter at the end of a step, at the point or face where they are
+  drawn, all together: a step's particles have the same age. At large rates
+  per step, streams come in bunches a step's travel apart.
+- A filled region's particles are placed in the cells it covers by their
+  volume fractions, which sample its edge: in cells it cuts, the density is
+  as exact as the fractions. A shape that barely touches a cell (less than about
+  a thousandth of it) may put that cell's few particles at one point of it.
+- Injectors do not take the gas's velocity or temperature: give them.
 
 ## Per-particle quantities
 

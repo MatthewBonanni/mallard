@@ -36,6 +36,7 @@ import limiters
 import mesh_fields
 import particle_coupling
 import particle_evaporation
+import particle_injection
 import particles
 import post_flame
 import probes
@@ -77,6 +78,7 @@ def main():
     limiters.figures()
     particle_coupling.figures(args.mallard)
     particle_evaporation.figures(args.mallard)
+    particle_injection.figures(args.mallard)
     particles.figures(args.mallard)
     post_flame.figures()
     scaling.figures()

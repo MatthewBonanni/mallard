@@ -49,6 +49,7 @@
   "examples/viscous_shock_tube/input.toml",
   "examples/vortex_ring_3d/coarse.toml",
   "examples/vortex_ring_3d/input.toml",
+  "tools/dev/catalog_inputs/2d/particle_injectors.toml",
   "tools/dev/catalog_inputs/2d/sector.toml",
   "tools/dev/catalog_inputs/2d/solid_particles.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml",

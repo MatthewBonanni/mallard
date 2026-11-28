@@ -421,6 +421,8 @@ void Solver::device_step_body() {
         step_queue::end_step(in, L, record);
         if (L.advanced) s(T) = record.t_end;
     });
+    // At the time the step reached: nothing after a rejected step
+    if (particles) particles->inject(step_time_device());
     const uint32_t * const advanced = &step_loop.data()->advanced;
     run_health.ledger.end_step(step_scalars.data() + STEP_DT, advanced);
     if (reacting) {

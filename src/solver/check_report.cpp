@@ -877,6 +877,31 @@ std::string check_json(const CheckReport & r) {
                                                            : "null")
                   .str();
           }));
+    o.raw("particle_injectors", array_json(r.injectors, [](const CheckInjector & j) {
+              const auto triple = [](const std::array<double, 3> & x) {
+                  return "[" + json::number(x[0]) + ", " + json::number(x[1]) + ", " + json::number(x[2]) + "]";
+              };
+              const auto finite = [](const double x) { return std::isfinite(x) ? json::number(x) : std::string("null"); };
+              return json::Object()
+                  .add("name", j.name)
+                  .add("site", j.site)
+                  .add("where", j.where)
+                  .raw("center", triple(j.center))
+                  .raw("box", "[" + triple(j.box[0]) + ", " + triple(j.box[1]) + "]")
+                  .add("measure", j.measure)
+                  .raw("direction", j.along_normal ? "\"inward_normal\"" : triple(j.direction))
+                  .add("speed", j.speed)
+                  .add("cone_angle", j.cone_angle)
+                  .add("rate", j.rate)
+                  .raw("mass_flow", finite(j.mass_flow))
+                  .add("start", j.start)
+                  .raw("end", finite(j.end))
+                  .add("weight", j.weight)
+                  .raw("mean_diameter", finite(j.mean_diameter))
+                  .raw("sauter_diameter", finite(j.sauter_diameter))
+                  .raw("parcels", finite(j.parcels))
+                  .str();
+          }));
     o.raw("case_view", r.view_file.empty() ? "null" : json::quote(r.view_file));
     o.raw("case_view_images", array_json(r.view_images, [](const std::string & f) { return json::quote(f); }));
     o.add("geometry_only", r.geometry_only);

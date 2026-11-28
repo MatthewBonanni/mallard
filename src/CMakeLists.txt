@@ -149,6 +149,7 @@ add_library(MallardCore STATIC
     parallel/lock_arrays.cpp
     parallel/partition.cpp
     particles/particle_coupling.cpp
+    particles/particle_injection.cpp
     particles/particle_probes.cpp
     particles/particle_quantities.cpp
     particles/particles.cpp

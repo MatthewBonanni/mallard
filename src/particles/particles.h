@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -31,6 +32,7 @@
 #include "particle_coupling.h"
 #include "particle_evaporation.h"
 #include "particle_forces.h"
+#include "particle_injection.h"
 #include "particle_probes.h"
 #include "particle_quantities.h"
 #include "periodic_maps.h"
@@ -166,8 +168,9 @@ struct Walker {
 /**
  * @brief A particle as output reports it: its id, position, velocity (solid
  *        particles and droplets, else 0), temperature (with heat transfer and
- *        for droplets, else NaN), diameter (NaN for tracers), mass (droplets,
- *        else NaN) and quantities.
+ *        for droplets, else NaN), diameter (NaN for tracers), particles per
+ *        parcel (solid particles and droplets, else NaN), mass (droplets, else
+ *        NaN) and quantities.
  */
 struct Record {
     uint64_t id;
@@ -175,6 +178,7 @@ struct Record {
     std::array<double, N_DIM> v;
     double T;
     double d;
+    double w;
     double m;
     std::vector<double> q;
 };
@@ -223,11 +227,14 @@ class Particles {
          * @param gas The single gas (the temperature at a particle, the drag on solid particles), or null for a mixture.
          * @param mixture The gas mixture, or null for a single gas.
          * @param gas_scalars Per cell its mass fractions, then other columns (mixtures; the gas at droplets).
+         * @param t_begin The run's start time, and t_end the latest it can stop (infinite if unknown): the
+         *        default capacity holds every particle the injectors emit in between.
          */
         void init(const Input & input, std::shared_ptr<const Mesh> mesh, const BoundaryData & boundaries,
                   const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
                   const Euler * gas, const MixtureModel * mixture = nullptr,
-                  Kokkos::View<rtype **, Kokkos::LayoutRight> gas_scalars = {});
+                  Kokkos::View<rtype **, Kokkos::LayoutRight> gas_scalars = {}, double t_begin = 0.0,
+                  double t_end = std::numeric_limits<double>::infinity());
 
         /** @brief The values of the particle block of a State: width() per slot. */
         size_t n_values() const { return size_t(capacity) * width; }
@@ -370,6 +377,26 @@ class Particles {
          */
         void relocate();
 
+        /** @brief Whether [[particles.injectors]] seed particles during the run. */
+        bool injects() const { return !injectors.empty(); }
+
+        /** @brief The injectors emit from time t on (the first call only: the run's start). */
+        void start_injection(double t) { injectors.start(t); }
+
+        /**
+         * @brief After an accepted step, add the particles the injectors emitted up to time t_now, into the
+         *        cells of this rank that hold them (particles::Injectors). On the device only: the device-time
+         *        overload is capturable in a step graph.
+         */
+        void inject(rtype t_now);
+        void inject(const rtype * t_now);
+
+        /** @brief Throw if injected particles found no free slot on some rank (collective). */
+        void check_capacity() const;
+
+        /** @brief The injectors, as mallard check reports them. */
+        const std::vector<particles::InjectorInfo> & injector_info() const { return injectors.info(); }
+
         /** @brief Send the particles that moved into halo cells to their owners (collective). */
         void migrate();
 
@@ -420,8 +447,14 @@ class Particles {
         /** @brief The velocity of the particle in slot values y (from the velocity on) into v, on the host. */
         void host_velocity(const rtype * y, rtype * v) const;
 
-        /** @brief The values a restart file or migration carries per particle after its id and cell: block, then aux. */
-        uint32_t persistent() const { return width + quantities.n_aux(); }
+        /**
+         * @brief The values a restart file or migration carries per particle after its id and cell: block, aux, then
+         *        the properties (diameter and weight of solid particles and droplets).
+         */
+        uint32_t persistent() const { return width + quantities.n_aux() + n_props; }
+
+        /** @brief Where inject() puts new particles. */
+        particles::InjectionTarget injection_target() const;
 
         /** @brief Read [[particles.walls]] into the face actions and restitution coefficients. */
         void read_walls(const Input & table, Kokkos::View<uint8_t *>::host_mirror_type & action);
@@ -447,6 +480,9 @@ class Particles {
         particles::Deposition deposition;
         particles::Quantities quantities;
         particles::ParticleProbes probes;
+        particles::Injectors injectors;
+        uint32_t n_props = 0;
+        rtype default_diameter = 0.0_r;
         uint64_t n_seeded = 0;
         uint64_t n_restored = 0;
         bool distributed = false;
@@ -454,6 +490,8 @@ class Particles {
 
         ParticleView x;                     // (width slot + k): position, velocity (solid), temperature (heated), integrated quantities
         Kokkos::View<rtype **, Kokkos::LayoutRight> aux;  // (slot, k): extrema, first times
+        Kokkos::View<rtype **, Kokkos::LayoutRight> props;  // (slot, k): diameter, particles per parcel (solid)
+        Kokkos::View<rtype *> initial_aux;  // (k): aux of a new particle
         Kokkos::View<uint64_t *> id;        // (slot), EMPTY if free
         Kokkos::View<uint32_t *> cell;      // (slot): local cell at the start of the step
         Kokkos::View<uint64_t[4]> n_removed;  // left the domain, lost, stuck, evaporated
@@ -472,6 +510,7 @@ class Particles {
         Kokkos::View<uint32_t *>::host_mirror_type h_cell;
         ParticleView::host_mirror_type h_x;
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_aux;
+        Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_props;
         Kokkos::View<uint64_t[4]>::host_mirror_type h_removed;
 
         // Migration (host)

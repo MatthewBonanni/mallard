@@ -1,0 +1,35 @@
+{
+ "dims": [
+  2
+ ],
+ "required": true,
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/particle_injectors.toml"
+ ],
+ "type": "string",
+ "values": [
+  "annulus",
+  "boundary",
+  "circle",
+  "cone",
+  "cylinder",
+  "difference",
+  "disk",
+  "ellipse",
+  "ellipsoid",
+  "frustum",
+  "half_space",
+  "implicit",
+  "interior",
+  "intersection",
+  "isosurface",
+  "obj",
+  "polygon",
+  "rectangle",
+  "sphere",
+  "stl",
+  "torus",
+  "union",
+  "where"
+ ]
+}

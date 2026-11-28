@@ -120,6 +120,26 @@ struct CheckRegion {
     std::array<std::array<double, 3>, 2> box{};
 };
 
+/** @brief A particle injector: where, along what and how much it injects, for drawing it and its cost. */
+struct CheckInjector {
+    std::string name;
+    std::string site;   // "point", "zone" or "region"
+    std::string where;  // the point, zones or region as given
+    std::array<double, 3> center{};  // the point, or the centroid of the faces or volume
+    std::array<std::array<double, 3>, 2> box{};
+    double measure = 0.0;      // area of the faces (2D: length), volume of the region (2D: area); 0 for a point
+    bool along_normal = false;  // directed along the zones' inward normal, else along direction
+    std::array<double, 3> direction{};
+    double speed = 0.0;
+    double cone_angle = 0.0;   // half angle, degrees
+    double rate = 0.0;         // parcels per second
+    double mass_flow = std::numeric_limits<double>::quiet_NaN();  // solid particles
+    double start = 0.0, end = std::numeric_limits<double>::infinity();
+    double weight = 1.0;
+    double mean_diameter = std::numeric_limits<double>::quiet_NaN(), sauter_diameter = std::numeric_limits<double>::quiet_NaN();
+    double parcels = std::numeric_limits<double>::quiet_NaN();  // emitted over the run (NaN without t_stop or end)
+};
+
 /** @brief An estimate of the resolution: its value and units, what it rests on, and its target if it has one. */
 struct CheckEstimate {
     std::string id;        // stable: "y_plus_max"
@@ -186,6 +206,7 @@ struct CheckReport {
     std::vector<CheckUnassigned> unassigned;
     std::vector<CheckPeriodic> periodic;
     std::vector<CheckRegion> regions;
+    std::vector<CheckInjector> injectors;
     std::vector<double> face_y_plus;  // per local face: first-cell y+ of wall faces, NaN elsewhere (the view's walls)
     std::string initial_file;  // the initial state written, or empty
     std::string view_file;     // the case view's ParaView file written, or empty

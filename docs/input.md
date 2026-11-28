@@ -1575,8 +1575,8 @@ keys.
 
 | Key | Description |
 |---|---|
-| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas; `"droplet"`: solid particles of the liquid of `[particles.liquid]` that evaporate into a viscous gas mixture ([Evaporating droplets](guide/particles.md#evaporating-droplets)). Required |
-| `diameter` | Sphere diameter (`"solid"`), initial diameter (`"droplet"`). Required for solid particles and droplets |
+| `type` | `"tracer"`: massless particles moving with the gas velocity of the reconstruction polynomial at their position; `"solid"`: spheres that drag, gravity and the other `forces` accelerate ([Solid particles](guide/particles.md#solid-particles)), for a viscous single gas. Required |
+| `diameter` | Sphere diameter (`"solid"`): of the seeded particles, and of injected ones by default; initial diameter (`"droplet"`). Required for droplets, and for solid particles with seeds or with an injector that gives none |
 | `density` | Material density (`"solid"`; a droplet's is the liquid's). Required for solid particles |
 | `drag` | `"stokes"`, `"schiller_naumann"` or `"singh"` (`"solid"`; [drag laws](guide/particles.md#drag-laws)), default `"schiller_naumann"` |
 | `gravity` | Gravity on the particles (`"solid"`), default `[source] gravity`, else none |
@@ -1591,7 +1591,8 @@ keys.
 | `deposition_width` | Standard deviation of the Gaussian that the coupling sources and dispersed-phase fields spread over (`"solid"`, `"droplet"`), default 0 (each particle's own cell) |
 | `points` | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D), default none |
 | `file` | CSV file of the particles at the end of the run (`id`, `x`, `y`, `z`, the velocity `v_x`, `v_y`, `v_z` of solid particles, their temperature `T_p` with heat transfer, a droplet's temperature `T_P`, diameter `D_P` and mass `M_P`, then the quantities, by id), default none |
-| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) |
+| `capacity` | Particles each rank can hold, default the number seeded (or restored from the restart file) plus those the injectors emit up to `[run] t_stop` (or `n_steps` times a fixed `dt`) |
+| `seed` | Seed of the injectors' random numbers, default 0 |
 
 ### `[particles.liquid]`
 
@@ -1619,6 +1620,37 @@ Seeds on a lattice, after the `points` in id order (`x` varying fastest).
 |---|---|
 | `lo`, `hi` | Opposite corners. Required |
 | `n` | Points per direction (one: the middle of `lo` and `hi`). Required |
+
+### `[[particles.injectors]]`
+
+Particles seeded during the run, at a point, on boundary zones or in a filled
+region ([Injectors](guide/particles.md#injectors)), at most 8. Give exactly one
+of `point` and `region`, and of `rate` and `mass_flow`; solid particles also
+exactly one of `velocity` and `speed`.
+
+| Key | Description |
+|---|---|
+| `name` | Its name: letters, digits and `_`, unique. Required |
+| `point` | Where a nozzle injects, `[x, y]` (`[x, y, z]` in 3D) |
+| `region` | Boundary zones (a zone name, injecting uniformly over their faces by area), or a filled region of shapes or of the mesh that does not move (uniformly in its volume), inline or a name |
+| `rate` | Parcels per second |
+| `mass_flow` | Mass per second (`"solid"`; per meter of depth in 2D): `rate` is `mass_flow / (weight m)`, `m` the mean particle mass of `diameter` |
+| `start`, `end` | Times it injects between, default 0 and for ever |
+| `velocity` | Velocity of the particles (`"solid"`) |
+| `speed` | Their speed (`"solid"`), along `direction` |
+| `direction` | Direction of their velocity with `speed`, default the inward normal on boundary zones (required elsewhere) |
+| `cone_angle` | Half angle in degrees, in [0, 90], of the cone about the direction the velocities fill (uniformly in angle in 2D, in solid angle in 3D), default 0 |
+| `diameter` | A diameter, or a size distribution `{distribution, basis, ...}` (`"solid"`), default `[particles] diameter` |
+| `weight` | Particles per parcel (`"solid"`), default `[particles] weight` |
+| `temperature` | Temperature of the particles (`"solid"` with `specific_heat`), default `[particles] temperature` |
+
+A size distribution is a table of:
+
+| Distribution key | Description |
+|---|---|
+| `distribution` | `"rosin_rammler"` (`size` X, `spread` q: 1 - F = exp(-(d/X)^q)), `"log_normal"` (`median`, `sigma` of ln d), `"nukiyama_tanasawa"` (`size` X, `spread` q, `exponent` p: f ~ d^p exp(-(d/X)^q)), `"uniform"` (`min`, `max`) or `"table"` (`diameters` and `pdf`, linear between them). Required |
+| `basis` | `"number"` (the PDF of the particles' diameters) or `"mass"` (of their mass). Required |
+| `min`, `max` | Diameters it is clipped to, default the 1e-9 and 1 - 1e-9 quantiles of the distribution in its basis (the support of `"uniform"` and `"table"`) |
 
 ### `[[particles.walls]]`
 
