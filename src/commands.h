@@ -56,6 +56,8 @@ int list_keys_main(const cli::Args & args);
 json::Value general_key_catalog();
 
 /** @brief `mallard list templates`: the case templates of mallard new. */
+/** @brief mallard list models [INPUT]: the gas models and the keys that select each, and the one INPUT chooses. */
+int list_models_main(const cli::Args & args);
 int list_templates_main(const cli::Args & args);
 
 /** @brief `mallard diff A B`: how two solutions differ, field by field. */

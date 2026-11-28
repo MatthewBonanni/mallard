@@ -1,0 +1,1 @@
+- `mallard list models [INPUT] [--format json]` lists the gas models (perfect gas, frozen mixture, finite-rate chemistry, flamelet table) with the keys each sets, requires and removes, and marks the one an input chooses, for front ends that offer the choice ([Gas models](docs/guide/thermochemistry.md#gas-models))

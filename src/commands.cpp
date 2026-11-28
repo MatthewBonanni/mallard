@@ -563,6 +563,7 @@ std::string capabilities_json() {
                                  .raw("run_control", control)
                                  .raw("convergence", entry(interfaces::CONVERGENCE))
                                  .raw("pack", entry(interfaces::PACK))
+                                 .raw("gas_models", entry(interfaces::GAS_MODELS))
                                  .str();
     return json::Object()
         .add("schema", interfaces::CAPABILITIES.name)
@@ -912,6 +913,27 @@ constexpr Command COMMANDS[] = {
                        "2  usage error, or a section with no key",
         .dim = Case::input_file,
         .run = list_keys_main,
+    },
+    {
+        .name = "list models",
+        .group = "Inspect",
+        .summary = "The gas models a case chooses between, and the keys that select each",
+        .synopsis = "mallard list models [INPUT] [--format text|json]",
+        .description =
+            "Lists the gas models: perfect gas, frozen mixture, finite-rate chemistry and flamelet table (FPV), each "
+            "with the keys it sets (and their values), the keys it requires and the keys and tables it does not "
+            "read, which switching a case to it removes. With an input file, reads its keys (not its mesh or "
+            "mechanism) and marks the model it chooses. --format json gives the same as one object (schema "
+            "mallard-gas-models, version 1), for front ends that offer the choice.",
+        .options = LIST_OPTIONS,
+        .arguments = OPTIONAL_INPUT,
+        .examples = "$ mallard list models\n"
+                    "$ mallard list models flame.toml --format json",
+        .exit_status = "0  listed\n"
+                       "1  the input cannot be read (the error is printed)\n"
+                       "2  usage error",
+        .dim = Case::input_file,
+        .run = list_models_main,
     },
     {
         .name = "list templates",

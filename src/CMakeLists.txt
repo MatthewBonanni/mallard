@@ -75,6 +75,7 @@ add_library(MallardCore STATIC
     numerics/step_control.cpp
     numerics/stencils.cpp
     physics/flamelet.cpp
+    physics/gas_models.cpp
     physics/mixture.cpp
     physics/les.cpp
     physics/pasr.cpp

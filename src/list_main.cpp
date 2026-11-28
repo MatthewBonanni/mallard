@@ -1,6 +1,6 @@
 /**
  * @file list_main.cpp
- * @brief mallard list fields|species|keys|templates: the catalogs, in general or for one case.
+ * @brief mallard list fields|species|keys|models|templates: the catalogs, in general or for one case.
  *
  * @copyright Copyright (c) 2026 Matthew Bonanni
  */
@@ -24,6 +24,7 @@
 #include "commands.h"
 #include "diagnostic_code.h"
 #include "field_units.h"
+#include "gas_models.h"
 #include "input.h"
 #include "interfaces.h"
 #include "json.h"
@@ -297,6 +298,64 @@ int list_species_main(const cli::Args & args) {
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < c.species.size(); i++) rows.push_back({std::to_string(i), c.species[i]});
     logging::table({"#", "species"}, rows);
+    return 0;
+}
+
+int list_models_main(const cli::Args & args) {
+    if (const int e = format_error(args, "list models")) return e;
+    const std::string input_file = args.positional.empty() ? "" : args.positional[0];
+    std::string current;
+    if (!input_file.empty()) {
+        try {
+            current = gas_models::of(parse_input(input_file));
+        } catch (const std::exception & e) {
+            logging::error(diagnostic_code::LIST, std::string("mallard list models: ") + e.what());
+            return 1;
+        }
+    }
+    const std::vector<gas_models::GasModel> & models = gas_models::all();
+    if (json_format(args)) {
+        const auto strings = [](const std::vector<std::string> & v) { return json_array(v, json::quote); };
+        std::cout << json::Object()
+                         .add("schema", interfaces::GAS_MODELS.name)
+                         .add("version", interfaces::GAS_MODELS.version)
+                         .raw("input", input_file.empty() ? "null" : json::quote(input_file))
+                         .raw("current", current.empty() ? "null" : json::quote(current))
+                         .raw("models", json_array(models,
+                                                   [&](const gas_models::GasModel & m) {
+                                                       json::Object sets;
+                                                       for (const auto & [k, v] : m.sets) sets.add(k, v);
+                                                       return json::Object()
+                                                           .add("name", m.name)
+                                                           .add("title", m.title)
+                                                           .add("description", m.description)
+                                                           .add("docs", m.docs)
+                                                           .raw("sets", sets.str())
+                                                           .raw("requires", strings(m.requires_keys))
+                                                           .raw("removes", strings(m.removes))
+                                                           .str();
+                                                   }))
+                         .str()
+                  << "\n";
+        return 0;
+    }
+    std::vector<std::vector<std::string>> rows;
+    const auto joined = [](const std::vector<std::string> & v) {
+        std::string out;
+        for (const std::string & s : v) out += (out.empty() ? "" : ", ") + s;
+        return out.empty() ? std::string("-") : out;
+    };
+    for (const gas_models::GasModel & m : models) {
+        std::string sets;
+        for (const auto & [k, v] : m.sets) sets += (sets.empty() ? "" : ", ") + k + " = " + v;
+        rows.push_back({m.name == current ? m.name + " *" : m.name, m.title, sets, joined(m.requires_keys),
+                        joined(m.removes)});
+    }
+    logging::section(input_file.empty() ? "Gas models" : input_file + ": gas models", logging::count(rows.size(), "model"));
+    logging::table({"model", "", "sets", "requires", "removes"}, rows);
+    std::cout << (current.empty() ? std::string(input_file.empty() ? "" : "\nIts keys match no model.\n")
+                                  : "\n* the model " + input_file + " chooses.\n")
+              << "To switch a case, set the model's keys, give those it requires and remove those it does not read.\n";
     return 0;
 }
 

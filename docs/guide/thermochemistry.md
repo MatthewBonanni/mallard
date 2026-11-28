@@ -5,6 +5,23 @@ thermally perfect thermodynamics, mixture-averaged (or simpler) transport,
 finite-rate chemistry and optically thin radiation. All of it is in double
 precision in every build, on CPUs and GPUs.
 
+## Gas models
+
+A case chooses one of four gas models with the keys below; `mallard list models` lists them (with
+`--format json`, schema `mallard-gas-models`, for front ends that offer the choice), and
+`mallard list models input.toml` marks the one a case chooses.
+
+| Model | Sets | Requires | Removes |
+|---|---|---|---|
+| `perfect`: perfect gas | `physics.gas = "perfect"` | | `physics.mechanism`, `physics.table`, `[chemistry]`, `[radiation]` |
+| `frozen`: frozen mixture | `physics.gas = "mixture"` | `physics.mechanism` | `physics.table`, `physics.units`, `[chemistry]` |
+| `finite_rate`: finite-rate chemistry | `physics.gas = "mixture"`, `chemistry.enabled = true` | `physics.mechanism` | `physics.table`, `physics.units` |
+| `flamelet`: flamelet table (FPV) | `physics.gas = "flamelet"` | `physics.table` | `physics.mechanism`, `physics.units`, `[chemistry]`, `[radiation]` |
+
+A mixture with `chemistry.enabled = false` is frozen too. Switching a case's model this way leaves the rest of its
+input as it is: keys only the old model reads (a perfect gas's `gamma`, a mixture's compositions) are then unused,
+and `mallard check` lists them.
+
 ## Gas mixtures
 
 ```toml
