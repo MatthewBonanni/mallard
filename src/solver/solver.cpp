@@ -794,6 +794,7 @@ void Solver::allocate_point_gradients() {
         Kokkos::View<rtype **[2][N_CONSERVATIVE]>("point_gradients", mesh->n_state_faces(), n_slots);
     teno.point_gradients.R = physics.R;
     teno.point_gradients.gamma = physics.gamma;
+    teno.init_wall_fits();
 }
 
 void Solver::init_physics() {

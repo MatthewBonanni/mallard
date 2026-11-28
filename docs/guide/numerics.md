@@ -368,9 +368,33 @@ between two cells TENO finds smooth takes the gradients of the two cells'
 TENO polynomials at its quadrature points instead. That is order `order - 1`
 for the face gradients: 3 for TENO4, 4 for TENO5, 5 for TENO6.
 
+Walls and symmetry planes take polynomial gradients too:
+
+- **Walls.** TENO's stencils near a wall hold mirror images of cells, whose
+  velocity (and, at isothermal walls, temperature) is reflected oddly about
+  the wall's value. That reflection is smooth only where the second normal
+  derivatives vanish, so the polynomials of those cells give first-order
+  gradients. For the viscous flux, every cell whose stencil mirrors cells
+  across a wall takes a one-sided least-squares fit instead: its stencil's
+  own cells, plus the wall velocity (and isothermal temperature) at the
+  quadrature points of the walls it mirrored across. On the wall faces the
+  fit's gradients, with the jump from its values to the wall's as on interior
+  faces, give the shear stress and the heat flux; adiabatic and heat-flux
+  walls keep their prescribed heat flux.
+- **First cell layer.** On quadrilaterals and hexahedra, the first layer of
+  cells at a wall sees one cell layer too few without the mirror images, so
+  its fit of the density drops a degree. Velocity gradients and isothermal
+  walls' temperature gradients keep their order; next to adiabatic and
+  heat-flux walls the temperature gradients there lose one.
+- **Corners.** Cells whose stencils mirror across walls of different
+  conditions keep their TENO polynomial, and their wall faces least squares.
+- **Symmetry planes** take the cell's polynomial, whose mirror images are
+  exact for a symmetric flow, and keep the normal stress only.
+- Inflow, outflow and transmissive faces keep least squares.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials (TENO4 or higher, single gas, planar runs) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials, and at walls from one-sided fits (TENO4 or higher, single gas, planar runs) |
 
 Two convergence studies on periodic boxes of every cell type
 (`tools/docs/viscous_gradients.py`) compare the two paths against their design
@@ -407,8 +431,9 @@ grows with resolution.
 
 Cost: TENO's smooth pass evaluates each smooth cell's polynomial gradients
 at its face points while it holds the coefficients, and keeps those of u and
-T for the stage, per face side: 5.3 KB per cell for TENO5 on hexahedra (9
-points per face), 2.7 KB on tetrahedra (7), 0.6 KB on quadrilaterals. The
+T for the stage, per face side, with their values (for the wall fits): 7.0 KB
+per cell for TENO5 on hexahedra (9 points per face), 3.7 KB on tetrahedra (7),
+0.9 KB on quadrilaterals. The
 halo sides of partition faces come from their owners with the face states.
 A step of the 3D Taylor-Green vortex on an A100 (96^3 hexahedra, 48^3 x 6
 tetrahedra) takes, against least squares:
@@ -430,10 +455,10 @@ Pitfalls:
   `reconstruction`. Viscous-dominated runs (fine near-wall cells, low Reynolds
   numbers) take up to half the time step; convection-dominated runs are
   unaffected.
-- **Troubled cells and boundaries.** Faces next to a cell where TENO selects
-  stencils, or whose polynomial is negative in density or pressure at a face
-  point, and boundary faces (walls among them), keep the least-squares
-  gradients. Near walls and shocks the flux is then second order, as before.
+- **Troubled cells.** Faces next to a cell where TENO selects stencils, or
+  whose polynomial is negative in density or pressure at a face point, keep
+  the least-squares gradients, as do the walls and boundaries listed above.
+  Near shocks the flux is then second order, as before.
 - **Not yet available** for gas mixtures (species diffusion), axisymmetric
   runs, LES, the hybrid convective flux, curved meshes and rotational
   periodicity, where Mallard reports an error. Probes of the diffusive fluxes

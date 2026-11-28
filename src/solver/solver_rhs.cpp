@@ -321,7 +321,7 @@ void Solver::calc_rhs(State state, State rhs_state, rtype t_stage, rtype c) {
 void Solver::set_polynomial_flux(ViscousFluxFunctor & functor) const {
     const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
     functor.point_gradients = teno.point_gradients;
-    functor.face_solution = face_solution;
+    functor.fitted_walls = teno.fitted_walls;
     functor.quad_weights = teno.quadrature_face.weights;
     functor.face_weights = flux_weights;
     functor.quad_normals = teno.face_quad_normals;

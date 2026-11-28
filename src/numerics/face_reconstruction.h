@@ -618,6 +618,15 @@ class TENO : public FaceReconstruction {
         // polynomials of the cells it finds smooth at their face points, and marks the sides of the troubled
         // cells and of those whose face values fall back to the cell mean (inadmissible at a face point)
         FacePointGradients point_gradients;
+        // With point_gradients: the wall fits that replace the central polynomials' point gradients and values
+        // of the cells whose stencils mirror cells across a wall, and (face) 1 on the wall faces of their cells
+        teno::WallFits wall_fits;
+        Kokkos::View<uint8_t *> fitted_walls;
+        /**
+         * @brief Sets up wall_fits and fitted_walls for the cells reconstructed every step, once
+         *        point_gradients (and its R and gamma) is set.
+         */
+        void init_wall_fits();
 
         // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)

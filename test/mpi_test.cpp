@@ -262,6 +262,19 @@ TEST(MPITest, TENOOnQuadsMatchesSerial) {
                                         "type = \"symmetry\"\n", "type = \"outlet_extrapolation\"\n"), 20));
 }
 
+TEST(MPITest, ReconstructionGradientsAtWallsAndSymmetryPlanesMatchSerial) {
+    // Wall fits read cells of the stencil that may be halo cells, and walls and symmetry planes take the
+    // polynomial gradients of their cells
+    for (const std::string mesh : {"cartesian", "cartesian_tri"}) {
+        std::string input = box_input(mesh, "type = \"TENO\"\norder = 5\n", NS,
+                                      bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
+                                          "type = \"wall_adiabatic\"\nu = [0.2, 0.0]\n",
+                                          "type = \"wall_isothermal\"\nT = 1.2\n"), 10);
+        input.insert(input.find("[numerics]\n") + 11, "viscous_gradients = \"reconstruction\"\n");
+        expect_matches_serial(input);
+    }
+}
+
 TEST(MPITest, TENOOnTrianglesMatchesSerial) {
     expect_matches_serial(box_input("cartesian_tri", "type = \"TENO\"\norder = 4\n", EULER,
                                     bcs("type = \"outlet_extrapolation\"\n", "type = \"symmetry\"\n",
