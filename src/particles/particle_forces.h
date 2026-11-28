@@ -154,6 +154,7 @@ struct Solid {
     bool added_mass = false;
     bool lift = false;
     rtype specific_heat = 0.0;  // 0: no heat transfer
+    bool energy_state = false;  // with heat transfer: the block holds e = c_p T_p + |v|^2 / 2 in place of T_p
     Euler gas;
 
     /**
@@ -165,6 +166,48 @@ struct Solid {
                             T = 3 * N_DIM + 3, TAU_T = 3 * N_DIM + 4 };
 
     KOKKOS_INLINE_FUNCTION bool heated() const { return specific_heat > 0.0_r; }
+
+    /**
+     * @brief The temperature of a heated particle whose block values from its velocity on are y: y[N_DIM]
+     *        itself, or with energy_state (c_p T_p + |v|^2 / 2) of it.
+     */
+    KOKKOS_INLINE_FUNCTION rtype temperature(const rtype * y) const {
+        if (!energy_state) return y[N_DIM];
+        rtype v2 = 0.0_r;
+        FOR_I_DIM v2 += y[i] * y[i];
+        return (y[N_DIM] - 0.5_r * v2) / specific_heat;
+    }
+
+    /** @brief The block value after the velocity v of a heated particle at temperature Tp (inverse of temperature()). */
+    KOKKOS_INLINE_FUNCTION rtype thermal_value(const rtype * v, const rtype Tp) const {
+        if (!energy_state) return Tp;
+        rtype v2 = 0.0_r;
+        FOR_I_DIM v2 += v[i] * v[i];
+        return specific_heat * Tp + 0.5_r * v2;
+    }
+
+    /** @brief The mass of one particle. */
+    KOKKOS_INLINE_FUNCTION rtype mass() const {
+        return density * Kokkos::numbers::pi_v<rtype> / 6.0_r * diameter * diameter * diameter;
+    }
+
+    /**
+     * @brief What a particle with block values y from its velocity on, and stage rates rate (of rates()),
+     *        gives the gas per unit time: mass, momentum and total energy, out[0, N_CONSERVATIVE). The gas
+     *        receives the opposite of the particle's change less gravity's: -m (dv/dt - g) and -m (de/dt - g . v),
+     *        e = c_p T_p + |v|^2 / 2 (energy_state; without heat transfer only the kinetic part).
+     */
+    KOKKOS_INLINE_FUNCTION void exchange(const rtype * y, const rtype * rate, rtype * out) const {
+        const rtype m = mass();
+        rtype work = 0.0_r, gravity_work = 0.0_r;
+        out[0] = 0.0_r;
+        FOR_I_DIM {
+            out[1 + i] = -m * (rate[N_DIM + i] - gravity[i]);
+            work += y[i] * rate[N_DIM + i];
+            gravity_work += y[i] * gravity[i];
+        }
+        out[N_DIM + 1] = -m * ((heated() ? rate[2 * N_DIM] : work) - gravity_work);
+    }
 
     /** @brief Whether the forces read the gradients of the gas state. */
     KOKKOS_INLINE_FUNCTION bool reads_gradients() const { return pressure_gradient || added_mass || lift; }
@@ -185,9 +228,33 @@ struct Solid {
      *        dW_k/dx_d), which only the forces of reads_gradients() read.
      */
     KOKKOS_INLINE_FUNCTION Response response(const rtype * W, const rtype * G, const rtype * v, const rtype Tp) const {
-        const rtype rho = W[0], p = W[N_DIM + 1];
-        const rtype T_gas = p / (rho * gas.R);
+        const rtype T_gas = W[N_DIM + 1] / (W[0] * gas.R);
         const rtype mu = gas.viscosity(T_gas);
+        Response r = motion(W, G, v, Tp, T_gas, mu, gas.gamma, diameter);
+        r.tau_T = 0.0_r;
+        if (heated()) {
+            const rtype Re = reynolds(W, v, mu, diameter);
+            const rtype Nu = 2.0_r + 0.6_r * Kokkos::sqrt(Re) * Kokkos::cbrt(gas.Pr);
+            r.tau_T = density * specific_heat * diameter * diameter / (6.0_r * gas.conductivity(mu) * Nu);
+        }
+        return r;
+    }
+
+    /** @brief The slip Reynolds number rho |u - v| d / mu of a sphere of diameter d at velocity v in gas W. */
+    KOKKOS_INLINE_FUNCTION static rtype reynolds(const rtype * W, const rtype * v, const rtype mu, const rtype d) {
+        rtype slip2 = 0.0_r;
+        FOR_I_DIM slip2 += (W[1 + i] - v[i]) * (W[1 + i] - v[i]);
+        return W[0] * Kokkos::sqrt(slip2) * d / mu;
+    }
+
+    /**
+     * @brief The relaxation time of the velocity and the acceleration by the other forces (tau_T unset) of a
+     *        sphere of diameter d, at velocity v and temperature Tp, in gas W of temperature T_gas, viscosity
+     *        mu and heat capacity ratio gamma, with gradients G.
+     */
+    KOKKOS_INLINE_FUNCTION Response motion(const rtype * W, const rtype * G, const rtype * v, const rtype Tp,
+                                           const rtype T_gas, const rtype mu, const rtype gamma, const rtype d) const {
+        const rtype rho = W[0], p = W[N_DIM + 1];
         const rtype pi = Kokkos::numbers::pi_v<rtype>;
         rtype slip[N_DIM], slip2 = 0.0_r;
         FOR_I_DIM {
@@ -195,19 +262,20 @@ struct Solid {
             slip2 += slip[i] * slip[i];
         }
         const rtype speed = Kokkos::sqrt(slip2);
-        const rtype Re = rho * speed * diameter / mu;
+        const rtype Re = rho * speed * d / mu;
         rtype f;
         if (drag == Drag::SINGH) {
-            const rtype c = Kokkos::sqrt(gas.gamma * p / rho);
-            const rtype Kn = mu / (rho * c * diameter) * Kokkos::sqrt(0.5_r * pi * gas.gamma);
-            f = singh_drag_factor(Re, speed / c, Kn, Tp / T_gas, gas.gamma);
+            const rtype c = Kokkos::sqrt(gamma * p / rho);
+            const rtype Kn = mu / (rho * c * d) * Kokkos::sqrt(0.5_r * pi * gamma);
+            f = singh_drag_factor(Re, speed / c, Kn, Tp / T_gas, gamma);
         } else {
             f = drag_factor(drag, Re);
         }
         const rtype C_A = added_mass ? 0.5_r : 0.0_r;
         const rtype mass = density + C_A * rho;  // per volume, with the added mass
         Response r;
-        r.tau = mass * diameter * diameter / (18.0_r * mu * f);
+        r.tau = mass * d * d / (18.0_r * mu * f);
+        r.tau_T = 0.0_r;
         // Per volume: gravity, buoyancy or the pressure gradient, the fluid acceleration of the added mass, lift
         rtype force[N_DIM];
         FOR_I_DIM {
@@ -217,7 +285,7 @@ struct Solid {
         }
         if (lift) {
             // Saffman: F / V_p = 1.615 (6 / (pi d)) sqrt(rho mu / |w|) (u - v) x w
-            const auto du = [&](const int i, const int d) { return G[(1 + i) * N_DIM + d]; };
+            const auto du = [&](const int i, const int k) { return G[(1 + i) * N_DIM + k]; };
             rtype w[3] = {0.0_r, 0.0_r, du(1, 0) - du(0, 1)};
             if constexpr (N_DIM == 3) {
                 w[0] = du(2, 1) - du(1, 2);
@@ -225,25 +293,20 @@ struct Solid {
             }
             const rtype w_norm = Kokkos::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
             if (w_norm > 0.0_r) {
-                const rtype k = 1.615_r * 6.0_r / (pi * diameter) * Kokkos::sqrt(rho * mu / w_norm);
+                const rtype k = 1.615_r * 6.0_r / (pi * d) * Kokkos::sqrt(rho * mu / w_norm);
                 const rtype s[3] = {slip[0], slip[1], N_DIM == 3 ? slip[N_DIM - 1] : 0.0_r};
                 const rtype cross[3] = {s[1] * w[2] - s[2] * w[1], s[2] * w[0] - s[0] * w[2], s[0] * w[1] - s[1] * w[0]};
                 FOR_I_DIM force[i] += k * cross[i];
             }
         }
         FOR_I_DIM r.a[i] = force[i] / mass;
-        r.tau_T = 0.0_r;
-        if (heated()) {
-            const rtype Nu = 2.0_r + 0.6_r * Kokkos::sqrt(Re) * Kokkos::cbrt(gas.Pr);
-            r.tau_T = density * specific_heat * diameter * diameter / (6.0_r * gas.conductivity(mu) * Nu);
-        }
         return r;
     }
 
     /**
      * @brief The rates of a stage: dx/dt into rate[0, N_DIM), dv/dt into
-     *        rate[N_DIM, 2 N_DIM) and with heat transfer dT_p/dt into
-     *        rate[2 N_DIM], of a particle whose velocity (then temperature) is
+     *        rate[N_DIM, 2 N_DIM) and with heat transfer dT_p/dt (with
+     *        energy_state de/dt = c_p dT_p/dt + v . dv/dt) into rate[2 N_DIM], of a particle whose velocity (then temperature) is
      *        y, in gas W with gradients G, for a step dt. The first stage of a
      *        step (its start) writes start (n_start() values), which every
      *        stage reads: the relaxation times there decide which relaxations
@@ -252,7 +315,7 @@ struct Solid {
     KOKKOS_INLINE_FUNCTION void rates(const rtype * W, const rtype * G, const rtype * y, const rtype dt, const bool first,
                                       rtype * start, rtype * rate) const {
         const rtype T_gas = W[N_DIM + 1] / (W[0] * gas.R);
-        const rtype Tp = heated() ? y[N_DIM] : T_gas;
+        const rtype Tp = heated() ? temperature(y) : T_gas;
         const Response r = response(W, G, y, Tp);
         const rtype * u = W + 1;
         if (first) {
@@ -291,6 +354,11 @@ struct Solid {
                 rate[2 * N_DIM] = (e.decay * (start[T] - start[TP]) + e.forcing * (T_gas - start[T])) / dt;
             } else {
                 rate[2 * N_DIM] = (T_gas - Tp) / r.tau_T;
+            }
+            if (energy_state) {
+                rtype power = 0.0_r;
+                FOR_I_DIM power += y[i] * rate[N_DIM + i];
+                rate[2 * N_DIM] = specific_heat * rate[2 * N_DIM] + power;
             }
         }
     }

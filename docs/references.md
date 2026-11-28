@@ -349,7 +349,17 @@ The numerical methods Mallard implements and the reference data it is validated 
 - <a id="saffman-1965"></a>P. G. Saffman, The lift on a small sphere in a slow shear flow, *J. Fluid Mech.* 22, 385–400 (1965). [doi:10.1017/S0022112065000824](https://doi.org/10.1017/S0022112065000824)
   Used in: the `"saffman_lift"` force of solid particles.
 - <a id="ranz-marshall-1952"></a>W. E. Ranz and W. R. Marshall, Evaporation from drops, *Chem. Eng. Prog.* 48, 141–146 and 173–180 (1952).
-  Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`).
+  Used in: the Nusselt number of the heat transfer of solid particles (`specific_heat` in `[particles]`), and the Sherwood and Nusselt numbers of evaporating droplets.
+- <a id="abramzon-sirignano-1989"></a>B. Abramzon and W. A. Sirignano, Droplet vaporization model for spray combustion calculations, *Int. J. Heat Mass Transfer* 32, 1605–1618 (1989). [doi:10.1016/0017-9310(89)90043-4](https://doi.org/10.1016/0017-9310(89)90043-4)
+  Used in: `evaporation = "abramzon_sirignano"` of droplets: the film correction F(B), the heat transfer number B_T and the 1/3 rule (`src/particles/particle_evaporation.h`).
+- <a id="spalding-1953"></a>D. B. Spalding, The combustion of liquid fuels, *Proc. Combust. Inst.* 4, 847–864 (1953). [doi:10.1016/S0082-0784(53)80110-4](https://doi.org/10.1016/S0082-0784(53)80110-4)
+  Used in: the mass transfer number B_M and the d^2 law of `evaporation = "d2_law"`.
+- <a id="bell-2014"></a>I. H. Bell, J. Wronski, S. Quoilin and V. Lemort, Pure and pseudo-pure fluid thermophysical property evaluation and the open-source thermophysical property library CoolProp, *Ind. Eng. Chem. Res.* 53, 2498–2508 (2014). [doi:10.1021/ie4033999](https://doi.org/10.1021/ie4033999)
+  Used in: the tables of the named liquids of droplets (`fluid` in `[particles.liquid]`, `src/particles/liquid_coolprop.cpp`), from CoolProp's equations of state and transport and surface tension correlations, whose sources the [guide's table](guide/particles.md#named-liquids) lists.
+- <a id="miller-harstad-bellan-1998"></a>R. S. Miller, K. Harstad and J. Bellan, Evaluation of equilibrium and non-equilibrium evaporation models for many-droplet gas-liquid flow simulations, *Int. J. Multiphase Flow* 24, 1025–1055 (1998). [doi:10.1016/S0301-9322(98)00028-7](https://doi.org/10.1016/S0301-9322(98)00028-7)
+  Used in: the comparison of the equilibrium d^2 law and Abramzon-Sirignano models behind the droplets' default.
+- <a id="capecelatro-desjardins-2013"></a>J. Capecelatro and O. Desjardins, An Euler–Lagrange strategy for simulating particle-laden flows, *J. Comput. Phys.* 238, 1–31 (2013). [doi:10.1016/j.jcp.2012.12.015](https://doi.org/10.1016/j.jcp.2012.12.015)
+  Used in: the deposition of two-way coupling sources and dispersed-phase fields as a deposit spread by diffusion over a width in physical units (`deposition_width` in `[particles]`, `src/particles/particle_coupling.cpp`).
 - <a id="maxey-1987"></a>M. R. Maxey, The gravitational settling of aerosol particles in homogeneous turbulence and random flow fields, *J. Fluid Mech.* 174, 441–465 (1987). [doi:10.1017/S0022112087000193](https://doi.org/10.1017/S0022112087000193)
 - <a id="ferry-balachandar-2001"></a>J. Ferry and S. Balachandar, A fast Eulerian method for disperse two-phase flow, *Int. J. Multiphase Flow* 27, 1199–1226 (2001). [doi:10.1016/S0301-9322(00)00069-0](https://doi.org/10.1016/S0301-9322%2800%2900069-0)
   Used in (these two): the expansion of a small particle's velocity in its relaxation time, whose first term is the equilibrium velocity toward which particles faster than the step relax.

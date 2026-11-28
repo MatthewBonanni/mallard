@@ -307,6 +307,152 @@ Restart files carry the velocities as `PARTICLE_V`, the temperatures as
 `PARTICLE_T` and three removal counts (older files with two are read with zero
 deposited).
 
+## Two-way coupling (#758)
+
+With `coupling = "two-way"` the gas receives, per particle and stage, the
+opposite of the particle's momentum and energy change less gravity's work on
+it, times `weight` (`Solid::exchange`):
+
+    S_rhou = -w m (dv/dt - g),   S_rhoE = -w m (de/dt - g . v),   e = c_p T_p + |v|^2 / 2
+
+from the very stage rates the integrator advances the particle with (explicit
+or exponential). Every integrator updates gas and particles by the same linear
+combinations of stage rates, so whatever the gas loses the particles gain, to
+round-off, at every stage and step, rejected steps included.
+
+**Energy state.** Integrating T_p and charging the gas m (c_p dT_p/dt + v .
+dv/dt) would conserve energy only to the integrator's order: the particle's
+kinetic energy |v|^2 / 2 is quadratic in the integrated v, and no linear
+combination of stages reproduces it exactly. With heat transfer, two-way
+coupled particles therefore integrate e = c_p T_p + |v|^2 / 2 in place of T_p,
+with rate c_p dT_p/dt + v . dv/dt, and read T_p = (e - |v|^2 / 2) / c_p. The
+truncation error of the kinetic energy then shows in T_p (of order
+(dv)^2 / c_p, far below the temperature changes of heat transfer) instead of in
+the total. Without heat transfer there is nowhere to put it, and the kinetic
+energy is conserved to the integrator's order. One-way runs keep T_p, whose
+exponential integration is exact for linear forcing. Restart files carry e as
+`PARTICLE_E` beside `PARTICLE_T`, so restarts are bitwise.
+
+**Deposition** (`particles::Deposition`) runs after the particle rates of a
+stage, before the rates are divided into the gas's. Four plain kernels:
+
+- per slot, an atomic count of the particles in its cell;
+- per cell, the start of its slots (a prefix sum of the counts);
+- per slot, its place among its cell's slots (an atomic increment, so in any
+  order);
+- per owned cell, each term summed over its slots exactly in integer limbs and
+  rounded once (`exact_sums.h`).
+
+Each cell's sum is thus the exact sum rounded to the nearest double, whatever
+the slot order, which differs between rank counts and migrations: no sort, no
+global reduction, nothing on the host. The start cell is always owned, so
+deposits never land in a halo.
+
+**Width.** A source in one cell is a point source of the mesh's size: refining
+concentrates it, and coupled results do not converge. Following Capecelatro and
+Desjardins (2013), the deposit is spread by diffusion: width^2 / 2 of unit
+diffusivity is a Gaussian of standard deviation `width` in the continuum limit,
+whatever the cells. It is integrated by explicit steps of the face-flux
+Laplacian q_c += dtau sum_f (A_f / d_f)(s_n - s_c), s = q / V, d_f the
+distance between the centroids along the face normal, with dtau at most half
+the inverse of the largest sum_f A_f / (d_f V) (positive weights). A face moves
+exactly the opposite amount out of each of its cells (`a - b == -(b - a)` in
+floating point, and the weight is computed by the same expression on both
+sides), so the sums are conserved to round-off; walls and other boundaries
+have no flux. Each cell adds its faces in the order of its neighbors' global
+ids, and halo values come from their owners (`HaloExchange`) before each step,
+so the spread is bitwise independent of the rank count. On one rank the halo
+exchange is a no-op and the steps are plain kernels, captured in the step
+graph.
+
+**First moments.** Spreading from the cell centers forgets where in its cell a
+particle is: an error of half a cell in the kernel's center, first order in h.
+With a width, the cells also sum each value's first moment about their
+centers, m = sum q (x_p - x_c) (N_DIM more fixed-point columns per value), and
+before spreading move each sum by minus the divergence of the moment density
+mu = m / V, face averaged, in flux form: q_c -= sum_f (mu_c + mu_n) / 2 . n_f
+A_f. That gives the deposit the particles' first moments, and the spread
+converges at second order: the volume fraction of one particle against the
+Gaussian (sigma = 0.08) has L1 errors 5.3e-2, 2.3e-2 and 4.3e-3 on 16, 32 and
+64 cells per side (orders 1.2 and 2.4, the first at sigma / h = 1.3), where
+the cell-center deposit gave 1.0e-1, 1.6e-1 and 6.6e-2, depending on where
+the particle sat in its cell. Across rotational periodic faces the
+neighbor's mu turns into the cell's frame as in `Walker::cross`. With width 0
+neither moments nor spreading run.
+
+**Cost.** Per stage, two kernels over the slots, a prefix sum over the cells and one kernel over the owned cells, then
+with a width one moment pass and about width^2 a_max steps (2 N_DIM width^2 / h^2 on a Cartesian mesh), each a kernel over
+the owned cells and (distributed) a halo exchange. A width of two cells is
+16 steps in 2D and 24 in 3D.
+
+**Ledger.** The deposited sources enter the conservation ledger as sources, so
+`[output] health` still closes the gas's totals.
+
+**Dispersed-phase fields** (`Particles::fields`) deposit, at output, the
+particles' volume, number and momentum (`w V_p`, `w`, `w m v`), and with
+two-way coupling their sources at the written state from the rates of a step
+of zero length (the explicit rates, which need no step start). Statistics of
+these fields, and their place in probes and monitors, come with the field
+registry work of #502.
+
+**Validity.** `mallard check` reports particles above a tenth of their cell's
+size and volume fractions above 1% at the initial state; the run-health checks
+during the run are left for later.
+
+## Evaporating droplets (#760)
+
+`particles::Droplet` (`particle_evaporation.h`) is a solid particle
+(`Solid::motion`, the drag and forces at a per-droplet diameter) of a
+`Liquid` in the gas `Mixture`. Three decisions shape it.
+
+**Conserved block values.** After the position a droplet's block holds its
+momentum `P = M v`, energy `E = M (c_l (T_p - T_b) + |v|^2 / 2)` and mass
+`M`, not `v`, `T_p` and `d`. The gas receives the opposite of their stage
+rates, so the gas and the droplets conserve mass, momentum and energy to
+round-off whatever the integrator, as for solid particles; with `v` and `T_p`
+in the block, the products `M v` and `M e` would be conserved only to the
+integrator's order once `M` changes. Rebounds and periodic rotations act on
+`P` directly (rotated as a vector; converted to `v` only for a rebound), so
+relocation adds no rounding to it.
+
+**One energy reference.** The liquid's enthalpy is
+`h_l(T) = h_v(T_b) - L_b + c_l (T - T_b)` from the mechanism's vapor enthalpy
+(formation included), so the latent heat at any temperature is
+`h_v(T) - h_l(T)` (Kirchhoff) and the gas, whose `rho E` carries formation
+enthalpies, and the liquid share one reference: the gas receives
+`-(dE + dM h_l(T_b))` and its vapor `-dM`. The input refuses a liquid whose
+Kirchhoff latent heat vanishes below the critical temperature.
+
+**Stiff temperature, finite mass.** The droplet temperature relaxes to its
+wet-bulb value on the heat-up time `rho_l c_l d^2 / (6 k Nu)`, far below the
+gas step for small droplets. The first stage linearizes `dT/dt` by a backward
+difference of the heating at `T_p` and stores the equilibrium and relaxation
+time (`T_EQ`, `TAU_T`); stages integrate it exponentially above
+`EXPONENTIAL_ABOVE`, as the velocity is. The evaporation rate is capped at
+the step's starting mass over `dt`; a capped droplet stops heating and
+evaporates within the step at its temperature, which keeps a vanishing
+droplet's temperature bounded. Below `minimum_mass` (from `minimum_diameter`)
+a droplet's rates are zero, and `remove_evaporated`, after the step and
+before relocation (in `take_step` and in the recorded step graph), deposits
+its remains through the coupling's `Deposition` and empties its slot
+(`n_removed(3)`).
+
+The gas film uses the mechanism's tables on the device: `ThermoTable` for
+`R`, `c_p` and `h_v`, `TransportTable::properties` for `mu`, `k` and the
+vapor's mixture-averaged diffusivity, with `n_species` doubles of work memory
+per slot (`work`). The composition at a droplet is its cell's average
+(`cell_scalars`), the one per-cell composition the solver keeps; reconstructing
+species to the droplet's position would need their gradients at every stage.
+The vapor source is the deposition's mass column, so deposition carries
+`N_CONSERVATIVE` columns as before, and the ledger leaves the gas totals
+unchecked for two-way droplets.
+
+The critical point bounds the model rather than describing it: the boiling
+temperature `T_b(p)` from the saturation curve stops at `T_crit`, the transfer
+is evaluated at `min(T_p, T_crit)`, and seeded temperatures must be below
+`T_crit`. Real-fluid surface equilibrium, multicomponent liquids, internal
+conduction and evaporation of droplets touching walls are left out.
+
 ## Particle probes (#756)
 
 A probe samples on the host after a step it is due at: the gas at the
@@ -325,9 +471,11 @@ every few steps of a large run.
 Restart files carry the particles as named arrays (version 6), written by rank
 0 sorted by id (every rank gathers them, since each lays out the header): `PARTICLE_ID`, `PARTICLE_CELL` (the global id of the cell
 holding each particle), `PARTICLE_X` (positions, exact in double precision),
-`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_Q_<name>` (quantities)
+`PARTICLE_V` (velocities of solid particles), `PARTICLE_T` (their temperatures, with heat transfer), `PARTICLE_M`, `PARTICLE_P`
+and `PARTICLE_E` (the block values of droplets, restored exactly), `PARTICLE_Q_<name>` (quantities)
 and `PARTICLE_REMOVED` (the counts of particles that left the domain, that
-were lost, and that stuck to walls). The device copies them into pinned host mirrors with the other restart
+were lost, that stuck to walls, and of droplets that evaporated; files with
+the first two or three counts restart too). The device copies them into pinned host mirrors with the other restart
 data (`Particles::stage_output`, capturable), so a restart staged by the step
 graph holds the particles of its own step. On a restart each rank takes the
 particles of the cells it owns, so the file restarts on any rank count, and a
@@ -357,9 +505,13 @@ parallel I/O are #753; `Particles::gather` is the interface it replaces.
   scale of #291 and comes with injection.
 - **Particle fields in the registry** (#502) and Lagrangian statistics (#764).
 - **Further models** (#757 follow-ups): thermophoresis, the Basset force,
-  splashing, mass transfer (evaporation), drag and heat transfer in mixtures,
+  splashing, drag and heat transfer of solid particles in mixtures,
   and validation against DNS of particle-laden flow.
-- **Two-way coupling** (#758): the particles' forces on the gas.
+- **Of #758:** four-way coupling (collisions), statistics and probes of the
+  dispersed-phase fields, and run-health warnings.
+- **Of #760:** multicomponent liquids, internal conduction, real-fluid
+  (supercritical) droplets, the species composition reconstructed to the
+  droplet's position, wall films, and a ledger term for the droplets.
 - **Of #756:** probes through surfaces (fluxes of particles), histograms, the
   residence time per visit and visit counts, crossings located within a stage,
   and probes staged in the step graph.

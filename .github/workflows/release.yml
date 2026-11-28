@@ -262,6 +262,7 @@ jobs:
           spack -e "$RUNNER_TEMP/env" spec mallard +cuda cuda_arch=90 +nccl
           spack -e "$RUNNER_TEMP/env" spec mallard ~mpi dims=3 precision=single
           spack -e "$RUNNER_TEMP/env" spec mallard +kaminpar
+          spack -e "$RUNNER_TEMP/env" spec mallard +coolprop
       - name: Test
         run: |
           spack -e "$RUNNER_TEMP/env" test run mallard

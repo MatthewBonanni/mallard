@@ -242,6 +242,7 @@ const std::vector<ExampleCase> EXAMPLES = {
     {"shu_osher/input.toml", "high_order", 2, "", {}, ""},
     {"sod/input.toml", "high_order", 2, "", {}, ""},
     {"tracer_vortex/input.toml", "high_order", 2, "", {}, ""},
+    {"particle_cloud/input.toml", "high_order", 2, "", {}, ""},
     {"particle_vortex/input.toml", "high_order", 2, "", {}, ""},
     {"particle_wake/flow.toml", "high_order", 2, "", {{"inner", "cylinder"}, {"outer", "farfield"}},
      "type = \"annulus\"\nr_inner = 0.5\nr_outer = 25.0\nNtheta = 32\nNr = 8\n"},

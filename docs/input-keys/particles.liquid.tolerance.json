@@ -1,0 +1,10 @@
+{
+ "default": "1e-06",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/named_liquid.toml"
+ ],
+ "type": "number"
+}

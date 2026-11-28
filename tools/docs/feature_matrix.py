@@ -187,6 +187,7 @@ OTHER_GUARDS = [
     ("src/solver/solver.cpp", "is not available with rotational periodicity yet"),
     ("src/solver/solver_mixture.cpp", "with Z varying in time is not supported"),
     ("src/particles/particles.cpp", "the drag of mixtures is not available yet"),
+    ("src/solver/solver.cpp", "\"two-way\" is not available in axisymmetric runs"),
 ]
 GUARD_WORDS = re.compile(r"not (supported|available)")
 

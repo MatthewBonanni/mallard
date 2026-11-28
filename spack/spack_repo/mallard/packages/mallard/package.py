@@ -72,6 +72,11 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
         when="+mpi",
         description="The dKaMinPar graph partitioner (partitioner = \"graph\"), fetched at configure time",
     )
+    variant(
+        "coolprop",
+        default=False,
+        description="Named liquids for droplets ([particles.liquid] fluid), tabulated from CoolProp at setup",
+    )
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
@@ -105,6 +110,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("cgns+hdf5", when="+cgns")
     depends_on("cgns~mpi", when="+cgns~mpi")
     depends_on("zlib-api", when="+zlib")
+    # Built by the host compiler as Spack builds any library: nvcc and hipcc never compile it
+    depends_on("coolprop@8:+shared", when="+coolprop")
     extends("python", when="+python")
     depends_on("python@3.10:", when="+python", type=("build", "run"))
     depends_on("py-numpy", when="+python", type="run")
@@ -198,7 +205,10 @@ class CMakeBuilder(cmake.CMakeBuilder):
             self.define_from_variant("Mallard_ENABLE_ZLIB", "zlib"),
             self.define("Mallard_ENABLE_TESTS", self.pkg.run_tests),
             self.define_from_variant("Mallard_ENABLE_PYTHON", "python"),
+            self.define_from_variant("Mallard_ENABLE_COOLPROP", "coolprop"),
         ]
+        if spec.satisfies("+coolprop"):
+            args.append(self.define("Mallard_COOLPROP_ROOT", spec["coolprop"].prefix))
         if spec.satisfies("+python"):
             site = join_path(self.pkg.prefix, spec["python-venv"].package.purelib)
             args.append(self.define("Mallard_PYTHON_INSTALL_DIR", site))

@@ -37,6 +37,8 @@ std::vector<std::string> base_variables() {
         if (v.size() < VAR_V + N_DIM) v.push_back(u);
     }
     v.push_back("T_P");
+    v.push_back("D_P");
+    for (const char * m : {"RHO_P", "MU_P", "K_P", "SIGMA_P"}) v.push_back(m);
     return v;
 }
 
@@ -108,7 +110,7 @@ kexpr::Program Quantities::compile(const std::string & where, const std::string 
     kexpr::Program p(where, substituted, variables(m_count));
     if (!m_temperature && (p.uses(VAR_TEMPERATURE) || p.uses(VAR_TP))) {
         throw InputError(Diagnostic{.key = where,
-                                    .message = "reads T or T_P, which particle expressions have for a single gas only",
+                                    .message = "reads T or T_P, which particle expressions have for a single gas and for droplets only",
                                     .docs = DOCS});
     }
     m_time = m_time || p.uses(VAR_T);
@@ -168,7 +170,7 @@ void Quantities::init(const Input & table, region::Regions & regions, const uint
             if (!m_temperature && (p.uses(VAR_TEMPERATURE) || p.uses(VAR_TP))) {
                 throw InputError(Diagnostic{.key = where + "." + key,
                                             .line = line_of(e, key),
-                                            .message = "reads T or T_P, which particle expressions have for a single gas only",
+                                            .message = "reads T or T_P, which particle expressions have for a single gas and for droplets only",
                                             .docs = DOCS});
             }
             m_time = m_time || p.uses(VAR_T);

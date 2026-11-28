@@ -1,0 +1,83 @@
+# A cloud of heavy particles falling through quiescent gas (2D build).
+#
+# 81 parcels in a square of side 0.16 at rest in a periodic box of gas at
+# rest, under gravity on the particles only. Alone, a particle falls at its
+# terminal velocity tau g = 0.1. The cloud's mass equals the gas's within it
+# (mass loading 1), so with coupling = "two-way" its drag sets the gas inside
+# moving down with it, and it falls faster than a single particle, shedding a
+# vortex pair at its sides. The probe "cloud" gives the particles' mean
+# velocity; with coupling = "one-way" it stays at -0.1. The box is periodic,
+# so the gas and particles together gain exactly the weight of the particles:
+# their total vertical momentum is -m_total g t.
+[run]
+t_stop = 2.0
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 64
+Ny = 64
+Lx = 1.0
+Ly = 1.0
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+type = "constant"
+T = 0.7142857142857143
+u = [0.0, 0.0]
+p = 0.7142857142857143
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 4
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+mu = 1e-3
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "solid"
+coupling = "two-way"
+file = "particles.csv"
+# tau = rho_p d^2 / (18 mu) = 0.1
+diameter = 4.243e-3
+density = 100.0
+drag = "stokes"
+gravity = [0.0, -1.0]
+velocity = [0.0, 0.0]
+# 81 parcels of 79 particles: the cloud's mass, 0.0256, equals the gas's in it
+weight = 79.0
+# About two cells
+deposition_width = 0.03
+
+[particles.lattice]
+lo = [0.42, 0.62]
+hi = [0.58, 0.78]
+n = [9, 9]
+
+[[particles.probes]]
+name = "cloud"
+fields = ["V_Y", "y"]
+interval = 25
+
+[[write_data]]
+prefix = "cloud"
+fields = ["U", "PARTICLE_VOLUME_FRACTION", "PARTICLE_SOURCE_RHOU_Y"]
+time_interval = 0.5
+
+[output]
+check_interval = 200

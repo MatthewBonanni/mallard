@@ -26,6 +26,8 @@
 #include "gated.h"
 #include "log.h"
 #include "mesh.h"
+#include "liquid_library.h"
+#include "mixture.h"
 #include "provenance.h"
 #include "statistics.h"
 #include "units.h"
@@ -110,6 +112,7 @@ struct LinearW {
 constexpr int MAX_BOUNCES = 8;
 
 const std::string SOLID_DOCS = "docs/guide/particles.md#solid-particles";
+const std::string COUPLING_DOCS = "docs/guide/particles.md#two-way-coupling";
 
 /** @brief A vector of N_DIM components of [particles]. */
 std::vector<rtype> read_vector(const Input & table, const std::string & key, const Dimension & dimension) {
@@ -133,20 +136,8 @@ rtype positive(const Input & table, const std::string & key, const Dimension & d
     return value;
 }
 
-/** @brief The solid particles of [particles] in the gas, with gravity from [source] unless [particles] gives it. */
-particles::Solid read_solid(const Input & input, const Input & table, const Euler * gas) {
-    if (!gas || !gas->is_viscous()) {
-        throw InputError(Diagnostic{.key = "particles.type",
-                                    .line = line_of(table, "type"),
-                                    .message = gas ? "\"solid\" needs the gas viscosity for the drag, but physics.type is \"euler\""
-                                                   : "\"solid\" is for a single gas; the drag of mixtures is not available yet",
-                                    .fix = gas ? "Set type = \"navier_stokes\" and mu in [physics]" : "",
-                                    .docs = SOLID_DOCS});
-    }
-    particles::Solid solid;
-    solid.gas = *gas;
-    solid.diameter = positive(table, "diameter", dim::length);
-    solid.density = positive(table, "density", dim::density);
+/** @brief The drag, gravity (from [source] unless [particles] gives it) and further forces of [particles]. */
+void read_motion(const Input & input, const Input & table, particles::Solid & solid) {
     const std::vector<std::string> drags = {"schiller_naumann", "singh", "stokes"};
     record_options("particles.drag", drags);
     const std::string drag = find_value_or<std::string>(table, "drag", "schiller_naumann");
@@ -171,28 +162,297 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
         solid.pressure_gradient = solid.pressure_gradient || force == "pressure_gradient";
         solid.lift = solid.lift || force == "saffman_lift";
     }
+}
+
+/** @brief The solid particles of [particles] in the gas, with gravity from [source] unless [particles] gives it. */
+particles::Solid read_solid(const Input & input, const Input & table, const Euler * gas) {
+    if (!gas || !gas->is_viscous()) {
+        throw InputError(Diagnostic{.key = "particles.type",
+                                    .line = line_of(table, "type"),
+                                    .message = gas ? "\"solid\" needs the gas viscosity for the drag, but physics.type is \"euler\""
+                                                   : "\"solid\" is for a single gas; the drag of mixtures is not available yet",
+                                    .fix = gas ? "Set type = \"navier_stokes\" and mu in [physics]" : "",
+                                    .docs = SOLID_DOCS});
+    }
+    particles::Solid solid;
+    solid.gas = *gas;
+    solid.diameter = positive(table, "diameter", dim::length);
+    solid.density = positive(table, "density", dim::density);
+    read_motion(input, table, solid);
     if (contains_optional(table, "specific_heat")) solid.specific_heat = positive(table, "specific_heat", dim::specific_heat);
     return solid;
+}
+
+const std::string DROPLET_DOCS = "docs/guide/particles.md#evaporating-droplets";
+
+/** @brief A positive number of [particles.liquid]. */
+double liquid_value(const Input & liquid, const std::string & key, const Dimension & dimension) {
+    if (!contains_optional(liquid, key)) throw missing_key(liquid, "particles.liquid." + key);
+    const double value = static_cast<double>(find_real(liquid, key, dimension));
+    if (!(value > 0.0) || !std::isfinite(value)) {
+        throw InputError(Diagnostic{.key = "particles.liquid." + key, .line = line_of(liquid, key),
+                                    .message = "must be positive", .docs = DROPLET_DOCS});
+    }
+    return value;
+}
+
+/**
+ * @brief The tables of the library fluid of [particles.liquid] (fluid, tolerance), its enthalpy from its boiling
+ *        temperature T_b at p_b (from its saturation curve if T_b is NaN), and the setup log's line of them.
+ */
+particles::LiquidTables library_tables(const Input & liquid, const double p_b, const double T_b, std::string & line) {
+    std::vector<std::string> names;
+    for (const particles::LibraryFluid & f : particles::library_fluids()) names.emplace_back(f.name);
+    record_options("particles.liquid.fluid", names);
+    const std::string name = find_value<std::string>(liquid, "fluid");
+    const particles::LibraryFluid * fluid = particles::find_library_fluid(name);
+    if (!fluid) throw not_accepted(liquid, "particles.liquid.fluid", name, names);
+    const double tolerance = static_cast<double>(find_real_or(liquid, "tolerance", dim::none, 1e-6_r));
+    if (!(tolerance >= 1e-10) || !(tolerance <= 1e-2)) {
+        throw InputError(Diagnostic{.key = "particles.liquid.tolerance", .line = line_of(liquid, "tolerance"),
+                                    .message = "must be between 1e-10 and 1e-2", .docs = DROPLET_DOCS});
+    }
+    if (!particles::coolprop_available()) {
+        throw InputError(Diagnostic{.key = "particles.liquid.fluid", .line = line_of(liquid, "fluid"),
+                                    .message = "names a fluid of the liquid library, whose properties come from "
+                                               "CoolProp, but this build of Mallard has no CoolProp",
+                                    .fix = "Build Mallard with -DMallard_ENABLE_COOLPROP=ON (docs/installation.md), or "
+                                           "give the liquid's properties in place of fluid: density, specific_heat, "
+                                           "latent_heat, boiling_temperature, critical_temperature, critical_pressure",
+                                    .docs = DROPLET_DOCS});
+    }
+    try {
+        const particles::PropertySource source = particles::coolprop_source(fluid->coolprop);
+        const double T_ref = std::isnan(T_b) ? source.saturation_temperature(p_b) : T_b;
+        const double T_max = particles::table_end(source);
+        if (!(T_ref > source.T_triple && T_ref < T_max)) {
+            throw InputError(Diagnostic{.key = "particles.liquid.boiling_pressure", .line = line_of(liquid, "boiling_pressure"),
+                                        .message = "puts the boiling point of " + name + " at " + logging::real(T_ref) +
+                                                   " K, outside its liquid range from its triple point " +
+                                                   logging::real(source.T_triple) + " K to " + logging::real(T_max) + " K",
+                                        .docs = DROPLET_DOCS});
+        }
+        particles::LiquidTables tables = particles::tabulate(source, T_ref, tolerance);
+        line = name + " (CoolProp " + particles::coolprop_version() + "), " + logging::real(tables.T_min) + " to " +
+               logging::real(tables.T_max) + " K to " + logging::real(tolerance) + ":";
+        for (size_t i = 0; i < tables.report.size(); i++) {
+            const particles::TableReport & r = tables.report[i];
+            line += std::string(i ? "," : "") + " " + r.name + " " + logging::count(r.knots, "knot") + " (" +
+                    logging::real(r.error) + ")";
+        }
+        return tables;
+    } catch (const InputError &) {
+        throw;
+    } catch (const std::runtime_error & e) {
+        throw InputError(Diagnostic{.key = "particles.liquid.fluid", .line = line_of(liquid, "fluid"),
+                                    .message = std::string("cannot be tabulated: ") + e.what(), .docs = DROPLET_DOCS});
+    }
+}
+
+/**
+ * @brief The droplets of [particles] and their liquid ([particles.liquid]) in the gas mixture: the vapor
+ *        species, the liquid's properties and their consistency up to the critical temperature, the
+ *        evaporation model, and the drag and forces as for solid particles.
+ */
+particles::Droplet read_droplet(const Input & input, const Input & table, const MixtureModel * mixture,
+                                std::string & vapor_name, std::string & tables_line) {
+    if (!mixture || !mixture->viscous()) {
+        throw InputError(Diagnostic{.key = "particles.type",
+                                    .line = line_of(table, "type"),
+                                    .message = mixture ? "\"droplet\" needs the gas's transport properties for the "
+                                                         "evaporation and the drag, but physics.type is \"euler\""
+                                                       : "\"droplet\" evaporates into a gas mixture, but [physics] is "
+                                                         "a single gas",
+                                    .fix = mixture ? "Set type = \"navier_stokes\" in [physics]"
+                                                   : "Give [physics] gas = \"mixture\", a mechanism holding the "
+                                                     "liquid's vapor, and type = \"navier_stokes\"",
+                                    .docs = DROPLET_DOCS});
+    }
+    if (!contains_optional(table, "liquid")) throw missing_key(table, "particles.liquid");
+    const Input & liquid = table.at("liquid");
+    particles::Droplet drop;
+    drop.gas = mixture->device();
+    if (!contains_optional(liquid, "species")) throw missing_key(liquid, "particles.liquid.species");
+    vapor_name = find_value<std::string>(liquid, "species");
+    const std::vector<std::string> names = mixture->species_names();
+    const auto found = std::find(names.begin(), names.end(), vapor_name);
+    if (found == names.end()) throw mixture->unknown_species(liquid, "particles.liquid.species", vapor_name);
+    particles::Liquid & l = drop.liquid;
+    l.vapor = static_cast<uint32_t>(found - names.begin());
+    // A library fluid's properties are its tables', unless a key gives them
+    const bool library = contains_optional(liquid, "fluid");
+    const auto given = [&](const char * key) { return !library || contains_optional(liquid, key); };
+    particles::LiquidTables tables;
+    if (library) {
+        if (contains_optional(liquid, "boiling_pressure")) l.boiling_pressure = liquid_value(liquid, "boiling_pressure", dim::pressure);
+        const double T_b = contains_optional(liquid, "boiling_temperature")
+                               ? liquid_value(liquid, "boiling_temperature", dim::temperature)
+                               : std::numeric_limits<double>::quiet_NaN();
+        tables = library_tables(liquid, l.boiling_pressure, T_b, tables_line);
+        l.boiling_temperature = tables.T_ref;
+        Kokkos::View<double *, Kokkos::HostSpace> host("liquid_tables", tables.table.size());
+        std::copy(tables.table.begin(), tables.table.end(), host.data());
+        l.host_table = host;
+        l.table = Kokkos::create_mirror_view_and_copy(Kokkos::DefaultExecutionSpace::memory_space(), host);
+    }
+    const auto at_boiling = [&](const particles::Curve & c) { return c.value(tables.table.data(), l.boiling_temperature); };
+    if (given("density")) {
+        l.density = liquid_value(liquid, "density", dim::density);
+    } else {
+        l.density_curve = tables.density;
+        l.density = at_boiling(tables.density);
+    }
+    if (given("specific_heat")) {
+        l.specific_heat = liquid_value(liquid, "specific_heat", dim::specific_heat);
+    } else {
+        l.enthalpy_curve = tables.enthalpy;
+        l.temperature_curve = tables.temperature;
+        l.specific_heat = l.specific_heat_at(l.boiling_temperature);
+    }
+    if (given("latent_heat")) {
+        l.latent_heat = liquid_value(liquid, "latent_heat", dim::velocity_squared);
+    } else {
+        l.latent_curve = tables.latent;
+        l.latent_heat = at_boiling(tables.latent);
+    }
+    if (!library) {
+        l.boiling_temperature = liquid_value(liquid, "boiling_temperature", dim::temperature);
+        if (contains_optional(liquid, "boiling_pressure")) l.boiling_pressure = liquid_value(liquid, "boiling_pressure", dim::pressure);
+    }
+    l.critical_temperature = given("critical_temperature") ? liquid_value(liquid, "critical_temperature", dim::temperature)
+                                                           : tables.T_max;
+    l.critical_pressure = given("critical_pressure")
+                              ? liquid_value(liquid, "critical_pressure", dim::pressure)
+                              : std::exp(tables.pressure.value(tables.table.data(), tables.T_max));
+    if (!(l.critical_temperature > l.boiling_temperature) || !(l.critical_pressure > l.boiling_pressure)) {
+        throw InputError(Diagnostic{.key = !(l.critical_temperature > l.boiling_temperature) ? "particles.liquid.critical_temperature"
+                                                                                           : "particles.liquid.critical_pressure",
+                                    .line = line_of(liquid, !(l.critical_temperature > l.boiling_temperature)
+                                                                ? "critical_temperature" : "critical_pressure"),
+                                    .message = "must be above the boiling point (boiling_temperature at boiling_pressure)",
+                                    .docs = DROPLET_DOCS});
+    }
+    const chemistry::Mechanism & mech = mixture->mechanism();
+    const auto thermo = chemistry::make_thermo_table<Kokkos::HostSpace>(mech);
+    const double inv_W = thermo.inv_W(l.vapor);
+    l.R_vapor = chemistry::GAS_CONSTANT * inv_W;
+    const auto h_vapor = [&](const double T) {
+        return chemistry::GAS_CONSTANT * T * inv_W * thermo.h_RT(l.vapor, chemistry::ThermoTable<Kokkos::HostSpace>::powers(T));
+    };
+    l.h_ref = h_vapor(l.boiling_temperature) - l.latent_heat;
+    if (contains_optional(liquid, "antoine")) {
+        const std::vector<rtype> c = find_real_vector(liquid, "antoine", dim::none);
+        if (c.size() != 3) {
+            throw InputError(Diagnostic{.key = "particles.liquid.antoine", .line = line_of(liquid, "antoine"),
+                                        .message = "must be [A, B, C] of log10(p / Pa) = A - B / (T / K + C)",
+                                        .docs = DROPLET_DOCS});
+        }
+        l.antoine = true;
+        l.A = static_cast<double>(c[0]);
+        l.B = static_cast<double>(c[1]);
+        l.C = static_cast<double>(c[2]);
+    } else if (library) {
+        l.pressure_curve = tables.pressure;
+        l.boiling_curve = tables.boiling;
+    }
+    const auto transport = [&](const char * key, const Dimension & dimension, double & value, particles::Curve & c,
+                               const particles::Curve & table_curve) {
+        if (contains_optional(liquid, key)) {
+            value = liquid_value(liquid, key, dimension);
+        } else if (library) {
+            c = table_curve;
+        }
+    };
+    transport("viscosity", dim::dynamic_viscosity, l.viscosity, l.viscosity_curve, tables.viscosity);
+    transport("conductivity", dim::of(1, 1, -3, -1), l.conductivity, l.conductivity_curve, tables.conductivity);
+    transport("surface_tension", dim::of(1, 0, -2), l.surface_tension, l.tension_curve, tables.tension);
+    if (!l.latent_curve.given()) {
+        // Kirchhoff's latent heat h_v(T) - h_l(T) must stay positive up to the critical temperature
+        for (int k = 0; k <= 200; k++) {
+            const double T = 0.5 * l.boiling_temperature + (l.critical_temperature - 0.5 * l.boiling_temperature) * static_cast<double>(k) / 200.0;
+            const double L = h_vapor(T) - l.h_ref - l.sensible(T);
+            if (!(L > 0.0)) {
+                throw InputError(Diagnostic{.key = "particles.liquid.specific_heat",
+                                            .line = line_of(liquid, "specific_heat"),
+                                            .message = "makes the latent heat h_v(T) - h_l(T) vanish at T = " +
+                                                       logging::real(T) + " K, below the critical temperature: the "
+                                                       "liquid's enthalpy is h_v(T_b) - latent_heat + specific_heat (T - T_b)",
+                                            .fix = "Check specific_heat and latent_heat against the vapor species " + vapor_name,
+                                            .docs = DROPLET_DOCS});
+            }
+        }
+    }
+    const std::vector<std::string> models = {"abramzon_sirignano", "d2_law"};
+    record_options("particles.evaporation", models);
+    const std::string model = find_value_or<std::string>(table, "evaporation", "abramzon_sirignano");
+    if (std::find(models.begin(), models.end(), model) == models.end()) {
+        throw not_accepted(table, "particles.evaporation", model, models);
+    }
+    drop.model = model == "d2_law" ? particles::Evaporation::D2_LAW : particles::Evaporation::ABRAMZON_SIRIGNANO;
+    particles::Solid & motion = drop.motion;
+    motion.density = static_cast<rtype>(l.density);
+    motion.diameter = positive(table, "diameter", dim::length);
+    read_motion(input, table, motion);
+    for (const char * key : {"density", "specific_heat"}) {
+        if (contains_optional(table, key)) {
+            throw InputError(Diagnostic{.key = std::string("particles.") + key,
+                                        .line = line_of(table, key),
+                                        .message = "is a property of the liquid for droplets",
+                                        .fix = std::string("Give it in [particles.liquid]"),
+                                        .docs = DROPLET_DOCS});
+        }
+    }
+    return drop;
 }
 
 } // namespace
 
 void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, const BoundaryData & boundaries,
                      const Distribution * distribution, const RestartArrays * restart, region::Regions & regions,
-                     const Euler * gas) {
+                     const Euler * gas, const MixtureModel * mixture, Kokkos::View<rtype **, Kokkos::LayoutRight> gas_scalars) {
     mesh = std::move(mesh_in);
     const Input & table = input.at("particles");
-    record_options("particles.type", {"solid", "tracer"});
+    record_options("particles.type", {"droplet", "solid", "tracer"});
     const std::string type = find_value<std::string>(table, "type");
-    if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
-    is_solid = type == "solid";
+    if (type != "tracer" && type != "solid" && type != "droplet") {
+        throw not_accepted(table, "particles.type", type, {"droplet", "solid", "tracer"});
+    }
+    is_droplet = type == "droplet";
+    is_solid = type == "solid" || is_droplet;
     file = find_value_or<std::string>(table, "file", "");
     distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
     std::array<rtype, N_DIM> v_seed{};
     rtype T_seed = 0.0_r;
     bool v_given = false, T_given = false;
-    if (is_solid) {
+    if (is_droplet) {
+        droplet = read_droplet(input, table, mixture, vapor_name, liquid_tables);
+        solid = droplet.motion;
+        scalars = gas_scalars;
+        if (contains_optional(table, "velocity")) {
+            const std::vector<rtype> v = read_vector(table, "velocity", dim::velocity);
+            FOR_I_DIM v_seed[i] = v[i];
+            v_given = true;
+        }
+        if (!contains_optional(table, "temperature")) throw missing_key(table, "particles.temperature");
+        T_seed = positive(table, "temperature", dim::temperature);
+        T_given = true;
+        if (!(static_cast<double>(T_seed) < droplet.liquid.critical_temperature)) {
+            throw InputError(Diagnostic{.key = "particles.temperature",
+                                        .line = line_of(table, "temperature"),
+                                        .message = "is at or above the liquid's critical temperature",
+                                        .docs = DROPLET_DOCS});
+        }
+        const rtype d_min = find_real_or(table, "minimum_diameter", dim::length, 1e-2_r * solid.diameter);
+        if (!(d_min > 0.0_r) || !(d_min < solid.diameter)) {
+            throw InputError(Diagnostic{.key = "particles.minimum_diameter",
+                                        .line = line_of(table, "minimum_diameter"),
+                                        .message = "must be positive and below the diameter",
+                                        .docs = DROPLET_DOCS});
+        }
+        minimum_diameter = static_cast<double>(d_min);
+        droplet.minimum_mass = droplet.mass_of(static_cast<double>(d_min), static_cast<double>(T_seed));
+    } else if (is_solid) {
         solid = read_solid(input, table, gas);
         heated = solid.heated();
         if (contains_optional(table, "velocity")) {
@@ -212,8 +472,39 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             T_given = true;
         }
     }
-    const uint32_t first_quantity = is_solid ? 2 * N_DIM + (heated ? 1 : 0) : N_DIM;
-    quantities.init(table, regions, first_quantity, R > 0.0);
+    record_options("particles.coupling", {"one-way", "two-way"});
+    const std::string coupling = find_value_or<std::string>(table, "coupling", "one-way");
+    if (coupling != "one-way" && coupling != "two-way") {
+        throw not_accepted(table, "particles.coupling", coupling, {"one-way", "two-way"});
+    }
+    coupled = coupling == "two-way";
+    if (coupled && !is_solid) {
+        throw InputError(Diagnostic{.key = "particles.coupling",
+                                    .line = line_of(table, "coupling"),
+                                    .message = "\"two-way\" is for solid particles; tracers are massless and do not act "
+                                               "on the gas",
+                                    .fix = "Set type = \"solid\", or remove coupling",
+                                    .docs = COUPLING_DOCS});
+    }
+    rtype deposition_width = 0.0_r;
+    if (is_solid) {
+        // In 2D a parcel stands for particles per unit depth
+        if (contains_optional(table, "weight")) {
+            weight = positive(table, "weight", N_DIM == 3 ? dim::none : dim::of(0, -1, 0));
+        }
+        deposition_width = find_real_or(table, "deposition_width", dim::length, 0.0_r);
+        if (!(deposition_width >= 0.0_r) || !std::isfinite(deposition_width)) {
+            throw InputError(Diagnostic{.key = "particles.deposition_width",
+                                        .line = line_of(table, "deposition_width"),
+                                        .message = "must be 0 (each particle's own cell) or positive",
+                                        .docs = COUPLING_DOCS});
+        }
+        solid.energy_state = coupled && heated;
+    }
+    const uint32_t first_quantity = is_droplet ? N_DIM + particles::Droplet::N_VALUES
+                                    : is_solid ? 2 * N_DIM + (heated ? 1 : 0)
+                                               : N_DIM;
+    quantities.init(table, regions, first_quantity, R > 0.0 || is_droplet);
     probes.init(table, regions, quantities);
     width = first_quantity + quantities.n_integrated();
     const uint32_t n_aux = quantities.n_aux();
@@ -270,14 +561,21 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     std::vector<uint64_t> new_ids;
     std::vector<uint32_t> new_cells;
     std::vector<rtype> new_values;  // persistent() per particle
+    const rtype seed_mass = is_droplet ? static_cast<rtype>(droplet.mass_of(static_cast<double>(solid.diameter), static_cast<double>(T_seed))) : 0.0_r;
     const auto fresh = [&](const Point & p) {
         for (size_t d = 0; d < N_DIM; d++) new_values.push_back(static_cast<rtype>(p[d]));
-        if (is_solid) FOR_I_DIM new_values.push_back(v_seed[i]);
-        if (heated) new_values.push_back(T_seed);
+        if (is_droplet) {
+            rtype y[particles::Droplet::N_VALUES];
+            droplet.values(static_cast<double>(seed_mass), v_seed.data(), static_cast<double>(T_seed), y);
+            for (const rtype value : y) new_values.push_back(value);
+        } else if (is_solid) {
+            FOR_I_DIM new_values.push_back(v_seed[i]);
+        }
+        if (heated) new_values.push_back(solid.thermal_value(v_seed.data(), T_seed));
         for (uint32_t k = first_quantity; k < width; k++) new_values.push_back(0.0_r);
         for (uint32_t j = 0; j < n_aux; j++) new_values.push_back(static_cast<rtype>(quantities.initial_aux(j)));
     };
-    std::array<uint64_t, 3> removed_before{0, 0, 0};
+    std::array<uint64_t, 4> removed_before{0, 0, 0, 0};
     const auto find_array = [&](const char * name) -> const std::vector<double> * {
         if (!restart) return nullptr;
         for (const auto & [key, values] : *restart) {
@@ -293,7 +591,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         const std::vector<double> * restored_removed = find_array("PARTICLE_REMOVED");
         n_restored = restored_id->size();
         if (!restored_cell || !restored_x || !restored_removed || restored_cell->size() != n_restored ||
-            restored_x->size() != N_DIM * n_restored || restored_removed->size() < 2 || restored_removed->size() > 3) {
+            restored_x->size() != N_DIM * n_restored || restored_removed->size() < 2 || restored_removed->size() > 4) {
             throw std::runtime_error("particles: the restart file's particle arrays are inconsistent.");
         }
         // Tracers continuing as solid particles start at the gas velocity
@@ -308,6 +606,19 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             throw std::runtime_error("particles: the restart file's particle temperatures are inconsistent.");
         }
         start_T_at_gas = heated && !restored_T && !T_given;
+        // Two-way coupled particles continue their energies bit for bit (the temperature alone would round them)
+        const std::vector<double> * restored_E = solid.energy_state && restored_T ? find_array("PARTICLE_E") : nullptr;
+        if (restored_E && restored_E->size() != n_restored) {
+            throw std::runtime_error("particles: the restart file's particle energies are inconsistent.");
+        }
+        // Droplets continue their momenta, energies and masses bit for bit; other particles start as droplets
+        const std::vector<double> * restored_M = is_droplet ? find_array("PARTICLE_M") : nullptr;
+        const std::vector<double> * restored_P = restored_M ? find_array("PARTICLE_P") : nullptr;
+        const std::vector<double> * restored_DE = restored_M ? find_array("PARTICLE_E") : nullptr;
+        if (restored_M && (restored_M->size() != n_restored || !restored_P || restored_P->size() != N_DIM * n_restored ||
+                           !restored_DE || restored_DE->size() != n_restored)) {
+            throw std::runtime_error("particles: the restart file's droplet arrays are inconsistent.");
+        }
         // Quantities the file has continue; others start afresh
         std::vector<const std::vector<double> *> restored_q(quantities.size(), nullptr);
         for (uint32_t q = 0; q < quantities.size(); q++) {
@@ -326,10 +637,25 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
             for (size_t d = 0; d < N_DIM; d++) p[d] = (*restored_x)[N_DIM * k + d];
             const size_t at = new_values.size();
             fresh(p);
-            if (restored_v) {
+            if (is_droplet) {
+                rtype * y = &new_values[at + N_DIM];
+                if (restored_M) {
+                    for (size_t d = 0; d < N_DIM; d++) y[particles::Droplet::MOMENTUM + d] = static_cast<rtype>((*restored_P)[N_DIM * k + d]);
+                    y[particles::Droplet::ENERGY] = static_cast<rtype>((*restored_DE)[k]);
+                    y[particles::Droplet::MASS] = static_cast<rtype>((*restored_M)[k]);
+                } else if (restored_v) {
+                    rtype v[N_DIM];
+                    for (size_t d = 0; d < N_DIM; d++) v[d] = static_cast<rtype>((*restored_v)[N_DIM * k + d]);
+                    droplet.values(static_cast<double>(seed_mass), v, static_cast<double>(T_seed), y);
+                }
+            } else if (restored_v) {
                 for (size_t d = 0; d < N_DIM; d++) new_values[at + N_DIM + d] = static_cast<rtype>((*restored_v)[N_DIM * k + d]);
             }
-            if (restored_T) new_values[at + 2 * N_DIM] = static_cast<rtype>((*restored_T)[k]);
+            if (restored_E) {
+                new_values[at + 2 * N_DIM] = static_cast<rtype>((*restored_E)[k]);
+            } else if (restored_T) {
+                new_values[at + 2 * N_DIM] = solid.thermal_value(&new_values[at + N_DIM], static_cast<rtype>((*restored_T)[k]));
+            }
             for (uint32_t q = 0; q < quantities.size(); q++) {
                 if (!restored_q[q]) continue;
                 const particles::QuantitySpec & spec = quantities.spec(q);
@@ -387,14 +713,19 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     x = ParticleView("particle_x", n_values());
     id = Kokkos::View<uint64_t *>("particle_id", capacity);
     cell = Kokkos::View<uint32_t *>("particle_cell", capacity);
-    n_removed = Kokkos::View<uint64_t[3]>("particle_removed");
+    n_removed = Kokkos::View<uint64_t[4]>("particle_removed");
     point_cell = Kokkos::View<uint32_t *>("particle_point_cell", capacity);
     offsets = Kokkos::View<rtype *[N_DIM]>("particle_offsets", capacity);
     W_point = Kokkos::View<rtype *[N_CONSERVATIVE]>("particle_W", capacity);
     marked = Kokkos::View<uint32_t *>("particle_marked_cells", mesh->n_cells);
     aux = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_aux", capacity, n_aux);
     if (distributed) slots = Kokkos::View<uint32_t *>("particle_slots", capacity);
-    if (is_solid) step_start = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_step_start", capacity, solid.n_start());
+    if (is_solid) {
+        const uint32_t n_start = is_droplet ? particles::Droplet::n_start() : solid.n_start();
+        step_start = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_step_start", capacity, n_start);
+        deposition.init(*mesh, walker, global_cell, capacity, 0, N_CONSERVATIVE, deposition_width, distributed);
+    }
+    if (is_droplet) work = Kokkos::View<double **, Kokkos::LayoutRight>("particle_work", capacity, droplet.gas.n_species);
     h_id = mirrors(id);
     h_cell = mirrors(cell);
     h_x = mirrors(x);
@@ -415,7 +746,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         for (uint32_t j = 0; j < width; j++) h_x(width * k + j) = v[j];
         for (uint32_t j = 0; j < n_aux; j++) h_aux(k, j) = v[width + j];
     }
-    for (uint32_t k = 0; k < 3; k++) h_removed(k) = removed_before[k];
+    for (uint32_t k = 0; k < 4; k++) h_removed(k) = removed_before[k];
     Kokkos::deep_copy(id, h_id);
     Kokkos::deep_copy(cell, h_cell);
     Kokkos::deep_copy(x, h_x);
@@ -483,7 +814,16 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
     const bool read_gradients = solid.reads_gradients();
     const auto pc = point_cell;
     const auto start = step_start;
-    const uint32_t n_start = is_solid ? solid.n_start() : 0;
+    const uint32_t n_start = static_cast<uint32_t>(step_start.extent(1));
+    const bool two = coupled;
+    const rtype parcel = weight;
+    const auto sources = deposition.slot_values();
+    const bool drops = is_droplet;
+    const particles::Droplet drop = droplet;
+    const auto Y = scalars;
+    const auto scratch = work;
+    const double d_solid = is_solid ? static_cast<double>(solid.diameter) : Kokkos::Experimental::quiet_NaN_v<double>;
+    const double rho_solid = is_solid ? static_cast<double>(solid.density) : Kokkos::Experimental::quiet_NaN_v<double>;
     gated::parallel_for("particle_rhs", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         rtype * rate = dxdt.data() + size_t(w) * s;
         if (ids(s) == EMPTY) {
@@ -492,15 +832,33 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         }
         const rtype * values = xs.data() + size_t(w) * s;
         rtype Ws[N_CONSERVATIVE], v[N_DIM];
+        double Tp = 0.0, T_gas = gas_R > 0.0 ? static_cast<double>(Wp(s, N_DIM + 1)) / (static_cast<double>(Wp(s, 0)) * gas_R)
+                                             : Kokkos::Experimental::quiet_NaN_v<double>;
+        double d = d_solid;
         FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
         if (inertia) {
             rtype G[N_CONSERVATIVE * N_DIM] = {};
             if (read_gradients) {
-                FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = gradients(pc(s), i, d);
+                FOR_I_CONSERVATIVE for (uint8_t k = 0; k < N_DIM; k++) G[i * N_DIM + k] = gradients(pc(s), i, k);
             }
-            sphere.rates(Ws, G, values + N_DIM, dt_device ? *dt_device : dt, first_stage,
-                         start.data() + size_t(n_start) * s, rate);
-            FOR_I_DIM v[i] = values[N_DIM + i];
+            const rtype step_dt = dt_device ? *dt_device : dt;
+            rtype out[N_CONSERVATIVE];
+            if (drops) {
+                const rtype * Yc = &Y(pc(s), 0);
+                drop.rates(Ws, G, Yc, values + N_DIM, step_dt, first_stage, start.data() + size_t(n_start) * s, rate,
+                           &scratch(s, 0));
+                drop.velocity(values + N_DIM, v);
+                Tp = drop.temperature(values + N_DIM);
+                T_gas = drop.gas_temperature(Ws, Yc);
+                d = drop.diameter_of(static_cast<double>(values[N_DIM + particles::Droplet::MASS]), Tp);
+                if (two) drop.exchange(values + N_DIM, rate, out);
+            } else {
+                sphere.rates(Ws, G, values + N_DIM, step_dt, first_stage, start.data() + size_t(n_start) * s, rate);
+                FOR_I_DIM v[i] = values[N_DIM + i];
+                if (heat) Tp = static_cast<double>(sphere.temperature(values + N_DIM));
+                if (two) sphere.exchange(values + N_DIM, rate, out);
+            }
+            if (two) FOR_I_CONSERVATIVE sources(s, i) = static_cast<double>(parcel * out[i]);
         } else {
             FOR_I_DIM v[i] = Ws[1 + i];
             FOR_I_DIM rate[i] = v[i];
@@ -509,9 +867,149 @@ void Particles::velocity(const ParticleView & x_stage, const ParticleView & dxdt
         rtype * row = a.data() + size_t(n_aux) * s;
         const double t = timed ? static_cast<double>(time()) : 0.0;
         double vars[particles::MAX_VARIABLES];
-        particles::fill_base(vars, values, t, Ws, v, heat ? values + 2 * N_DIM : nullptr, gas_R);
+        double material[particles::N_MATERIAL];
+        drop.material(drops, rho_solid, Tp, material);
+        particles::fill_base(vars, values, t, Ws, v, heat || drops ? &Tp : nullptr, T_gas, d, material);
         q.fill(vars, values, row, rate);
         if (observe) q.observe(vars, t, row);
+    });
+}
+
+void Particles::couple(const ParticleView & x_stage, const State & rhs,
+                       const std::function<void(const State &)> & exchange) {
+    if (!coupled) return;
+    deposition.deposit(id, cell, x_stage, width, exchange);
+    const StateView q = deposition.result().flow;
+    const StateView r = rhs.flow;
+    const SpeciesView r_species = rhs.species;
+    const auto V = mesh->cell_measure;
+    const bool vapor = is_droplet;
+    const uint32_t k_v = droplet.liquid.vapor;
+    gated::parallel_for("particle_coupling", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_CONSERVATIVE r(c, i) += q(c, i) / V(c);
+        if (vapor) r_species(c, k_v) += q(c, 0) / V(c);
+    });
+}
+
+void Particles::remove_evaporated(const State & state, const std::function<void(const State &)> & exchange) {
+    if (!is_droplet || capacity == 0) return;
+    const auto ids = id;
+    const auto xs = x;
+    const uint32_t w = width;
+    const double m_min = droplet.minimum_mass;
+    const particles::Droplet drop = droplet;
+    const rtype parcel = weight;
+    const bool two = coupled;
+    const auto values = deposition.slot_values();
+    const auto removed = n_removed;
+    // What the gas receives from the droplets removed, 0 from the others; positions are in the start cells' frames
+    gated::parallel_for("particle_evaporated", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        if (ids(s) == EMPTY) return;
+        const rtype * y = xs.data() + size_t(w) * s + N_DIM;
+        const bool gone = !(static_cast<double>(y[particles::Droplet::MASS]) >= m_min);
+        double out[N_CONSERVATIVE];
+        drop.remains(y, out);
+        if (two) FOR_I_CONSERVATIVE values(s, i) = gone ? static_cast<double>(parcel) * out[i] : 0.0;
+    });
+    if (coupled) {
+        deposition.deposit(id, cell, x, width, exchange);
+        const StateView q = deposition.result().flow;
+        const StateView U = state.flow;
+        const SpeciesView rhoY = state.species;
+        const auto V = mesh->cell_measure;
+        const uint32_t k_v = droplet.liquid.vapor;
+        gated::parallel_for("particle_evaporated_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            FOR_I_CONSERVATIVE U(c, i) += q(c, i) / V(c);
+            rhoY(c, k_v) += q(c, 0) / V(c);
+        });
+    }
+    gated::parallel_for("particle_evaporated_remove", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        if (ids(s) == EMPTY) return;
+        if (static_cast<double>(xs(size_t(w) * s + N_DIM + particles::Droplet::MASS)) >= m_min) return;
+        ids(s) = EMPTY;
+        Kokkos::atomic_inc(&removed(3));
+    });
+}
+
+std::vector<std::string> Particles::field_names(const Input & input) {
+    if (!configured(input)) return {};
+    const Input & table = input.at("particles");
+    const std::string type = find_value_or<std::string>(table, "type", "");
+    if (type != "solid" && type != "droplet") return {};
+    std::vector<std::string> names = {"PARTICLE_VOLUME_FRACTION", "PARTICLE_NUMBER_DENSITY"};
+    FOR_I_DIM names.push_back(std::string("PARTICLE_U_") + "XYZ"[i]);
+    if (find_value_or<std::string>(table, "coupling", "one-way") == "two-way") {
+        for (const auto & name : CONSERVATIVE_NAMES) names.push_back("PARTICLE_SOURCE_" + std::string(name));
+        if (type == "droplet" && table.contains("liquid") && table.at("liquid").contains("species")) {
+            names.push_back("PARTICLE_SOURCE_RHOY_" + find_value<std::string>(table.at("liquid"), "species"));
+        }
+    }
+    return names;
+}
+
+void Particles::fields(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                       const LSQVertexGradientFunctor & gradient, Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients,
+                       const std::function<void(const State &)> & exchange,
+                       const Kokkos::View<rtype **, Kokkos::LayoutRight> & out) {
+    if (!is_solid) return;
+    const auto ids = id;
+    const auto xs = x;
+    const uint32_t w = width;
+    const rtype parcel = weight;
+    const particles::Solid sphere = solid;
+    const auto values = deposition.slot_values();
+    const auto V = mesh->cell_measure;
+    const bool drops = is_droplet;
+    // Volume, number and momentum of the particles
+    gated::parallel_for("particle_field_values", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        const rtype * y = xs.data() + size_t(w) * s + N_DIM;
+        const rtype m = drops ? Kokkos::fmax(y[particles::Droplet::MASS], 0.0_r) : sphere.mass();
+        values(s, 0) = static_cast<double>(parcel * m / sphere.density);
+        values(s, 1) = static_cast<double>(parcel);
+        FOR_I_DIM values(s, 2 + i) = static_cast<double>(parcel * (drops ? y[i] : m * y[i]));
+    });
+    deposition.deposit(ids, cell, xs, w, exchange);
+    {
+        const StateView q = deposition.result().flow;
+        gated::parallel_for("particle_fields", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+            out(c, 0) = q(c, 0) / V(c);
+            out(c, 1) = q(c, 1) / V(c);
+            FOR_I_DIM out(c, 2 + i) = q(c, 0) > 0.0_r ? q(c, 2 + i) / (sphere.density * q(c, 0)) : 0.0_r;
+        });
+    }
+    if (!coupled) return;
+    // What they give the gas at their present state, from the rates of a step of zero length (explicit)
+    sample(W, reconstruction, gradient, gradients);
+    const auto Wp = W_point;
+    const auto pc = point_cell;
+    const bool read_gradients = solid.reads_gradients();
+    const particles::Droplet drop = droplet;
+    const auto Y = scalars;
+    const auto scratch = work;
+    constexpr uint32_t MAX_START = particles::Droplet::N_START;
+    static_assert(particles::Solid::TAU_T + 1 <= MAX_START);
+    gated::parallel_for("particle_field_sources", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        if (ids(s) == EMPTY) return;
+        const rtype * y = xs.data() + size_t(w) * s + N_DIM;
+        rtype Ws[N_CONSERVATIVE], G[N_CONSERVATIVE * N_DIM] = {}, start[MAX_START], rate[2 * N_DIM + 2], o[N_CONSERVATIVE];
+        FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
+        if (read_gradients) {
+            FOR_I_CONSERVATIVE for (uint8_t d = 0; d < N_DIM; d++) G[i * N_DIM + d] = gradients(pc(s), i, d);
+        }
+        if (drops) {
+            drop.rates(Ws, G, &Y(pc(s), 0), y, 0.0_r, true, start, rate, &scratch(s, 0));
+            drop.exchange(y, rate, o);
+        } else {
+            sphere.rates(Ws, G, y, 0.0_r, true, start, rate);
+            sphere.exchange(y, rate, o);
+        }
+        FOR_I_CONSERVATIVE values(s, i) = static_cast<double>(parcel * o[i]);
+    });
+    deposition.deposit(ids, cell, xs, w, exchange);
+    const StateView q = deposition.result().flow;
+    gated::parallel_for("particle_field_source_cells", n_owned, KOKKOS_LAMBDA(const uint32_t c) {
+        FOR_I_CONSERVATIVE out(c, N_DIM + 2 + i) = q(c, i) / V(c);
+        if (drops) out(c, N_DIM + 2 + N_CONSERVATIVE) = q(c, 0) / V(c);
     });
 }
 
@@ -533,10 +1031,23 @@ void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReco
     const auto Wp = W_point;
     const uint32_t w = width;
     const rtype gas_R = static_cast<rtype>(R);
+    const bool heat = heated;
+    const particles::Solid sphere = solid;
+    const bool drops = is_droplet;
+    const particles::Droplet drop = droplet;
     gated::parallel_for("particle_start_from_gas", capacity, KOKKOS_LAMBDA(const uint32_t s) {
         if (ids(s) == EMPTY) return;
-        if (velocity) FOR_I_DIM values(w * s + N_DIM + i) = Wp(s, 1 + i);
-        if (temperature) values(w * s + 2 * N_DIM) = Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R);
+        rtype * y = values.data() + size_t(w) * s + N_DIM;
+        if (drops) {
+            if (!velocity) return;
+            rtype u[N_DIM];
+            FOR_I_DIM u[i] = Wp(s, 1 + i);
+            drop.values(static_cast<double>(y[particles::Droplet::MASS]), u, drop.temperature(y), y);
+            return;
+        }
+        const rtype Tp = heat ? sphere.temperature(y) : 0.0_r;
+        if (velocity) FOR_I_DIM y[i] = Wp(s, 1 + i);
+        if (heat) y[N_DIM] = sphere.thermal_value(y, temperature ? Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R) : Tp);
     });
 }
 
@@ -621,7 +1132,13 @@ void Particles::write_probes(const uint64_t step, const double t) {
     const auto Wp = W_point;
     const uint32_t w = width;
     const double gas_R = R;
-    const bool inertia = is_solid, heat = heated;
+    const bool inertia = is_solid, heat = heated, drops = is_droplet;
+    const particles::Solid sphere = solid;
+    const particles::Droplet drop = droplet;
+    const auto Y = scalars;
+    const auto pc = point_cell;
+    const double d_solid = is_solid ? static_cast<double>(solid.diameter) : Kokkos::Experimental::quiet_NaN_v<double>;
+    const double rho_solid = is_solid ? static_cast<double>(solid.density) : Kokkos::Experimental::quiet_NaN_v<double>;
     const particles::QuantityFunctor q = quantities.functor();
     const uint32_t n_aux = quantities.n_aux();
     const kexpr::ProgramTable<> table = probes.table();
@@ -643,8 +1160,21 @@ void Particles::write_probes(const uint64_t step, const double t) {
         FOR_I_CONSERVATIVE Ws[i] = Wp(s, i);
         const rtype * values = xs.data() + size_t(w) * s;
         double vars[particles::MAX_VARIABLES];
-        particles::fill_base(vars, values, t, Ws, inertia ? values + N_DIM : Ws + 1, heat ? values + 2 * N_DIM : nullptr,
-                             gas_R);
+        rtype v[N_DIM];
+        FOR_I_DIM v[i] = inertia ? values[N_DIM + i] : Ws[1 + i];
+        double Tp = heat ? static_cast<double>(sphere.temperature(values + N_DIM)) : 0.0;
+        double T_gas = gas_R > 0.0 ? static_cast<double>(Ws[N_DIM + 1]) / (static_cast<double>(Ws[0]) * gas_R)
+                                   : Kokkos::Experimental::quiet_NaN_v<double>;
+        double d = d_solid;
+        if (drops) {
+            drop.velocity(values + N_DIM, v);
+            Tp = drop.temperature(values + N_DIM);
+            T_gas = drop.gas_temperature(Ws, &Y(pc(s), 0));
+            d = drop.diameter_of(static_cast<double>(values[N_DIM + particles::Droplet::MASS]), Tp);
+        }
+        double material[particles::N_MATERIAL];
+        drop.material(drops, rho_solid, Tp, material);
+        particles::fill_base(vars, values, t, Ws, v, heat || drops ? &Tp : nullptr, T_gas, d, material);
         q.fill(vars, values, a.data() + size_t(n_aux) * s, nullptr);
         const double p[3] = {vars[0], vars[1], N_DIM == 3 ? vars[N_DIM - 1] : 0.0};
         for (uint32_t j = 0; j < n; j++) {
@@ -664,7 +1194,7 @@ void Particles::relocate() {
     const auto pos = x;
     const auto removed = n_removed;
     const uint32_t wd = width;
-    const bool inertia = is_solid;
+    const bool inertia = is_solid, drops = is_droplet;
     const auto e = restitution;
     const auto step = step_start;
     gated::parallel_for("particle_relocate", capacity, KOKKOS_LAMBDA(const uint32_t s) {
@@ -673,6 +1203,8 @@ void Particles::relocate() {
         // The velocity, then the gas velocity and acceleration of the step's start, which turn with it
         rtype p[N_DIM], v[3 * N_DIM];
         FOR_I_DIM p[i] = pos(wd * s + i);
+        // A droplet's momentum in place of the velocity: it turns across periodic faces as the velocity does
+        const rtype mass = drops ? pos(wd * s + N_DIM + particles::Droplet::MASS) : 1.0_r;
         FOR_I_DIM {
             v[i] = inertia ? pos(wd * s + N_DIM + i) : 0.0_r;
             v[N_DIM + i] = inertia ? step(s, particles::Solid::U + i) : 0.0_r;
@@ -692,8 +1224,10 @@ void Particles::relocate() {
                 rtype n[N_DIM];
                 const rtype d = w.distance(c, static_cast<uint32_t>(face), p, n);
                 if (inertia) {
+                    if (drops) FOR_I_DIM v[i] = mass > 0.0_r ? v[i] / mass : 0.0_r;
                     particles::rebound(v + N_DIM, v + 2 * N_DIM, step(s, particles::Solid::TAU), step(s, particles::Solid::DT),
                                        n, d, e(static_cast<uint32_t>(face), 0), e(static_cast<uint32_t>(face), 1), p, v);
+                    if (drops) FOR_I_DIM v[i] *= mass;
                 } else {
                     FOR_I_DIM p[i] -= 2.0_r * d * n[i];
                 }
@@ -801,6 +1335,33 @@ void Particles::migrate() {
     }
 }
 
+particles::Validity Particles::validity(const double limit) const {
+    particles::Validity v;
+    if (!is_solid) return v;
+    const auto ids = id;
+    const auto start = cell;
+    const auto V = mesh->cell_measure;
+    const double d_solid = static_cast<double>(solid.diameter);
+    const bool drops = is_droplet;
+    const particles::Droplet drop = droplet;
+    const auto xs = x;
+    const uint32_t w = width;
+    gated::parallel_reduce("particle_size_ratio", capacity, KOKKOS_LAMBDA(const uint32_t s, double & m, uint64_t & n) {
+        if (ids(s) == EMPTY) return;
+        const double d = drops ? drop.diameter_of(static_cast<double>(xs(size_t(w) * s + N_DIM + particles::Droplet::MASS)),
+                                                  drop.temperature(&xs(size_t(w) * s + N_DIM)))
+                               : d_solid;
+        const double ratio = d / Kokkos::pow(static_cast<double>(V(start(s))), 1.0 / N_DIM);
+        m = Kokkos::fmax(m, ratio);
+        n += ratio > limit ? 1u : 0u;
+    }, Kokkos::Max<double>(v.size_ratio), Kokkos::Sum<uint64_t>(v.n_large));
+    if (distributed) {
+        v.size_ratio = comm::allreduce(v.size_ratio, comm::Op::MAX);
+        v.n_large = comm::allreduce(v.n_large, comm::Op::SUM);
+    }
+    return v;
+}
+
 uint64_t Particles::count() const {
     const auto ids = id;
     uint64_t n = 0;
@@ -816,19 +1377,46 @@ std::array<uint64_t, 3> Particles::removed() const {
     return distributed ? comm::allreduce(local, comm::Op::SUM) : local;
 }
 
+uint64_t Particles::evaporated() const {
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), n_removed);
+    return distributed ? comm::allreduce(h(3), comm::Op::SUM) : h(3);
+}
+
+void Particles::host_velocity(const rtype * y, rtype * v) const {
+    if (is_droplet) {
+        droplet.velocity(y, v);
+    } else {
+        FOR_I_DIM v[i] = is_solid ? y[i] : 0.0_r;
+    }
+}
+
 std::vector<particles::Record> Particles::gather() const {
     auto g_id = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), id);
     auto g_x = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), x);
     auto g_aux = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), aux);
-    const size_t n_q = quantities.size(), stride = 2 * N_DIM + 1 + n_q;
+    const size_t n_q = quantities.size(), stride = 2 * N_DIM + 3 + n_q;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
     std::vector<uint64_t> ids;
-    std::vector<double> xs;  // position, velocity, temperature, quantities
+    std::vector<double> xs;  // position, velocity, temperature, diameter, mass, quantities
     for (uint32_t i = 0; i < capacity; i++) {
         if (g_id(i) == EMPTY) continue;
         ids.push_back(g_id(i));
+        const rtype * y = g_x.data() + size_t(width) * i + N_DIM;
+        rtype v[N_DIM];
+        host_velocity(y, v);
         for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(g_x(width * i + d)));
-        for (size_t d = 0; d < N_DIM; d++) xs.push_back(is_solid ? static_cast<double>(g_x(width * i + N_DIM + d)) : 0.0);
-        xs.push_back(heated ? static_cast<double>(g_x(width * i + 2 * N_DIM)) : std::numeric_limits<double>::quiet_NaN());
+        for (size_t d = 0; d < N_DIM; d++) xs.push_back(static_cast<double>(v[d]));
+        if (is_droplet) {
+            const double M = static_cast<double>(y[particles::Droplet::MASS]);
+            const double T = droplet.temperature(y);
+            xs.push_back(T);
+            xs.push_back(droplet.diameter_of(M, T));
+            xs.push_back(M);
+        } else {
+            xs.push_back(heated ? static_cast<double>(solid.temperature(y)) : nan);
+            xs.push_back(is_solid ? static_cast<double>(solid.diameter) : nan);
+            xs.push_back(nan);
+        }
         for (uint32_t q = 0; q < n_q; q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -848,7 +1436,9 @@ std::vector<particles::Record> Particles::gather() const {
             records[k].v[d] = xs[stride * k + N_DIM + d];
         }
         records[k].T = xs[stride * k + 2 * N_DIM];
-        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + 2 * N_DIM + 1),
+        records[k].d = xs[stride * k + 2 * N_DIM + 1];
+        records[k].m = xs[stride * k + 2 * N_DIM + 2];
+        records[k].q.assign(xs.begin() + static_cast<std::ptrdiff_t>(stride * k + 2 * N_DIM + 3),
                             xs.begin() + static_cast<std::ptrdiff_t>(stride * (k + 1)));
     }
     std::sort(records.begin(), records.end(), [](const auto & a, const auto & b) { return a.id < b.id; });
@@ -869,7 +1459,8 @@ void Particles::write(const uint64_t step, const double t) const {
     if (is_solid) {
         for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
     }
-    if (heated) out << ",T_p";
+    if (heated || is_droplet) out << ",T_P";
+    if (is_droplet) out << ",D_P,M_P";
     for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {
@@ -878,7 +1469,8 @@ void Particles::write(const uint64_t step, const double t) const {
         if (is_solid) {
             for (size_t d = 0; d < N_DIM; d++) out << "," << r.v[d];
         }
-        if (heated) out << "," << r.T;
+        if (heated || is_droplet) out << "," << r.T;
+        if (is_droplet) out << "," << r.d << "," << r.m;
         for (const double q : r.q) out << "," << q;
         out << "\n";
     }
@@ -902,7 +1494,7 @@ RestartArrays Particles::restart_arrays() const {
         for (uint32_t j = 0; j < width; j++) local.push_back(static_cast<double>(h_x(width * s + j)));
         for (uint32_t j = 0; j < n_aux; j++) local.push_back(static_cast<double>(h_aux(s, j)));
     }
-    std::array<uint64_t, 3> removed{h_removed(0), h_removed(1), h_removed(2)};
+    std::array<uint64_t, 4> removed{h_removed(0), h_removed(1), h_removed(2), h_removed(3)};
     std::vector<double> all = local;
     if (distributed) {
         // Every rank lays out the file's header, arrays included
@@ -914,17 +1506,34 @@ RestartArrays Particles::restart_arrays() const {
     std::vector<size_t> order(n);
     for (size_t k = 0; k < n; k++) order[k] = k;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return all[WIDTH * a] < all[WIDTH * b]; });
-    std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0), Ts(heated ? n : 0);
+    std::vector<double> ids(n), cells(n), xs(N_DIM * n), vs(is_solid ? N_DIM * n : 0), Ts(heated || is_droplet ? n : 0),
+        Es(solid.energy_state || is_droplet ? n : 0), Ps(is_droplet ? N_DIM * n : 0), Ms(is_droplet ? n : 0);
     std::vector<std::vector<double>> qs(quantities.size(), std::vector<double>(n));
     for (size_t k = 0; k < n; k++) {
         const double * p = all.data() + WIDTH * order[k];
         ids[k] = p[0];
         cells[k] = p[1];
         for (size_t d = 0; d < N_DIM; d++) xs[N_DIM * k + d] = p[2 + d];
-        if (is_solid) {
+        if (is_droplet) {
+            rtype y[particles::Droplet::N_VALUES], v[N_DIM];
+            for (uint32_t j = 0; j < particles::Droplet::N_VALUES; j++) y[j] = static_cast<rtype>(p[2 + N_DIM + j]);
+            droplet.velocity(y, v);
+            for (size_t d = 0; d < N_DIM; d++) {
+                vs[N_DIM * k + d] = static_cast<double>(v[d]);
+                Ps[N_DIM * k + d] = p[2 + N_DIM + particles::Droplet::MOMENTUM + d];
+            }
+            Ts[k] = droplet.temperature(y);
+            Es[k] = p[2 + N_DIM + particles::Droplet::ENERGY];
+            Ms[k] = p[2 + N_DIM + particles::Droplet::MASS];
+        } else if (is_solid) {
             for (size_t d = 0; d < N_DIM; d++) vs[N_DIM * k + d] = p[2 + N_DIM + d];
         }
-        if (heated) Ts[k] = p[2 + 2 * N_DIM];
+        if (heated) {
+            rtype y[N_DIM + 1];
+            for (uint32_t j = 0; j <= N_DIM; j++) y[j] = static_cast<rtype>(p[2 + N_DIM + j]);
+            Ts[k] = static_cast<double>(solid.temperature(y));
+            if (solid.energy_state) Es[k] = p[2 + 2 * N_DIM];
+        }
         for (uint32_t q = 0; q < quantities.size(); q++) {
             const particles::QuantitySpec & spec = quantities.spec(q);
             const bool integrated = spec.kind == particles::Accumulate::INTEGRAL ||
@@ -937,9 +1546,14 @@ RestartArrays Particles::restart_arrays() const {
                             {"PARTICLE_X", std::move(xs)},
                             {"PARTICLE_REMOVED",
                              {static_cast<double>(removed[0]), static_cast<double>(removed[1]),
-                              static_cast<double>(removed[2])}}};
+                              static_cast<double>(removed[2]), static_cast<double>(removed[3])}}};
     if (is_solid) arrays.emplace_back("PARTICLE_V", std::move(vs));
-    if (heated) arrays.emplace_back("PARTICLE_T", std::move(Ts));
+    if (heated || is_droplet) arrays.emplace_back("PARTICLE_T", std::move(Ts));
+    if (solid.energy_state || is_droplet) arrays.emplace_back("PARTICLE_E", std::move(Es));
+    if (is_droplet) {
+        arrays.emplace_back("PARTICLE_P", std::move(Ps));
+        arrays.emplace_back("PARTICLE_M", std::move(Ms));
+    }
     for (uint32_t q = 0; q < quantities.size(); q++) {
         arrays.emplace_back("PARTICLE_Q_" + quantities.names()[q], std::move(qs[q]));
     }
@@ -947,7 +1561,7 @@ RestartArrays Particles::restart_arrays() const {
 }
 
 std::vector<std::pair<std::string, std::string>> Particles::settings() const {
-    const char * noun = is_solid ? "solid particle" : "tracer";
+    const char * noun = is_droplet ? "droplet" : is_solid ? "solid particle" : "tracer";
     std::string text = n_restored > 0 ? logging::count(n_restored, noun) + " from the restart file"
                                       : logging::count(n_seeded, noun);
     text += ", " + logging::count(capacity, "slot") + " per rank";
@@ -965,7 +1579,17 @@ std::vector<std::pair<std::string, std::string>> Particles::settings() const {
         if (solid.added_mass) solid_text += ", added mass";
         if (solid.lift) solid_text += ", Saffman lift";
         if (heated) solid_text += ", Ranz-Marshall heat transfer (specific heat " + logging::real(static_cast<double>(solid.specific_heat)) + ")";
-        lines.emplace_back("Solid particles", solid_text);
+        if (is_droplet) {
+            const particles::Liquid & l = droplet.liquid;
+            const char * saturation = l.pressure_curve.given() ? "tabulated" : l.antoine ? "Antoine" : "Clausius-Clapeyron";
+            solid_text += ", liquid of vapor " + vapor_name + " (density " + logging::real(l.density) + ", specific heat " +
+                          logging::real(l.specific_heat) + ", latent heat " + logging::real(l.latent_heat) + " at " +
+                          logging::real(l.boiling_temperature) + " K, " + saturation + " saturation pressure), " +
+                          (droplet.model == particles::Evaporation::D2_LAW ? "d^2-law" : "Abramzon-Sirignano") +
+                          " evaporation, removed below a diameter of " + logging::real(minimum_diameter);
+        }
+        lines.emplace_back(is_droplet ? "Droplets" : "Solid particles", solid_text);
+        if (!liquid_tables.empty()) lines.emplace_back("Liquid tables", liquid_tables);
     }
     for (const auto & q : quantities.summary()) lines.emplace_back("Particle quantity", q);
     for (const auto & p : probes.summary()) lines.emplace_back("Particle probe", p);

@@ -1,0 +1,10 @@
+{
+ "dimension": "temperature (K)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/droplets.toml"
+ ],
+ "type": "number"
+}

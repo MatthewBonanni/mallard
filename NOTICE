@@ -20,3 +20,8 @@ src/common/kexpr.{h,cpp} and src/common/expression.h follows
 exprtk's grammar, operator semantics and numerics, and ports its literal
 conversion, integer powers and numerical derivative. exprtk is distributed
 under the MIT License; see licenses/exprtk-MIT.txt.
+
+Builds configured with Mallard_ENABLE_COOLPROP include CoolProp
+(http://www.coolprop.org), linked statically to tabulate the properties of
+the named liquids of droplets (src/particles/liquid_coolprop.cpp). CoolProp
+is distributed under the MIT License; see licenses/CoolProp-MIT.txt.

@@ -1,0 +1,45 @@
+# For the key catalog only (tools/dev/input_catalog.py): droplets of a named
+# liquid (needs a build with Mallard_ENABLE_COOLPROP).
+
+[run]
+n_steps = 1
+dt = 1e-5
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 0.01
+Ly = 0.01
+
+[[periodic]]
+zones = ["left", "right"]
+
+[[periodic]]
+zones = ["bottom", "top"]
+
+[initialize]
+p = 101325.0
+T = 1000.0
+u = [0.0, 0.0]
+X = { O2 = 0.21, N2 = 0.79 }
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "../../../../mechanisms/h2o2.yaml"
+transport = "mixture_averaged"
+
+[particles]
+type = "droplet"
+diameter = 50e-6
+temperature = 300.0
+points = [[0.005, 0.005]]
+
+[particles.liquid]
+species = "H2O"
+fluid = "water"
+tolerance = 1e-5

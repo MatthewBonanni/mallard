@@ -6,7 +6,9 @@
  ],
  "required": true,
  "set_in": [
-  "tools/dev/catalog_inputs/2d/check.toml"
+  "tools/dev/catalog_inputs/2d/check.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml",
+  "tools/dev/catalog_inputs/2d/named_liquid.toml"
  ],
  "type": "number"
 }

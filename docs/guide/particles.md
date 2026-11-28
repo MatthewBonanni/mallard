@@ -8,9 +8,12 @@ the gas accelerate them, convection heats them, and walls rebound or catch
 them. Each particle can carry
 [quantities](#per-particle-quantities) along its path (time integrals, extrema,
 first times, turns about an axis), and [probes](#particle-probes) give
-statistics of the particles in a region. Particles do not act on the gas yet;
-two-way coupling, sprays, injection during the run and particle output beyond
-the final positions follow in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+statistics of the particles in a region. With
+[two-way coupling](#two-way-coupling) solid particles act on the gas,
+[evaporating droplets](#evaporating-droplets) give it their vapor, and
+[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh.
+Injection during the run and particle output beyond the final positions follow
+in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 - [Which particles?](#which-particles)
 - [Tracers](#tracers-particles), [seeding](#seeding), [restarts](#restarts) and [boundaries](#boundaries)
@@ -28,8 +31,8 @@ measured orders of accuracy in the
 
 The particles are *point particles*: each is much smaller than the cells and
 the smallest eddies around it, sees the gas as undisturbed at its center, and
-moves on its own, without collisions with other particles and without acting
-on the gas (one-way coupling). That describes dilute suspensions, with a
+moves on its own, without collisions with other particles and, unless coupled
+[two-way](#two-way-coupling), without acting on the gas (one-way coupling). That describes dilute suspensions, with a
 volume fraction of particles below about 10⁻⁶ (a mass loading of 0.2% for
 glass beads in air), and every tracer study.
 
@@ -88,8 +91,8 @@ n = [9, 9]
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
-and 2 more.
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
+and 3 more.
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -183,9 +186,9 @@ interaction = "stick"
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
-[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step)
-and 1 more.
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+and 2 more.
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
@@ -198,7 +201,8 @@ The gas state at the particle (`u`, `rho`, `mu` at its temperature) comes from
 the reconstruction polynomial, as for tracers, and position and velocity are
 part of the time integrator's state: trajectories converge at the
 integrator's order. `f` is the drag correction of the [drag law](#drag-laws)
-(`drag`), `f = 1` for creeping flow. The particles do not act on the gas.
+(`drag`), `f = 1` for creeping flow. By default the particles do not act on the gas;
+`coupling = "two-way"` makes them ([Two-way coupling](#two-way-coupling)).
 
 **Forces.** Drag, gravity and buoyancy are the forces that matter for
 particles much denser than the gas (droplets, dust, ash, sand, soot in air).
@@ -224,7 +228,7 @@ $$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2
 \qquad Nu = 2 + 0.6 Re_p^{1/2} Pr^{1/3},$$
 
 with `k` the gas conductivity. The particle is isothermal (its Biot number is
-small) and does not heat the gas. Particle expressions read it as `T_P`, the
+small) and, unless coupled two-way, does not heat the gas. Particle expressions read it as `T_P`, the
 `file` has it as a column `T_p`, and restart files carry it.
 
 | Key | Default | Meaning |
@@ -398,6 +402,324 @@ example: Mallard's particles (dots) against their exact trajectories
   particles of a few cells' size are not point particles: the gas at their
   center is not the flow around them.
 
+## Two-way coupling
+
+```toml
+[particles]
+type = "solid"
+coupling = "two-way"
+weight = 1e4              # particles per parcel
+deposition_width = 2e-3   # m
+diameter = 50e-6
+density = 2500.0
+specific_heat = 840.0
+```
+
+*Used in:*
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud).
+
+With `coupling = "two-way"` the gas feels the particles: each stage, every
+particle gives the gas the opposite of its own change of momentum and energy,
+less what gravity on the particle did, times `weight`:
+
+$$\mathbf{S}_{\rho \mathbf{u}} = -w\, m_p \left(\frac{d\mathbf{v}}{dt} - \mathbf{g}\right),
+\qquad S_{\rho E} = -w\, m_p \left(\frac{d e_p}{dt} - \mathbf{g} \cdot \mathbf{v}\right),
+\qquad e_p = c_p T_p + \tfrac{1}{2} |\mathbf{v}|^2,$$
+
+summed into the cells and spread over a Gaussian of standard deviation
+`deposition_width`. Drag, the pressure-gradient, added-mass and lift forces and
+heat transfer all act back on the gas; gravity on the particles (`gravity` of
+`[particles]`) does not, since the earth exerts it, not the gas. The sources use
+the same stage rates the particles are integrated with, so the gas and the
+particles together conserve momentum and energy to round-off (with heat
+transfer; without it, the particles' kinetic energy is conserved to the
+integrator's order), however stiff the particles are.
+
+A parcel stands for `weight` identical particles, so that a computational
+particle can represent many physical ones; in 2D a parcel stands for `weight`
+particles per meter of depth. The mass loading of a cell, `w m_p / (rho V)`,
+decides how strongly the particles act: near 1 and above, they drag the gas
+along.
+
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-light.svg#gh-light-mode-only)
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-dark.svg#gh-dark-mode-only)
+
+*The [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
+example, coupled one way and two ways (Mallard runs). Left: the cloud's mean
+fall velocity from its probe. Coupled one way, each particle reaches the
+terminal velocity `tau g` = 0.1 of a single particle; coupled two ways, the
+cloud, as heavy as the gas within it, drags that gas along and falls at up
+to 0.27. Right: the gas velocity at `t` = 2 and the parcels, whose wake
+sheds a vortex pair and bends the cloud into an arc.*
+
+**Deposition.** With `deposition_width = 0` (the default) each particle's
+source goes to the cell holding it. On a fine mesh that puts a point source in
+one small cell, so the result depends on the mesh. A `deposition_width` in
+meters spreads it over a Gaussian of that width whatever the cells, so coupled
+results converge as the mesh is refined: second order in the cell size at a
+fixed width (the deposit keeps each particle's position within its cell, not
+only its cell). Choose a width of the order of the cell size of the coarsest
+mesh you would trust, or of the physical size of the region a particle
+disturbs. The spreading never moves sources across walls or out of the domain,
+and conserves them exactly.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `coupling` | `"one-way"` | `"one-way"`: the particles feel the gas only; `"two-way"`: the gas feels them too |
+| `weight` | 1 | Particles per parcel (per meter of depth in 2D) |
+| `deposition_width` | 0 | Standard deviation of the Gaussian the sources spread over; 0: each particle's own cell |
+
+The results are bitwise the same on any number of ranks and with or without
+CUDA graphs.
+
+**Pitfalls.**
+
+- The point-particle model assumes particles much smaller than the cells and a
+  dilute suspension. `mallard check` warns where particles are larger than a
+  tenth of their cell (`W-PARTICLE-SIZE`) and where the particle volume
+  fraction exceeds 1% (`W-PARTICLE-VOLUME-FRACTION`): collisions (four-way
+  coupling) and the volume the particles take from the gas are left out.
+- Two-way coupling needs solid particles; tracers are massless. Axisymmetric
+  runs are refused.
+- A wide `deposition_width` costs spreading passes per stage, about
+  `4 width^2 / h^2` in 2D and `6 width^2 / h^2` in 3D for cells of size `h`,
+  each with a halo exchange on several ranks.
+
+## Evaporating droplets
+
+```toml
+[physics]
+type = "navier_stokes"
+gas = "mixture"
+mechanism = "mechanisms/h2o2.yaml"   # holds the vapor species
+transport = "mixture_averaged"
+
+[particles]
+type = "droplet"
+diameter = 50e-6
+temperature = 300.0
+evaporation = "abramzon_sirignano"   # or "d2_law"
+coupling = "two-way"
+weight = 1e4
+
+[particles.liquid]
+species = "H2O"
+density = 958.0
+specific_heat = 4216.0
+latent_heat = 2.257e6           # J/kg, at the boiling temperature
+boiling_temperature = 373.15
+critical_temperature = 647.1
+critical_pressure = 22.064e6
+```
+
+Droplets are solid particles of a liquid that evaporates into a gas mixture:
+sprays, fuel injection, humidification, quenching. Each droplet moves as a
+solid particle (drag, gravity, `forces`, walls), is heated by the gas and
+evaporates into the vapor species `species` of the mechanism, so its diameter
+falls until, below `minimum_diameter`, it is removed. With
+`coupling = "two-way"` the gas receives the vapor, with its momentum and
+energy, and gives the heat; the gas and droplets together conserve mass, every
+species, momentum and energy to round-off. Droplets need a viscous mixture
+(`gas = "mixture"`, `type = "navier_stokes"`).
+
+**The model.** A droplet is a sphere of uniform temperature (infinite liquid
+conductivity) of one component. Its surface is at its temperature `T_p`, up to
+the boiling temperature at the gas pressure, and the vapor there is at its
+saturation pressure: the surface's vapor mass fraction `Y_s` follows from
+Raoult's law of a pure liquid. The gas film around the droplet is evaluated by
+the 1/3 rule, `T_f = T_s + (T - T_s)/3`, `Y_f = Y_s + (Y - Y_s)/3`, with the
+mechanism's thermodynamics and transport (its viscosity also sets the drag).
+With the [Spalding (1953)](../references.md#spalding-1953) mass transfer number `B_M = (Y_s - Y)/(1 - Y_s)`:
+
+- `evaporation = "d2_law"`: `mdot = pi d rho_f D_f Sh0 ln(1 + B_M)` and the
+  heat from the gas `Q = pi d k_f Nu0 (T - T_s)`, [Ranz & Marshall (1952)](../references.md#ranz-marshall-1952)'s
+  `Sh0 = 2 + 0.6 Re^1/2 Sc^1/3`, `Nu0 = 2 + 0.6 Re^1/2 Pr^1/3`. At rest and at
+  its wet-bulb temperature, d² falls linearly:
+  `d² = d0² - K t`, `K = 8 rho_f D_f ln(1 + B_M) / rho_l`.
+- `evaporation = "abramzon_sirignano"` (default): the film model of
+  [Abramzon & Sirignano (1989)](../references.md#abramzon-sirignano-1989), which thickens the film by the Stefan flow and transfers heat by the
+  number `B_T = (1 + B_M)^phi - 1`, `phi = (c_p,v / c_p,f) (Sh*/Nu*) / Le_f`:
+  `mdot = pi d rho_f D_f Sh* ln(1 + B_M)`,
+  `Q = pi d k_f Nu* (T - T_s) ln(1 + B_T)/B_T`. The usual choice for sprays
+  in hot gas ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-light.svg#gh-light-mode-only)
+![A 50 µm water droplet at rest in air at 1000 K: d squared falls linearly at the rate of its film under both models, and the droplet heats from 300 K to its wet-bulb temperature in about 4 ms](../images/guide/droplet_evaporation-dark.svg#gh-dark-mode-only)
+
+*A 50 µm water droplet at rest in air at 1000 K and 1 atm (Mallard
+runs). Released at its wet-bulb temperature (markers), its d² falls on the
+straight line `d0² - K t` of its film, whose properties, wet-bulb temperature
+and rate `K` are computed independently with Cantera from the same mechanism;
+released at 300 K (dashed), it first heats to that temperature (right), in a
+4 ms, and lives a little longer. At rest the two models differ in
+the heat only: Abramzon & Sirignano's blowing factor lowers the heat that
+reaches the surface, so the droplet is 4 K cooler and evaporates 22% more
+slowly.*
+
+The heat into the liquid is `Q - mdot L(T_s)`, so a droplet heats or cools to
+its wet-bulb temperature, where the heat from the gas just evaporates it. The
+liquid has a constant density and specific heat; its enthalpy is that of the
+mechanism's vapor at the boiling point less `latent_heat`, so the latent heat
+at other temperatures follows Kirchhoff's law and the liquid and the gas share
+one energy reference. The saturation pressure is Clausius-Clapeyron's through
+the boiling point, or Antoine's with `antoine`. A droplet at or above the
+boiling temperature boils: the heat it receives evaporates it and its superheat
+relaxes to the boiling temperature at its heating rate. Above the critical
+pressure the boiling temperature is the critical temperature, and the
+properties of a droplet driven past the critical temperature are those at it.
+
+A droplet that would evaporate entirely within a step evaporates within that
+step at its temperature, and droplets below `minimum_diameter` are removed
+after the step: with two-way coupling their remains (mass, momentum, energy)
+go to the gas as vapor. Restart files keep the count of evaporated droplets
+with those that left the domain, were lost or stuck (`PARTICLE_REMOVED`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `type` | required | `"droplet"` |
+| `diameter` | required | Initial diameter of every seeded droplet |
+| `temperature` | required | Initial temperature, below `critical_temperature` |
+| `velocity` | gas velocity | Initial velocity |
+| `evaporation` | `"abramzon_sirignano"` | `"abramzon_sirignano"` or `"d2_law"` |
+| `minimum_diameter` | `diameter / 100` | Droplets below it are removed (their remains go to the gas with two-way coupling) |
+| `drag`, `gravity`, `forces`, `coupling`, `weight`, `deposition_width` | | As for [solid particles](#solid-particles) and [two-way coupling](#two-way-coupling) |
+
+| `[particles.liquid]` key | Default | Meaning |
+|---|---|---|
+| `species` | required | The vapor species of the mechanism |
+| `fluid` | none | A [named liquid](#named-liquids), whose properties are tables of the temperature; the keys below then replace its tables |
+| `tolerance` | 1e-6 | With `fluid`: the tables' largest relative error |
+| `density` | required without `fluid` | Liquid density (constant) |
+| `specific_heat` | required without `fluid` | Liquid specific heat (constant) |
+| `latent_heat` | required without `fluid` | Latent heat of vaporization at the boiling point |
+| `boiling_temperature` | required without `fluid` | Boiling temperature at `boiling_pressure` |
+| `boiling_pressure` | 101325 Pa | Pressure of the boiling point |
+| `critical_temperature`, `critical_pressure` | required without `fluid` | Critical point; above the boiling point |
+| `antoine` | the table, or Clausius-Clapeyron | `[A, B, C]` of the saturation pressure `log10(p / Pa) = A - B / (T / K + C)` |
+| `viscosity`, `conductivity`, `surface_tension` | the tables, or none | For particle expressions (`MU_P`, `K_P`, `SIGMA_P`) |
+
+Particle expressions read the droplet's temperature `T_P`, its diameter `D_P`,
+density `RHO_P`, the liquid's viscosity `MU_P`, conductivity `K_P` and surface
+tension `SIGMA_P` at `T_P`, and the gas temperature `T`: a droplet's Weber
+number is `RHO * ((U_X - V_X)^2 + (U_Y - V_Y)^2) * D_P / SIGMA_P`. The CSV
+`file` has the columns `T_P`, `D_P` and the droplet's mass `M_P`. With two-way coupling, `PARTICLE_SOURCE_RHOY_<species>`
+writes the vapor source per volume and time.
+
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-light.svg#gh-light-mode-only)
+![Water vapor mass fraction and vapor source around two-way coupled droplets released at rest into a sheared stream of hot air: each droplet leaves a trail of vapor downstream](../images/guide/droplet_vapor_field-dark.svg#gh-dark-mode-only)
+
+*Two-way coupled 20 µm water droplets (`weight = 3e3`,
+`deposition_width = 2e-4`) released at rest into a periodic stream of air at
+1000 K, `u = 10 + 4 sin(2 pi y / L)` m/s, after 1 ms (a Mallard run). The gas
+carries the vapor `Y_H2O` (left) downstream of the droplets, which lag behind
+it, and the shear tilts the trails; `PARTICLE_SOURCE_RHOY_H2O` (right) is
+each droplet's evaporation rate spread over the deposition width.*
+
+### Named liquids
+
+```toml
+[particles.liquid]
+species = "H2O"
+fluid = "water"        # density, specific heat, latent heat, saturation pressure,
+                       # viscosity, conductivity and surface tension from CoolProp
+```
+
+With `fluid`, every property of the liquid is a function of the droplet's
+temperature, from the triple point up to 0.999 of the critical temperature:
+density, specific heat, latent heat, saturation pressure, viscosity, thermal
+conductivity and surface tension of the saturated liquid. At setup,
+[CoolProp](http://www.coolprop.org) ([Bell et al. 2014](../references.md#bell-2014))
+fills tables of them, as fine as `tolerance` asks (the largest relative error
+of each, 1e-6 by default; a table stops at 8193 knots, where CoolProp's
+conductivity, whose slope jumps where its critical enhancement starts, is
+within 5e-6), and the setup log lists each table's knots and error; the
+droplets read only the tables, on the GPU as on the CPU. Fitting them takes
+about 2 s of setup. The range ends
+below the critical point where a correlation does (ethanol's surface
+tension). The
+boiling point is the saturation temperature at `boiling_pressure` and the
+critical point the end of the tables. A key of `[particles.liquid]` replaces
+its table with a constant, for instance `density = 1000.0`; `latent_heat`
+then is the latent heat at the boiling point, continued by Kirchhoff's law as
+for a liquid given property by property.
+
+The latent heat at the surface is the table's, and the enthalpy of the liquid
+is the integral of its specific heat, from the vapor's enthalpy at the boiling
+point less the latent heat there: the gas and the liquid share one energy
+reference, and gas and droplets conserve energy to round-off as before. The
+diameter follows the density at the droplet's temperature (a heated droplet
+swells).
+
+Named liquids need a build with `-DMallard_ENABLE_COOLPROP=ON`
+([installation](../installation.md#from-source)); in a build without it,
+`fluid` is an error that says so. Liquids given property by property need no
+CoolProp. The vapor `species` must be in the mechanism (`H2O` and `O2` are in
+`mechanisms/h2o2.yaml`, `NH3`, `CH3OH` and `C3H8` in `gri30.yaml`), with
+transport data for a Navier-Stokes gas.
+
+![Saturated-liquid properties of seven library fluids from the triple point to the end of their tables](../images/guide/liquid_library_properties-light.svg#gh-light-mode-only)
+![Saturated-liquid properties of seven library fluids from the triple point to the end of their tables](../images/guide/liquid_library_properties-dark.svg#gh-dark-mode-only)
+
+| `fluid` | CoolProp | Range (K) | Equation of state; viscosity; conductivity; surface tension |
+|---|---|---|---|
+| `ammonia` | Ammonia | 195.5 to 405.2 | Gao et al. (2020); Fenghour et al. (1995); Tufeu et al. (1984); Mulero et al. (2012) |
+| `ethanol` | Ethanol | 159.1 to 513.4 | Schroeder et al. (2014); Kiselev et al. (2005); Assael et al. (2013); Mulero et al. (2012) |
+| `methane` | Methane | 90.7 to 190.4 | Setzmann and Wagner (1991); Quinones-Cisneros and Deiters (2006); Friend et al. (1989); Mulero et al. (2012) |
+| `methanol` | Methanol | 175.6 to 512.9 | de Reuck and Craven (1993); Xiang et al. (2006); Sykioti et al. (2013); Mulero et al. (2012) |
+| `n-decane` | n-Decane | 243.5 to 617.1 | Lemmon and Span (2006); Huber et al. (2004); Huber and Perkins (2005); Mulero et al. (2012) |
+| `n-dodecane` | n-Dodecane | 263.6 to 657.4 | Lemmon and Huber (2004); Huber et al. (2004); Huber et al. (2004); Mulero et al. (2012) |
+| `n-heptane` | n-Heptane | 182.6 to 539.6 | Span and Wagner (2003); Michailidou et al. (2014); Assael et al. (2013); Mulero et al. (2012) |
+| `n-hexane` | n-Hexane | 177.8 to 507.3 | Thol et al. (2019); Michailidou et al. (2013); Assael et al. (2013); Mulero et al. (2012) |
+| `n-octane` | n-Octane | 216.4 to 568.2 | Beckmueller et al. (2019); Huber et al. (2004); Huber and Perkins (2005); Mulero et al. (2012) |
+| `n-pentane` | n-Pentane | 143.5 to 469.2 | Thol et al. (2019); Quinones-Cisneros and Deiters (2006); Vassiliou et al. (2015); Mulero et al. (2012) |
+| `nitrogen` | Nitrogen | 63.2 to 126.1 | Span et al. (2000); Lemmon and Jacobsen (2004); Lemmon and Jacobsen (2004); Mulero et al. (2012) |
+| `oxygen` | Oxygen | 54.4 to 154.4 | Schmidt and Wagner (1985); Lemmon and Jacobsen (2004); Lemmon and Jacobsen (2004); Mulero et al. (2012) |
+| `propane` | Propane | 85.5 to 369.5 | Lemmon et al. (2009); Vogel et al. (1998); Marsh et al. (2002); Mulero et al. (2012) |
+| `toluene` | Toluene | 178.0 to 591.2 | Lemmon and Span (2006); Avgeri et al. (2015); Assael et al. (2012); Mulero et al. (2012) |
+| `water` | Water | 273.2 to 646.4 | Wagner and Pruss (2002); Huber et al. (2009); Huber et al. (2012); Mulero et al. (2012) |
+
+**Pitfalls.**
+
+- Named liquids are saturated liquids: their properties do not depend on the
+  pressure. At 50 bar a compressed liquid is 0.2 to 0.3% denser than the
+  saturated liquid for water, about 2% for n-heptane and n-dodecane at 450 K,
+  and up to 10% near their critical temperature
+  ([design](../design/liquid_library.md#pressure)).
+- The gas composition at a droplet is the average of its cell, not
+  reconstructed to its position as the velocity and pressure are.
+- One-component liquids only; the liquid's temperature is uniform (no internal
+  conduction), its density and specific heat constant unless it is a
+  [named liquid](#named-liquids).
+- Supercritical droplets are outside the model: properties stop at the
+  critical temperature, and a gas above the critical pressure boils the
+  droplet at the critical temperature.
+- With two-way droplets, the conservation ledger of the run does not check
+  the gas's totals, which the droplets change; the closed-box totals of gas and
+  droplets together are conserved to round-off.
+- `density` and `specific_heat` of `[particles]` are errors for droplets: they
+  belong to `[particles.liquid]`. A `specific_heat` and `latent_heat` whose
+  Kirchhoff latent heat vanishes below the critical temperature are refused.
+
+## Dispersed-phase fields
+
+```toml
+[[write_data]]
+prefix = "spray"
+fields = ["PARTICLE_VOLUME_FRACTION", "PARTICLE_U_X", "PARTICLE_SOURCE_RHOU_X"]
+```
+
+Runs with solid particles can write the particles as mesh fields, deposited as
+the coupling deposits them (over `deposition_width`):
+
+| Field | Meaning |
+|---|---|
+| `PARTICLE_VOLUME_FRACTION` | Particle volume per cell volume |
+| `PARTICLE_NUMBER_DENSITY` | Particles per volume (counting `weight`) |
+| `PARTICLE_U_X`, `_Y`, `_Z` | Mass-weighted mean particle velocity, 0 where there are none |
+| `PARTICLE_SOURCE_<A>` | What the particles give the gas per volume and time at the written state, for `<A>` each conservative variable (`RHO`, `RHOU_X`, ..., `RHOE`); with `coupling = "two-way"` |
+
+They are written by `[[write_data]]` and listed by `mallard list fields`.
+
 ## Per-particle quantities
 
 ```toml
@@ -447,12 +769,13 @@ Expressions follow the [expression syntax](expressions.md) and read, at the
 particle:
 
 - `x`, `y` (`z`) and `t`;
-- the gas: `RHO`, `U_X`, `U_Y` (`U_Z`), `P` and, for a single gas, `T`,
+- the gas: `RHO`, `U_X`, `U_Y` (`U_Z`), `P` and, for a single gas and for droplets, `T`,
   evaluated as the particle's velocity is, from the reconstruction polynomial
   of its cell;
 - the particle velocity `V_X`, `V_Y` (`V_Z`), for tracers the gas velocity;
-- the particle temperature `T_P`, for a single gas, the gas temperature for
-  particles without heat transfer;
+- the particle temperature `T_P`, for a single gas and for droplets, the gas
+  temperature for particles without heat transfer;
+- the particle diameter `D_P` (solid particles and droplets; `nan` for tracers);
 - the quantities listed before this one;
 - `in(name)`: 1 inside the region `name` of [regions](geometry.md#named-regions)
   and 0 outside, smooth across the region's `edge`.
@@ -494,6 +817,7 @@ interval = 100
 
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
 [`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
 [`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake).
@@ -521,8 +845,9 @@ deposition history.
 
 **Pitfalls (quantities and probes).**
 
-- An expression reading `T` or `T_P` in a mixture is an error: particle
-  expressions have temperatures for a single gas only.
+- An expression reading `T` or `T_P` in a mixture is an error, except for
+  droplets: particle expressions have temperatures for a single gas and for
+  droplets only.
 - `in(name)` and probe regions are regions of primitives that do not move
   (boolean combinations included); at most 4 regions in all particle
   expressions, 4 probes with regions, and 16 quantities.
@@ -592,4 +917,4 @@ In practice:
 5. Converge the statistic you report in `cfl` (time), the mesh (space) and the
    number of particles.
 
-*Design notes:* [particles](../design/particles.md).
+*Design notes:* [particles](../design/particles.md), [liquid library](../design/liquid_library.md).

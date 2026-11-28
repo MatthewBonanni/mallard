@@ -262,6 +262,14 @@ void Solver::init_health() {
     if (double_flux) ledger.uncheck(ENERGY, "double flux does not conserve energy (its reset is a repair)");
     if (radiating) ledger.uncheck(ENERGY, "the radiative loss is not re-evaluated");
     if (axisymmetric) ledger.uncheck(2, "the hoop stress source of axisymmetric runs is not re-evaluated");
+    if (particles && particles->droplets() && particles->two_way()) {
+        for (uint32_t i = 0; i < ledger.n_components(); i++) {
+            if (i == 0 || i > ENERGY) ledger.uncheck(i, "evaporating droplets add vapor the ledger does not count");
+        }
+        for (uint32_t i = 0; i <= ENERGY; i++) {
+            ledger.uncheck(i, "droplets removed at the minimum diameter give the gas their remains outside the stages");
+        }
+    }
     if (mesh->is_rotational()) {
         for (uint32_t i = 1; i <= N_DIM; i++) ledger.uncheck(i, "rotational periodicity turns momentum across the periodic faces");
     }

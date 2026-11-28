@@ -1,0 +1,26 @@
+{
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "tools/dev/catalog_inputs/2d/named_liquid.toml"
+ ],
+ "type": "string",
+ "values": [
+  "ammonia",
+  "ethanol",
+  "methane",
+  "methanol",
+  "n-decane",
+  "n-dodecane",
+  "n-heptane",
+  "n-hexane",
+  "n-octane",
+  "n-pentane",
+  "nitrogen",
+  "oxygen",
+  "propane",
+  "toluene",
+  "water"
+ ]
+}

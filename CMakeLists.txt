@@ -231,6 +231,90 @@ if(${PROJECT_NAME}_ENABLE_CGNS)
     endif()
 endif()
 
+# Named liquids of droplets ([particles.liquid] fluid = "water", ...), tabulated from CoolProp at setup.
+# CoolProp is host code: it is built as its own project with the host compiler, never by nvcc, hipcc
+# or a SYCL compiler, and Mallard calls it through its C interface (CoolPropLib.h) at setup only.
+option(${PROJECT_NAME}_ENABLE_COOLPROP "Named liquids for droplets (particles.liquid.fluid), from CoolProp" OFF)
+set(${PROJECT_NAME}_COOLPROP_ROOT "" CACHE PATH
+    "An installed static CoolProp (CoolPropLib.h and libCoolProp under it); empty: build CoolProp from source")
+set(${PROJECT_NAME}_COOLPROP_CXX_COMPILER "" CACHE FILEPATH
+    "The host C++ compiler that builds CoolProp; empty: the C++ compiler, or the host compiler of nvcc_wrapper or hipcc")
+set(mallard_coolprop_version v8.0.0)
+if(${PROJECT_NAME}_ENABLE_COOLPROP)
+    add_library(mallard_coolprop INTERFACE)
+    if(${PROJECT_NAME}_COOLPROP_ROOT)
+        find_path(COOLPROP_INCLUDE_DIR CoolPropLib.h HINTS ${${PROJECT_NAME}_COOLPROP_ROOT}
+                  PATH_SUFFIXES include/CoolProp static_library/include/CoolProp include static_library shared_library
+                  NO_DEFAULT_PATH REQUIRED)
+        # CoolProp installs its library under static_library/ or shared_library/<system>/<bits>...; a shared one
+        # (Spack's default) exports the C interface with C linkage, which COOLPROP_LIB declares
+        set(coolprop_root "${${PROJECT_NAME}_COOLPROP_ROOT}")
+        set(coolprop_name ${CMAKE_STATIC_LIBRARY_PREFIX}CoolProp)
+        file(GLOB_RECURSE coolprop_found "${coolprop_root}/*${coolprop_name}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        set(COOLPROP_SHARED OFF)
+        if(NOT coolprop_found)
+            file(GLOB_RECURSE coolprop_found "${coolprop_root}/*${coolprop_name}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+            set(COOLPROP_SHARED ON)
+        endif()
+        if(NOT coolprop_found)
+            message(FATAL_ERROR "Mallard_COOLPROP_ROOT=${coolprop_root} has no CoolProp library")
+        endif()
+        list(GET coolprop_found 0 COOLPROP_LIBRARY)
+        message(STATUS "Mallard: CoolProp ${COOLPROP_LIBRARY}")
+    else()
+        set(coolprop_cxx "${${PROJECT_NAME}_COOLPROP_CXX_COMPILER}")
+        get_filename_component(cxx_name "${CMAKE_CXX_COMPILER}" NAME)
+        get_filename_component(cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        if(NOT coolprop_cxx)
+            if(cxx_name STREQUAL "nvcc_wrapper")
+                # nvcc_wrapper's own default host compiler
+                if(DEFINED ENV{NVCC_WRAPPER_DEFAULT_COMPILER})
+                    set(coolprop_cxx "$ENV{NVCC_WRAPPER_DEFAULT_COMPILER}")
+                else()
+                    set(coolprop_cxx g++)
+                endif()
+            elseif(cxx_name MATCHES "^hipcc")
+                find_program(coolprop_cxx NAMES clang++ amdclang++ HINTS ${cxx_dir}/../llvm/bin ${cxx_dir}
+                             NO_DEFAULT_PATH NO_CACHE)
+                if(NOT coolprop_cxx)
+                    set(coolprop_cxx c++)
+                endif()
+            else()
+                set(coolprop_cxx "${CMAKE_CXX_COMPILER}")
+            endif()
+        endif()
+        include(ExternalProject)
+        set(coolprop_dir ${CMAKE_BINARY_DIR}/external/coolprop)
+        set(COOLPROP_INCLUDE_DIR ${coolprop_dir}/source/include/CoolProp)
+        set(COOLPROP_LIBRARY ${coolprop_dir}/build/${CMAKE_STATIC_LIBRARY_PREFIX}CoolProp${CMAKE_STATIC_LIBRARY_SUFFIX})
+        set(coolprop_args -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=${coolprop_cxx}
+                          -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCOOLPROP_STATIC_LIBRARY=ON
+                          -DCOOLPROP_NO_EXAMPLES=ON -DBUILD_TESTING=OFF
+                          -DCOOLPROP_INSTALL_PREFIX=${coolprop_dir}/install)
+        foreach(var CMAKE_CXX_COMPILER_LAUNCHER CMAKE_C_COMPILER_LAUNCHER CMAKE_OSX_ARCHITECTURES CMAKE_OSX_DEPLOYMENT_TARGET CMAKE_OSX_SYSROOT)
+            if(${var})
+                list(APPEND coolprop_args -D${var}=${${var}})
+            endif()
+        endforeach()
+        ExternalProject_Add(coolprop_build
+            GIT_REPOSITORY https://github.com/CoolProp/CoolProp.git
+            GIT_TAG ${mallard_coolprop_version}
+            GIT_SHALLOW TRUE
+            GIT_PROGRESS FALSE
+            UPDATE_DISCONNECTED TRUE
+            PREFIX ${coolprop_dir}
+            SOURCE_DIR ${coolprop_dir}/source
+            BINARY_DIR ${coolprop_dir}/build
+            CMAKE_ARGS ${coolprop_args}
+            BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target CoolProp --config Release
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS ${COOLPROP_LIBRARY})
+        add_dependencies(mallard_coolprop coolprop_build)
+        message(STATUS "Mallard: CoolProp ${mallard_coolprop_version} (built from source by ${coolprop_cxx})")
+    endif()
+    target_link_libraries(mallard_coolprop INTERFACE ${COOLPROP_LIBRARY} ${CMAKE_DL_LIBS})
+endif()
+
 # Add Kokkos dependency
 option(USE_SYSTEM_KOKKOS "Use system-installed Kokkos" ON)
 if(USE_SYSTEM_KOKKOS)

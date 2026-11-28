@@ -1,0 +1,12 @@
+{
+ "default": "0.0",
+ "dimension": "length (m)",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/particle_cloud/input.toml",
+  "tools/dev/catalog_inputs/2d/droplets.toml"
+ ],
+ "type": "number"
+}

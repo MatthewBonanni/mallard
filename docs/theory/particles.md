@@ -16,15 +16,18 @@ rationale: [particles](../design/particles.md).
 
 ## Assumptions
 
-The particles are dilute, one-way coupled point particles:
+The particles are dilute point particles, one-way coupled by default:
 
-- **Dilute and one-way coupled.** The gas moves the particles; they do not
-  act on the gas or on each other (no collisions, no wakes of one particle
-  felt by another). That holds for volume fractions below about $10^{-6}$,
-  and for mass loadings small enough that the particles' momentum and
-  energy are negligible against the gas's
+- **Dilute and, by default, one-way coupled.** The gas moves the particles;
+  they do not act on each other (no collisions, no wakes of one particle felt
+  by another), nor on the gas. That holds for volume fractions below about
+  $10^{-6}$, and for mass loadings small enough that the particles' momentum
+  and energy are negligible against the gas's
   ([Elghobashi 1994](../references.md#elghobashi-1994),
   [Balachandar & Eaton 2010](../references.md#balachandar-eaton-2010)).
+  With `coupling = "two-way"` solid particles act on the gas too, which
+  extends this to volume fractions of about $10^{-3}$
+  ([Two-way coupling](#two-way-coupling)).
 - **Point particles.** Each particle is smaller than the cells and the
   smallest scales of the flow around it, so that the gas state at its center,
   the *undisturbed* flow interpolated from the resolved field, drives it,
@@ -453,7 +456,8 @@ Stokes drag without added mass, $\tau_T / \tau = 3\,(c_p / c_{p,g})\,Pr / Nu$.
 
 The temperature is a state of the particle only: it enters the drag through
 $T_p / T$ of Singh et al.'s law, and the gas temperature at the particle drives
-it, but the particle's heat does not return to the gas (one-way coupling).
+it, but the particle's heat returns to the gas only with two-way coupling
+([Two-way coupling](#two-way-coupling)).
 Left out: radiation (the particle neither emits nor absorbs, also with the
 optically thin radiation of the gas,
 [Chemistry and radiation](chemistry_radiation.md)), the variation of the gas
@@ -587,3 +591,446 @@ with $\mathbf{r}_\perp$ the part of $\mathbf{r}$ normal to $\mathbf{a}$, so the
 turns are unwrapped by construction. Both converge at the integrator's order.
 Extrema and first times sample the accepted state at the start of every step
 ([Per-particle quantities](../guide/particles.md#per-particle-quantities)).
+
+## Two-way coupling
+
+With `coupling = "two-way"` the solid particles act on the gas
+(`src/particles/particle_coupling.cpp`, `Solid::exchange` in
+`src/particles/particle_forces.h`). The suspension is still dilute: the
+gas equations keep their form, without the volume the particles take from the
+gas or collisions between particles, and gain per-volume sources
+$\mathbf{S} = [0, \mathbf{S}_{\rho\mathbf{u}}, S_{\rho E}]$ in momentum and
+total energy, with no mass source. This regime of two-way coupling spans
+particle volume fractions from about $10^{-6}$ to $10^{-3}$
+([Elghobashi 1994](../references.md#elghobashi-1994)); above it collisions
+matter (four-way coupling), which Mallard does not model.
+
+### Source terms
+
+A computational particle, a *parcel*, stands for $w$ identical physical
+particles (`weight`; in 2D, particles per unit depth). Each gives the gas the
+opposite of its own change of momentum and energy, less the part gravity on
+the particle accounts for:
+
+$$
+\begin{equation}
+\mathbf{S}_{\rho\mathbf{u}} = -\frac{1}{V}\sum_{p} w\,m_p\left(\frac{\mathrm{d}\mathbf{v}_p}{\mathrm{d}t} - \mathbf{g}\right), \qquad
+S_{\rho E} = -\frac{1}{V}\sum_{p} w\,m_p\left(\frac{\mathrm{d}e_p}{\mathrm{d}t} - \mathbf{g}\cdot\mathbf{v}_p\right), \qquad
+e_p = c_p T_p + \tfrac12\lvert\mathbf{v}_p\rvert^2,
+\label{eq:coupling-sources}
+\end{equation}
+$$
+
+with $m_p = \rho_p \pi d^3 / 6$, $V$ the volume the source is deposited over
+(below), $\mathbf{g}$ the particles' gravity and, without heat transfer,
+$e_p = \tfrac12\lvert\mathbf{v}_p\rvert^2$. Gravity on the particles is the
+earth's force, not the gas's, so it does not act back. Everything else does,
+as the reaction to the forces of eq. $\eqref{eq:solid}$: the drag, which for
+drag alone gives the familiar
+$\mathbf{S}_{\rho\mathbf{u}} = \frac{1}{V}\sum_p w\,m_p(\mathbf{v}_p - \mathbf{u})/\tau$,
+the buoyancy or pressure-gradient force, the added mass and the lift. The
+energy source is the heat the particles take from the gas,
+$w\,\pi d\,k\,Nu\,(T_p - T)$ per particle, plus the work of those forces on
+the particle, $-w\,m_p(\mathrm{d}\mathbf{v}_p/\mathrm{d}t - \mathbf{g})\cdot\mathbf{v}_p$.
+
+### Conservation
+
+The sources are computed from the very stage rates the integrator advances
+the particles with, explicit or exponential, and every Runge-Kutta method
+updates the gas and the particles by the same linear combination of stage
+rates. Whatever the gas loses, the particles therefore gain, to round-off, at
+every stage and step (rejected steps included), however stiff the particles:
+the total momentum and energy of gas and particles change only by gravity's
+force and work on the particles.
+
+That holds for the energy only if the particle's energy is itself an
+integrated value: its kinetic energy $\tfrac12\lvert\mathbf{v}\rvert^2$ is
+quadratic in the integrated velocity, and no linear combination of stages
+reproduces it exactly. With heat transfer, two-way coupled particles
+therefore integrate $e_p$ in place of $T_p$, with the rate
+$c_p\,\mathrm{d}T_p/\mathrm{d}t + \mathbf{v}\cdot\mathrm{d}\mathbf{v}/\mathrm{d}t$,
+and read $T_p = (e_p - \tfrac12\lvert\mathbf{v}\rvert^2) / c_p$: the
+truncation error of the kinetic energy shows in $T_p$, where it is of order
+$(\delta v)^2 / c_p$, rather than in the total. Without heat transfer the
+kinetic energy is conserved to the integrator's order. Restart files carry
+$e_p$ (`PARTICLE_E`) beside $T_p$, so restarts continue bit for bit.
+
+### Deposition
+
+The sources of the particles in a stage are summed into the cells holding
+them at the step's start and, with `deposition_width` $\sigma > 0$, spread
+over a Gaussian of standard deviation $\sigma$
+(`particles::Deposition`):
+
+1. **Exact sums per cell.** Each cell sums its particles' sources exactly,
+    in integer limbs (`exact_sums.h`), and rounds each sum once to the
+    nearest double: the result does not depend on the order of the slots,
+    which differs between rank counts and migrations. The start cell is
+    always owned, so no deposit lands in a halo.
+2. **First moments** (with a width). Spreading from the cell centers would
+    place every particle at its cell's center, an error of half a cell in the
+    kernel's center. The cells also sum each source's first moment about
+    their centers, $\mathbf{m}_c = \sum_p q_p(\mathbf{x}_p - \mathbf{x}_c)$, and
+    move each sum by minus the divergence of the moment density
+    $\boldsymbol{\mu} = \mathbf{m} / V$, face averaged, in flux form,
+
+    $$
+    \begin{equation}
+    q_c \leftarrow q_c - \sum_{f} \tfrac12\left(\boldsymbol{\mu}_c + \boldsymbol{\mu}_n\right)\cdot\mathbf{n}_f A_f,
+    \label{eq:coupling-moments}
+    \end{equation}
+    $$
+
+    which gives the deposit the particles' first moments: the spread then
+    converges at second order in the cell size rather than first.
+3. **Spreading by diffusion**, following
+    [Capecelatro & Desjardins 2013](../references.md#capecelatro-desjardins-2013):
+    $\sigma^2 / 2$ of diffusion with unit diffusivity, whose continuum limit
+    is the convolution with a Gaussian of standard deviation $\sigma$, by
+    explicit steps of the face-flux Laplacian,
+
+    $$
+    \begin{equation}
+    q_c \leftarrow q_c + \Delta s \sum_{f} \frac{A_f}{\delta_f}\left(\frac{q_n}{V_n} - \frac{q_c}{V_c}\right),
+    \qquad \Delta s \le \frac{1}{2}\left(\max_c \frac{1}{V_c}\sum_f \frac{A_f}{\delta_f}\right)^{-1},
+    \label{eq:coupling-spread}
+    \end{equation}
+    $$
+
+    with $\delta_f$ the distance between the two centroids along the face
+    normal, over $\lceil \sigma^2 \max_c (\sum_f A_f / \delta_f) / V_c\rceil$
+    equal steps (about $2d\,\sigma^2 / h^2$ on a Cartesian mesh of spacing
+    $h$). The weights stay positive, so the spread deposit keeps the sign of
+    the sources. A face moves exactly the opposite amount out of one cell and
+    into the other, so the sums are conserved to round-off, and walls and
+    other boundaries have no flux, so no source leaves the domain or crosses
+    a wall.
+
+The gas receives $q_c / V_c$ in each owned cell. With $\sigma = 0$ (the
+default) each particle's source stays in its cell: a point source of the
+mesh's size, which concentrates as the mesh is refined, so coupled results do
+not converge under refinement and, with cells comparable to the particles,
+the gas a particle reads carries its own disturbance, which the
+point-particle drag does not expect. A width in physical units makes the
+deposit independent of the mesh, so it converges as the mesh is refined at
+fixed $\sigma$: the volume fraction of a single particle against the Gaussian
+of $\sigma = 0.08$ has L1 errors $5.6 \times 10^{-2}$, $1.1 \times 10^{-2}$,
+$2.5 \times 10^{-3}$ and $6.1 \times 10^{-4}$ on 16, 32, 64 and 128 cells per
+side (orders 2.4, 2.1 and 2.0), where the cell-center deposit's error did not
+converge. The error's constant depends on where the particle sits in its
+cell: the first moments are exact, but a particle at offset $\mathbf{d}$ from
+its cell's center starts with covariance $-\mathbf{d}\mathbf{d}^T$ rather
+than zero (the cell sum and its moment correction, eq.
+$\eqref{eq:coupling-moments}$), so the spread kernel's covariance is
+$\sigma^2 \mathbf{I} - \mathbf{d}\mathbf{d}^T$, an $O(h^2)$ error that is
+largest for a particle near a cell's corner and vanishes at its center. Over
+all offsets the L1 error is between $8 h^2$ and $37 h^2$ at $\sigma = 0.08$,
+each bound at second order; a particle at a fixed physical position sits at a
+different offset on each mesh, so its error stays within second-order bounds
+without decreasing by 4 on every mesh, and a study at a fixed position can appear to stall from one mesh to
+the next (64 to 128 cells for a particle at $(0.4137, 0.5862)$, near a center
+on one and a corner on the other). The study below keeps
+$|\mathbf{d}| = h / 6$ on every mesh. Each cell adds its faces in the order
+of its neighbors' global ids, and halo values come from their owners before
+each step, so the deposit, like the particles, is bitwise independent of the
+rank count; on one rank its kernels are captured in the step graph.
+
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-light.svg#gh-light-mode-only)
+![Left: the volume fraction of one particle deposited over a Gaussian of width 0.08 on 16, 32, 64 and 128 cells per side, along the particle's row of cells, against the Gaussian. Right: its L1 error against the cell size, at second order](../images/theory/particle_deposition-dark.svg#gh-dark-mode-only)
+
+*The volume fraction of one particle off the cell centers, deposited with
+$\sigma = 0.08$ on Cartesian meshes of a periodic unit box (Mallard runs):
+along the particle's row of cells (left), and the $L_1$ error of the whole
+deposit against the Gaussian about the particle, relative to the particle's
+volume (right).*
+
+### Dispersed-phase fields
+
+At output the same deposition gives the fields of the dispersed phase: the
+volume fraction $\alpha = \sum_p w V_p / V$, the number density
+$n = \sum_p w / V$, the particles' mean velocity
+$\mathbf{U}_p = \sum_p w\,m_p\mathbf{v}_p / (\rho_p \sum_p w V_p)$
+(mass weighted), and with two-way coupling the sources of
+eq. $\eqref{eq:coupling-sources}$ at the written state, from the explicit
+rates of the particles there (`Particles::fields`). `mallard check` warns
+where a particle is larger than a tenth of its cell or the volume fraction
+exceeds 1%, where the point-particle and dilute assumptions fail.
+
+## Evaporating droplets
+
+`type = "droplet"` makes the particles droplets of one liquid that evaporate
+into a gas mixture whose mechanism holds the liquid's vapor
+(`particles::Droplet`, `src/particles/particle_evaporation.h`). A droplet
+moves as a solid particle, eq. $\eqref{eq:solid}$, with the liquid's density
+and its own, shrinking diameter, and the drag and forces of `[particles]`;
+the gas heats it, and it evaporates until, below `minimum_diameter`, it is
+removed.
+
+### Assumptions
+
+- **One component**, of constant density $\rho_l$ and specific heat $c_l$.
+- **Uniform temperature** $T_p$ within the droplet (infinite liquid
+  conductivity): no internal conduction or circulation.
+- **Quasi-steady gas film**: the gas around the droplet adjusts to the
+  droplet's state faster than it changes, so the transfer to a droplet in a
+  uniform stream holds at every instant. The film's properties are evaluated
+  at reference values by the 1/3 rule (below).
+- **Equilibrium at the surface**: the vapor at the surface is at the
+  saturation pressure of the surface temperature (Raoult's law of a pure
+  liquid), with no non-equilibrium (Langmuir-Knudsen) correction, which
+  matters for droplets below about 50 µm in hot gas
+  ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+- **Subcritical**: the saturation curve ends at the critical point, and
+  real-fluid (supercritical) droplets are outside the model.
+- The gas composition at a droplet is its cell's average.
+
+### The liquid
+
+The liquid's enthalpy is referred to the mechanism's vapor enthalpy $h_v$
+(formation enthalpy included), through the latent heat $L_b$ at the boiling
+temperature $T_b$ at the pressure $p_b$:
+
+$$
+\begin{equation}
+h_l(T) = h_v(T_b) - L_b + c_l\,(T - T_b), \qquad L(T) = h_v(T) - h_l(T),
+\label{eq:droplet-enthalpy}
+\end{equation}
+$$
+
+so that the latent heat at any temperature follows Kirchhoff's law, and the
+liquid and the gas, whose total energy carries formation enthalpies, share one
+energy reference. The input refuses a liquid whose $L(T)$ vanishes below the
+critical temperature. The saturation pressure is Clausius-Clapeyron's through
+the boiling point, or Antoine's with `antoine`,
+
+$$
+\begin{equation}
+p_{sat}(T) = p_b \exp\left[\frac{L_b}{R_v}\left(\frac{1}{T_b} - \frac{1}{T}\right)\right]
+\quad\text{or}\quad
+\log_{10}\frac{p_{sat}}{\mathrm{Pa}} = A - \frac{B}{T/\mathrm{K} + C},
+\label{eq:droplet-saturation}
+\end{equation}
+$$
+
+with $R_v$ the vapor's gas constant, and the boiling temperature $T_b(p)$ at
+the gas pressure is its inverse, at most the critical temperature.
+
+### The surface and the film
+
+The surface is at $T_s = \min(T_p, T_b(p))$. The vapor's mole fraction there
+is $X_s = \min(p_{sat}(T_s) / p, 1)$, and its mass fraction
+
+$$
+\begin{equation}
+Y_s = \frac{X_s W_v}{X_s W_v + (1 - X_s)\,W_{dry}}, \qquad
+W_{dry} = \frac{1 - Y_v}{\sum_{k \ne v} Y_k / W_k},
+\label{eq:droplet-surface}
+\end{equation}
+$$
+
+with $W_v$ the vapor's molar mass, $Y_v$ the gas's vapor mass fraction and
+$W_{dry}$ the molar mass of the gas's other species. The film between the
+surface and the gas is evaluated at the reference state of the 1/3 rule,
+as in Abramzon & Sirignano's model,
+
+$$
+\begin{equation}
+T_f = T_s + \tfrac13\,(T - T_s), \qquad Y_{v,f} = Y_s + \tfrac13\,(Y_v - Y_s),
+\label{eq:droplet-film}
+\end{equation}
+$$
+
+the other species in the gas's proportions, with the mechanism's density
+$\rho_f$, specific heat $c_{p,f}$, viscosity $\mu_f$, conductivity $k_f$ and
+the vapor's mixture-averaged diffusivity $D_f$, and
+
+$$
+\begin{equation}
+Re_p = \frac{\rho\,\lvert\mathbf{u} - \mathbf{v}\rvert\,d}{\mu_f}, \quad
+Pr_f = \frac{\mu_f c_{p,f}}{k_f}, \quad
+Sc_f = \frac{\mu_f}{\rho_f D_f}, \quad
+Le_f = \frac{k_f}{\rho_f c_{p,f} D_f}, \quad
+Sh_0 = 2 + 0.6\,Re_p^{1/2} Sc_f^{1/3}, \quad
+Nu_0 = 2 + 0.6\,Re_p^{1/2} Pr_f^{1/3},
+\label{eq:droplet-numbers}
+\end{equation}
+$$
+
+the Sherwood and Nusselt numbers of
+[Ranz & Marshall 1952](../references.md#ranz-marshall-1952) at the film's
+properties. The drag uses the film's viscosity too, with the gas's
+$\gamma = c_p / (c_p - R)$ and $T_p$ for Singh et al.'s law.
+
+### Evaporation rate and heat transfer
+
+With Spalding's mass transfer number
+([Spalding 1953](../references.md#spalding-1953))
+
+$$
+\begin{equation}
+B_M = \frac{Y_s - Y_v}{1 - Y_s},
+\label{eq:droplet-spalding}
+\end{equation}
+$$
+
+`evaporation` chooses the rate $\dot m$ at which the droplet loses mass and
+the heat $Q$ the gas gives it:
+
+- **`d2_law`**: the classical quasi-steady droplet,
+
+    $$
+    \begin{equation}
+    \dot m = \pi d\,\rho_f D_f\,Sh_0 \ln(1 + B_M), \qquad Q = \pi d\,k_f\,Nu_0\,(T - T_s).
+    \label{eq:droplet-d2}
+    \end{equation}
+    $$
+
+    At rest ($Sh_0 = 2$) and at a constant surface state, $d^2$ falls
+    linearly in time, $d^2 = d_0^2 - K t$ with
+    $K = 8 \rho_f D_f \ln(1 + B_M) / \rho_l$.
+
+- **`abramzon_sirignano`** (default): the film model of
+    [Abramzon & Sirignano 1989](../references.md#abramzon-sirignano-1989),
+    in which the Stefan flow of the vapor thickens the film by
+    $F(B) = (1 + B)^{0.7} \ln(1 + B) / B$, and heat crosses it with its own
+    transfer number $B_T$:
+
+    $$
+    \begin{equation}
+    \begin{gathered}
+    Sh^* = 2 + \frac{Sh_0 - 2}{F(B_M)}, \qquad Nu^* = 2 + \frac{Nu_0 - 2}{F(B_T)}, \qquad
+    B_T = (1 + B_M)^{\phi} - 1, \qquad \phi = \frac{c_{p,v}}{c_{p,f}}\,\frac{Sh^*}{Nu^*}\,\frac{1}{Le_f}, \\
+    \dot m = \pi d\,\rho_f D_f\,Sh^* \ln(1 + B_M), \qquad
+    Q = \pi d\,k_f\,Nu^*\,(T - T_s)\,\frac{\ln(1 + B_T)}{B_T},
+    \end{gathered}
+    \label{eq:droplet-abramzon-sirignano}
+    \end{equation}
+    $$
+
+    with $c_{p,v}$ the vapor's specific heat at $T_f$; $B_T$ and $Nu^*$ are
+    found by eight fixed-point passes from $B_T = B_M$. The factor
+    $\ln(1 + B_T)/B_T$ is the blowing of the vapor, which reduces the heat
+    that reaches the surface. It is the usual choice for sprays in hot gas
+    ([Miller et al. 1998](../references.md#miller-harstad-bellan-1998)).
+
+A vapor-rich gas ($Y_v > Y_s$, $B_M < 0$) condenses on the droplet. The heat
+into the liquid is what the gas gives less the latent heat of what
+evaporates,
+
+$$
+\begin{equation}
+M c_l\,\frac{\mathrm{d}T_p}{\mathrm{d}t} = Q - \dot m\,L(T_s), \qquad
+\frac{\mathrm{d}M}{\mathrm{d}t} = -\dot m, \qquad M = \rho_l \frac{\pi d^3}{6},
+\label{eq:droplet-energy}
+\end{equation}
+$$
+
+so a droplet heats or cools toward its wet-bulb temperature, where the heat
+from the gas just evaporates it.
+
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-light.svg#gh-light-mode-only)
+![Left: the vapor mass fraction at the surface of water and Spalding's transfer number against the surface temperature at 1 atm, by Clausius-Clapeyron and Antoine. Right: Abramzon and Sirignano's film thickening, blowing factor and corrected Sherwood number against the transfer number](../images/theory/droplet_transfer_numbers-dark.svg#gh-dark-mode-only)
+
+*Left: water's surface vapor mass fraction $Y_s$, eq. $\eqref{eq:droplet-surface}$, and
+$B_M$, eq. $\eqref{eq:droplet-spalding}$, in dry air at 1 atm, from
+Clausius-Clapeyron through the boiling point and from Antoine's coefficients
+of water; $B_M$ diverges at the boiling point, where $Y_s \to 1$. The dotted
+lines are the wet-bulb temperatures of a droplet at rest in air at 1000 K,
+where eq. $\eqref{eq:droplet-energy}$'s heat into the liquid vanishes. Right:
+the factors of eq. $\eqref{eq:droplet-abramzon-sirignano}$: the Stefan flow
+thickens the film by $F(B)$, lowering $Sh^*$ and $Nu^*$ in a stream (here
+$Re_p = 100$, $Sc_f = 0.7$), and blowing reduces the heat reaching the surface
+by $\ln(1 + B_T)/B_T$, already by 30% at $B_T = 1$.*
+
+**Boiling.** A droplet at or above the boiling temperature at the gas
+pressure, or whose surface would be pure vapor ($Y_s \to 1$), boils: its
+surface is at $T_b(p)$, the heat it receives evaporates it, and its superheat
+relaxes to the boiling temperature on its heat-up time
+$\tau_h = \rho_l c_l d^2 / (6 k_f Nu_0)$:
+
+$$
+\begin{equation}
+Q = \pi d\,k_f\,Nu_0\,(T - T_s), \qquad
+\dot m = \frac{\max\left(Q + M c_l (T_p - T_s)/\tau_h,\; 0\right)}{L(T_s)}.
+\label{eq:droplet-boiling}
+\end{equation}
+$$
+
+Above the critical pressure the boiling temperature is the critical
+temperature, and a droplet driven past it is evaluated at it.
+
+### Sources in the gas
+
+With `coupling = "two-way"` the gas receives, besides the momentum and energy
+of eq. $\eqref{eq:coupling-sources}$, the vapor: per volume, over the deposit
+of each parcel,
+
+$$
+\begin{equation}
+S_\rho = S_{\rho Y_v} = \frac{1}{V}\sum_p w\,\dot m_p, \qquad
+\mathbf{S}_{\rho\mathbf{u}} = -\frac{1}{V}\sum_p w\left(\frac{\mathrm{d}\mathbf{P}_p}{\mathrm{d}t} - M_p\,\mathbf{g}\right), \qquad
+S_{\rho E} = -\frac{1}{V}\sum_p w\left(\frac{\mathrm{d}\mathcal{E}_p}{\mathrm{d}t} - \mathbf{g}\cdot\mathbf{P}_p\right),
+\label{eq:droplet-sources}
+\end{equation}
+$$
+
+with the droplet's momentum $\mathbf{P} = M\mathbf{v}$ and total energy
+$\mathcal{E} = M(h_l(T_p) + \tfrac12\lvert\mathbf{v}\rvert^2)$ in the gas's
+reference. The vapor enters at the droplet's velocity with the enthalpy
+$h_l(T_p) + L(T_s)$, which is the vapor's $h_v(T_s)$ for a droplet at its
+surface temperature, while the gas loses the heat $Q$ it gives: the
+energy source is $\dot m\,(h_v + \tfrac12\lvert\mathbf{v}\rvert^2) - Q$ less
+the work of the forces, per droplet. The vapor source makes the gas's mass
+and its vapor species grow by the same amount, so the other species' mass
+fractions fall with dilution. Removed droplets give the gas what they still
+carry, their mass as vapor with their momentum and energy, after the step.
+
+### Numerics
+
+**Conserved block values.** After its position a droplet's integrated
+values are its momentum $\mathbf{P}$, its energy
+$E = M(c_l(T_p - T_b) + \tfrac12\lvert\mathbf{v}\rvert^2)$ and its mass $M$,
+not $\mathbf{v}$, $T_p$ and $d$; $\mathbf{v} = \mathbf{P}/M$, $T_p$ from
+$E$ and $d$ from $M$ are derived. The rates are
+$\mathrm{d}M/\mathrm{d}t = -\dot m$,
+$\mathrm{d}\mathbf{P}/\mathrm{d}t = M\,\mathrm{d}\mathbf{v}/\mathrm{d}t - \dot m\,\mathbf{v}$
+and the matching $\mathrm{d}E/\mathrm{d}t$, and the gas receives the opposite
+of these stage rates (plus $\dot m\,h_l(T_b)$, the change of reference). Every
+Runge-Kutta method combines both linearly in the same way, so gas and droplets
+together conserve mass, every species, momentum and energy to round-off,
+whatever the integrator and the stiffness; with $\mathbf{v}$ and $T_p$
+integrated, the products $M\mathbf{v}$ and $ME$ would be conserved only to
+the integrator's order once $M$ changes. Rebounds and periodic rotations act
+on $\mathbf{P}$.
+
+**Stiff velocity and temperature.** The velocity relaxes as a solid
+particle's, explicitly for $\Delta t / \tau \le 1$ and exponentially above.
+The temperature relaxes toward its wet-bulb value on the heat-up time, which
+for small droplets is far below the gas step, and its rate
+$f(T_p) = (Q - \dot m L) / (M c_l)$ is nonlinear in $T_p$. The first stage of
+a step linearizes it, by a backward difference of $10^{-6}\,T_p$:
+$J = \partial f / \partial T_p$, and where $J < 0$ the relaxation time
+$\tau_T = -1/J$ and equilibrium $T_{eq} = T_p + \tau_T f$. With
+$\Delta t > \tau_T$ the temperature is integrated exponentially toward
+$T_{eq}$, with $\tau_T$ frozen at the step's start and $T_{eq}$ of each
+stage, exactly as the velocity: exact for $T_{eq}$ linear in time over the
+step, with the error of a frozen $\tau_T$ otherwise. The mass is integrated
+explicitly: $d^2$ falls about linearly in time, so $\dot m$ changes slowly
+until the droplet is nearly gone.
+
+**Vanishing droplets.** The evaporation rate is at most the step's starting
+mass over $\Delta t$, so no droplet's mass turns negative; a droplet capped
+this way stops heating and evaporates within the step at its temperature,
+which keeps the temperature of a vanishing droplet bounded. Below
+`minimum_diameter` (by default 1% of `diameter`) a droplet's rates are zero
+and it moves with the gas; after the step and before relocation it is
+removed (`Particles::remove_evaporated`), its remains deposited into the gas
+with the same deposition as the sources, and counted as evaporated.
+
+**Gas properties.** The film properties come from the mechanism's
+thermodynamic and transport tables on the device (`ThermoTable`,
+`TransportTable::properties`), with $n_{species}$ values of work memory per
+slot. The gas composition at the droplet is its cell's average, so it is first
+order in space where the velocity and pressure the droplet reads are of the
+reconstruction's order: reconstructing the species to the droplet's position
+would need their gradients at every stage.
