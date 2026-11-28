@@ -96,6 +96,21 @@ front:
 | [`[statistics.convergence]`](statistics.md#convergence-statisticsconvergence) | `convergence_<column>`, e.g. `convergence_stationary`, `convergence_converged`, `convergence_integrals_kinetic_energy_ci` |
 
 Characters other than letters, digits and `_` in these names become `_`.
+
+**Reductions over a region.** `<reduction>(<field>, "<region>")` reduces a
+field over a region at every step without a `[[probes]]` entry:
+`max(T, "domain") > 2500`, `integral(RHO, "combustor") < 0.1`, `{mean(P,
+'inlet')}` in a log message. The reductions are those of region probes,
+`integral`, `mean`, `favre`, `min`, `max` and `rms`; the field is any field a
+probe takes, one component of a vector (`U_X`); the region is `"domain"`, a
+named region, a cell zone or a boundary zone. The run reduces the fields each
+region is read with in a probe of its own, every step and on the device as
+other probes, and writes it nowhere; the `values` of a firing name it as the
+condition does. In TOML, write the condition in single quotes (`when =
+'max(T, "domain") > 2500'`) or the region in them (`"max(T, 'domain') >
+2500"`). A probe of a large region reduced every step costs a reduction of
+its cells per step; a `[[probes]]` region probe written every n steps is the
+cheaper choice when the condition can wait for it.
 A misspelled name is an input error (also of `mallard check`) that lists
 the names the run has.
 

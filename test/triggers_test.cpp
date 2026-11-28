@@ -327,6 +327,27 @@ TEST(TriggersTest, UnknownActionOrWriterIsAnInputError) {
     }
 }
 
+TEST(TriggersTest, RegionReductionsThatNoProbeCanGiveAreInputErrorsOfTheCondition) {
+    const std::string dir = fresh_dir("region_errors");
+    const std::vector<std::pair<std::string, std::vector<std::string>>> cases = {
+        {"avg(P, \"domain\") > 1", {"triggers[0].when", "avg is not a reduction", "integral, mean, favre, min, max, rms"}},
+        {"max(U, \"domain\") > 1", {"triggers[0].when", "U is not a field of one value", "max(U_X, \"domain\")"}},
+        {"max(P, \"nowhere\") > 1", {"triggers[0].when", "max(P, \"nowhere\")"}},
+        {"max(NOT_A_FIELD, \"domain\") > 1", {"triggers[0].when", "NOT_A_FIELD"}}};
+    for (const auto & [when, parts] : cases) {
+        Solver solver;
+        try {
+            solver.init(parse_toml(case_input(dir, "n_steps = 2\ncfl = 0.25\n",
+                                              "[[triggers]]\nwhen = '" + when + "'\ndo = \"stop\"\n")));
+            ADD_FAILURE() << when << ": no error";
+        } catch (const InputError & e) {
+            const std::string what = e.what();
+            for (const std::string & part : parts) EXPECT_NE(what.find(part), std::string::npos) << part << " not in: " << what;
+            EXPECT_EQ(what.find("__trigger"), std::string::npos) << what;
+        }
+    }
+}
+
 namespace {
 
 /** @brief The data rows of a CSV file, by step (header and comment lines left out). */

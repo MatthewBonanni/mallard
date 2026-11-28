@@ -201,6 +201,13 @@ class Probes {
         void add_snapshot(const Input & input, const Mesh & mesh, region::Regions & regions,
                           const std::vector<std::string> & species_names, bool resume, bool viscous,
                           const Input & entry, const Snapshot & snapshot, const std::vector<Data> & cell_data);
+        /**
+         * @brief Adds a probe the run reads but does not write, list or record (a region reduction of a trigger's
+         *        condition), from entry, a [[probes]] table, after init.
+         */
+        void add_internal(const Input & input, const Mesh & mesh, region::Regions & regions,
+                          const std::vector<std::string> & species_names, bool viscous, const Input & entry,
+                          const std::vector<Data> & cell_data);
         /** @brief A restarted run at (step, t): next output times, and series cut back to t. */
         void resume(uint64_t step, rtype t);
 
@@ -528,6 +535,7 @@ class Probes {
             bool from_region = false;
             bool resampled = false;  // a surface region on an n_points grid
             bool snapshot = false;   // of a [[write_data]] entry
+            bool internal = false;   // read by the run (triggers), never written or listed
             bool staged = false;     // evaluated in the step graph
             CellColumns cell_columns;
             // Staged: the device columns of cell_columns' fields
@@ -726,10 +734,14 @@ class Probes {
             void write_reductions(uint64_t step, rtype t) const;
             void write_spectra(uint64_t step, rtype t);
         };
-        /** @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all). */
+        /**
+         * @brief copy: with copies = "each", the index of the region's copy the probe covers (-1: all); internal:
+         *        a probe the run reads but does not write (see add_internal).
+         */
         void add(const Input & input, const Mesh & mesh, region::Regions & regions,
                  const std::vector<std::string> & species_names, bool resume, bool viscous, const Input & entry,
-                 const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1);
+                 const Snapshot * snapshot, const std::vector<Data> * cell_data, int32_t copy = -1,
+                 bool internal = false);
         /** @brief A snapshot's samples of a region of lower dimension: one at each element's center. */
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Region & r, uint32_t n_variables);
         static void select_snapshot_elements(Probe & p, const Mesh & mesh, const region::Elements & e, int dimension,
