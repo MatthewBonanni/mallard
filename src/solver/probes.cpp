@@ -1825,7 +1825,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
 
     const bool boundary = !region_zones.empty() || (where == &entry && !p.from_region &&
                                                      (entry.contains("boundary") || entry.contains("boundary_type")));
-    const std::string type = p.from_region ? "" : find_value_or<std::string>(*where, "type", "");
+    const std::string type =
+        p.from_region || !contains_optional(*where, "type") ? "" : find_value<std::string>(*where, "type");
     const bool cut = type == "cut_plane";
     const bool oriented = (region && region->dimension() == N_DIM - 1) ||
                           (elements && elements->dimension() == N_DIM - 1) ||

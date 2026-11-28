@@ -90,12 +90,12 @@ statistics = "run1/restart_020000.restart"
 |---|---|
 | `cfl` | CFL number in the usual unstructured convention ([Blazek](references.md#blazek-2015) eqs. 6.20-6.21; see [time step](numerics/overview.md)): on a uniform 2D grid of spacing h, `dt = cfl * h / (abs(u) + abs(v) + 2a)`. Measured stability limits for smooth flow are 1.26-1.6 with SSPRK3 and 1.39-1.8 with RK4, depending on reconstruction and cell type ([table](numerics/overview.md#time-step)): use at most 1.2 (SSPRK3) or 1.35 (RK4), and 1.0 with SSPRK3 as a robust default, shocks included (but 0.25 for the Noh problem's infinite-strength shock with `bound_preserving`); with `[chemistry]` the splitting error may call for less (detonations: about 0.35 with Strang splitting, 1.0 with `coupling = "simpler"`). Mallard 0.5 and earlier inputs give the same time step with half their `cfl`. Exactly one of `cfl` and `dt` is required, except that with a [numerics preset](guide/numerics.md#presets) (also the default `high_order`, which applies when the input sets neither `[numerics] preset` nor `[numerics.face_reconstruction]`) and neither of them the preset sets `cfl`. |
 | `dt` | Fixed time step |
-| `t_stop` | Stop at this simulation time (the last step is shortened to land on it) |
-| `n_steps` | Stop after this many steps |
-| `t_wall_stop` | Stop after this many seconds of wall time |
+| `t_stop` | Stop at this simulation time (the last step is shortened to land on it). Default none: no simulated-time limit. At least one of `t_stop`, `n_steps` and `t_wall_stop` is required, and each given must be positive |
+| `n_steps` | Stop after this many steps. Default none: no step limit |
+| `t_wall_stop` | Stop after this many seconds of wall time. Default none: no wall-clock limit |
 | `keep_last_good` | Keep a copy of the state at the start of each step (one copy of the conservatives, and partial densities, per step), so that a diverging run writes the last valid state; see [run control](guide/running.md) (default `true`) |
 | `control_socket` | Serve `mallard ctl` on `mallard.sock` in the working directory (default `true`) |
-| `control_file_interval` | Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory (default 0: never; `--set control_file_interval=N` turns them on from the command line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
+| `control_file_interval` | Every this many steps, look for the files `STOP`, `CHECKPOINT` and `SET` in the working directory (default none: never; if given, positive; `--set control_file_interval=N` turns them on from the command line). A file found acts like `mallard ctl stop`, `checkpoint` or `set`: at the first step whose time-step reduction reads the request, within `step_queue` steps of the step the host had reached |
 | `cuda_graphs` | CUDA builds (HIP and SYCL builds take their steps kernel by kernel): run each step (time-step reduction, halo exchanges, stages, the step's end) as one CUDA graph, so the host launches one graph per step instead of launching each kernel (default `true`). Results are the same bit for bit. Steps run kernel by kernel with halos exchanged with MPI (`[parallel] halo_exchange = "mpi"`, or builds without NCCL) or before CUDA 12.4; the run log says so. Turn it off to check kernels with `compute-sanitizer` ([details](guide/running.md#compute-sanitizer)) |
 | `step_queue` | Steps the host enqueues ahead of the GPU (default 3, at most 64). Each step's time step, end and checks are decided on the device, so the host does not wait for a step before launching the next; snapshots and restarts are staged in pinned host memory and written from there; it stops the queue at the steps it acts on (outputs it writes itself, probes reading `[statistics]` confidence intervals, a moving region's probe outgrowing its staging, triggers that fire, requests, the end of the run, a divergence) and acts on that step's state. `1` waits for every step; `0` has the host take every step itself, kernel by kernel. Results and files are the same bit for bit with any value. More than one step ahead needs the CUDA graphs of CUDA 12.4 or later; CUDA runs without graphs, and HIP and SYCL builds (whose graphs have no conditional nodes), take one step at a time ([details](guide/parallel.md#threads-and-gpus)) |
 
@@ -487,7 +487,7 @@ for the autonomous constant-volume reactor). $F$, $E$ and $\Omega$ are computed 
 
 | Key | Description |
 |---|---|
-| `model` | `tfles` |
+| `model` | `tfles` (required) |
 | `sensor` | `progress` (the default and only sensor with `gas = "flamelet"`): the sensor $\Omega$ above of the table's normalized progress variable, $c = \Lambda$ (`C_NORM`), with `delta_L` and `s_L`; the table is looked up at zero subgrid variance ([guide](guide/flamelet.md#thickened-flames)). `temperature` (default with mixtures): the sensor $\Omega$ above, with `delta_L`, `s_L`, `T_unburnt`, `T_burnt`. `reaction`: for non-premixed and partially premixed flames, the consumption rate of `sensor_species` over the largest rate `omega_max(Z)` of the premixed flame of the cell's Bilger mixture fraction $Z$, ramped from 0 at 1% to 1 at 5% of it, zeroed where the flame is not premixed (Takeno's flame index of `sensor_species` and the oxidizer stream's most abundant species with O and without C or H is not positive), filtered by two passes of the volume average over the cell and its vertex neighbors and doubled (clipped at 1); $F$ and $E$ take `s_L(Z)` and `delta_L(Z)`; 0 (no thickening) where $Z$ is outside the table (the flammability limits). [Guide](guide/les.md#non-premixed-and-partially-premixed-flames) |
 | `delta_L` | `temperature` and `progress` only: laminar thermal thickness `(T_b - T_u) / max dT/dx` of the flame (m), e.g. from Cantera |
 | `s_L` | `temperature` and `progress` only: laminar flame speed (m/s) |
@@ -878,8 +878,8 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 
 | Key | Description |
 |---|---|
-| `tolerance` | Absolute and relative tolerance: a step's error is the largest over cells and conservative variables (and partial densities) of `abs(e) / (abs_tolerance + rel_tolerance max(abs(U^n), abs(U^n+1)))`, which the controller keeps near 1 |
-| `abs_tolerance`, `rel_tolerance` | Override `tolerance` for either part |
+| `tolerance` | Absolute and relative tolerance: a step's error is the largest over cells and conservative variables (and partial densities) of `abs(e) / (abs_tolerance + rel_tolerance max(abs(U^n), abs(U^n+1)))`, which the controller keeps near 1. Default none: then `abs_tolerance` and `rel_tolerance` set them |
+| `abs_tolerance`, `rel_tolerance` | Override `tolerance` for either part; both are required without `tolerance` |
 | `beta` | PID coefficients `[b1, b2, b3]`, default `[0.64, -0.31, 0.04]` (Ranocha et al.'s for RDPK3Sp35) |
 
 ### `[numerics.hybrid]`
@@ -903,7 +903,7 @@ Error-based time steps ([Ranocha et al. 2022](references.md#ranocha-2022)), with
 | `small_stencil_size` | (`TENO`) Cells per sector stencil, default 10 (18 in 3D) |
 | `troubled_threshold` | (`TENO`) Troubled-cell threshold on the density-jump variance, default 1e-3 |
 | `troubled_upper` | (`TENO`) Variance at which the adaptive cutoff reaches its largest value (most dissipative), default 1e-2 |
-| `C_T` | (`TENO`) Fixed TENO cutoff; adaptive (1e-10 to 1e-6) if omitted |
+| `C_T` | (`TENO`) Fixed TENO cutoff, positive; adaptive (1e-10 to 1e-6) if omitted |
 | `characteristic` | (`TENO`) Select stencils on characteristic variables, default true |
 | `max_condition` | (`TENO`) Stencils grow until the least-squares system's condition estimate is below this, default 1e8 |
 | `cache_file` | (`TENO`) Save the precomputed stencils and matrices here, and reuse them on later runs of the same mesh, boundary assignment and TENO options; anything else is detected and recomputed. Distributed runs write one file per rank, `<cache_file>.r<rank>-of-<ranks>`, for that rank count and partition, and record the halo depth the stencils need, so a cached run sets up its halo once. Partitions repeat for the same mesh and rank count. Size per cell: about 2.5 / 4 / 6 / 11 KB in 2D and 10 / 18 / 32 KB (hexahedra) or 9 / 13 / 29 / 63 KB (tetrahedra) in 3D for orders 3 / 4 / 5 / 6, e.g. 8.4 GB for 64³ hexahedra at order 5; reading it takes seconds; the 3D setup takes about 5 s per million hexahedra and 20 s per million tetrahedra on an A100 (order 5), and minutes on CPUs. The cache records whether the device or the host computed it; both give the same tables |
@@ -1140,7 +1140,7 @@ weights and the trigger state.
 | Key | Description |
 |---|---|
 | `fields` | Variables to average: any of the `[statistics]` fields |
-| `bins` | Number of phase bins |
+| `bins` | Number of phase bins (required) |
 | `period`, `t_reference` | A fixed period, phase 0 at `t_reference` (default 0), or |
 | `probe`, `variable`, `level` | The trigger point `[x, y(, z)]`, its variable and the level of its upward crossings (default 0) |
 | `interval`, `t_start` | Sampling, default those of `[statistics]` |
@@ -1967,7 +1967,7 @@ Used when Mallard runs on several MPI ranks (`mpirun -n N mallard -i input.toml`
 | `async` | `true` (default) writes the `[[write_data]]` files on background threads while the run continues; `false` writes them before the run goes on. When a file is due, its values are copied out (on several ranks, regrouped where the file needs it) and the run goes on; a writer's next file first waits for its previous one. The files are the same as without `async`, byte for byte. VTKHDF and HDF5 output on several ranks stays synchronous: parallel HDF5 calls MPI, which only the main thread does. The run waits for every file before it ends, also when it stops on an error |
 | `io_threads` | Threads that copy out each snapshot and compress its files (default 1) |
 | `reference` | `{rho, u = [...], p}`: the free stream of the [derived field](guide/output.md#derived-fields) `CP`, and the default `reference` of every `[[probes]]` entry's `CF` and `CP` (a probe's own replaces it). Default none: `CP` is then an error that asks for it |
-| `write_stencils` | Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the setup ([layout](guide/output.md#mesh-and-stencil-fields)); `""` writes none. Needs HDF5. Default `""` |
+| `write_stencils` | Path of an HDF5 file of every cell's reconstruction stencils as the run builds them, written once at the setup ([layout](guide/output.md#mesh-and-stencil-fields)). Needs HDF5. Default none: no stencil file |
 
 ### `[output.mixture]`
 

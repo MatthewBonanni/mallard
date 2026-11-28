@@ -186,7 +186,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     const std::string type = find_value<std::string>(table, "type");
     if (type != "tracer" && type != "solid") throw not_accepted(table, "particles.type", type, {"solid", "tracer"});
     is_solid = type == "solid";
-    file = find_value_or<std::string>(table, "file", "");
+    file = find_optional<std::string>(table, "file", "no particle file").value_or("");
     distributed = distribution != nullptr;
     R = gas ? static_cast<double>(gas->R) : 0.0;
     std::array<rtype, N_DIM> v_seed{};
@@ -369,8 +369,16 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
     }
     const uint64_t n_local = new_ids.size();
     // Every rank can hold every particle unless told otherwise: migration never runs out of slots
-    const uint64_t asked = find_value_or<uint64_t>(table, "capacity", 0);
-    const uint64_t n_slots = asked > 0 ? asked : std::max<uint64_t>(n_global, 1);
+    const std::optional<uint64_t> asked =
+        find_optional<uint64_t>(table, "capacity", "room for every particle on every rank");
+    if (asked == 0u) {
+        throw InputError(Diagnostic{.key = "particles.capacity",
+                                    .line = line_of(table, "capacity"),
+                                    .message = "must be positive",
+                                    .fix = "Leave capacity out for room for every particle on every rank (before "
+                                           "0.12.0, 0 meant that)"});
+    }
+    const uint64_t n_slots = asked.value_or(std::max<uint64_t>(n_global, 1));
     if (n_slots < n_local) {
         throw InputError(Diagnostic{.key = "particles.capacity",
                                     .line = line_of(table, "capacity"),

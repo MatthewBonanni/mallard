@@ -1,5 +1,4 @@
 {
- "default": "-1.0",
  "dimension": "time (s)",
  "dims": [
   2,
@@ -86,5 +85,6 @@
   "tutorials/cluster/input.toml",
   "tutorials/wedge/input.toml"
  ],
- "type": "number"
+ "type": "number",
+ "unset": "no simulated-time limit"
 }

@@ -467,9 +467,11 @@ std::vector<Point> read_points(const std::string & file, const std::string & key
 }
 
 Geometry make_geometry(const Input & entry, const std::string & key) {
-    std::string type = find_value_or<std::string>(entry, "type", "");
+    const std::optional<std::string> given =
+        find_optional<std::string>(entry, "type", "point or line, from point or start and end");
+    std::string type = given.value_or("");
     record_options(key + ".type", {"point", "points", "line", "polyline", "circle", "arc", "curve"});
-    if (type.empty()) {
+    if (!given) {
         const bool point = entry.contains("point");
         const bool line = entry.contains("start") || entry.contains("end");
         if (point == line) throw InputError(key + ": give a type, or either point or start, end and n_points.");

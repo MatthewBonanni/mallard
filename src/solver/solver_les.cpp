@@ -1109,7 +1109,7 @@ void Solver::init_les() {
                          "[chemistry]) or gas = \"flamelet\" with navier_stokes.");
     }
     const Input & combustion = input.at("les").at("combustion");
-    if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
+    if (find_value<std::string>(combustion, "model") == "pasr") {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;
         chem_time_scale = Kokkos::View<rtype *>("chem_time_scale", mesh->n_cells);

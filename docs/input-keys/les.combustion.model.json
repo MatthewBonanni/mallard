@@ -1,9 +1,9 @@
 {
- "default": "\"\"",
  "dims": [
   2,
   3
  ],
+ "required": true,
  "set_in": [
   "examples/flame_turbulence/les.toml",
   "examples/triple_flame/tfles/input.toml",

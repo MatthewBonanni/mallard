@@ -1,10 +1,10 @@
 {
- "default": "-1.0",
  "dims": [
   2
  ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/statistics.toml"
  ],
- "type": "number"
+ "type": "number",
+ "unset": "abs_tolerance and rel_tolerance set the tolerances"
 }

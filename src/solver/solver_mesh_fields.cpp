@@ -30,11 +30,18 @@ bool Solver::writes_stencils() const {
     for (const char * name : stencils::FIELDS) {
         if (writes_variable(input, name)) return true;
     }
-    return !find_value_or<std::string>(input, "output", "write_stencils", "").empty() && output_files_enabled();
+    return find_optional<std::string>(input, "output", "write_stencils", "no stencil file") && output_files_enabled();
 }
 
 void Solver::init_mesh_fields() {
-    const std::string stencil_file = find_value_or<std::string>(input, "output", "write_stencils", "");
+    const std::optional<std::string> stencil_file =
+        find_optional<std::string>(input, "output", "write_stencils", "no stencil file");
+    if (stencil_file && stencil_file->empty()) {
+        throw InputError({.key = "output.write_stencils",
+                          .line = line_of(input.at("output"), "write_stencils"),
+                          .message = "is empty",
+                          .fix = "Give the path of the HDF5 file, or leave write_stencils out for none"});
+    }
     mesh_field_names.clear();
     for (const char * name : MeshQuality::FIELDS) {
         if (writes_variable(input, name)) mesh_field_names.emplace_back(name);
@@ -43,7 +50,7 @@ void Solver::init_mesh_fields() {
     for (const char * name : stencils::FIELDS) {
         if (writes_variable(input, name)) mesh_field_names.emplace_back(name);
     }
-    const bool write_file = !stencil_file.empty() && output_files_enabled();
+    const bool write_file = stencil_file && output_files_enabled();
     h_mesh_fields = {};
     if (mesh_field_names.empty() && !write_file) return;
 
@@ -59,7 +66,7 @@ void Solver::init_mesh_fields() {
             for (uint32_t c = 0; c < mesh->n_owned(); c++) targets[c] = c;
         }
         const stencils::Table table = stencil_table(targets, false);
-        if (write_file) logging::line("Stencils: " + stencils::write(table, *mesh, cell_owners(), stencil_file));
+        if (write_file) logging::line("Stencils: " + stencils::write(table, *mesh, cell_owners(), *stencil_file));
         for (auto & field : table.summary_fields()) values.push_back(std::move(field));
     }
     h_mesh_fields = Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace>("mesh_fields", mesh->n_cells,

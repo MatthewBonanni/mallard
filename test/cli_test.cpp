@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -1228,6 +1229,35 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     EXPECT_EQ(keys.keys(), json::parse(read_file("keys.json")).keys());
     EXPECT_TRUE(keys["physics.gamma"]["set"].boolean);
     EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
+}
+
+TEST(CliTest, KeyCatalogHasNoValueStandingForOffOrAutomatic) {
+    SKIP_UNDER_MPI();
+    const Result all = run({"list", "keys", "--format", "json"}, true);
+    ASSERT_EQ(all.status, 0) << all.err;
+    const json::Value catalog = json::parse(all.out)["keys"];
+    // A key with no default says what leaving it out means ("unset") instead of a sentinel default
+    const auto sentinel = [](const std::string & text) {
+        if (text == "\"\"" || text == "''") return true;
+        char * end = nullptr;
+        const double x = std::strtod(text.c_str(), &end);
+        return end != text.c_str() && *end == '\0' && (x < 0.0 || !std::isfinite(x) || std::abs(x) >= 1e15);
+    };
+    for (const std::string & key : catalog.keys()) {
+        const json::Value & entry = catalog[key];
+        if (const json::Value * d = entry.find("default")) {
+            EXPECT_FALSE(sentinel(d->string)) << key << " = " << d->string;
+        }
+        if (const json::Value * by_dim = entry.find("defaults_by_dim")) {
+            for (const std::string & dim : by_dim->keys()) {
+                EXPECT_FALSE(sentinel((*by_dim)[dim].string)) << key << " (" << dim << "D) = " << (*by_dim)[dim].string;
+            }
+        }
+    }
+    EXPECT_EQ(catalog["run.t_wall_stop"]["unset"].string, "no wall-clock limit");
+    const Result text = run({"list", "keys", "run"}, true);
+    ASSERT_EQ(text.status, 0) << text.err;
+    EXPECT_TRUE(has_row(text.out, {"run.t_wall_stop", "number", "s", "unset: no wall-clock limit"})) << text.out;
 }
 
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {

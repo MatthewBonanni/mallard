@@ -145,12 +145,12 @@ std::vector<Row> time_quantities(const TimeSetup & t) {
     } else {
         rows.push_back({Status::NONE, {"time step", real(t.dt), units::column("s"), "", first}});
     }
-    if (t.n_steps > 0) rows.push_back({Status::NONE, {"stop at step", logging::count(t.n_steps), "steps", "", ""}});
-    if (t.t_stop > 0.0) {
-        rows.push_back({Status::NONE, {"stop at time", real(t.t_stop), units::column("s"), "", "simulated time"}});
+    if (t.n_steps) rows.push_back({Status::NONE, {"stop at step", logging::count(*t.n_steps), "steps", "", ""}});
+    if (t.t_stop) {
+        rows.push_back({Status::NONE, {"stop at time", real(*t.t_stop), units::column("s"), "", "simulated time"}});
     }
-    if (t.wall_stop > 0.0) {
-        rows.push_back({Status::NONE, {"stop at wall time", real(t.wall_stop), "s", "", "of this run"}});
+    if (t.wall_stop) {
+        rows.push_back({Status::NONE, {"stop at wall time", real(*t.wall_stop), "s", "", "of this run"}});
     }
     return rows;
 }

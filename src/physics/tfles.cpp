@@ -67,7 +67,7 @@ Kokkos::View<double *[4]> read_flame_table(const Input & table, ThickenedFlame &
 
 ThickenedFlame ThickenedFlame::from_input(const Input & table, const bool flamelet) {
     using Efficiency = ThickenedFlame::Efficiency;
-    const std::string model = find_value_or<std::string>(table, "model", "");
+    const std::string model = find_value<std::string>(table, "model");
     if (model != "tfles") throw InputError("les.combustion.model = \"" + model + "\" is not one of: tfles, pasr.");
     ThickenedFlame tf;
     const std::string sensor = flamelet && !table.contains("sensor")

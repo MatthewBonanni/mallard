@@ -1,5 +1,4 @@
 {
- "default": "\"\"",
  "dims": [
   2,
   3
@@ -19,5 +18,6 @@
   "examples/triple_flame/tfles/input.toml",
   "examples/triple_flame/thick/input.toml"
  ],
- "type": "string"
+ "type": "string",
+ "unset": "the mechanism's first phase"
 }

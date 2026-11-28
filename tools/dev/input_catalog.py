@@ -11,7 +11,8 @@ a few cells per direction (each check takes seconds; inputs whose mesh file is n
 in the repository are skipped) and
 merges what setup recorded into docs/input-keys/, one file per key path: its type,
 physical dimension (and the unit of a plain number, when not SI), default (as TOML
-text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
+text), that it is required, or what leaving it out means ("unset": a key with no
+default, whose absence turns its feature off or lets the run choose), the accepted values, the builds (2D, 3D) whose setup
 read it, and the inputs that set it. A key's file is its path, percent-encoded
 outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
 plus .json. With --check it compares with the committed files instead of writing
@@ -20,7 +21,7 @@ them, and exits 1 if they differ.
 docs: checks docs/input.md against the catalog and exits 1 on any difference:
 every key of its key tables (those headed "| Key |") must be in the catalog, and
 the defaults it states ("default X", "Default: X", "X (default)" in a key's row)
-must be the catalog's. CI runs
+must be the catalog's, and a key with no default ("unset") must state none. CI runs
 build --check in the tutorials job, which has both builds, and docs in
 tools/dev/precheck.sh.
 """
@@ -119,7 +120,7 @@ def build(args):
                         m["default"] = entry["default"]
                     else:
                         m.setdefault("defaults_by_dim", {})[str(dim)] = entry["default"]
-                for field in ("dimension", "unit"):
+                for field in ("dimension", "unit", "unset"):
                     if field in entry:
                         m[field] = entry[field]
                 if "values" in entry:
@@ -223,6 +224,9 @@ def docs(args):
     wrong = []
     for path, text in documented.items():
         entry = catalog.get(path)
+        if entry and "unset" in entry and "default" not in entry:
+            wrong.append(f"{path}: setup has no default (unset: {entry['unset']}), docs/input.md says {text}")
+            continue
         if not entry or "default" not in entry or entry.get("type") not in ("bool", "integer", "number", "string"):
             continue
         if not same(entry["default"], text) and not any(same(d, text) for d in entry.get("defaults_by_dim", {}).values()):

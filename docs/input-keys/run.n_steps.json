@@ -1,5 +1,4 @@
 {
- "default": "0",
  "dims": [
   2,
   3
@@ -21,5 +20,6 @@
   "tools/dev/catalog_inputs/3d/mesh_file.toml",
   "tools/dev/catalog_inputs/3d/sector.toml"
  ],
- "type": "integer"
+ "type": "integer",
+ "unset": "no step limit"
 }

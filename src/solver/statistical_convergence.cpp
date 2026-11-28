@@ -224,8 +224,8 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                                      " (two batches of MSER-5)",
                           .docs = DOCS});
     }
-    tolerance = table.contains("tolerance") ? find_value<double>(table, "tolerance") : 0.0;
-    variance_tolerance = find_value_or<double>(table, "variance_tolerance", 0.0);
+    tolerance = find_optional<double>(table, "tolerance", "no convergence criterion").value_or(0.0);
+    variance_tolerance = find_optional<double>(table, "variance_tolerance", "no variance criterion").value_or(0.0);
     for (const auto & [name, value] : {std::pair{"tolerance", tolerance}, {"variance_tolerance", variance_tolerance}}) {
         if (table.contains(name) && !(value > 0.0)) {
             throw InputError({.key = key + "." + name,

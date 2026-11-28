@@ -199,6 +199,22 @@ TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
     }
 }
 
+TEST(CheckKeys, KeysWithNoDefaultSayWhatLeavingThemOutMeans) {
+    Solver solver;
+    solver.init(parse_input_string(box()));
+    const json::Value catalog = json::parse(key_catalog(resolve_input(solver.resolved_input())));
+    for (const auto & [key, unset] : {std::pair{"run.n_steps", "no step limit"},
+                                      std::pair{"run.t_wall_stop", "no wall-clock limit"},
+                                      std::pair{"run.control_file_interval", "control files are not polled"}}) {
+        ASSERT_TRUE(catalog.has(key)) << key;
+        EXPECT_FALSE(catalog[key].has("default")) << key;
+        EXPECT_FALSE(catalog[key].has("required")) << key;
+        EXPECT_EQ(catalog[key]["unset"].string, unset) << key;
+    }
+    EXPECT_EQ(catalog["run.t_stop"]["set"].boolean, true);
+    EXPECT_FALSE(catalog["run.t_stop"].has("default"));
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");

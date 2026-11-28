@@ -1206,7 +1206,7 @@ class Solver {
         // Run control
         bool control_enabled = false;
         bool control_socket = true;              // [run] control_socket
-        uint64_t control_file_interval = 0;      // [run] control_file_interval
+        std::optional<uint64_t> control_file_interval;  // [run] control_file_interval
         uint64_t control_files_polled = 0;       // step / control_file_interval at the last look
         int control_contributed = 0;             // this rank's requests in the last time-step reduction
         int control_reduced = 0;                 // every rank's
@@ -1335,9 +1335,9 @@ class Solver {
         std::vector<input_upgrade::Finding> deprecated_keys;  // read under their new names
 
         // Run parameters
-        uint64_t n_steps;
-        rtype t_stop;
-        rtype t_wall_stop;
+        std::optional<uint64_t> n_steps;  // empty: no limit, as t_stop and t_wall_stop
+        std::optional<rtype> t_stop;
+        std::optional<rtype> t_wall_stop;
         bool use_cfl;
         rtype dt = 0.0;
         rtype dt_cfl1 = 0.0;  // stable time step at CFL 1

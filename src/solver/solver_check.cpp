@@ -565,8 +565,8 @@ void Solver::check_sizing(CheckReport & r, const CheckOptions & options) const {
 }
 
 void Solver::check_cost(CheckReport & r, const CheckOptions & options, memory::Tracker & tracker) {
-    r.t_stop = static_cast<double>(t_stop);
-    r.n_steps = n_steps;
+    r.t_stop = t_stop ? static_cast<double>(*t_stop) : 0.0;
+    r.n_steps = n_steps.value_or(0);
     double step_measured = 0.0;
     if (options.steps > 0) {
         calc_dt();
@@ -770,7 +770,7 @@ void Solver::check_settings(CheckReport & r) const {
                                                          r.cfl, r.cfl_limit, r.integrator.c_str()));
     }
     const double t0 = static_cast<double>(t);
-    const double t_end = t_stop > 0 ? static_cast<double>(t_stop) : std::numeric_limits<double>::infinity();
+    const double t_end = t_stop ? static_cast<double>(*t_stop) : std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < triggers.size(); i++) {
         const Triggers::Trigger & trigger = triggers[i];
         const std::string which = "triggers[" + std::to_string(i) + "] (" + trigger.name + ")";

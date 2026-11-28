@@ -30,7 +30,7 @@ stopped at step 12415, t = 0.82239; restart: restart_012415.restart
 
 Restarts on request go to the `[[write_data]]` restart writers, or to `restart_<step>.restart` in the working directory if there is none. `mallard ctl` talks to rank 0 through the Unix-domain socket `mallard.sock` in the directory the run was started from, readable and writable by its owner only, so it must run on rank 0's node (in Kubernetes: `kubectl exec`). `[run] control_socket = false` turns the socket off.
 
-Control files work from anywhere the run directory is visible (a login node, a GUI, a job script), without a process on rank 0's node. Rank 0 looks for them in the directory the run was started from every `[run] control_file_interval` steps; with the default 0 it never does, and `--set control_file_interval=10` turns them on without editing the input. A `SET` file holds one setting per line, `#` starting a comment; write it under another name and rename it to `SET`, so the run never reads half of it:
+Control files work from anywhere the run directory is visible (a login node, a GUI, a job script), without a process on rank 0's node. Rank 0 looks for them in the directory the run was started from every `[run] control_file_interval` steps; left out, it never does (`set control_file_interval=0` turns them off again), and `--set control_file_interval=10` turns them on without editing the input. A `SET` file holds one setting per line, `#` starting a comment; write it under another name and rename it to `SET`, so the run never reads half of it:
 
 ```bash
 $ mallard -i input.toml --set control_file_interval=10 --set t_wall_stop=11h

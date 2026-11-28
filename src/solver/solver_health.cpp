@@ -537,7 +537,7 @@ void Solver::health_event_row(const RunStatus & status, std::vector<MonitorValue
                            .cfl = status.cfl,
                            .wall = status.wall,
                            .eta = status.eta,
-                           .t_wall_stop = static_cast<double>(t_wall_stop),
+                           .t_wall_stop = t_wall_stop ? static_cast<double>(*t_wall_stop) : 0.0,
                            .rejected = n_rejected,
                            .residuals = run_health.last.residuals,
                            .monitored = std::move(monitored)};

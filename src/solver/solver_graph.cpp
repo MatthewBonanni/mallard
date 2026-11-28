@@ -1310,8 +1310,8 @@ void Solver::begin_device_steps() {
 
 step_queue::Horizon Solver::step_horizon() const {
     step_queue::Horizon h;
-    if (n_steps > 0) h.at_step(n_steps);
-    if (t_stop > 0) h.at_time(t_stop_reached());
+    if (n_steps) h.at_step(*n_steps);
+    if (t_stop) h.at_time(t_stop_reached());
     h.at_step(pause_step);
     if (pause_time < std::numeric_limits<rtype>::infinity()) {
         h.at_time(pause_time - precision_tol(1e-9, 1e-5) * Kokkos::abs(pause_time));
@@ -1395,7 +1395,7 @@ void Solver::resume_device_steps() {
 void Solver::post_requests() {
     // Acted on by every rank after the step whose time-step reduction carries it
     poll_control_files();
-    if (t_wall_stop > 0 && timer.seconds() >= double(t_wall_stop)) run_control::request(run_control::WALL_TIME);
+    if (t_wall_stop && timer.seconds() >= double(*t_wall_stop)) run_control::request(run_control::WALL_TIME);
     const int pending = run_control::pending();
     for (int k = 0; k < run_control::N_REQUESTS; k++) requests_posted(k) = (pending >> k) & 1 ? rtype(-1) : rtype(0);
     // Rank 0's wall time, as the host's triggers read it: the reduction's minimum of its negative
