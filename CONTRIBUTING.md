@@ -105,6 +105,12 @@ cmake --build build -j
       `uint16_t` wrap the offset, and the build rejects them.
     - Data lives in `Kokkos::View`s in the default memory space; copy to the host
       with `Kokkos::deep_copy` (or a mirror) outside the time loop, not per step.
+    - Only contiguous subviews copy between host and device. A row range of a
+      View of rank 2 or more is contiguous in `LayoutRight` but not in `LayoutLeft`,
+      the default on CUDA and HIP, so its copy works on host backends and throws on
+      GPUs. Copy the whole View, pack the rows on the device first, or declare the
+      View `LayoutRight`; `tools/dev/check_subview_copies.py` (in `precheck.sh`)
+      flags such copies.
     - A View of rank 2 or more holds at most 2^32 entries: Kokkos computes its offset
       in 32 bits, which Mallard's copy of `Kokkos_View.hpp` makes unsigned
       (`src/CMakeLists.txt`), and every allocation is checked
