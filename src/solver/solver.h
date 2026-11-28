@@ -114,6 +114,40 @@ struct DirichletBoundary {
     std::vector<std::shared_ptr<const kexpr::Program>> W;
 };
 
+class BoundaryProfiles;
+class CompositionExpressions;  // solver_mixture.cpp
+
+/** @brief The mdot and profile of an inlet_mass_flow entry (without mdot, a mass_flux is BoundaryFields'). */
+struct MassFlowInput {
+    bool given = false;  // mdot is given
+    double mdot = 0.0;   // at t = 0 if of t
+    std::shared_ptr<const kexpr::Program> mdot_of_t;  // null: constant
+    std::shared_ptr<const kexpr::Program> shape;      // the profile; null: uniform
+};
+
+/** @brief A [[boundaries]] entry as the input phase of the setup decides it, without the mesh. */
+struct BoundaryEntry {
+    std::string name;
+    std::string where_name;  // boundaries[name = "..."], for messages
+    BoundaryCondition bc;
+    WallModelSpec wall_model;
+    std::shared_ptr<const Expression> where;  // keeps the zone's faces where nonzero; null: every face
+    std::vector<std::shared_ptr<const kexpr::Program>> dirichlet;  // rho, u and p of a dirichlet condition
+    std::shared_ptr<BoundaryFields> fields;
+    std::shared_ptr<const BoundaryProfiles> profiles;
+    std::vector<uint16_t> coordinates;  // the local coordinates its expressions and data read
+    std::vector<std::string> walls;     // the zones n measures from; empty: every wall entry
+    MassFlowInput mass_flow;
+    // Mixture inlets: the temperature (unless of the face) and the composition (or its expressions)
+    bool T_varies = false;
+    double T = 0.0;
+    std::shared_ptr<CompositionExpressions> composition;
+    std::vector<double> Y;
+    // inlet_state with nscbc: the mean velocity and Reynolds stress, and synthetic turbulence
+    std::shared_ptr<const InletProfile> inlet;
+    std::optional<SyntheticInflow::Settings> turbulence;
+};
+
 /** @brief Thrown inside the time loop when the state stops being valid; run() handles it. */
 struct DivergedError : std::exception {
     const char * what() const noexcept override { return "solution diverged"; }
@@ -920,6 +954,12 @@ class Solver {
          */
         std::vector<std::string> init_fields(const Input & input);
 
+        /**
+         * @brief Instead of init, without the mesh: the input's upgrades and numerics preset and the
+         *        input phase of the setup (read_input), whose key reads resolved_input() records.
+         */
+        void read_keys(const Input & input);
+
         StateView conservatives;
         SpeciesView species;
         Kokkos::View<rtype *[N_PRIMITIVE]> primitives;
@@ -941,6 +981,17 @@ class Solver {
         Kokkos::View<rtype **, Kokkos::LayoutRight, Kokkos::HostSpace> h_table_fields;
 
     protected:
+        /**
+         * @brief The input phase of the setup, before the mesh is read: reads [run], [physics] (and the
+         *        mechanism), [mesh], [parallel], [[periodic]] and [[boundaries]], and decides from them.
+         *        The mesh phase that follows applies the decisions.
+         */
+        void read_input();
+        void read_mesh_keys();
+        /** @brief Reads [[boundaries]] into boundary_entries. */
+        void read_boundaries();
+        /** @brief Mixtures: the temperature and composition of an entry, or an error for an unsupported type. */
+        void read_mixture_boundary(const Input & bound, BoundaryEntry & entry) const;
         void init_mesh();
         /**
          * @brief Curved meshes: halo cells take their owners' centroids, volumes and (axisymmetric) measures and
@@ -1027,8 +1078,10 @@ class Solver {
          *        else empty (an mdot without profile sets bc's uniform flux).
          *        A profile of t gives the fluxes at t = 0 and fills `timed`.
          */
-        std::vector<double> mass_flow_inlet_fluxes(const Input & bound, const std::vector<uint32_t> & faces,
+        std::vector<double> mass_flow_inlet_fluxes(const BoundaryEntry & entry, const std::vector<uint32_t> & faces,
                                                    BoundaryCondition & bc, MassFlowProfile & timed) const;
+        /** @brief The mdot and profile of an inlet_mass_flow entry. */
+        static MassFlowInput read_mass_flow(const Input & bound, const BoundaryCondition & bc, const std::string & where);
         void init_sources(region::Regions & regions);
         void init_sponges(region::Regions & regions);
         /** @brief Mass fractions of a composition table (numbers or expressions) at the centroids of cells. */
@@ -1241,6 +1294,7 @@ class Solver {
         int halo_layers = 0;
         std::optional<std::vector<int>> block_owners;  // owner of each block cell, during init only
         std::string partitioner;
+        bool nccl_exchange = false;  // [parallel] halo_exchange = "nccl"
         Distribution distribution;
         HaloExchange halo;
 
@@ -1303,8 +1357,7 @@ class Solver {
         void launch_mixture_flux_functor();
         template <typename T_riemann_solver>
         void launch_double_flux_functor();
-        void init_mixture_boundaries(const std::vector<Input> & input_boundaries,
-                                     const std::vector<std::array<uint32_t, 2>> & profiled_faces,
+        void init_mixture_boundaries(const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs);
         /** @brief Write the conditions' bc_Y, bc_thermo and bc_transport_values to the device. */
         void copy_boundary_gas();
@@ -1392,6 +1445,7 @@ class Solver {
         std::vector<AveragePressureOutlet> average_pressure_outlets;
         // The numbers of each input boundary, per face where they vary; for mixtures, the composition per input
         // boundary where it depends on t; the faces' own conditions that depend on t, evaluated on the device
+        std::vector<BoundaryEntry> boundary_entries;  // by [[boundaries]] entry
         std::vector<std::shared_ptr<BoundaryFields>> boundary_fields;
         std::vector<std::shared_ptr<CompositionPrograms>> boundary_composition;
         std::vector<std::array<uint32_t, 3>> field_faces;  // (input boundary, face, its own condition)

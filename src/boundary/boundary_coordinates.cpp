@@ -203,14 +203,9 @@ std::vector<double> arc_length(const Mesh & mesh, const std::vector<uint32_t> & 
     if (tips.size() > 2) throw fail("the faces form more than one curve");
     const size_t axis = dominant(Point{tips[1][0] - tips[0][0], tips[1][1] - tips[0][1]});
     Vertex at = tips[1][axis] < tips[0][axis] ? tips[1] : tips[0];
-    if (entry.contains("origin")) {
-        const std::vector<rtype> p = find_real_vector(entry, "origin", dim::length);
-        if (p.size() != 2) {
-            throw InputError({.key = where + ".origin", .line = line_of(entry, "origin"),
-                              .message = "a point has 2 components",
-                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-        }
-        auto away = [&](const Vertex & v) { return std::hypot(v[0] - double(p[0]), v[1] - double(p[1])); };
+    if (const std::optional<Point> origin = read_patch_points(entry, where).origin) {
+        const Point & p = *origin;
+        auto away = [&](const Vertex & v) { return std::hypot(v[0] - p[0], v[1] - p[1]); };
         at = away(tips[1]) < away(tips[0]) ? tips[1] : tips[0];
         double total = 0.0;
         for (const Ends & e : ends) total += std::hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]);
@@ -278,31 +273,17 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
         std::sort(nodes.begin(), nodes.end());
         index[nodes] = k / W;
     }
+    const PatchPoints given = read_patch_points(entry, where);
+    auto vec3 = [](const Point & p) { return patch::Vec3{p[0], p[1], p[2]}; };
     patch::Corners corners{.points = std::nullopt, .origin = std::nullopt, .toward = std::nullopt, .key = where,
                            .line = line_of(entry)};
-    auto point = [&](const Input & item, const std::string & key) {
-        const std::vector<rtype> p = as_real_vector(item, key, dim::length);
-        if (p.size() != 3) {
-            throw InputError({.key = key, .line = line_of(entry, key.substr(where.size() + 1)),
-                              .message = "a point has 3 components",
-                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-        }
-        return patch::Vec3{static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])};
-    };
-    if (entry.contains("origin")) corners.origin = point(entry.at("origin"), where + ".origin");
-    if (entry.contains("toward")) corners.toward = point(entry.at("toward"), where + ".toward");
-    if (entry.contains("corners")) {
-        const std::string key = where + ".corners";
-        corners.key = key;
+    if (given.origin) corners.origin = vec3(*given.origin);
+    if (given.toward) corners.toward = vec3(*given.toward);
+    if (given.corners) {
+        corners.key = where + ".corners";
         corners.line = line_of(entry, "corners");
-        const Input & list = entry.at("corners");
-        if (!list.is_array()) {
-            throw InputError({.key = key, .line = corners.line, .message = "must be a list of points",
-                              .fix = "Write corners = [[x, y, z], [x, y, z], [x, y, z], [x, y, z]]",
-                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
-        }
         corners.points.emplace();
-        for (const Input & item : list.as_array()) corners.points->push_back(point(item, key));
+        for (const Point & p : *given.corners) corners.points->push_back(vec3(p));
     }
     const patch::Coordinates global = patch::coordinates(surface, corners);
     patch::Coordinates local{global.shape, std::vector<patch::Values>(faces.size()), global.summary};
@@ -316,6 +297,45 @@ patch::Coordinates patch_coordinates(const Mesh & mesh, const std::vector<uint32
 #endif
 
 } // namespace
+
+PatchPoints read_patch_points(const Input & entry, const std::string & where) {
+    PatchPoints given;
+#if N_DIM == 2
+    if (entry.contains("origin")) {
+        const std::vector<rtype> p = find_real_vector(entry, "origin", dim::length);
+        if (p.size() != 2) {
+            throw InputError({.key = where + ".origin", .line = line_of(entry, "origin"),
+                              .message = "a point has 2 components",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        given.origin = Point{static_cast<double>(p[0]), static_cast<double>(p[1])};
+    }
+#else
+    auto point = [&](const Input & item, const std::string & key) {
+        const std::vector<rtype> p = as_real_vector(item, key, dim::length);
+        if (p.size() != 3) {
+            throw InputError({.key = key, .line = line_of(entry, key.substr(where.size() + 1)),
+                              .message = "a point has 3 components",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        return Point{static_cast<double>(p[0]), static_cast<double>(p[1]), static_cast<double>(p[2])};
+    };
+    if (entry.contains("origin")) given.origin = point(entry.at("origin"), where + ".origin");
+    if (entry.contains("toward")) given.toward = point(entry.at("toward"), where + ".toward");
+    if (entry.contains("corners")) {
+        const std::string key = where + ".corners";
+        const Input & list = entry.at("corners");
+        if (!list.is_array()) {
+            throw InputError({.key = key, .line = line_of(entry, "corners"), .message = "must be a list of points",
+                              .fix = "Write corners = [[x, y, z], [x, y, z], [x, y, z], [x, y, z]]",
+                              .docs = "docs/guide/boundary_conditions.md#local-coordinates"});
+        }
+        given.corners.emplace();
+        for (const Input & item : list.as_array()) given.corners->push_back(point(item, key));
+    }
+#endif
+    return given;
+}
 
 std::vector<bool> variables_read(const Input & entry) {
     const std::vector<std::string> variables = BoundaryValue::variables(entry);

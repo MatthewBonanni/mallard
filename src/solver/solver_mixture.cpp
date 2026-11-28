@@ -303,6 +303,8 @@ struct MixtureDiagnosticsFunctor {
     }
 };
 
+} // namespace
+
 /**
  * @brief A composition given as X or Y by species, each value a number or an
  *        expression in x, y, z, with an optional balance species taking
@@ -435,6 +437,8 @@ class CompositionExpressions {
         std::vector<std::string> texts;
         std::vector<Expression> values;
 };
+
+namespace {
 
 /**
  * @brief GeometricSourceFunctor (solver_rhs.cpp) for mixtures: the viscosity
@@ -680,8 +684,48 @@ std::vector<std::vector<double>> Solver::composition_at_cells(const Input & tabl
     return CompositionExpressions(*mixture_model, table, where).mass_fractions(mesh->cell_coords, cells);
 }
 
-void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries,
-                                     const std::vector<std::array<uint32_t, 2>> & profiled_faces,
+void Solver::read_mixture_boundary(const Input & bound, BoundaryEntry & entry) const {
+    const std::string & where = entry.where_name;
+    auto unsupported = [&](const std::string & what) {
+        throw InputError(where + ": " + what + " is not yet supported with gas = \"" +
+                         (mixture_model->tabulated() ? "flamelet" : "mixture") +
+                         "\" (it is with outlet_extrapolation, symmetry, the wall_* types, inlet_state, "
+                         "inlet_stagnation, inlet_mass_flow and outlet_pressure without average).");
+    };
+    switch (entry.bc.type) {
+        case BoundaryType::OUTLET_EXTRAPOLATION:
+        case BoundaryType::SYMMETRY:
+        case BoundaryType::WALL_ADIABATIC:
+        case BoundaryType::WALL_ISOTHERMAL:
+        case BoundaryType::WALL_HEAT_FLUX:
+        case BoundaryType::OUTLET_PRESSURE:
+            if (entry.bc.has(BoundaryCondition::AVERAGE)) unsupported("average = true");
+            return;
+        case BoundaryType::INLET_STATE:
+        case BoundaryType::INLET_STAGNATION:
+        case BoundaryType::INLET_MASS_FLOW: {
+            const char * T_key = entry.bc.type == BoundaryType::INLET_STAGNATION ? "T0" : "T";
+            // The temperature and composition of the condition, or of each face where they are expressions
+            entry.T_varies = BoundaryValue::is_expression(bound.at(T_key));
+            if (!entry.T_varies) entry.T = static_cast<double>(find_real(bound, T_key, dim::temperature));
+            if (MixtureModel::composition_varies(bound)) {
+                entry.composition = std::make_shared<CompositionExpressions>(
+                    *mixture_model, bound, where, BoundaryValue::variables(bound), boundary_variable::FIRST_LOCAL);
+                if (entry.composition->burnt_progress() && entry.composition->compiled()->depends_on_time()) {
+                    throw InputError(where + ".C: \"burnt\" with Z varying in time is not supported; give C "
+                                     "as an expression of t too.");
+                }
+            } else {
+                entry.Y = mixture_model->mass_fractions(bound, where);
+            }
+            return;
+        }
+        default:
+            unsupported("type = \"" + BOUNDARY_NAMES.at(entry.bc.type) + "\"");
+    }
+}
+
+void Solver::init_mixture_boundaries(const std::vector<std::array<uint32_t, 2>> & profiled_faces,
                                      std::vector<BoundaryCondition> & bcs) {
     bc_mass_fractions.assign(bcs.size(), {});
     bc_surrogates.assign(bcs.size(), {1.4, 0.0});
@@ -697,68 +741,35 @@ void Solver::init_mixture_boundaries(const std::vector<Input> & input_boundaries
         bc_temperatures[i_bc] = T;
         mixture_model->surrogates(T, Y, bc_surrogates[i_bc][0], bc_surrogates[i_bc][1]);
     };
-    for (size_t i_bc = 0; i_bc < input_boundaries.size(); i_bc++) {
-        const Input & bound = input_boundaries[i_bc];
-        const std::string name = find_value<std::string>(bound, "name");
-        const std::string where = "boundaries[name = \"" + name + "\"]";
-        auto unsupported = [&](const std::string & what) {
-            throw InputError(where + ": " + what + " is not yet supported with gas = \"" +
-                             (mixture.tabulated() ? "flamelet" : "mixture") +
-                             "\" (it is with outlet_extrapolation, symmetry, the wall_* types, inlet_state, "
-                             "inlet_stagnation, inlet_mass_flow and outlet_pressure without average).");
-        };
-        switch (bcs[i_bc].type) {
-            case BoundaryType::OUTLET_EXTRAPOLATION:
-            case BoundaryType::SYMMETRY:
-            case BoundaryType::WALL_ADIABATIC:
-            case BoundaryType::WALL_ISOTHERMAL:
-            case BoundaryType::WALL_HEAT_FLUX:
-            case BoundaryType::OUTLET_PRESSURE:
-                if (bcs[i_bc].has(BoundaryCondition::AVERAGE)) unsupported("average = true");
-                break;
-            case BoundaryType::INLET_STATE:
-            case BoundaryType::INLET_STAGNATION:
-            case BoundaryType::INLET_MASS_FLOW: {
-                const char * T_key = bcs[i_bc].type == BoundaryType::INLET_STAGNATION ? "T0" : "T";
-                // The temperature and composition of the condition, or of each face where they are expressions
-                const bool T_varies = BoundaryValue::is_expression(bound.at(T_key));
-                const BoundaryFields * fields = boundary_fields[i_bc].get();
-                const double T_uniform = T_varies ? 0.0 : static_cast<double>(find_real(bound, T_key, dim::temperature));
-                std::shared_ptr<CompositionExpressions> composition;
-                std::vector<double> Y_uniform;
-                if (MixtureModel::composition_varies(bound)) {
-                    composition = std::make_shared<CompositionExpressions>(*mixture_model, bound, where,
-                                                                           BoundaryValue::variables(bound),
-                                                                           boundary_variable::FIRST_LOCAL);
-                    const auto programs = composition->compiled();
-                    if (programs->depends_on_time() && composition->burnt_progress()) {
-                        throw InputError(where + ".C: \"burnt\" with Z varying in time is not supported; give C "
-                                         "as an expression of t too.");
-                    }
-                    if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
-                } else {
-                    Y_uniform = mixture_model->mass_fractions(bound, where);
-                    if (!T_varies) prescribe(i_bc, Y_uniform, T_uniform);
-                }
-                on_every_rank([&] {
-                    std::vector<size_t> profiled;
-                    std::vector<FacePoint> points;
-                    for (size_t k = 0; k < profiled_faces.size(); k++) {
-                        if (profiled_faces[k][0] != i_bc) continue;
-                        profiled.push_back(k);
-                        points.push_back(boundary_point(profiled_faces[k][1]));
-                    }
-                    const std::vector<std::vector<double>> Y =
-                        composition ? composition->mass_fractions(points) : std::vector<std::vector<double>>();
-                    for (size_t j = 0; j < profiled.size(); j++) {
-                        const double T = T_varies ? fields->temperature(points[j], 0.0) : T_uniform;
-                        prescribe(input_boundaries.size() + profiled[j], composition ? Y[j] : Y_uniform, T);
-                    }
-                });
-                break;
-            }
-            default:
-                unsupported("type = \"" + BOUNDARY_NAMES.at(bcs[i_bc].type) + "\"");
+    for (size_t i_bc = 0; i_bc < boundary_entries.size(); i_bc++) {
+        const BoundaryEntry & entry = boundary_entries[i_bc];
+        const BoundaryType type = bcs[i_bc].type;
+        if (type != BoundaryType::INLET_STATE && type != BoundaryType::INLET_STAGNATION &&
+            type != BoundaryType::INLET_MASS_FLOW) {
+            continue;
         }
+        const BoundaryFields * fields = boundary_fields[i_bc].get();
+        const std::shared_ptr<CompositionExpressions> & composition = entry.composition;
+        if (composition) {
+            const auto programs = composition->compiled();
+            if (programs->depends_on_time()) boundary_composition[i_bc] = programs;
+        } else if (!entry.T_varies) {
+            prescribe(i_bc, entry.Y, entry.T);
+        }
+        on_every_rank([&] {
+            std::vector<size_t> profiled;
+            std::vector<FacePoint> points;
+            for (size_t k = 0; k < profiled_faces.size(); k++) {
+                if (profiled_faces[k][0] != i_bc) continue;
+                profiled.push_back(k);
+                points.push_back(boundary_point(profiled_faces[k][1]));
+            }
+            const std::vector<std::vector<double>> Y =
+                composition ? composition->mass_fractions(points) : std::vector<std::vector<double>>();
+            for (size_t j = 0; j < profiled.size(); j++) {
+                const double T = entry.T_varies ? fields->temperature(points[j], 0.0) : entry.T;
+                prescribe(boundary_entries.size() + profiled[j], composition ? Y[j] : entry.Y, T);
+            }
+        });
     }
 }
