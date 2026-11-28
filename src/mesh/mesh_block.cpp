@@ -425,6 +425,7 @@ MeshBlock cartesian_3d_block(uint32_t nx, uint32_t ny, uint32_t nz, rtype Lx, rt
 }
 
 std::string mesh_filename(const Input & input) {
+    record_path("mesh.filename", {.kind = "file_or_directory", .extensions = {".msh", ".cgns", ".cas", ".h5", ".hdf5"}});
     const std::string filename = find_value_or<std::string>(input, "mesh", "filename", "mesh.msh");
     if (std::filesystem::exists(filename)) return filename;
     const bool given = input.contains("mesh") && input.at("mesh").contains("filename");

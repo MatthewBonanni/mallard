@@ -691,6 +691,7 @@ RestartData remap_restart(const Input & input, const Mesh & target, bool axisymm
     const Input & init = input.at("initialize");
     if (!init.contains("file")) throw InputError("initialize: type = \"remap\" needs file, the source restart file.");
     if (!init.contains("mesh")) throw InputError("initialize: type = \"remap\" needs [initialize.mesh], the source mesh.");
+    record_path("initialize.file", {});
     const std::string file = find_value<std::string>(init, "file");
     Options options;
     const int degree = find_value_or<int>(init, "degree", 2);

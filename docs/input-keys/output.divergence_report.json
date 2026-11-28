@@ -4,6 +4,10 @@
   2,
   3
  ],
+ "path": {
+  "io": "output",
+  "kind": "prefix"
+ },
  "set_in": [],
  "type": "string"
 }

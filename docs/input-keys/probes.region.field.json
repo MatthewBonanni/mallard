@@ -2,7 +2,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "isosurface"
+ ],
  "required": true,
+ "required_for": [
+  "isosurface"
+ ],
  "set_in": [
   "examples/hot_gas_regions/input.toml"
  ],

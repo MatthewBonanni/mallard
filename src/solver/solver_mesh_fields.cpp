@@ -34,6 +34,7 @@ bool Solver::writes_stencils() const {
 }
 
 void Solver::init_mesh_fields() {
+    record_path("output.write_stencils", {.output = true});
     const std::string stencil_file = find_value_or<std::string>(input, "output", "write_stencils", "");
     mesh_field_names.clear();
     for (const char * name : MeshQuality::FIELDS) {

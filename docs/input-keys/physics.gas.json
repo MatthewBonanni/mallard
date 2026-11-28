@@ -4,6 +4,10 @@
   2,
   3
  ],
+ "for_types": [
+  "euler",
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/detonation_1d/input.toml",

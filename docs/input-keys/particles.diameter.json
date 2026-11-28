@@ -3,7 +3,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "solid"
+ ],
  "required": true,
+ "required_for": [
+  "solid"
+ ],
  "set_in": [
   "examples/particle_bounce/input.toml",
   "examples/particle_centrifuge/input.toml",

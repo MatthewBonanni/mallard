@@ -3,6 +3,13 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "circle",
+  "cylinder",
+  "disk",
+  "sphere"
+ ],
  "set_in": [
   "examples/moving_heaters/input.toml",
   "examples/source_regions/input.toml",

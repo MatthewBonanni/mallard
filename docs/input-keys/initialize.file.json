@@ -3,7 +3,19 @@
   2,
   3
  ],
+ "for_types": [
+  "remap",
+  "restart"
+ ],
+ "path": {
+  "io": "input",
+  "kind": "file"
+ },
  "required": true,
+ "required_for": [
+  "remap",
+  "restart"
+ ],
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/cbc_les/input.toml",

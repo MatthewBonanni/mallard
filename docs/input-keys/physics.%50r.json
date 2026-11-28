@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",

@@ -150,6 +150,7 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
     std::vector<std::string> accepted;
     for (const auto & [v, d] : variables) accepted.push_back(v);
     for (const auto & [r, d] : reductions) accepted.push_back(r);
+    record_reference(key + ".fields", "fields");
     for (const auto & v : find_value<std::vector<std::string>>(table, "fields")) {
         std::vector<std::string> names = {v};
         const bool known = std::find(accepted.begin(), accepted.end(), v) != accepted.end();
@@ -228,6 +229,8 @@ ProbeSpectra::ProbeSpectra(const Input & table, const std::string & key, const s
             throw InputError(key + ".strouhal: length and velocity must be positive.");
         }
     }
+    record_path(key + ".file", {.output = true, .extensions = {".csv"}});
+    record_path(key + ".reductions_file", {.output = true, .extensions = {".csv"}});
     file = find_value_or<std::string>(table, "file", "probe_" + name + "_spectra.csv");
     file_reductions =
         find_value_or<std::string>(table, "reductions_file", "probe_" + name + "_reductions_spectra.csv");

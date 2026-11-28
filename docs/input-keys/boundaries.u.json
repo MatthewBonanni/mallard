@@ -3,6 +3,11 @@
   2,
   3
  ],
+ "for_types": [
+  "dirichlet",
+  "farfield",
+  "inlet_state"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

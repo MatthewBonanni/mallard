@@ -9,7 +9,7 @@ typed by the catalog (bool, integer, number, string; a quantity with its unit fo
 and documented by the key's row in docs/input.md (else by the catalog's default and accepted values). The classes
 only collect keys and values: Case::set (mallard.Case.set) writes them into the case's TOML, which setup then reads
 and checks as a file's. A table is an array of tables when the catalog types it as an array, docs/input.md heads it
-`[[...]]`, or an input of the catalog writes it as one; a table whose keys are all species names (X, Y) is a map.
+`[[...]]`, or an input of the catalog writes it as one; a table of species names (X.<species>) is a map.
 Every region (a `region` key, a named region of [regions], the lists of regions of REGION_LISTS, and a region's parts
 a, b, of and regions) is one class, Region, whose keys are those of every region of the catalog: a region takes the
 same keys wherever it is, so the catalog inputs need set each key in one region only.
@@ -79,7 +79,7 @@ def tree(catalog, arrays):
             mark(child)
         if node.children:
             node.array = node.path in arrays or (node.entry or {}).get("type") == "array"
-            node.map = all(not c.children and re.fullmatch(r"[A-Z][A-Z0-9]*", c.name) for c in node.children.values())
+            node.map = set(node.children) == {"<species>"}
     mark(root)
     return root
 

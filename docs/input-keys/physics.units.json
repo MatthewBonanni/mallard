@@ -4,6 +4,10 @@
   2,
   3
  ],
+ "for_types": [
+  "euler",
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",
   "examples/channel_inlet/input.toml",

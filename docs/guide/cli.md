@@ -721,7 +721,9 @@ Usage: mallard list species INPUT [--format text|json]
 
 Reads the input and its mechanism (not its mesh, which need not exist yet) and
 lists its species, one table row each, in the order of the mechanism: the <s> of
-its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none.
+its Y_<s>, X_<s> and RHOY_<s> fields. A single gas has none. The JSON also gives
+molar_masses, each species' molar mass in kg/kmol in the same order (empty for a
+flamelet gas), to convert between X and Y.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),
@@ -761,6 +763,13 @@ whether the input sets each: what mallard check --catalog writes, as tables.
 SECTION keeps the keys of one table (numerics, [numerics], write_data) or of one
 key path (numerics.face_reconstruction). An argument that ends in .toml or names
 a file is the input.
+
+The type of a key that names a file says what it names (string (input file)),
+and the values of a key that names things defined elsewhere say which (names of
+zones). The JSON also gives each key the file it names (path), what it names
+(references), the types of its table it is read for (for_types, required_for)
+and its table's mutually exclusive keys (alternatives):
+docs/guide/input_files.md#the-key-catalog.
 
 Options:
   --format text|json  text: one table per group (of fields) or table (of keys),

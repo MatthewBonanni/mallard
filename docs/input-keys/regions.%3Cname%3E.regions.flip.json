@@ -3,6 +3,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "sphere"
+ ],
  "set_in": [],
  "type": "bool"
 }

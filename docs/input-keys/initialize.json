@@ -1,4 +1,17 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "X"
+    ],
+    [
+     "Y"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2,
   3

@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

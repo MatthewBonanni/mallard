@@ -37,6 +37,7 @@ namespace {
 /** @brief What a case's setup gives: its output fields, species or key catalog, or the errors that stopped it. */
 struct CaseFields {
     std::vector<std::string> fields, species, errors;
+    std::vector<double> molar_masses;  // kg/kmol, of each species; empty for a flamelet gas
     std::string keys;  // key_catalog
 };
 
@@ -67,6 +68,9 @@ CaseFields set_up(const std::string & input_file, const cli::Args & args) {
     return quietly(input_file, args, [&](Solver & solver, CaseFields & out) {
         out.fields = solver.init_fields(parse_input(input_file));
         out.species = solver.get_species_names();
+        if (solver.is_mixture() && !solver.get_mixture().tabulated()) {
+            for (const auto & s : solver.get_mixture().mechanism().species) out.molar_masses.push_back(s.molecular_weight);
+        }
     });
 }
 
@@ -285,6 +289,7 @@ int list_species_main(const cli::Args & args) {
         std::cout << json::Object()
                          .add("input", input_file)
                          .raw("species", json_array(c.species, [](const std::string & s) { return json::quote(s); }))
+                         .raw("molar_masses", json_array(c.molar_masses, [](double w) { return json::number(w); }))
                          .str()
                   << "\n";
         return 0;
@@ -379,6 +384,21 @@ std::string key_values(const json::Value & k) {
     if (const json::Value * values = k.find("values")) {
         for (const json::Value & v : values->array) out += (out.empty() ? "" : ", ") + v.string;
     }
+    if (const json::Value * names = k.find("references")) out += (out.empty() ? "" : ", ") + ("names of " + names->string);
+    return out;
+}
+
+/** @brief The type, and what a path names: "string (input file)". */
+std::string key_type(const json::Value & k) {
+    const json::Value * type = k.find("type");
+    std::string out = type ? type->string : "";
+    if (const json::Value * path = k.find("path")) {
+        const json::Value * io = path->find("io");
+        const json::Value * kind = path->find("kind");
+        std::string what = kind ? kind->string : "file";
+        std::replace(what.begin(), what.end(), '_', ' ');
+        out += " (" + (io ? io->string : "") + " " + what + ")";
+    }
     return out;
 }
 
@@ -467,9 +487,7 @@ int list_keys_main(const cli::Args & args) {
     std::vector<std::vector<std::string>> rows;
     for (size_t i = 0; i < keys.size(); i++) {
         const json::Value & k = catalog[keys[i]];
-        const json::Value * type = k.find("type");
-        std::vector<std::string> row = {keys[i] + only_dim(k), type ? type->string : "", key_units(k), key_default(k),
-                                        key_values(k)};
+        std::vector<std::string> row = {keys[i] + only_dim(k), key_type(k), key_units(k), key_default(k), key_values(k)};
         if (per_case) row.insert(row.begin() + 1, k.find("set") && k["set"].boolean ? "yes" : "");
         rows.push_back(row);
         if (i + 1 == keys.size() || section_of(keys[i + 1]) != section_of(keys[i])) {

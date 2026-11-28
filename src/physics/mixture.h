@@ -209,6 +209,13 @@ class MixtureModel {
          */
         static bool composition_varies(const Input & table);
 
+        /**
+         * @brief Records the composition keys of the table at where for the key catalog: X
+         *        and Y, of which it takes one (exactly one if required), tables of species,
+         *        and balance, a species.
+         */
+        static void record_composition(const std::string & where, bool required);
+
         /** @brief Mass fractions from mole fractions. */
         std::vector<double> mass_fractions_from_mole(const std::vector<double> & X) const;
 

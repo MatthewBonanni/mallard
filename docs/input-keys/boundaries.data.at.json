@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "table"
+ ],
  "set_in": [
   "examples/channel_inlet_data/input.toml"
  ],

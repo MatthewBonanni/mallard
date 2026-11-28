@@ -12,7 +12,9 @@ in the repository are skipped) and
 merges what setup recorded into docs/input-keys/, one file per key path: its type,
 physical dimension (and the unit of a plain number, when not SI), default (as TOML
 text) or that it is required, the accepted values, the builds (2D, 3D) whose setup
-read it, and the inputs that set it. A key's file is its path, percent-encoded
+read it, the inputs that set it, and what setup records besides (path, references,
+for_types, required_for, alternatives: docs/guide/input_files.md#the-key-catalog;
+for_types and required_for only if every input read the key under a type). A key's file is its path, percent-encoded
 outside [a-z0-9_.-] (file systems that ignore case keep sigma_t and sigma_T apart),
 plus .json. With --check it compares with the committed files instead of writing
 them, and exits 1 if they differ. After a build, python tools/dev/input_config.py
@@ -86,6 +88,55 @@ def check(mallard, path, work):
     return json.loads(keys.read_text()) if keys.exists() else None
 
 
+def merge(merged, keys, dim, source, untyped):
+    """Merges one input's catalog (keys, of the build of dimension dim) into merged. untyped
+    collects the keys some input read in a table without a type (their for_types and
+    required_for are dropped at the end: they apply whatever the type) or read required
+    without a type (required_for alone)."""
+    for key, entry in keys.items():
+        m = merged.setdefault(key, {"dims": [], "set_in": []})
+        if dim not in m["dims"]:
+            m["dims"].append(dim)
+        if entry.get("set") and source not in m["set_in"]:
+            m["set_in"].append(source)
+        if "type" in entry:
+            types = set(filter(None, m.get("type", "").split("|"))) | {entry["type"]}
+            m["type"] = "|".join(sorted(types))
+        if ("type" in entry or entry.get("set")) and "for_types" not in entry:
+            untyped.add((key, "for_types"))
+        if entry.get("required") and "required_for" not in entry:
+            untyped.add((key, "required_for"))
+        if entry.get("required"):
+            m["required"] = True
+        if "default" in entry:
+            if m.get("default") in (None, entry["default"]):
+                m["default"] = entry["default"]
+            else:
+                m.setdefault("defaults_by_dim", {})[str(dim)] = entry["default"]
+        for field in ("dimension", "unit", "references", "path"):
+            if field in entry:
+                m[field] = entry[field]
+        for field in ("values", "for_types", "required_for"):
+            if field in entry:
+                m[field] = sorted(set(m.get(field, [])) | set(entry[field]))
+        if "alternatives" in entry:
+            required = {}
+            for a in m.get("alternatives", []) + entry["alternatives"]:
+                groups = json.dumps(a["keys"])
+                required[groups] = required.get(groups, True) and a["required"]
+            m["alternatives"] = [{"keys": json.loads(g), "required": r} for g, r in sorted(required.items())]
+
+
+def finish(merged, untyped):
+    for key, field in untyped:
+        merged[key].pop(field, None)
+        if field == "for_types":
+            merged[key].pop("required_for", None)
+    for m in merged.values():
+        m["dims"].sort()
+        m["set_in"].sort()
+
+
 def require_hdf5(mallard):
     """Defaults that depend on the build (write_data's format) are the HDF5 builds' ones."""
     out = subprocess.run([str(Path(mallard).resolve()), "version", "--format", "json"],
@@ -97,38 +148,14 @@ def require_hdf5(mallard):
 def build(args):
     require_hdf5(args.mallard_2d)
     require_hdf5(args.mallard_3d)
-    merged = {}
+    merged, untyped = {}, set()
     with tempfile.TemporaryDirectory() as tmp:
         for path, dim in inputs():
             mallard = Path(args.mallard_2d if dim == 2 else args.mallard_3d).resolve()
             keys = check(mallard, path, Path(tmp))
-            if keys is None:
-                continue
-            source = path.relative_to(ROOT).as_posix()
-            for key, entry in keys.items():
-                m = merged.setdefault(key, {"dims": [], "set_in": []})
-                if dim not in m["dims"]:
-                    m["dims"].append(dim)
-                if entry.get("set") and source not in m["set_in"]:
-                    m["set_in"].append(source)
-                if "type" in entry:
-                    types = set(filter(None, m.get("type", "").split("|"))) | {entry["type"]}
-                    m["type"] = "|".join(sorted(types))
-                if entry.get("required"):
-                    m["required"] = True
-                if "default" in entry:
-                    if m.get("default") in (None, entry["default"]):
-                        m["default"] = entry["default"]
-                    else:
-                        m.setdefault("defaults_by_dim", {})[str(dim)] = entry["default"]
-                for field in ("dimension", "unit"):
-                    if field in entry:
-                        m[field] = entry[field]
-                if "values" in entry:
-                    m["values"] = sorted(set(m.get("values", [])) | set(entry["values"]))
-    for m in merged.values():
-        m["dims"].sort()
-        m["set_in"].sort()
+            if keys is not None:
+                merge(merged, keys, dim, path.relative_to(ROOT).as_posix(), untyped)
+    finish(merged, untyped)
     files = {file_name(key): json.dumps(entry, indent=1, sort_keys=True) + "\n" for key, entry in merged.items()}
     present = {f.name: f.read_text() for f in CATALOG.glob("*.json")}
     where = CATALOG.relative_to(ROOT)

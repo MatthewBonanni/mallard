@@ -2,6 +2,9 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "dirichlet"
+ ],
  "set_in": [
   "examples/double_mach/input.toml",
   "examples/noh_axisymmetric/input.toml",

@@ -1,6 +1,32 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "integral"
+    ],
+    [
+     "max"
+    ],
+    [
+     "min"
+    ],
+    [
+     "first_time"
+    ],
+    [
+     "winding"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2
+ ],
+ "for_types": [
+  "solid",
+  "tracer"
  ],
  "set_in": [
   "examples/particle_vortex/input.toml",

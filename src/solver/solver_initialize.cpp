@@ -98,6 +98,7 @@ void Solver::init_solution_restart() {
         throw missing_key(input.at("initialize"), "initialize.file",
                           "Add file = \"...\": a restart file written by [[write_data]] with format = \"restart\"");
     }
+    record_path("initialize.file", {});
     const std::string file = find_value<std::string>(input, "initialize", "file");
     // Restart files hold cells in global order, so any number of ranks can read
     // them; each rank reads only its local cells

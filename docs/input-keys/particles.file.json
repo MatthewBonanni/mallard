@@ -3,6 +3,17 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "solid",
+  "tracer"
+ ],
+ "path": {
+  "extensions": [
+   ".csv"
+  ],
+  "io": "input",
+  "kind": "file"
+ },
  "set_in": [
   "examples/particle_bounce/input.toml",
   "examples/particle_centrifuge/input.toml",

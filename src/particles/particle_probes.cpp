@@ -54,6 +54,7 @@ void ParticleProbes::init(const Input & table, region::Regions & regions, Quanti
             throw InputError(Diagnostic{.key = where + ".interval", .line = line_of(e, "interval"),
                                         .message = "must be positive", .docs = DOCS});
         }
+        record_path(where + ".file", {.output = true, .extensions = {".csv"}});
         p.file = find_value_or<std::string>(e, "file", "particle_probe_" + p.name + ".csv");
         int32_t r = -1;
         if (contains_optional(e, "region")) {

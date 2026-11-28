@@ -4,6 +4,31 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "boundary",
+  "box",
+  "circle",
+  "cone",
+  "cylinder",
+  "difference",
+  "disk",
+  "ellipse",
+  "ellipsoid",
+  "half_space",
+  "implicit",
+  "interior",
+  "intersection",
+  "isosurface",
+  "obj",
+  "polygon",
+  "rectangle",
+  "sphere",
+  "stl",
+  "torus",
+  "union",
+  "where"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/regions.toml"
  ],

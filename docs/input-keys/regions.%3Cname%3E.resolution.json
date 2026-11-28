@@ -3,7 +3,13 @@
   2,
   3
  ],
+ "for_types": [
+  "boundary"
+ ],
  "required": true,
+ "required_for": [
+  "boundary"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/regions.toml"
  ],

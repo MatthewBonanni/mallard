@@ -3,6 +3,7 @@
  "dims": [
   3
  ],
+ "references": "fields",
  "set_in": [
   "examples/flame_turbulence/input.toml"
  ],

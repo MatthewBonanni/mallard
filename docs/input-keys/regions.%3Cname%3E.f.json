@@ -2,7 +2,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "implicit"
+ ],
  "required": true,
+ "required_for": [
+  "implicit"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/regions.toml"
  ],

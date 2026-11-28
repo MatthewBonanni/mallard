@@ -3,7 +3,15 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "solid",
+  "tracer"
+ ],
  "required": true,
+ "required_for": [
+  "solid",
+  "tracer"
+ ],
  "set_in": [
   "examples/particle_bounce/input.toml",
   "examples/particle_centrifuge/input.toml",

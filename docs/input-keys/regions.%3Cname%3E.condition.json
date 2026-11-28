@@ -2,7 +2,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "where"
+ ],
  "required": true,
+ "required_for": [
+  "where"
+ ],
  "set_in": [
   "examples/hot_gas_regions/input.toml",
   "tools/dev/catalog_inputs/2d/regions.toml"

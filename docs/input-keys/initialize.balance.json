@@ -3,6 +3,10 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical"
+ ],
+ "references": "species",
  "set_in": [
   "examples/flame_outflow/input.toml"
  ],

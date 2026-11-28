@@ -153,6 +153,7 @@ void read_nscbc(const Input & entry, const std::string & where, BoundaryConditio
 } // namespace
 
 BoundaryCondition BoundaryCondition::from_input(const Input & input, const Euler & physics) {
+    record_reference("boundaries.name", "zones");
     const std::string name = find_value<std::string>(input, "name");
     const std::string type_str = find_value<std::string>(input, "type");
     const std::string where = "boundaries[name = \"" + name + "\"]";

@@ -5,6 +5,11 @@
   2,
   3
  ],
+ "for_types": [
+  "cartesian",
+  "cartesian_tri",
+  "wedge"
+ ],
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/average_outlet/input.toml",

@@ -3,7 +3,23 @@
   2,
   3
  ],
+ "for_types": [
+  "euler",
+  "navier_stokes"
+ ],
+ "path": {
+  "extensions": [
+   ".yaml",
+   ".yml"
+  ],
+  "io": "input",
+  "kind": "file"
+ },
  "required": true,
+ "required_for": [
+  "euler",
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/detonation_1d/input.toml",

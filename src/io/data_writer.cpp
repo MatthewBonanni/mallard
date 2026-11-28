@@ -144,6 +144,7 @@ void DataWriter::init(const Input & input,
         throw missing_key(input, "write_data.prefix",
                           "Add prefix = \"...\": the path the files start with, e.g. \"out/flow\"");
     }
+    record_alternatives("write_data", {{"interval"}, {"time_interval"}}, true);
     const bool has_interval = contains_optional(input, "interval");
     const bool has_time_interval = contains_optional(input, "time_interval");
     if (has_interval == has_time_interval) {
@@ -153,6 +154,7 @@ void DataWriter::init(const Input & input,
                                                   : "specify exactly one of interval and time_interval",
                           .fix = "Use interval for every N steps, or time_interval for every T of simulated time"});
     }
+    record_path("write_data.prefix", {.output = true, .kind = "prefix"});
     prefix = prefix_in.empty() ? find_value<std::string>(input, "prefix") : prefix_in;
     if (has_interval) {
         interval = find_value<uint64_t>(input, "interval");
@@ -205,6 +207,7 @@ void DataWriter::init(const Input & input,
         if (!input.contains("fields")) {
             throw missing_key(input, "write_data.fields", "Add fields = [\"RHO\", \"U\", \"P\"], for example");
         }
+        record_reference("write_data.fields", "fields");
         variables = find_value<std::vector<std::string>>(input, "fields");
     }
     if (variables.empty()) {

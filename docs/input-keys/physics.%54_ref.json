@@ -4,7 +4,15 @@
   2,
   3
  ],
+ "for_types": [
+  "euler",
+  "navier_stokes"
+ ],
  "required": true,
+ "required_for": [
+  "euler",
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

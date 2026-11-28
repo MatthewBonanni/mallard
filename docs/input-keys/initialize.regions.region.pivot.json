@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "rectangle"
+ ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml"
  ]

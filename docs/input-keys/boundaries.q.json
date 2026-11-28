@@ -3,7 +3,13 @@
  "dims": [
   2
  ],
+ "for_types": [
+  "wall_heat_flux"
+ ],
  "required": true,
+ "required_for": [
+  "wall_heat_flux"
+ ],
  "set_in": [
   "examples/heated_wall/input.toml"
  ],

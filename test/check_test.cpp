@@ -199,6 +199,88 @@ TEST(CheckKeys, KeysReadOnlyIfPresentAreOptionalInTheCatalog) {
     }
 }
 
+TEST(CheckKeys, TheCatalogStatesNamedKeysPathsReferencesTypesAndAlternatives) {
+    const Input input = parse_input_string("[[b]]\ntype = \"in\"\nfile = \"a.csv\"\nX = {N2 = 1.0, O2 = 0.5}\n"
+                                           "[[b]]\ntype = \"out\"\nfile = \"b.csv\"\nlimit = 2.0\n"
+                                           "[[b]]\ntype = \"out\"\nfile = \"c.csv\"\n[c]\nzone = \"top\"\n");
+    const auto entries = find_value<std::vector<Input>>(input, "b");
+    for (size_t i = 0; i < entries.size(); i++) {
+        const std::string where = "b[" + std::to_string(i) + "]";
+        find_value<std::string>(entries[i], "type");
+        record_path(where + ".file", {.output = true, .extensions = {".csv"}});
+        find_value<std::string>(entries[i], "file");
+        record_alternatives(where, {{"X"}, {"Y"}}, i == 0);
+        if (i == 0) {
+            record_names(where + ".X", "species");
+            for (const auto & [name, value] : entries[i].at("X").as_table().entries()) {
+                find_real(entries[i].at("X"), name, dim::none);
+            }
+        } else {
+            find_real_or(entries[i], "limit", dim::none, 1.0_r);
+        }
+    }
+    record_reference("c.zone", "zones");
+    find_value<std::string>(input, "c", "zone");
+    const json::Value catalog = json::parse(key_catalog(resolve_input(input)));
+
+    EXPECT_FALSE(catalog.has("b.X.N2"));
+    const json::Value & species = catalog["b.X.<species>"];
+    EXPECT_FALSE(species.has("required"));
+    EXPECT_EQ(species["references"].string, "species");
+    EXPECT_EQ(catalog["c.zone"]["references"].string, "zones");
+    EXPECT_FALSE(catalog["c.zone"].has("for_types"));
+
+    const json::Value & file = catalog["b.file"];
+    EXPECT_EQ(file["path"]["io"].string, "output");
+    EXPECT_EQ(file["path"]["kind"].string, "file");
+    EXPECT_EQ(json::Value::Type::ARRAY, file["path"]["extensions"].type);
+    EXPECT_EQ(file["path"]["extensions"].array.at(0).string, ".csv");
+
+    const auto strings = [](const json::Value & v) {
+        std::vector<std::string> out;
+        for (const auto & s : v.array) out.push_back(s.string);
+        return out;
+    };
+    EXPECT_EQ(strings(file["for_types"]), (std::vector<std::string>{"in", "out"}));
+    EXPECT_EQ(strings(file["required_for"]), (std::vector<std::string>{"in", "out"}));
+    EXPECT_EQ(strings(catalog["b.limit"]["for_types"]), std::vector<std::string>{"out"});
+    EXPECT_FALSE(catalog["b.limit"].has("required_for"));
+    EXPECT_EQ(strings(catalog["b.X"]["for_types"]), std::vector<std::string>{"in"});
+    EXPECT_FALSE(catalog["b.type"].has("for_types"));
+
+    // Required only where every read requires one of the groups
+    const json::Value & alternatives = catalog["b"]["alternatives"];
+    ASSERT_EQ(alternatives.array.size(), 1u);
+    EXPECT_EQ(strings(alternatives.array[0]["keys"].array.at(0)), std::vector<std::string>{"X"});
+    EXPECT_EQ(strings(alternatives.array[0]["keys"].array.at(1)), std::vector<std::string>{"Y"});
+    EXPECT_FALSE(alternatives.array[0]["required"].boolean);
+}
+
+TEST(CheckKeys, TheCatalogOfACaseStatesWhatItsSetupReads) {
+    const std::string dir = (scratch_dir() / "mallard_check_catalog").string();
+    Solver solver;
+    const CheckReport r = solver.check(parse_input_string(box(
+        "1.0", "t_stop = 0.5\ncfl = 0.8\n",
+        "[[write_data]]\nprefix = \"" + dir + "/flow\"\nformat = \"vtu\"\ninterval = 5\nfields = [\"RHO\"]\n"
+        "[[forces]]\nzone = \"bottom\"\nfile = \"" + dir + "/forces.csv\"\n")), CheckOptions{});
+    ASSERT_TRUE(r.ok()) << first_error(r);
+    const json::Value catalog = json::parse(key_catalog(resolve_input(solver.resolved_input())));
+    EXPECT_EQ(catalog["write_data.prefix"]["path"]["kind"].string, "prefix");
+    EXPECT_EQ(catalog["write_data.prefix"]["path"]["io"].string, "output");
+    EXPECT_EQ(catalog["forces.file"]["path"]["io"].string, "output");
+    EXPECT_EQ(catalog["forces.zone"]["references"].string, "zones");
+    EXPECT_EQ(catalog["boundaries.name"]["references"].string, "zones");
+    EXPECT_EQ(catalog["write_data.fields"]["references"].string, "fields");
+    ASSERT_TRUE(catalog["mesh.Nx"].has("for_types"));
+    EXPECT_EQ(catalog["mesh.Nx"]["for_types"].array.at(0).string, "cartesian");
+    const json::Value & run = catalog["run"]["alternatives"].array.at(0);
+    EXPECT_EQ(run["keys"].array.at(0).array.at(0).string, "dt");
+    EXPECT_EQ(run["keys"].array.at(1).array.at(0).string, "cfl");
+    EXPECT_TRUE(run["required"].boolean);
+    // Looked up by the probes code only to reject it, write_data takes no boundary
+    for (const char * key : {"write_data.boundary", "write_data.boundary_type"}) EXPECT_FALSE(catalog.has(key)) << key;
+}
+
 TEST(CheckKeys, NormalSetupRejectsUnusedKeys) {
     std::string input = box();
     input.replace(input.find("Ny = 8"), 6, "Nyy = 8");

@@ -242,6 +242,7 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
                           .fix = "Add tolerance as well",
                           .docs = DOCS});
     }
+    record_path("statistics.convergence.file", {.output = true, .extensions = {".csv"}});
     file = find_value_or<std::string>(table, "file", "convergence.csv");
     stationary = false;
     t_stationary = 0.0;

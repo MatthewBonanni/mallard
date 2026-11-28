@@ -1,4 +1,17 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "dt"
+    ],
+    [
+     "cfl"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2,
   3

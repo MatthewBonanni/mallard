@@ -4,7 +4,13 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
  "required": true,
+ "required_for": [
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",

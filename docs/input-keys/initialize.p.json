@@ -4,7 +4,14 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "required": true,
+ "required_for": [
+  "constant"
+ ],
  "set_in": [
   "examples/average_outlet/input.toml",
   "examples/average_outlet/local.toml",

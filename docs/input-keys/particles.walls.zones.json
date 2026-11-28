@@ -2,6 +2,7 @@
  "dims": [
   2
  ],
+ "references": "zones",
  "required": true,
  "set_in": [
   "examples/particle_bounce/input.toml",

@@ -1626,6 +1626,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         if (other->name == p.name && other->snapshot == p.snapshot) throw InputError(key + ": name is used twice.");
     }
 
+    record_alternatives(snapshot ? "write_data" : "probes", {{"interval"}, {"time_interval"}}, snapshot != nullptr);
+    if (!snapshot) record_alternatives("probes", {{"region"}, {"type"}, {"boundary", "boundary_type"}}, false);
     const bool steps = entry.contains("interval"), times = contains_optional(entry, "time_interval");
     if (steps && times) throw InputError(key + ": give interval or time_interval, not both.");
     if (snapshot && !steps && !times) throw InputError(key + ": give interval or time_interval.");
@@ -1650,7 +1652,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             where = r.table;
             gkey = rkey;
             for (const char * k : {"type", "point", "start", "end", "boundary", "boundary_type"}) {
-                if (entry.contains(k)) throw InputError(key + ": give region or " + k + ", not both.");
+                if (entry.as_table().entries().contains(k)) throw InputError(key + ": give region or " + k + ", not both.");
             }
         } else if (snapshot) {
             if (r.kind == probe::RegionValue::Kind::ZONE) region_zones = r.zones;
@@ -1744,6 +1746,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                              : p.format == Format::HDF5   ? ".h5"
                              : p.format == Format::VTKHDF ? ".vtkhdf"
                                                           : ".pvd";
+    record_path("probes.file", {.output = true});
+    record_path("probes.reductions_file", {.output = true, .extensions = {".csv"}});
     p.file = reductions_only ? "" : find_value_or<std::string>(entry, "file", "probe_" + p.name + extension);
     p.write_samples = (!p.from_region || p.resampled) && find_value_or<bool>(entry, "samples", true);
     std::vector<std::string> reductions = find_value_or<std::vector<std::string>>(entry, "reductions", {});
@@ -1777,6 +1781,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         return nullptr;
     };
     std::vector<std::string> listed;
+    record_reference("probes.fields", "fields");
     for (const auto & v : find_value<std::vector<std::string>>(entry, "fields")) {
         const bool probe_name = v == "U" || v == "RHOU" || v == "MOMENTUM_FLUX" || v == "TRACTION_PRESSURE" ||
                                 v == "TRACTION_VISCOUS" || v == "Y_*" || v == "RHOY_*" || v == "SPECIES_FLUX_*" ||
@@ -1823,15 +1828,18 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                                     .docs = "docs/guide/probes.md#time-averages"});
     }
 
-    const bool boundary = !region_zones.empty() || (where == &entry && !p.from_region &&
+    const bool boundary = !region_zones.empty() || (!snapshot && where == &entry && !p.from_region &&
                                                      (entry.contains("boundary") || entry.contains("boundary_type")));
-    const std::string type = p.from_region ? "" : find_value_or<std::string>(*where, "type", "");
+    // A snapshot's entry is a [[write_data]] entry, which takes no probe keys (type, point, reference)
+    const bool own_keys = !p.from_region && !(snapshot && where == &entry);
+    const std::string type = own_keys ? find_value_or<std::string>(*where, "type", "") : "";
+    const auto has = [&](const char * k) { return own_keys && where->contains(k); };
     const bool cut = type == "cut_plane";
     const bool oriented = (region && region->dimension() == N_DIM - 1) ||
                           (elements && elements->dimension() == N_DIM - 1) ||
                           (!p.from_region && !elements &&
-                           (cut || (N_DIM == 2 && where->contains("type") && type != "point" && type != "points") ||
-                            (N_DIM == 2 && !where->contains("type") && !where->contains("point")) ||
+                           (cut || (N_DIM == 2 && has("type") && type != "point" && type != "points") ||
+                            (N_DIM == 2 && !has("type") && !has("point")) ||
                             (N_DIM == 3 && (type == "rectangle" || type == "disk" || type == "sphere" ||
                                             type == "cylinder" || type == "cone" || type == "surface"))));
     if (cut && mesh.axisymmetric && !p.reductions.empty()) {
@@ -1839,7 +1847,8 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     const bool output_reference = input.contains("output") && input.at("output").is_table() &&
                                   input.at("output").contains("reference");
-    const Input * reference_table = entry.contains("reference") ? &entry.at("reference")
+    const bool own_reference = !snapshot && entry.contains("reference");
+    const Input * reference_table = own_reference ? &entry.at("reference")
                                     : output_reference            ? &input.at("output").at("reference")
                                                                   : nullptr;
     for (size_t v = 0; v < p.variables.size(); v++) {
@@ -1898,7 +1907,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     }
     if (reference_table) {
         p.reference = probe::read_reference(*reference_table,
-                                            entry.contains("reference") ? key + ".reference" : "output.reference");
+                                            own_reference ? key + ".reference" : "output.reference");
     }
 
     if (elements && elements->solution()) {
@@ -2048,10 +2057,11 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         }
     } else if (boundary) {
         for (const char * k : {"type", "point", "start", "end"}) {
-            if (entry.contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");
+            if (entry.as_table().entries().contains(k)) throw InputError(key + ": boundary probes take no " + k + ".");
         }
         std::vector<std::string> zones = region_zones;
-        if (entry.contains("boundary")) {
+        if (!snapshot) record_reference("probes.boundary", "zones");
+        if (!snapshot && entry.contains("boundary")) {
             const Input & b = entry.at("boundary");
             if (b.is_string()) {
                 zones.push_back(b.as_string());
@@ -2059,7 +2069,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
                 zones = find_value<std::vector<std::string>>(entry, "boundary");
             }
         }
-        if (entry.contains("boundary_type")) {
+        if (!snapshot && entry.contains("boundary_type")) {
             const std::string zone_type = find_value<std::string>(entry, "boundary_type");
             if (zone_type != "wall" && BOUNDARY_TYPES.find(zone_type) == BOUNDARY_TYPES.end()) {
                 throw InputError(key + ".boundary_type = \"" + zone_type + "\" is not wall or a boundary type.");

@@ -287,10 +287,16 @@ once in the code that reads them, exported by `mallard list keys --format json`)
 - **Arrays of tables** (`[[boundaries]]`, `[[probes]]`, `[[write_data]]`) are
   lists of elements with a discriminator (`type`) and per-variant keys; the
   catalog must say which keys belong to which variant, or the GUI ends up
-  hard-coding them, as the website's builder does today.
+  hard-coding them, as the website's builder does today. Each key's
+  `for_types` and `required_for` give the variants its setup read it and
+  requires it for ([#1399](https://github.com/MatthewBonanni/mallard/issues/1399)),
+  and each table's `alternatives` its one-of choices (`dt` or `cfl`, `X` or `Y`).
 - **Roles of string keys**: which strings are files (mesh, mechanism, restart,
   data tables) and of what kind, so the GUI offers file pickers, previews and
-  transfers for them.
+  transfers for them: `path` (input or output; file, directory or prefix;
+  extensions), and `references` for names defined elsewhere (regions, zones,
+  boundaries, species, fields), so the GUI offers the case's names
+  ([#1399](https://github.com/MatthewBonanni/mallard/issues/1399)).
 - **Validation** is the session's `case.check` (the one-shot `mallard check
   INPUT --format json`), run on demand and after edits that change the setup;
   the session redoes only the setup stages the edit invalidates, so the mesh is
@@ -1087,7 +1093,7 @@ tested like any other.
 | Programmatic API (#345) | open | not needed for the MVP: `mallard session` is the interface |
 | `mallard session` ([design](session.md), [#1340](https://github.com/MatthewBonanni/mallard/issues/1340)) | missing | the resident JSON-RPC process, its schemas, routed `mallard ctl` with acknowledgments, detached launch |
 | `mallard check` (#321) | done: `--format json`, `--view` with block metadata, `--geometry-only`, `--ranks`, `--memory` | partial inputs fail; one setup error per run; `key` and `line` only in message text; setup warnings missing from the JSON |
-| Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; no variants for arrays of tables; no roles for file keys; the general catalog is read from a data directory, not the binary |
+| Key catalog (#1256) | open: `docs/input-keys/` is committed and inferred from the examples | no descriptions, no schema version; 204 of 511 general entries have no type; variants of arrays of tables, file roles, references and alternatives only as far as the catalog's inputs cover them (#1399); the general catalog is read from a data directory, not the binary |
 | `mallard ctl` (#322) | done: socket `mallard.sock`, `status`, `checkpoint`, `stop`, `set` | must run on rank 0's node |
 | Control files | done: `STOP`, `CHECKPOINT`, `SET` (#1316) | off by default (`control_file_interval = 0`); `--set control_file_interval=N` turns them on |
 | Run log (#326) | done: `mallard.jsonl` version 3 with start, progress, output (bytes, SHA-256), warning and end records | none for monitoring |

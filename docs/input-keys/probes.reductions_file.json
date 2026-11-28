@@ -8,6 +8,13 @@
   2,
   3
  ],
+ "path": {
+  "extensions": [
+   ".csv"
+  ],
+  "io": "output",
+  "kind": "file"
+ },
  "set_in": [],
  "type": "string"
 }

@@ -4,6 +4,13 @@
   2,
   3
  ],
+ "path": {
+  "extensions": [
+   ".jsonl"
+  ],
+  "io": "output",
+  "kind": "file"
+ },
  "set_in": [],
  "type": "string"
 }

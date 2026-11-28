@@ -2506,12 +2506,6 @@ class Triggers : public Table {
 class WriteData : public Table {
     public:
         explicit WriteData(std::size_t element) : Table("write_data[" + std::to_string(element) + "]") {}
-        /** @brief 3D.
-         */
-        WriteData & boundary(const Value & v) { put("boundary", v); return *this; }
-        /** @brief 3D.
-         */
-        WriteData & boundary_type(const Value & v) { put("boundary_type", v); return *this; }
         /** @brief (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank reading some
          *        cells decompresses only the chunks that hold them.
          */
@@ -2524,9 +2518,6 @@ class WriteData : public Table {
          *        regions of lower dimension are written uncompressed. One of none, zlib.
          */
         WriteData & compression(std::string_view v) { put("compression", v); return *this; }
-        /** @brief 3D.
-         */
-        WriteData & end(const Value & v) { put("end", v); return *this; }
         /** @brief (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`, (3D)
          *        `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors `RHOU` and
          *        `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`,
@@ -2562,15 +2553,9 @@ class WriteData : public Table {
          *        is shortened to land on each output time.
          */
         WriteData & interval(std::int64_t v) { put("interval", v); return *this; }
-        /** @brief 3D.
-         */
-        WriteData & point(const Value & v) { put("point", v); return *this; }
         /** @brief Output path prefix; directories are created as needed. Required.
          */
         WriteData & prefix(std::string_view v) { put("prefix", v); return *this; }
-        /** @brief 3D.
-         */
-        WriteData & reference(const Value & v) { put("reference", v); return *this; }
         /** @brief (`vtkhdf`, `vtu`) Default none, the whole mesh. A region, inline or by name, whose snapshot to write
          *        instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and
          *        `REGION_FRACTION`, each cell's volume fraction of it (a moving one, or one defined by the solution, the
@@ -2603,16 +2588,10 @@ class WriteData : public Table {
          *        for scripts that take one snapshot file at a time or move or delete snapshots as they go.
          */
         WriteData & series(const Value & v) { put("series", v); return *this; }
-        /** @brief 3D.
-         */
-        WriteData & start(const Value & v) { put("start", v); return *this; }
         /** @brief Write every this many steps / this much simulation time (exactly one). With `time_interval` the time step
          *        is shortened to land on each output time. Time (s), a number in SI units or a quantity with its unit.
          */
         WriteData & time_interval(Quantity v) { put("time_interval", v); return *this; }
-        /** @brief Default ""; 3D.
-         */
-        WriteData & type(std::string_view v) { put("type", v); return *this; }
 };
 
 } // namespace mallard::config

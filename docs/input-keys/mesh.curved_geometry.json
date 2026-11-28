@@ -4,6 +4,13 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus",
+  "cartesian",
+  "cartesian_tri",
+  "file",
+  "wedge"
+ ],
  "set_in": [],
  "type": "bool"
 }

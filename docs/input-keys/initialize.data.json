@@ -1,7 +1,23 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "at"
+    ],
+    [
+     "region"
+    ]
+   ],
+   "required": false
+  }
+ ],
  "dims": [
   2,
   3
+ ],
+ "for_types": [
+  "analytical"
  ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml",

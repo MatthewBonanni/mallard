@@ -4,6 +4,10 @@
   2,
   3
  ],
+ "for_types": [
+  "euler",
+  "navier_stokes"
+ ],
  "set_in": [
   "examples/noh_axisymmetric/input.toml",
   "examples/poiseuille_pipe/input.toml",

@@ -5,6 +5,9 @@
   2,
   3
  ],
+ "for_types": [
+  "annulus"
+ ],
  "set_in": [
   "examples/rotational_sector/annulus.toml",
   "examples/rotational_sector/sector.toml",

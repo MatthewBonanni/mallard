@@ -103,6 +103,7 @@ FlameletModel FlameletModel::from_input(const Input & input) {
                           "Add table = \"...\": a flamelet table in Mallard's format (docs/design/table_format.md), "
                           "written by a table generator");
     }
+    record_path("physics.table", {.extensions = {".h5"}});
     const std::string file = find_value<std::string>(physics, "table");
     const std::string type = find_value_or<std::string>(physics, "type", "euler");
     if (type != "euler" && type != "navier_stokes") {

@@ -4,6 +4,12 @@
   2,
   3
  ],
+ "for_types": [
+  "disk",
+  "half_space",
+  "rectangle",
+  "sphere"
+ ],
  "set_in": [],
  "type": "bool"
 }

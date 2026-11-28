@@ -2,7 +2,7 @@
  "dims": [
   3
  ],
- "required": true,
+ "references": "species",
  "set_in": [
   "examples/shock_bubble_3d/input.toml"
  ],

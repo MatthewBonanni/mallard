@@ -122,6 +122,7 @@ void Statistics::read_fields(const Input & table) {
         fields.push_back(name);
         return static_cast<uint32_t>(fields.size() - 1);
     };
+    record_reference("statistics.fields", "fields");
     for (const auto & name : find_value_or<std::vector<std::string>>(table, "fields", {})) {
         if (std::find(fields.begin(), fields.end(), name) != fields.end()) {
             throw InputError("statistics.fields: \"" + name + "\" is listed twice.");
@@ -673,6 +674,7 @@ void PhaseAverage::read_variables(const Input & table) {
     const std::string key = "statistics.phase";
     bins = find_value_or<uint32_t>(table, "bins", 0);
     if (bins == 0) throw InputError(key + ".bins must be positive.");
+    record_reference(key + ".fields", "fields");
     fields = find_value_or<std::vector<std::string>>(table, "fields", {});
     if (fields.empty()) throw InputError(key + ".fields: list at least one variable.");
     for (size_t i = 0; i < fields.size(); i++) {

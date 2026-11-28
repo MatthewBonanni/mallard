@@ -447,6 +447,7 @@ std::vector<Shape> read_shapes(const Input & input) {
     const auto entries = find_value<std::vector<Input>>(input, "mesh", "curved");
     for (size_t i = 0; i < entries.size(); i++) {
         const std::string where = "mesh.curved[" + std::to_string(i) + "]";
+        record_reference("mesh.curved.zone", "zones");
         const std::string zone = find_value<std::string>(entries[i], "zone");
         if (shape_of_zone(shapes, zone) >= 0) throw InputError("mesh.curved: zone " + zone + " is listed twice.");
         shapes.push_back(shape_of(entries[i], where, region::named_regions(input)));

@@ -3,6 +3,9 @@
   2,
   3
  ],
+ "for_types": [
+  "cartesian"
+ ],
  "set_in": [
   "examples/channel_inflow_retau180/input.toml",
   "examples/channel_les/input.toml",

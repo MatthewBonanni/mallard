@@ -3,7 +3,20 @@
   2,
   3
  ],
+ "for_types": [
+  "navier_stokes"
+ ],
+ "path": {
+  "extensions": [
+   ".h5"
+  ],
+  "io": "input",
+  "kind": "file"
+ },
  "required": true,
+ "required_for": [
+  "navier_stokes"
+ ],
  "set_in": [
   "tools/dev/catalog_inputs/2d/flamelet.toml",
   "tools/dev/catalog_inputs/2d/flamelet_tfles.toml",

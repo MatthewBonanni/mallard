@@ -1,7 +1,21 @@
 {
+ "alternatives": [
+  {
+   "keys": [
+    [
+     "X"
+    ],
+    [
+     "Y"
+    ]
+   ],
+   "required": true
+  }
+ ],
  "dims": [
   2
  ],
+ "references": "boundaries",
  "set_in": [
   "examples/triple_flame/tfles/input.toml"
  ]

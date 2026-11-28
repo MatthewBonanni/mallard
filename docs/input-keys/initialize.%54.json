@@ -4,7 +4,14 @@
   2,
   3
  ],
+ "for_types": [
+  "analytical",
+  "constant"
+ ],
  "required": true,
+ "required_for": [
+  "constant"
+ ],
  "set_in": [
   "examples/channel_inlet/input.toml",
   "examples/channel_inlet_data/input.toml",

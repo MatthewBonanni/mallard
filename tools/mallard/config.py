@@ -2123,30 +2123,21 @@ class Triggers(Table):
 class WriteData(Table):
     """[[write_data]]: the keys of this array of tables the case sets in its element index (its length appends one)."""
     _keys = {
-        'boundary': ('boundary', 'value', None),
-        'boundary_type': ('boundary_type', 'value', None),
         'chunk_cells': ('chunk_cells', 'value', None),
         'compression': ('compression', 'value', None),
-        'end': ('end', 'value', None),
         'fields': ('fields', 'value', None),
         'format': ('format', 'value', None),
         'interval': ('interval', 'value', None),
-        'point': ('point', 'value', None),
         'prefix': ('prefix', 'value', None),
-        'reference': ('reference', 'value', None),
         'region': ('region', 'table', 'Region'),
         'regions': ('regions', 'array', 'Region'),
         'relative_error': ('relative_error', 'value', None),
         'series': ('series', 'value', None),
-        'start': ('start', 'value', None),
         'time_interval': ('time_interval', 'quantity', None),
-        'type': ('type', 'value', None),
     }
 
-    def __init__(self, index, *, boundary: object = None, boundary_type: object = None, chunk_cells: object = None, compression: Literal['none', 'zlib'] | str | None = None, end: object = None, fields: list | None = None, format: Literal['restart', 'vtkhdf', 'vtu', 'xdmf'] | str | None = None, interval: int | None = None, point: object = None, prefix: str | None = None, reference: object = None, region: Region | dict | Inline | str | None = None, regions: list | None = None, relative_error: object = None, series: object = None, start: object = None, time_interval: float | str | tuple | None = None, type: str | None = None):
+    def __init__(self, index, *, chunk_cells: object = None, compression: Literal['none', 'zlib'] | str | None = None, fields: list | None = None, format: Literal['restart', 'vtkhdf', 'vtu', 'xdmf'] | str | None = None, interval: int | None = None, prefix: str | None = None, region: Region | dict | Inline | str | None = None, regions: list | None = None, relative_error: object = None, series: object = None, time_interval: float | str | tuple | None = None):
         r"""
-        boundary: 3D.
-        boundary_type: 3D.
         chunk_cells: (`restart`, with `compression = "zlib"`) Cells per compressed chunk (default 65536); a rank
             reading some cells decompresses only the chunks that hold them.
         compression: `none` (default) or `zlib`, lossless: VTU arrays are compressed as ParaView's
@@ -2156,7 +2147,6 @@ class WriteData(Table):
             (`Mallard_ENABLE_ZLIB` to write and to read them), and restart bitwise like uncompressed ones. Filled
             regions only: boundary zones and other regions of lower dimension are written uncompressed. One of none,
             zlib.
-        end: 3D.
         fields: (`vtkhdf`, `vtu`, `xdmf`) Any of `RHO`, `RHOU_X`, `RHOU_Y`, (3D) `RHOU_Z`, `RHOE`, `U_X`, `U_Y`,
             (3D) `U_Z`, `P`, `T`, `H`, `CFL`, `MACH` (with each cell's frozen gamma for mixtures), the vectors
             `RHOU` and `U` (written with 3 components, zero z in 2D), `VORTICITY` (3D: the vector of `VORTICITY_X`,
@@ -2186,9 +2176,7 @@ class WriteData(Table):
             HDF5 on several ranks, default to `vtu` with a warning. One of restart, vtkhdf, vtu, xdmf.
         interval: Write every this many steps / this much simulation time (exactly one). With `time_interval`
             the time step is shortened to land on each output time.
-        point: 3D.
         prefix: Output path prefix; directories are created as needed. Required.
-        reference: 3D.
         region: (`vtkhdf`, `vtu`) Default none, the whole mesh. A region, inline or by name, whose snapshot to
             write instead: a filled region (an area in 2D) writes the cells it covers, with only their nodes, and
             `REGION_FRACTION`, each cell's volume fraction of it (a moving one, or one defined by the solution, the
@@ -2210,13 +2198,11 @@ class WriteData(Table):
             the restart time; `false`: each snapshot whole, `PREFIX_NNNNNN.vtkhdf`, indexed by
             `PREFIX.vtkhdf.series`, for scripts that take one snapshot file at a time or move or delete snapshots as
             they go.
-        start: 3D.
         time_interval: Write every this many steps / this much simulation time (exactly one). With
             `time_interval` the time step is shortened to land on each output time. Time (s), a number in SI units
             or a quantity with its unit.
-        type: Default ""; 3D.
         """
-        super().__init__(f"write_data[{index}]", {'boundary': boundary, 'boundary_type': boundary_type, 'chunk_cells': chunk_cells, 'compression': compression, 'end': end, 'fields': fields, 'format': format, 'interval': interval, 'point': point, 'prefix': prefix, 'reference': reference, 'region': region, 'regions': regions, 'relative_error': relative_error, 'series': series, 'start': start, 'time_interval': time_interval, 'type': type})
+        super().__init__(f"write_data[{index}]", {'chunk_cells': chunk_cells, 'compression': compression, 'fields': fields, 'format': format, 'interval': interval, 'prefix': prefix, 'region': region, 'regions': regions, 'relative_error': relative_error, 'series': series, 'time_interval': time_interval})
 
 
 __all__ = ['Inline', 'Table', 'Boundaries', 'BoundariesData', 'BoundariesDataScale', 'BoundariesDataUnits', 'BoundariesNscbc', 'BoundariesTurbulence', 'BoundariesWallModel', 'Check', 'Chemistry', 'Forces', 'Initialize', 'InitializeData', 'InitializeDataReference', 'InitializeDataScale', 'InitializeMesh', 'InitializeRegions', 'InitializeRegionsTurbulence', 'InitializeTurbulence', 'Integrals', 'Les', 'LesCombustion', 'LesCombustionFuel', 'LesCombustionOxidizer', 'Mesh', 'MeshTransform', 'MeshTransformRotate', 'Numerics', 'NumericsErrorControl', 'NumericsFaceReconstruction', 'NumericsHybrid', 'Output', 'OutputMixture', 'OutputMixtureProgress', 'Parallel', 'Particles', 'ParticlesLattice', 'ParticlesProbes', 'ParticlesQuantities', 'ParticlesQuantitiesWinding', 'ParticlesWalls', 'Periodic', 'Physics', 'Probes', 'Radiation', 'Region', 'RegionRepeat', 'RegionRepeatRotate', 'RegionRotate', 'Regions', 'Run', 'Source', 'Sources', 'Sponges', 'Statistics', 'StatisticsConditional', 'StatisticsConvergence', 'StatisticsPhase', 'StatisticsSpectra', 'Triggers', 'WriteData']

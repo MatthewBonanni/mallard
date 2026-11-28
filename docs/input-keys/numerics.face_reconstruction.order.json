@@ -4,6 +4,9 @@
   2,
   3
  ],
+ "for_types": [
+  "TENO"
+ ],
  "set_in": [
   "examples/double_mach/input.toml",
   "examples/explosion_3d/input.toml",

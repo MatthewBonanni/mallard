@@ -3,7 +3,20 @@
   2,
   3
  ],
+ "for_types": [
+  "table"
+ ],
+ "path": {
+  "extensions": [
+   ".csv"
+  ],
+  "io": "input",
+  "kind": "file"
+ },
  "required": true,
+ "required_for": [
+  "table"
+ ],
  "set_in": [
   "examples/shock_bubble_2d/input.toml",
   "examples/vortex_ring_3d/coarse.toml",
