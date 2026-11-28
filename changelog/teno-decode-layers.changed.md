@@ -1,0 +1,1 @@
+- The keyed TENO setup finds stencil shapes faster, with the same tables bit for bit: a shape key sums a hash of each cell of the neighborhood instead of sorting it, and a cell that takes its shape's tables searches only the layers they reach (#1178). Keys themselves have other values than before.

@@ -1014,11 +1014,11 @@ TEST(TENOSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
 #ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(n_keyed, 144);
     EXPECT_EQ(distinct.size(), 27u);
-    EXPECT_EQ(digest, 10394126703101117812ULL);
+    EXPECT_EQ(digest, 6490497294593806500ULL);
 #else
     EXPECT_EQ(n_keyed, 110);
     EXPECT_EQ(distinct.size(), 110u);
-    EXPECT_EQ(digest, 11754670380066181648ULL);
+    EXPECT_EQ(digest, 6536239145204640138ULL);
 #endif
 }
 
@@ -1032,11 +1032,11 @@ KOKKOS_INLINE_FUNCTION rtype record_pinv(const uint32_t s, const size_t k) { ret
 
 // The setup's writes of slots [0, n) with a record (size(j) > 0), and nothing else (a free function: CUDA's
 // extended lambdas cannot be in a test's TestBody)
-void set_up_record_slots(const teno_setup::TableBatch & b, const uint32_t n, const Kokkos::View<uint32_t *> & size,
+void set_up_record_slots(const teno_setup::TableBatch & b, const uint32_t n, const Kokkos::View<uint32_t *[2]> & size,
                          const Kokkos::View<uint16_t *> & large, const Kokkos::View<uint16_t *> & small) {
     const size_t nk = b.nk;
     Kokkos::parallel_for(Kokkos::RangePolicy<>(0, n), KOKKOS_LAMBDA(const uint32_t j) {
-        if (size(j) == 0) return;
+        if (size(j, 0) == 0) return;
         b.gather_depth(j) = uint8_t(2 + j);
         b.invalid_small(j) = uint8_t(j);
         b.large_size(j) = large(j);
@@ -1065,12 +1065,17 @@ TEST(TENOSetup, ShapeRecordsHoldWhatTheirSlotsSetUp) {
     if (comm::size() > 1) GTEST_SKIP() << "a run on one rank";
     constexpr uint32_t slots = 4, n = 3;
     constexpr uint8_t nk = 3;
-    const std::vector<uint32_t> h_size = {7, 0, 9};
+    const std::vector<uint32_t> h_size = {7, 0, 9}, h_layers = {2, 0, 3};
     const std::vector<uint16_t> n_large = {2, 0, 3}, n_small = {4, 0, 1};
     for (const bool interleaved : {false, true}) {
         teno_setup::TableBatch batch(slots, nk, 4, 5, interleaved);
-        Kokkos::View<uint32_t *> size("size", n);
-        Kokkos::deep_copy(size, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(h_size.data(), n));
+        Kokkos::View<uint32_t *[2]> size("size", n);
+        auto h = Kokkos::create_mirror_view(size);
+        for (uint32_t j = 0; j < n; j++) {
+            h(j, 0) = h_size[j];
+            h(j, 1) = h_layers[j];
+        }
+        Kokkos::deep_copy(size, h);
         Kokkos::View<uint16_t *> large("large", n), small("small", n);
         Kokkos::deep_copy(large, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(n_large.data(), n));
         Kokkos::deep_copy(small, Kokkos::View<const uint16_t *, Kokkos::HostSpace>(n_small.data(), n));
@@ -1079,7 +1084,7 @@ TEST(TENOSetup, ShapeRecordsHoldWhatTheirSlotsSetUp) {
         ASSERT_EQ(records.size(), n);
         EXPECT_EQ(records[1], std::vector<uint64_t>{0});
         for (const uint32_t j : {0u, 2u}) {
-            std::vector<uint64_t> want = {1, h_size[j], 2 + j, j, n_large[j]};
+            std::vector<uint64_t> want = {1, h_size[j], h_layers[j], 2 + j, j, n_large[j]};
             for (uint32_t f = 0; f < teno::MAX_FACES; f++) want.push_back(uint64_t(f + j));
             auto bits = [](const rtype v) { return std::bit_cast<uint64_t>(double(v)); };
             for (size_t k = 0; k < batch.basis_mean.cap; k++) want.push_back(bits(record_mean(j, k)));
