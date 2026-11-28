@@ -236,7 +236,7 @@ Every build makes the library of the [Python package](guide/python.md); after `c
 uv pip install $HOME/mallard/share/mallard/tools     # or: uv pip install -e tools in the repository
 ```
 
-It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)). `-DMallard_ENABLE_PYTHON_BINDINGS=ON` adds the extension module that runs cases in Python (`mallard.Solver`), installed with the package.
+It finds the library next to the `mallard` on `PATH` (or through `MALLARD_LIBRARY`). To install it into a Python's `site-packages` with `cmake --install` itself, configure with `-DMallard_PYTHON_INSTALL_DIR=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')`. `-DMallard_ENABLE_PYTHON=OFF -DMallard_ENABLE_LIBRARY=OFF` builds without the library ([Python](guide/python.md#installing)). `-DMallard_ENABLE_PYTHON_BINDINGS=ON` adds the extension module that runs cases in Python (`mallard.Solver`), installed with the package; the extra `mallard-python[mpi]` adds mpi4py, to run them on a communicator of your own.
 
 ## Checking an install
 

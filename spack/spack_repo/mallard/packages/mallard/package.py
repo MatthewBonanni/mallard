@@ -110,6 +110,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     depends_on("python@3.10:", when="+python", type=("build", "run"))
     depends_on("py-numpy", when="+python", type="run")
     depends_on("py-nanobind", when="+python", type="build")
+    depends_on("py-mpi4py", when="+python+mpi", type="run")
 
     conflicts("+openmp", when="+threads", msg="Kokkos builds one parallel host backend")
     conflicts("+cuda", when="+rocm", msg="Kokkos builds one device backend")

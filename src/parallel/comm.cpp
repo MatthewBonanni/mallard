@@ -28,6 +28,7 @@ namespace comm {
 namespace {
 
 int self_scopes = 0;
+MPI_Comm world_comm = MPI_COMM_WORLD;
 
 } // namespace
 
@@ -88,7 +89,7 @@ MPI_Comm messages_comm = MPI_COMM_NULL;
 
 MPI_Comm messages() {
     if (self_scopes > 0) return MPI_COMM_SELF;
-    if (messages_comm == MPI_COMM_NULL) check(MPI_Comm_dup(MPI_COMM_WORLD, &messages_comm), "MPI_Comm_dup");
+    if (messages_comm == MPI_COMM_NULL) check(MPI_Comm_dup(world_comm, &messages_comm), "MPI_Comm_dup");
     return messages_comm;
 }
 
@@ -111,6 +112,15 @@ Session::Session(int & argc, char **& argv) {
     }
 }
 
+Session::Session(int &, char **&, MPI_Comm world) {
+#ifdef Mallard_HAS_NCCL
+    finalize_nccl();
+#endif
+    if (messages_comm != MPI_COMM_NULL) MPI_Comm_free(&messages_comm);
+    check(MPI_Comm_dup(world, &world_comm), "MPI_Comm_dup");
+    owns_world = true;
+}
+
 Session::~Session() {
 #ifdef Mallard_HAS_NCCL
     finalize_nccl();
@@ -118,10 +128,14 @@ Session::~Session() {
     int finalized = 0;
     MPI_Finalized(&finalized);
     if (!finalized && messages_comm != MPI_COMM_NULL) MPI_Comm_free(&messages_comm);
+    if (owns_world) {
+        if (!finalized) MPI_Comm_free(&world_comm);
+        world_comm = MPI_COMM_WORLD;
+    }
     if (owns_mpi && !finalized) MPI_Finalize();
 }
 
-MPI_Comm communicator() { return self_scopes > 0 ? MPI_COMM_SELF : MPI_COMM_WORLD; }
+MPI_Comm communicator() { return self_scopes > 0 ? MPI_COMM_SELF : world_comm; }
 
 int rank() {
     int r = 0;
@@ -175,7 +189,7 @@ void abort(int code) {
     int initialized = 0, finalized = 0;
     MPI_Initialized(&initialized);
     MPI_Finalized(&finalized);
-    if (initialized && !finalized) MPI_Abort(MPI_COMM_WORLD, code);
+    if (initialized && !finalized) MPI_Abort(world_comm, code);
     std::exit(code);
 }
 

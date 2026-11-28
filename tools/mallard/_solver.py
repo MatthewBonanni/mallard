@@ -115,15 +115,19 @@ _solvers = weakref.WeakSet()
 class Session:
     """MPI and Kokkos for the process, as mallard.Session in C++: Solver starts one with Kokkos' defaults if none
     is started. args are mallard's options (["--kokkos-num-threads=2"]). Kokkos starts once per process, so a
-    session lasts until the interpreter exits or end() is called, after which no other can start."""
+    session lasts until the interpreter exits or end() is called, after which no other can start.
 
-    def __init__(self, args=(), dim=None):
+    comm, an mpi4py communicator (uv pip install "mallard-python[mpi]"), runs the solvers on its processes instead
+    of MPI_COMM_WORLD: every process of comm starts the session and runs the same cases."""
+
+    def __init__(self, args=(), dim=None, comm=None):
         global _session
         if _session is not None:
             raise RuntimeError("a mallard.Session is already started in this process")
         self.dim = dim or _default_dimension()
         self._module = _extension(self.dim)
-        self._module.start_session([str(a) for a in args])
+        self._module.start_session([str(a) for a in args], _comm_address(comm))
+        self.comm = comm
         _session = self
 
     def end(self):
@@ -140,6 +144,19 @@ class Session:
 
     def __exit__(self, *exc):
         self.end()
+
+
+def _comm_address(comm):
+    if comm is None:
+        return 0
+    try:
+        from mpi4py import MPI
+    except ImportError:
+        message = 'a mallard.Session on an MPI communicator needs mpi4py: uv pip install "mallard-python[mpi]"'
+        raise ImportError(message) from None
+    if not isinstance(comm, MPI.Comm):
+        raise TypeError(f"comm must be an mpi4py communicator (mpi4py.MPI.Comm), not {type(comm).__name__}")
+    return MPI._addressof(comm)
 
 
 def _default_dimension():

@@ -279,6 +279,9 @@ MPI and Kokkos for the process, as mallard.Session in C++: Solver starts one wit
 is started. args are mallard's options (["--kokkos-num-threads=2"]). Kokkos starts once per process, so a
 session lasts until the interpreter exits or end() is called, after which no other can start.
 
+comm, an mpi4py communicator (uv pip install "mallard-python[mpi]"), runs the solvers on its processes instead
+of MPI_COMM_WORLD: every process of comm starts the session and runs the same cases.
+
 #### `session.end()`
 
 Closes every solver, then finalizes Kokkos (and MPI, if the session started it).

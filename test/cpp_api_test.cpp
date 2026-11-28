@@ -421,3 +421,32 @@ TEST(CppApiTest, ACaseOfTheOtherDimensionIsRefused) {
             << e.what();
     }
 }
+
+TEST(CppApiTest, ASessionOnACommunicatorRunsOnACopyOfIt) {
+    char name[] = "mallard";
+    char * args[] = {name, nullptr};
+    int argc = 1;
+    char ** argv = args;
+#ifdef Mallard_HAS_MPI
+    const int world = comm::size();
+    MPI_Comm self = MPI_COMM_SELF;
+    {
+        mallard::Session session(argc, argv, &self);
+        EXPECT_EQ(comm::size(), 1);
+        EXPECT_EQ(comm::rank(), 0);
+        int same = MPI_UNEQUAL;
+        MPI_Comm_compare(comm::communicator(), MPI_COMM_SELF, &same);
+        EXPECT_EQ(same, MPI_CONGRUENT);
+    }
+    EXPECT_EQ(comm::size(), world);
+#else
+    int comm = 0;
+    try {
+        mallard::Session session(argc, argv, &comm);
+        ADD_FAILURE() << "no error";
+    } catch (const mallard::Error & e) {
+        EXPECT_EQ(e.code(), "E-SETUP");
+        EXPECT_NE(std::string(e.what()).find("Mallard_ENABLE_MPI"), std::string::npos) << e.what();
+    }
+#endif
+}

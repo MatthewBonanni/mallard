@@ -167,7 +167,9 @@ char ** no_argv = no_args;
 
 Session::Session() : Session(no_argc, no_argv) {}
 
-Session::Session(int & argc, char **& argv) : impl(std::make_unique<Impl>()) {
+Session::Session(int & argc, char **& argv) : Session(argc, argv, nullptr) {}
+
+Session::Session(int & argc, char **& argv, const void * mpi_comm) : impl(std::make_unique<Impl>()) {
     if (Kokkos::is_finalized()) {
         throw Error(diagnostic_code::SETUP, "Kokkos was finalized in this process and cannot initialize again: keep "
                                             "one mallard::Session for the whole program.");
@@ -176,7 +178,20 @@ Session::Session(int & argc, char **& argv) : impl(std::make_unique<Impl>()) {
     int mpi_initialized = 0;
     MPI_Initialized(&mpi_initialized);
     // MPI before Kokkos, so Kokkos can map each rank to its own device
-    if (!mpi_initialized) impl->mpi = std::make_unique<comm::Session>(argc, argv);
+    if (mpi_comm) {
+        if (!mpi_initialized) {
+            throw Error(diagnostic_code::SETUP, "mallard::Session on an MPI communicator: initialize MPI first");
+        }
+        impl->mpi = std::make_unique<comm::Session>(argc, argv, *static_cast<const MPI_Comm *>(mpi_comm));
+    } else if (!mpi_initialized) {
+        impl->mpi = std::make_unique<comm::Session>(argc, argv);
+    }
+#else
+    if (mpi_comm) {
+        throw Error(diagnostic_code::SETUP,
+                    "mallard::Session on an MPI communicator: this library is built without MPI "
+                    "(-DMallard_ENABLE_MPI=ON)");
+    }
 #endif
     if (!Kokkos::is_initialized()) {
         binding::select_device(argc, argv);

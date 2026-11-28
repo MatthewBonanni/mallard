@@ -282,7 +282,7 @@ jobs:
         run: |
           backends='[
             {"name": "openmp", "flags": "-DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_CGNS=ON -DMallard_ENABLE_ZLIB=ON -DMallard_ENABLE_PYTHON_BINDINGS=ON", "packages": "python3-dev", "cgns": true, "full": true, "gate": true},
-            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "shards": 3, "gate": true},
+            {"name": "mpi", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_ENABLE_HDF5=ON -DMallard_ENABLE_ZLIB=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON -DMallard_ENABLE_PYTHON_BINDINGS=ON", "packages": "python3-dev python3-mpi4py", "mpi": true, "shards": 3, "gate": true},
             {"name": "mpi-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_ENABLE_MPI=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON -DKokkos_ENABLE_DEBUG_BOUNDS_CHECK=ON", "mpi": true, "full": true, "shards": 6, "gate": true},
             {"name": "serial", "flags": "-DKokkos_ENABLE_SERIAL=ON", "full": true},
             {"name": "serial-3d", "flags": "-DKokkos_ENABLE_SERIAL=ON -DMallard_DIM=3 -DMallard_ENABLE_HDF5=ON", "hdf5": true, "full": true},
@@ -571,6 +571,11 @@ jobs:
           } & others=$!
           ok=true; wait $others || ok=false; wait $three || ok=false; $ok
           if [ -n "$mpi" ]; then mpirun -n 4 --oversubscribe ./build/src/mallard test --gtest_filter="$mpi"; fi
+      - name: Python bindings on a communicator (MPI)
+        if: matrix.backend.name == 'mpi' && (!matrix.backend.shard || matrix.backend.shard == 1)
+        run: |
+          python3 -m pip install -q --break-system-packages './tools[mpi]' pytest
+          PATH="$PWD/build/src:$PATH" mpirun -n 3 --oversubscribe python3 -m pytest -q -p no:cacheprovider test/python/test_solver_mpi.py
       # Every rank in the report, and no warning about a sensible placement
       - &rank-report
         name: Rank report (MPI)
