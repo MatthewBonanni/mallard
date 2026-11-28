@@ -158,6 +158,9 @@ class ShapeKeys {
         static std::vector<std::vector<uint64_t>> records(const teno_setup::TableBatch & batch, uint32_t n,
                                                           const Kokkos::View<uint32_t *> & size);
 
+        /** @brief The largest central size of the records. */
+        static uint16_t widest(const std::vector<std::vector<uint64_t>> & records);
+
         /** @brief Records per group, on the device. */
         struct Records {
             Kokkos::View<uint64_t *> offset;  // (group + 1)

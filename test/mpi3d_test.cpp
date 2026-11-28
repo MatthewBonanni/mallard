@@ -127,6 +127,23 @@ TEST(MPI3DTest, SharedTENOTablesOnTetrahedraMatchSerial) {
     expect_matches_serial(blast_input("cartesian_tet", "type = \"TENO\"\norder = 3\n"));
 }
 
+TEST(MPI3DTest, TENOStencilsPastTheCentralStencilCapMatchSerial) {
+    // Order-6 prisms stretched 1.3 : 1 along their axis search past the central-stencil cap
+    // (#1232), on the host, in halos deepened for them, with the tables shared by default
+    std::string input = blast_input("cartesian_prism", "type = \"TENO\"\norder = 6\n");
+    const std::string box = "Nx = 12\nNy = 12\nNz = 12\nLx = 1.0\nLy = 1.0\nLz = 1.0\n";
+    input.replace(input.find(box), box.size(), "Nx = 4\nNy = 4\nNz = 4\nLx = 1.0\nLy = 1.0\nLz = 1.3\n");
+    input.erase(input.find("[[boundaries]]"), input.find("[numerics]") - input.find("[[boundaries]]"));
+    input += "[[periodic]]\nzones = [\"left\", \"right\"]\n[[periodic]]\nzones = [\"bottom\", \"top\"]\n"
+             "[[periodic]]\nzones = [\"back\", \"front\"]\n";
+    expect_matches_serial(input, [](const Solver & solver) {
+        const auto & teno = dynamic_cast<const TENO &>(solver.get_face_reconstruction());
+        uint64_t largest = 0;
+        teno.for_each_stencil([&](uint32_t, const TENO::CellStencils & st) { largest = std::max<uint64_t>(largest, st.central); }, false);
+        EXPECT_GT(double(comm::allreduce(largest, comm::Op::MAX)), std::ceil(3.5 * teno.n_dof_large) + 64.0);
+    });
+}
+
 TEST(MPI3DTest, InitialRegionsAndDataMatchSerial) {
     // Cell averages, region layers and nearest-point searches are per cell
     const std::string rank = std::to_string(comm::rank());
