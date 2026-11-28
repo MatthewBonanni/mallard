@@ -30,8 +30,8 @@ REF = {"St": (0.164, 0.166), "Cd": (1.33, 1.35), "Cl": (0.33, 0.34)}
 
 def coefficients(run):
     d = np.genfromtxt(os.path.join(run, "forces_cylinder.csv"), delimiter=",", names=True)
-    cd = (d["Fx_pressure"] + d["Fx_viscous"]) / Q
-    cl = (d["Fy_pressure"] + d["Fy_viscous"]) / Q
+    cd = (d["F_X_PRESSURE"] + d["F_X_VISCOUS"]) / Q
+    cl = (d["F_Y_PRESSURE"] + d["F_Y_VISCOUS"]) / Q
     return d["t"], cd, cl
 
 

@@ -362,19 +362,19 @@ TEST(ProbesTest, CurveReductionsAreExactForPolynomialFields) {
     ASSERT_FALSE(rows.empty());
     const auto & r = rows.front();
     const double tol = precision_tol<double>(1e-12, 1e-5);
-    EXPECT_NEAR(r.at("length"), length, tol * length);
-    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
-    EXPECT_NEAR(r.at("mean_RHO"), integral / length, tol * integral / length);
-    EXPECT_NEAR(r.at("favre_RHO"), square / integral, tol * square / integral);
-    EXPECT_NEAR(r.at("rms_RHO"), std::sqrt(square / length), tol * 2.0);
-    EXPECT_NEAR(r.at("integral_P"), length, tol * length);
-    EXPECT_NEAR(r.at("min_P"), 1.0, tol);
-    EXPECT_NEAR(r.at("max_P"), 1.0, tol);
+    EXPECT_NEAR(r.at("LENGTH"), length, tol * length);
+    EXPECT_NEAR(r.at("INTEGRAL_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("MEAN_RHO"), integral / length, tol * integral / length);
+    EXPECT_NEAR(r.at("FAVRE_RHO"), square / integral, tol * square / integral);
+    EXPECT_NEAR(r.at("RMS_RHO"), std::sqrt(square / length), tol * 2.0);
+    EXPECT_NEAR(r.at("INTEGRAL_P"), length, tol * length);
+    EXPECT_NEAR(r.at("MIN_P"), 1.0, tol);
+    EXPECT_NEAR(r.at("MAX_P"), 1.0, tol);
     // The extrema bound the written samples
     for (const auto & row : read_csv(dir + "/poly.csv")) {
         if (row.at("step") != 0.0) continue;
-        EXPECT_GE(rtype(row.at("RHO")), rtype(r.at("min_RHO")));
-        EXPECT_LE(rtype(row.at("RHO")), rtype(r.at("max_RHO")));
+        EXPECT_GE(rtype(row.at("RHO")), rtype(r.at("MIN_RHO")));
+        EXPECT_LE(rtype(row.at("RHO")), rtype(r.at("MAX_RHO")));
     }
 }
 
@@ -403,19 +403,19 @@ TEST(ProbesTest, RegionReductionsAreFractionWeightedIntegralsOfTheCellAverages) 
     auto cell_average = [&](double xa, double ya) {
         return 1.0 + (xa + 0.025) + 2.0 * (ya + 0.025) + 0.5 * cube(xa, xa + 0.05) / 0.05;
     };
-    const std::string measure = N_DIM == 3 ? "volume" : "area";
+    const std::string measure = N_DIM == 3 ? "VOLUME" : "AREA";
     const auto rows = read_csv(dir + "/box.csv");
     ASSERT_FALSE(rows.empty());
     const auto & r = rows.front();
     const double tol = precision_tol<double>(1e-12, 1e-5);
     EXPECT_EQ(r.at("step"), 0.0);
     EXPECT_NEAR(r.at(measure), volume, tol * volume);
-    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
-    EXPECT_NEAR(r.at("mean_RHO"), integral / volume, tol * integral / volume);
-    EXPECT_NEAR(r.at("min_RHO"), cell_average(x0, y0), tol);
-    EXPECT_NEAR(r.at("max_RHO"), cell_average(x1 - 0.05, y1 - 0.05), tol);
-    EXPECT_NEAR(r.at("integral_P"), volume, tol * volume);
-    EXPECT_NEAR(r.at("min_P"), 1.0, tol);
+    EXPECT_NEAR(r.at("INTEGRAL_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("MEAN_RHO"), integral / volume, tol * integral / volume);
+    EXPECT_NEAR(r.at("MIN_RHO"), cell_average(x0, y0), tol);
+    EXPECT_NEAR(r.at("MAX_RHO"), cell_average(x1 - 0.05, y1 - 0.05), tol);
+    EXPECT_NEAR(r.at("INTEGRAL_P"), volume, tol * volume);
+    EXPECT_NEAR(r.at("MIN_P"), 1.0, tol);
 
     const double pi = std::numbers::pi, radius = 0.27;
     const double exact = N_DIM == 2 ? pi * radius * radius : 4.0 / 3.0 * pi * radius * radius * radius;
@@ -423,9 +423,9 @@ TEST(ProbesTest, RegionReductionsAreFractionWeightedIntegralsOfTheCellAverages) 
     ASSERT_FALSE(ball_rows.empty());
     const auto & b = ball_rows.front();
     EXPECT_NEAR(b.at(measure), exact, 2e-5 * exact);
-    EXPECT_NEAR(b.at("integral_P"), b.at(measure), tol * exact);
-    EXPECT_NEAR(b.at("mean_P"), 1.0, tol);
-    EXPECT_NEAR(b.at("rms_P"), 1.0, tol);
+    EXPECT_NEAR(b.at("INTEGRAL_P"), b.at(measure), tol * exact);
+    EXPECT_NEAR(b.at("MEAN_P"), 1.0, tol);
+    EXPECT_NEAR(b.at("RMS_P"), 1.0, tol);
 }
 
 TEST(ProbesTest, RegionReductionsAreTheSameOnAnyNumberOfRanks) {
@@ -496,8 +496,8 @@ TEST(ProbesTest, RegionsOfTheMeshAreTheSameOnAnyNumberOfRanks) {
     const auto & mesh_s = *serial.get_mesh();
     double left = 0.0;
     for (uint32_t c = 0; c < mesh_s.n_cells; c++) left += mesh_s.h_cell_coords(c, 0) < 0.5_r ? double(mesh_s.h_cell_volume(c)) : 0.0;
-    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("area"), left, precision_tol<double>(1e-14, 1e-5));
-    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("area"), 1.0, precision_tol<double>(1e-14, 1e-5));
+    EXPECT_NEAR(read_csv(dir + "/half_serial.csv")[0].at("AREA"), left, precision_tol<double>(1e-14, 1e-5));
+    EXPECT_NEAR(read_csv(dir + "/inside_serial.csv")[0].at("AREA"), 1.0, precision_tol<double>(1e-14, 1e-5));
 }
 #endif
 
@@ -543,9 +543,9 @@ TEST(ProbesTest, SurfaceAndCurveRegionProbesWeighCellsByTheirMeasure) {
         const double exact = name == "ring" ? 2.0 * std::numbers::pi * 0.25
                              : N_DIM == 2   ? 2.0 * std::numbers::pi * 0.3
                                             : 4.0 * std::numbers::pi * 0.09;
-        const std::string measure = name == "ring" || N_DIM == 2 ? "length" : "area";
+        const std::string measure = name == "ring" || N_DIM == 2 ? "LENGTH" : "AREA";
         EXPECT_NEAR(rows[0].at(measure), exact, 1e-9 * exact) << name;
-        EXPECT_NEAR(rows[0].at("mean_P"), 1.0, 1e-3) << name;
+        EXPECT_NEAR(rows[0].at("MEAN_P"), 1.0, 1e-3) << name;
     }
 }
 
@@ -586,7 +586,7 @@ TEST(ProbesTest, OpenSurfacesFromFilesAreTheSameOnAnyNumberOfRanks) {
         << "on " << comm::size() << " ranks";
     const double length = std::hypot(0.35, 0.45) + std::hypot(0.35, 0.4);
     const auto rows = read_csv(dir + "/roof_serial.csv");
-    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "length" : "area"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
+    EXPECT_NEAR(rows[0].at(N_DIM == 2 ? "LENGTH" : "AREA"), N_DIM == 2 ? length : 0.6 * length, 1e-12);
 }
 
 TEST(ProbesTest, RejectsRegionProbesWithSampleKeys) {
@@ -827,7 +827,7 @@ TEST(ProbesTest, RegionsPartlyOutsideTheDomainRecordTheShareOutside) {
     EXPECT_NE(warned.find("% of its " + std::string(volume) + " lies outside the domain"), std::string::npos) << warned;
 }
 
-const char * const MEASURE = N_DIM == 2 ? "length" : "area";
+const char * const MEASURE = N_DIM == 2 ? "LENGTH" : "AREA";
 
 } // namespace
 
@@ -859,7 +859,7 @@ TEST(ProbesTest, WallShearAndHeatFluxMatchCouetteFlow) {
             if (row.at("step") != 0.0) continue;
             n_faces++;
             // The fluid drags the wall at rest along the flow, the moving wall against it
-            const bool top = row.at("ny") > 0.0;
+            const bool top = row.at("N_Y") > 0.0;
             const double sign = top ? -1.0 : 1.0;
             EXPECT_NEAR(row.at("T"), top ? COUETTE_T1 : COUETTE_T0, tol);
             EXPECT_NEAR(row.at("U_X"), top ? COUETTE_U : 0.0, tol);
@@ -925,18 +925,17 @@ TEST(ProbesTest, BoundaryTractionsIntegrateToTheForces) {
         std::map<double, std::map<std::string, double>> probe;
         for (const auto & row : read_csv(dir + "/top.csv")) probe[row.at("step")] = row;
         ASSERT_EQ(forces.size(), 4u);
-        const char * const axes[3] = {"x", "y", "z"};
         // [[forces]] writes 12 significant digits
         const double tol = precision_tol<double>(1e-10, 1e-5);
         for (size_t r = 0; r < forces.size(); r++) {
             const auto & row = probe.at(forces[r].at("step"));
             // A radian of the wall at r = 1 has the area of a unit length
-            EXPECT_NEAR(row.at(axisymmetric ? "area" : MEASURE), 1.0, tol);
+            EXPECT_NEAR(row.at(axisymmetric ? "AREA" : MEASURE), 1.0, tol);
             for (size_t d = 0; d < N_DIM; d++) {
-                const double Fp = forces[r].at(std::string("F") + axes[d] + "_pressure");
-                const double Fv = forces[r].at(std::string("F") + axes[d] + "_viscous");
-                EXPECT_NEAR(row.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
-                EXPECT_NEAR(row.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
+                const double Fp = forces[r].at(std::string("F_") + "XYZ"[d] + "_PRESSURE");
+                const double Fv = forces[r].at(std::string("F_") + "XYZ"[d] + "_VISCOUS");
+                EXPECT_NEAR(row.at(std::string("INTEGRAL_TRACTION_PRESSURE_") + "XYZ"[d]), Fp, tol * (1.0 + std::fabs(Fp)));
+                EXPECT_NEAR(row.at(std::string("INTEGRAL_TRACTION_VISCOUS_") + "XYZ"[d]), Fv, tol * 1e-2);
             }
         }
     }
@@ -969,10 +968,10 @@ TEST(ProbesTest, InletAndOutletFluxesHaveTheBoundaryStates) {
     for (const auto & [zone, sign] : {std::pair{"left", -1.0}, std::pair{"right", 1.0}}) {
         const auto r = read_csv(dir + "/" + zone + ".csv").front();
         EXPECT_NEAR(r.at(MEASURE), area, tol) << zone;
-        EXPECT_NEAR(r.at("integral_MASS_FLUX"), sign * mdot, tol) << zone;
-        EXPECT_NEAR(r.at("integral_MOMENTUM_FLUX_X"), sign * (0.3 * mdot + area), tol) << zone;
-        EXPECT_NEAR(r.at("integral_MOMENTUM_FLUX_Y"), 0.0, tol) << zone;
-        EXPECT_NEAR(r.at("integral_ENTHALPY_FLUX"), sign * mdot * h_t, tol) << zone;
+        EXPECT_NEAR(r.at("INTEGRAL_MASS_FLUX"), sign * mdot, tol) << zone;
+        EXPECT_NEAR(r.at("INTEGRAL_MOMENTUM_FLUX_X"), sign * (0.3 * mdot + area), tol) << zone;
+        EXPECT_NEAR(r.at("INTEGRAL_MOMENTUM_FLUX_Y"), 0.0, tol) << zone;
+        EXPECT_NEAR(r.at("INTEGRAL_ENTHALPY_FLUX"), sign * mdot * h_t, tol) << zone;
     }
 }
 
@@ -1027,9 +1026,9 @@ TEST(ProbesTest, WallPolylinesFollowCurvedWallsWithTheFluidOnTheirLeft) {
                     EXPECT_GT(b.at("s"), a.at("s"));
                 }
                 // The normal points out of the fluid: outward at the outer wall, inward at the inner one
-                EXPECT_GT(turn * (a.at("nx") * a.at("x") + a.at("ny") * a.at("y")), 0.0);
+                EXPECT_GT(turn * (a.at("N_X") * a.at("x") + a.at("N_Y") * a.at("y")), 0.0);
                 EXPECT_NEAR(a.at("MASS_FLUX"), 0.0, roundoff(1e-12));
-                total += a.at("area");
+                total += a.at("AREA");
                 error[k] = std::max(error[k], std::fabs(a.at("P") - p_exact(r)));
             }
             EXPECT_NEAR(total, 2.0 * std::numbers::pi * r, 1e-3 * r) << zone;
@@ -1069,8 +1068,8 @@ TEST(ProbesTest, AxisymmetricSurfacesOnCurvedWallsMeasureTheRevolvedSpheres) {
     if (!comm::is_root()) return;
     for (const auto & [zone, r] : {std::pair{"inner", r_in}, std::pair{"outer", r_out}}) {
         const auto row = read_csv(dir + "/" + zone + ".csv").front();
-        EXPECT_NEAR(row.at("area"), 2.0 * r * r, roundoff(1e-12)) << zone;
-        EXPECT_NEAR(row.at("integral_P"), 2.0 * r * r, roundoff(1e-12)) << zone;
+        EXPECT_NEAR(row.at("AREA"), 2.0 * r * r, roundoff(1e-12)) << zone;
+        EXPECT_NEAR(row.at("INTEGRAL_P"), 2.0 * r * r, roundoff(1e-12)) << zone;
     }
 }
 #endif
@@ -1123,14 +1122,14 @@ TEST(ProbesTest, RegionsCutByCurvedWallsMeasureAndBalanceTheirPartInTheDomain) {
     testing::internal::GetCapturedStderr();
     run(expanding);
     if (!comm::is_root()) return;
-    EXPECT_NEAR(read_csv(dir + "/surface.csv").front().at("integral_MASS_FLUX"), 0.2 * area, rounding_or(1e-8) * area);
+    EXPECT_NEAR(read_csv(dir + "/surface.csv").front().at("INTEGRAL_MASS_FLUX"), 0.2 * area, rounding_or(1e-8) * area);
     const auto disk = read_csv(dir + "/disk.csv").front();
     const auto & surface = steady;
-    EXPECT_NEAR(disk.at("area"), area, 1e-5 * area);
-    EXPECT_NEAR(surface.at("length"), perimeter, 1e-5 * perimeter);
+    EXPECT_NEAR(disk.at("AREA"), area, 1e-5 * area);
+    EXPECT_NEAR(surface.at("LENGTH"), perimeter, 1e-5 * perimeter);
     // The mass flow in and out across the disk's diameter
     const double through = 0.3 * (1.384 * 1.384 - 1.084 * 1.084) / 2.0;
-    EXPECT_NEAR(surface.at("integral_MASS_FLUX"), 0.0, rounding_or(1e-10) * through);
+    EXPECT_NEAR(surface.at("INTEGRAL_MASS_FLUX"), 0.0, rounding_or(1e-10) * through);
     const json::Value b = json::parse(output::open(dir + "/disk.csv").sampling);
     EXPECT_EQ(b["measures"]["region"]["area"].number, own);
     EXPECT_EQ(b["measures"]["region"]["perimeter"].number, 2.0 * pi * rho_r);
@@ -1221,9 +1220,9 @@ TEST(ProbesTest, CutPlaneIntegralsAreExactForPolynomialFields) {
     const auto r = read_csv(dir + "/cut.csv").front();
     const double tol = precision_tol<double>(1e-12, 1e-5);
     EXPECT_NEAR(r.at(MEASURE), measure, tol * measure);
-    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
-    EXPECT_NEAR(r.at("favre_RHO"), square / integral, tol * square / integral);
-    EXPECT_NEAR(r.at("integral_MASS_FLUX"), flux, tol * std::fabs(integral));
+    EXPECT_NEAR(r.at("INTEGRAL_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("FAVRE_RHO"), square / integral, tol * square / integral);
+    EXPECT_NEAR(r.at("INTEGRAL_MASS_FLUX"), flux, tol * std::fabs(integral));
 }
 
 TEST(ProbesTest, AxisymmetricRunsKeepPerRadianIntegralsOnBoundaries) {
@@ -1291,7 +1290,7 @@ TEST(ProbesTest, ClosedSurfaceFluxesFollowTheDivergence) {
     for (const char * file : {"/closed.csv", "/region.csv"}) {
         // The region's patches are half a cell wide (here coarser than the probe's 24 x 48 grid)
         const double tol = std::string(file) == "/region.csv" ? 1e-8 : 1e-9;
-        EXPECT_NEAR(read_csv(dir + file).front().at("integral_MASS_FLUX"), expected,
+        EXPECT_NEAR(read_csv(dir + file).front().at("INTEGRAL_MASS_FLUX"), expected,
                     precision_tol<double>(tol, 1e-5) * expected)
             << file;
     }
@@ -1324,10 +1323,10 @@ TEST(ProbesTest, FluxesThroughIsosurfacesFollowTheDivergence) {
         solver.init(parse_toml(input));
         run(solver);
         const auto out = read_csv(dir + "/outward.csv").front(), in = read_csv(dir + "/inward.csv").front();
-        const std::string measure = N_DIM == 2 ? "length" : "area";
+        const std::string measure = N_DIM == 2 ? "LENGTH" : "AREA";
         area_errors.push_back(std::fabs(out.at(measure) - area) / area);
-        flux_errors.push_back(std::fabs(out.at("integral_MASS_FLUX") - flux) / flux);
-        EXPECT_EQ(in.at("integral_MASS_FLUX"), -out.at("integral_MASS_FLUX")) << n;
+        flux_errors.push_back(std::fabs(out.at("INTEGRAL_MASS_FLUX") - flux) / flux);
+        EXPECT_EQ(in.at("INTEGRAL_MASS_FLUX"), -out.at("INTEGRAL_MASS_FLUX")) << n;
         EXPECT_EQ(in.at(measure), out.at(measure)) << n;
     }
     for (size_t i = 1; i < area_errors.size(); i++) {
@@ -1406,8 +1405,8 @@ TEST(ProbesTest, RegionsOfVelocityGradientFieldsAreTheSameOnAnyNumberOfRanks) {
             << name << " on " << comm::size() << " ranks";
         const auto rows = read_csv(file + "_serial.csv");
         ASSERT_EQ(rows.size(), 3u) << name;
-        EXPECT_GT(rows.front().at(name == std::string("level") ? (N_DIM == 2 ? "length" : "area")
-                                                                : (N_DIM == 2 ? "area" : "volume")),
+        EXPECT_GT(rows.front().at(name == std::string("level") ? (N_DIM == 2 ? "LENGTH" : "AREA")
+                                                                : (N_DIM == 2 ? "AREA" : "VOLUME")),
                   0.0)
             << name;
     }
@@ -1450,8 +1449,8 @@ TEST(ProbesTest, ClosedSurfaceFluxesBalanceTheEnclosedMassMomentumAndEnergy) {
         std::vector<double> errors(balances.size(), 1.0);
         if (content.size() != 3 || flux.size() != 3) return errors;
         for (size_t b = 0; b < balances.size(); b++) {
-            auto q = [&](size_t i) { return content[i].at("integral_" + balances[b].first); };
-            auto f = [&](size_t i) { return flux[i].at("integral_" + balances[b].second); };
+            auto q = [&](size_t i) { return content[i].at("INTEGRAL_" + balances[b].first); };
+            auto f = [&](size_t i) { return flux[i].at("INTEGRAL_" + balances[b].second); };
             // Simpson's rule in time, so that the time error is far below the space error
             const double balance = (q(2) - q(0)) / (2.0 * dt) + (f(0) + 4.0 * f(1) + f(2)) / 6.0;
             errors[b] = std::fabs(balance / f(1));
@@ -1574,7 +1573,7 @@ void expect_time_averages(const std::string & every_step, const std::string & av
                           const std::vector<std::string> & columns, const std::string & key, uint64_t interval,
                           double t_start) {
     auto mean_of = [](const std::string & c) {
-        for (const char * r : {"integral_", "mean_", "max_"}) {
+        for (const char * r : {"INTEGRAL_", "MEAN_", "MAX_"}) {
             if (c.starts_with(r)) return r + ("MEAN_" + c.substr(std::string(r).size()));
         }
         return "MEAN_" + c;
@@ -1653,10 +1652,10 @@ TEST(ProbesTest, ModeledWallsTakeTheWallModelsStressHeatFluxAndExchangeState) {
         const auto & r = reduced.at(f.at("step"));
         // [[forces]] writes 12 significant digits
         for (size_t d = 0; d < N_DIM; d++) {
-            const double F = f.at(std::string("F") + "xyz"[d] + "_viscous");
-            EXPECT_NEAR(r.at(std::string("integral_TRACTION_VISCOUS_") + "XYZ"[d]), F, tol_sum * tau) << d;
+            const double F = f.at(std::string("F_") + "XYZ"[d] + "_VISCOUS");
+            EXPECT_NEAR(r.at(std::string("INTEGRAL_TRACTION_VISCOUS_") + "XYZ"[d]), F, tol_sum * tau) << d;
         }
-        EXPECT_NEAR(r.at("integral_Q_W"), f.at("Q"), tol_sum * std::fabs(f.at("Q")) + 1e-15);
+        EXPECT_NEAR(r.at("INTEGRAL_Q_W"), f.at("Q"), tol_sum * std::fabs(f.at("Q")) + 1e-15);
     }
 }
 
@@ -1698,7 +1697,7 @@ TEST(ProbesTest, SpeciesDiffusiveFluxesAreFicksLawThroughTransmissiveBoundaries)
     const auto rows = rows_at(dir + "/ends.csv_serial", 0.0);
     ASSERT_EQ(rows.size(), N_DIM == 2 ? 6u : 18u);
     for (const auto & row : rows) {
-        const double n_x = row.at("nx");
+        const double n_x = row.at("N_X");
         EXPECT_NEAR(std::fabs(n_x), 1.0, 1e-14);
         EXPECT_NEAR(row.at("SPECIES_DIFFUSIVE_FLUX_N2"), j * n_x, 1e-9 * std::fabs(j));
         EXPECT_NEAR(row.at("SPECIES_DIFFUSIVE_FLUX_N2B"), -j * n_x, 1e-9 * std::fabs(j));
@@ -1709,7 +1708,7 @@ TEST(ProbesTest, SpeciesDiffusiveFluxesAreFicksLawThroughTransmissiveBoundaries)
     }
     // What leaves through the right end enters through the left
     const auto r = rows_at(dir + "/ends_red.csv_serial", 0.0).at(0);
-    EXPECT_NEAR(r.at("integral_SPECIES_DIFFUSIVE_FLUX_N2"), 0.0, 1e-9 * std::fabs(j) * r.at(MEASURE));
+    EXPECT_NEAR(r.at("INTEGRAL_SPECIES_DIFFUSIVE_FLUX_N2"), 0.0, 1e-9 * std::fabs(j) * r.at(MEASURE));
 }
 
 TEST(ProbesTest, MomentsOfTractionsHaveTheirClosedForm) {
@@ -1749,10 +1748,10 @@ TEST(ProbesTest, MomentsOfTractionsHaveTheirClosedForm) {
     const double M[3] = {x[1] * F[2] - x[2] * F[1], x[2] * F[0] - x[0] * F[2], x[0] * F[1] - x[1] * F[0]};
     const double tol = precision_tol<double>(1e-13, 1e-5);
     for (size_t d = 0; d < N_DIM; d++) {
-        EXPECT_NEAR(r.at(std::string("integral_TRACTION_PRESSURE_") + "XYZ"[d]), F[d], tol) << d;
+        EXPECT_NEAR(r.at(std::string("INTEGRAL_TRACTION_PRESSURE_") + "XYZ"[d]), F[d], tol) << d;
     }
     for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
-        EXPECT_NEAR(r.at(std::string("moment_TRACTION_PRESSURE_") + "XYZ"[a]), M[a], tol) << a;
+        EXPECT_NEAR(r.at(std::string("MOMENT_TRACTION_PRESSURE_") + "XYZ"[a]), M[a], tol) << a;
     }
 }
 
@@ -1797,7 +1796,7 @@ TEST(ProbesTest, StatisticsAveragesAreProbeVariablesAtTheirSamplesCells) {
     // Reductions take them at their own quadrature points: after the first
     // sample the mean is the sample itself
     const auto first = rows_at(dir + "/first_reductions.csv", 1).at(0);
-    EXPECT_EQ(first.at("integral_MEAN_P"), first.at("integral_P"));
+    EXPECT_EQ(first.at("INTEGRAL_MEAN_P"), first.at("INTEGRAL_P"));
 }
 
 TEST(ProbesTest, AveragedProbesAreTimeWeightedMeansOfTheirSamples) {
@@ -1819,14 +1818,14 @@ TEST(ProbesTest, AveragedProbesAreTimeWeightedMeansOfTheirSamples) {
     if (comm::is_root()) {
         expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"CF", "TAU_W", "Q_W"}, "face", 2, 0.005);
         expect_time_averages(dir + "/every_reductions.csv", dir + "/averaged_reductions.csv",
-                             {"integral_CF", "integral_Q_W"}, "", 2, 0.005);
+                             {"INTEGRAL_CF", "INTEGRAL_Q_W"}, "", 2, 0.005);
         // Written once they hold a sample (the first at step 4, t = 0.008): steps 4, 8, 12
         EXPECT_EQ(read_csv(dir + "/averaged_reductions.csv").size(), 3u);
         const auto last = rows_at(dir + "/averaged_reductions.csv", 12).at(0);
         // Reductions of the averaged samples: the extrema of the means
         double hi = -std::numeric_limits<double>::infinity();
         for (const auto & row : rows_at(dir + "/averaged.csv", 12)) hi = std::max(hi, row.at("MEAN_TAU_W"));
-        EXPECT_NEAR(last.at("max_MEAN_TAU_W"), hi, precision_tol<double>(0.0, 1e-6));
+        EXPECT_NEAR(last.at("MAX_MEAN_TAU_W"), hi, precision_tol<double>(0.0, 1e-6));
     }
     comm::barrier();
 }
@@ -1871,7 +1870,7 @@ TEST(ProbesTest, AveragedProbeOfMassFluxesThroughACutIsTheMeanOfItsSamples) {
     if (comm::is_root()) {
         expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"MASS_FLUX", "P"}, "cell", 1, 0.0);
         expect_time_averages(dir + "/every_reductions.csv", dir + "/averaged_reductions.csv",
-                             {"integral_MASS_FLUX"}, "", 1, 0.0);
+                             {"INTEGRAL_MASS_FLUX"}, "", 1, 0.0);
     }
     comm::barrier();
 }
@@ -2072,7 +2071,7 @@ TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
         "[[probes]]\nname = \"p\"\nfile = \"" + dir + "/p.csv\"\ntype = \"points\"\npoints = [" +
         numbers3("0.5", "0.1", "0.3") + ", " + numbers3("0.25", "0.6", "0.7") + "]\nfields = [\"RHO\", \"P\"]\n"
         "time_interval = 0.25\nreductions = [\"max\"]\nreductions_file = \"" + dir + "/p_reductions.csv\"\n"
-        "[probes.spectra]\nfields = [\"RHO\", \"max_RHO\"]\nlength = 10.0\nfile = \"" + dir + "/s.csv\"\n"
+        "[probes.spectra]\nfields = [\"RHO\", \"MAX_RHO\"]\nlength = 10.0\nfile = \"" + dir + "/s.csv\"\n"
         "reductions_file = \"" + dir + "/rs.csv\"\nstrouhal = {length = 2.0, velocity = 0.3}\n";
     Solver solver;
     solver.init(parse_toml(advected_wave(extra, "10.0")));
@@ -2101,8 +2100,8 @@ TEST(ProbesTest, SpectraOfAnAdvectedWavePeakAtItsFrequency) {
                                                        probe_spectra::Window::HANN, 0.25);
             for (size_t k = 0; k < psd.size(); k++) EXPECT_NEAR(psd[k], expected[k], 1e-12 * expected[3]);
         }
-        const auto reduced = column_at(read_csv(dir + "/rs.csv"), step, "PSD_max_RHO");
-        const auto expected = probe_spectra::welch(history_of(read_csv(dir + "/p_reductions.csv"), "max_RHO", 10.0, 40, false),
+        const auto reduced = column_at(read_csv(dir + "/rs.csv"), step, "PSD_MAX_RHO");
+        const auto expected = probe_spectra::welch(history_of(read_csv(dir + "/p_reductions.csv"), "MAX_RHO", 10.0, 40, false),
                                                    1, probe_spectra::Window::HANN, 0.25);
         ASSERT_EQ(reduced.size(), expected.size());
         for (size_t k = 0; k < reduced.size(); k++) EXPECT_NEAR(reduced[k], expected[k], 1e-12 * expected[3]);
@@ -2220,13 +2219,13 @@ TEST(ProbesTest, TimeAveragesOfMovingRegionsAreTheirMeanIntegralsOverTheirMeanMe
         const auto rows = read_csv(dir + "/disk.csv");
         ASSERT_EQ(rows.size(), 1u);
         const auto & row = rows.at(0);
-        const char * volume = N_DIM == 2 ? "area" : "volume";
-        EXPECT_NEAR(row.at("mean_MEAN_P"), 1.0, rounding_or(1e-9));
-        EXPECT_NEAR(row.at("integral_MEAN_P"), row.at(volume), rounding_or(1e-9) * row.at(volume));
-        EXPECT_NEAR(row.at("integral_MEAN_RHO"), row.at("mean_MEAN_RHO") * row.at(volume), 1e-12);
-        EXPECT_NEAR(row.at("mean_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
-        EXPECT_LT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
-        EXPECT_GT(row.at("max_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
+        const char * volume = N_DIM == 2 ? "AREA" : "VOLUME";
+        EXPECT_NEAR(row.at("MEAN_MEAN_P"), 1.0, rounding_or(1e-9));
+        EXPECT_NEAR(row.at("INTEGRAL_MEAN_P"), row.at(volume), rounding_or(1e-9) * row.at(volume));
+        EXPECT_NEAR(row.at("INTEGRAL_MEAN_RHO"), row.at("MEAN_MEAN_RHO") * row.at(volume), 1e-12);
+        EXPECT_NEAR(row.at("MEAN_MEAN_RHO"), 1.0 + 0.5 * 0.55, 2e-3);
+        EXPECT_LT(row.at("MAX_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.15) + 1e-2);
+        EXPECT_GT(row.at("MAX_MEAN_RHO"), 1.0 + 0.5 * (0.7 + 0.1));
     }
     // The restart at step 2 holds the cells the disk covered at t = 1e-6 and 2e-6, with their means
     const Mesh & mesh = *solver.get_mesh();
@@ -2284,10 +2283,10 @@ TEST(ProbesTest, TimeAveragesOfIsosurfacesAreTheirMeanIntegralsOverTheirMeanMeas
     straight.init(parse_toml(box_case(16, SINE_RHO, teno, probes + "[[write_data]]\nprefix = \"" + dir +
                                                                "/r\"\nformat = \"restart\"\ninterval = 6\n", steps)));
     run(straight);
-    const std::string measure = N_DIM == 2 ? "length" : "area";
+    const std::string measure = N_DIM == 2 ? "LENGTH" : "AREA";
     std::vector<std::map<std::string, double>> averaged;
     if (comm::is_root()) {
-        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"integral_RHO", "integral_P", "integral_MASS_FLUX"},
+        expect_time_averages(dir + "/every.csv", dir + "/averaged.csv", {"INTEGRAL_RHO", "INTEGRAL_P", "INTEGRAL_MASS_FLUX"},
                              "", 1, 0.02);
         const auto every = read_csv(dir + "/every.csv");
         averaged = read_csv(dir + "/averaged.csv");
@@ -2299,15 +2298,15 @@ TEST(ProbesTest, TimeAveragesOfIsosurfacesAreTheirMeanIntegralsOverTheirMeanMeas
                 weight += row.at("t") - t_prev;
                 sum += (row.at("t") - t_prev) * row.at(measure);
                 t_prev = row.at("t");
-                lo = std::min(lo, row.at("min_MASS_FLUX"));
-                hi = std::max(hi, row.at("max_MASS_FLUX"));
+                lo = std::min(lo, row.at("MIN_MASS_FLUX"));
+                hi = std::max(hi, row.at("MAX_MASS_FLUX"));
             }
             const double tol = precision_tol<double>(1e-12, 1e-6);
             EXPECT_NEAR(mean.at(measure), sum / weight, tol * mean.at(measure)) << "step " << mean.at("step");
-            EXPECT_NEAR(mean.at("mean_MEAN_RHO") * mean.at(measure), mean.at("integral_MEAN_RHO"),
-                        tol * mean.at("integral_MEAN_RHO"));
-            EXPECT_GE(mean.at("min_MEAN_MASS_FLUX"), lo - tol);
-            EXPECT_LE(mean.at("max_MEAN_MASS_FLUX"), hi + tol);
+            EXPECT_NEAR(mean.at("MEAN_MEAN_RHO") * mean.at(measure), mean.at("INTEGRAL_MEAN_RHO"),
+                        tol * mean.at("INTEGRAL_MEAN_RHO"));
+            EXPECT_GE(mean.at("MIN_MEAN_MASS_FLUX"), lo - tol);
+            EXPECT_LE(mean.at("MAX_MEAN_MASS_FLUX"), hi + tol);
         }
         // The front moved: the measures of the samples differ
         EXPECT_NE(every.at(1).at(measure), every.at(12).at(measure));
@@ -2354,8 +2353,8 @@ TEST(ProbesTest, MovingRegionsMeasureWhereTheyAreAtEachWriteAndCopiesReportEach)
             double expected = 0.0;
             for (uint32_t c = 0; c < mesh.n_owned(); c++) expected += f[c] * double(mesh.h_cell_measure(c));
             if (mesh.n_global_cells > 0) expected = comm::allreduce(expected, comm::Op::SUM);
-            EXPECT_NEAR(row.at(volume), expected, 1e-13 * expected) << file << " t " << row.at("t");
-            EXPECT_NEAR(row.at("mean_RHO"), 1.0, 1e-12) << file;
+            EXPECT_NEAR(row.at(N_DIM == 2 ? "AREA" : "VOLUME"), expected, 1e-13 * expected) << file << " t " << row.at("t");
+            EXPECT_NEAR(row.at("MEAN_RHO"), 1.0, 1e-12) << file;
         }
         // It keeps its shape, so its own measures are those of where it starts
         const json::Value b = json::parse(output::open(file).sampling);
@@ -2377,9 +2376,9 @@ TEST(ProbesTest, RegionsOfTheSolutionCoveringNoCellMeasureZero) {
         const auto rows = read_csv(dir + "/dense.csv");
         ASSERT_EQ(rows.size(), 3u);
         for (const auto & row : rows) {
-            EXPECT_EQ(row.at(N_DIM == 2 ? "area" : "volume"), 0.0);
-            EXPECT_EQ(row.at("integral_RHO"), 0.0);
-            EXPECT_EQ(row.at("max_RHO"), -std::numeric_limits<double>::infinity());
+            EXPECT_EQ(row.at(N_DIM == 2 ? "AREA" : "VOLUME"), 0.0);
+            EXPECT_EQ(row.at("INTEGRAL_RHO"), 0.0);
+            EXPECT_EQ(row.at("MAX_RHO"), -std::numeric_limits<double>::infinity());
         }
     }
     comm::barrier();
@@ -2519,19 +2518,19 @@ TEST(ProbesTest, CurvesOnTheirCellsHaveOneSamplePerCellAndExactIntegrals) {
     EXPECT_EQ(line.size(), 11u);
     EXPECT_EQ(cells_of(line), line.size());
     double length = 0.0;
-    for (const auto & row : line) length += row.at("area");
+    for (const auto & row : line) length += row.at("AREA");
     EXPECT_NEAR(length, L, tol * L);
     const auto r = read_csv(dir + "/line_serial_reductions.csv").front();
     const double integral = L * boole([](double s) { return quadratic(0.31 + 0.37 * s, 0.42 + 0.15 * s); }, 0.0, 1.0);
-    EXPECT_NEAR(r.at("length"), L, tol * L);
-    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("LENGTH"), L, tol * L);
+    EXPECT_NEAR(r.at("INTEGRAL_RHO"), integral, tol * integral);
     // On the faces between two rows of cells: once, in one of them
     const auto face = samples("face");
     EXPECT_EQ(face.size(), 12u);
-    EXPECT_NEAR(read_csv(dir + "/face_serial_reductions.csv").front().at("length"), 0.6, tol);
+    EXPECT_NEAR(read_csv(dir + "/face_serial_reductions.csv").front().at("LENGTH"), 0.6, tol);
     const auto ring = samples("ring");
     EXPECT_EQ(cells_of(ring), ring.size());
-    EXPECT_NEAR(read_csv(dir + "/ring_serial_reductions.csv").front().at("integral_P"), 2.0 * std::numbers::pi * 0.3, tol);
+    EXPECT_NEAR(read_csv(dir + "/ring_serial_reductions.csv").front().at("INTEGRAL_P"), 2.0 * std::numbers::pi * 0.3, tol);
 }
 
 TEST(ProbesTest, PointSampledRegionsIntegrateTheReconstructionOverTheCellsTheyCut) {
@@ -2554,10 +2553,10 @@ TEST(ProbesTest, PointSampledRegionsIntegrateTheReconstructionOverTheCellsTheyCu
     const double integral = quadratic(c[0], c[1]) * volume + 0.5 * (0.5 - 0.2) * second;
     const auto r = read_csv(dir + "/ball_serial.csv").front();
     const double tol = precision_tol<double>(1e-11, 1e-5);
-    const std::string measure = N_DIM == 3 ? "volume" : "area";
+    const std::string measure = N_DIM == 3 ? "VOLUME" : "AREA";
     EXPECT_NEAR(r.at(measure), volume, tol * volume);
-    EXPECT_NEAR(r.at("integral_RHO"), integral, tol * integral);
-    EXPECT_NEAR(r.at("integral_P"), volume, tol * volume);
+    EXPECT_NEAR(r.at("INTEGRAL_RHO"), integral, tol * integral);
+    EXPECT_NEAR(r.at("INTEGRAL_P"), volume, tol * volume);
 }
 
 TEST(ProbesTest, PointSampledRegionsIntegrateToRoundOffInCurvedCellsTheyCutAtTheirCenters) {

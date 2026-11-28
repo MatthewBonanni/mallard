@@ -116,7 +116,7 @@ class Convergence {
 
         /** @brief The latest values (named by columns(); empty name before any). */
         const MonitorValues & last() const { return values; }
-        /** @brief The value columns: stationary, t_stationary, [converged], <signal>_{mean,ci,...,nonfinite}. */
+        /** @brief The value columns: STATIONARY, T_STATIONARY, [CONVERGED], <signal>_{MEAN,CI,...,NONFINITE}. */
         std::vector<Monitored> columns() const;
 
         RestartAttributes attributes() const;

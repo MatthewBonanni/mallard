@@ -17,7 +17,7 @@ int main(int argc, char ** argv) {
     mallard::Solver solver(mallard::Case::from_toml_file("input.toml"));
     solver.setup();
     while (solver.advance_to(solver.time() + 0.01)) {
-        if (auto p = solver.monitor("wake_mean_P")) std::cout << solver.time() << " " << p->value << "\n";
+        if (auto p = solver.monitor("wake_MEAN_P")) std::cout << solver.time() << " " << p->value << "\n";
     }
     return solver.finish();
 }
@@ -69,7 +69,7 @@ with `-DMallard_ENABLE_LIBRARY=OFF` leaves the library out.
 | `finish()` | Ends the run: the final output, the summary and the run log's end record; returns the exit status `mallard -i` would. Before the stop condition, the run ends as stopped by the program (`outcome = "stopped"`, `cause = "caller"`) |
 | `run()` | The whole run of `mallard -i`: steps to the stop condition, then `finish()` |
 | `time()`, `step_count()`, `finished()` | Where the run is |
-| `monitors()`, `monitor(name)` | The latest value of every `[integrals]` column, `[[forces]]` component and `[[probes]]` value, by the name [triggers](running.md#triggers) give it (`integrals_kinetic_energy`, `forces_cylinder_Fx_pressure`, `wake_mean_P`), with its unit and the step it was written at |
+| `monitors()`, `monitor(name)` | The latest value of every `[integrals]` column, `[[forces]]` component and `[[probes]]` value, by the name [triggers](running.md#triggers) give it (`integrals_KINETIC_ENERGY`, `forces_cylinder_F_X_PRESSURE`, `wake_MEAN_P`), with its unit and the step it was written at |
 
 The case still needs a stop condition (`n_steps` or `t_stop`), which ends the
 run whatever the program asks; set it to the longest run you want.

@@ -893,7 +893,7 @@ def region_control_surface(P, args):
     label(ax, 1.17, -0.33, "the disk's edge in the domain", P, size=10, color=P["blue"], box=True)
     area = sampling["measures"]["in_domain"]["area"]
     text = (f"u = 0.1 (x, y), div u = 0.2\n"
-            f"net mass outflow    {surface['integral_MASS_FLUX']:.7f} kg/(m s)\n"
+            f"net mass outflow    {surface['INTEGRAL_MASS_FLUX']:.7f} kg/(m s)\n"
             f"0.2 x area inside   {0.2 * area:.7f}\n"
             f"perimeter           {surface['length']:.7f} m")
     ax.text(0.0, -0.02, text, fontsize=9, family="monospace", color=P["fg"], va="top", ha="left",
@@ -1189,7 +1189,7 @@ def region_curved_wall_3d(P, args):
             f"volume              {m['volume']:.7f}     {volume:.7f}\n"
             f"surface area        {m['surface_area']:.7f}     {area:.7f}\n"
             f"outside: {100 * sampling['clipped']['volume_fraction']:.3g}% of its volume\n"
-            f"u = 0.1 (x, y, z): net mass outflow {surface['integral_MASS_FLUX']:.7f} kg/s, "
+            f"u = 0.1 (x, y, z): net mass outflow {surface['INTEGRAL_MASS_FLUX']:.7f} kg/s, "
             f"0.3 x volume inside {0.3 * m['volume']:.7f}")
     fig.text(0.03, 0.22, text, fontsize=9, family="monospace", color=P["fg"], va="top", ha="left")
     return fig
@@ -1248,8 +1248,8 @@ def data_solution(mallard):
                   '[[probes]]\nname = "circle"\nfields = ["T"]\nregion = {type = "isosurface", field = "T", value = 1.09}\n')
         solution_run(mallard, work, f"n{n}", f'type = "cartesian_tri"\nNx = {n}\nNy = {n}\nLx = 1.0\nLy = 1.0\n',
                      "1 + (x - 0.5)^2 + (y - 0.5)^2", probes)
-        area = reductions_row(work / "probe_disk_reductions.csv")["area"]
-        length = reductions_row(work / "probe_circle_reductions.csv")["length"]
+        area = reductions_row(work / "probe_disk_reductions.csv")["AREA"]
+        length = reductions_row(work / "probe_circle_reductions.csv")["LENGTH"]
         errors.append((abs(area - np.pi * 0.09) / (np.pi * 0.09), abs(length - 2 * np.pi * 0.3) / (2 * np.pi * 0.3)))
     return hot, np.array(errors)
 

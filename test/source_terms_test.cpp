@@ -187,7 +187,7 @@ TEST(SourceTermsTest, NamedRegionsActAsTheTablesTheyName) {
     EXPECT_NE(r[0].values[0], std::vector<double>(r[0].measure.size(), 0.0));
     const std::string named = read_text(dir + "/named.csv");
     EXPECT_EQ(without_run_metadata(named), without_run_metadata(read_text(dir + "/inline.csv")));
-    EXPECT_NE(named.find("integral_RHO"), std::string::npos);
+    EXPECT_NE(named.find("INTEGRAL_RHO"), std::string::npos);
 }
 
 TEST(SourceTermsTest, SpongeRegionsScaleTheStrengthByTheirFractions) {

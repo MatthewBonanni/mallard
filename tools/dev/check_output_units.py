@@ -89,7 +89,7 @@ point = [1.0, 0.5]
 fields = ["U", "P"]
 time_interval = 1.0e-4
 reductions = ["mean"]
-spectra = {fields = ["U_X", "P", "mean_P"], length = 1.0e-3, strouhal = {length = 1.0, velocity = 10.0}}
+spectra = {fields = ["U_X", "P", "MEAN_P"], length = 1.0e-3, strouhal = {length = 1.0, velocity = 10.0}}
 """
 
 
@@ -127,9 +127,9 @@ def main():
         assert list(csv_units) == list(columns), (csv_units, columns)
         assert (csv_units["RHO"], csv_units["P"], csv_units["U_X"]) == (vtu["RHO"], vtu["P"], vtu["U"]), csv_units
         assert csv_units["t"] == "s" and csv_units["x"] == "m"
-        assert read_csv(path("probe_line_reductions.csv"))[1]["integral_RHO"] == "kg m-2"
-        assert read_csv(path("forces_bottom.csv"))[1]["Fx_pressure"] == "kg s-2"
-        assert read_csv(path("integrals.csv"))[1]["kinetic_energy"] == "kg m s-2"
+        assert read_csv(path("probe_line_reductions.csv"))[1]["INTEGRAL_RHO"] == "kg m-2"
+        assert read_csv(path("forces_bottom.csv"))[1]["F_X_PRESSURE"] == "kg s-2"
+        assert read_csv(path("integrals.csv"))[1]["KINETIC_ENERGY"] == "kg m s-2"
         assert len(read_csv(path("integrals.csv"))[0]["t"]) == 3
         spectra = read_csv(path("probe_tone_spectra.csv"))[1]
         assert (spectra["f"], spectra["St"], spectra["PSD_U_X"], spectra["PSD_P"]) == \

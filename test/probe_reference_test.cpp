@@ -138,7 +138,7 @@ Kind kind_of(const std::string & column) {
     for (const char * name : {"step", "t", "point", "cell", "face"}) {
         if (column == name) return Kind::EXACT;
     }
-    for (const char * name : {"x", "y", "z", "s", "nx", "ny", "nz", "area", "count", "length", "volume"}) {
+    for (const char * name : {"x", "y", "z", "s", "N_X", "N_Y", "N_Z", "AREA", "COUNT", "LENGTH", "VOLUME"}) {
         if (column == name) return Kind::GEOMETRY;
     }
     return Kind::VALUE;

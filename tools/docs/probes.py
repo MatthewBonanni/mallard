@@ -604,22 +604,22 @@ def measurements(P, args):
     r = red["wall"]
     k = np.argmax(r["step"])
     ax_y.plot(th, wall["Y_PLUS"][upper], "o", color=P["plum"], ms=3.5, label="samples")
-    ax_y.axhline(r["max_Y_PLUS"][k], color=P["flame"], ls="--", lw=1.2, label="max")
-    ax_y.axhline(r["mean_Y_PLUS"][k], color=P["teal"], ls="--", lw=1.2, label="mean")
+    ax_y.axhline(r["MAX_Y_PLUS"][k], color=P["flame"], ls="--", lw=1.2, label="max")
+    ax_y.axhline(r["MEAN_Y_PLUS"][k], color=P["teal"], ls="--", lw=1.2, label="mean")
     ax_y.set_xlabel("angle from the front stagnation point (deg)")
     ax_y.set_ylabel("first-cell y+")
     ax_y.set_xlim(0, 180)
-    ax_y.set_ylim(0, 1.3 * r["max_Y_PLUS"][k])
+    ax_y.set_ylim(0, 1.3 * r["MAX_Y_PLUS"][k])
     ax_y.legend(loc="upper right", ncols=3, fontsize=11)
     ax_y.set_title("Y_PLUS and its reductions", fontsize=12)
 
     # Integrals over time: drag from the wall tractions, net outflow through the closed circle
     q = 0.5 * U_INF**2 * D
     t = r["t"]
-    ax_t.plot(t, r["integral_TRACTION_PRESSURE_X"] / q, color=P["teal"], label="wall: pressure drag, C$_D$")
-    ax_t.plot(t, r["integral_TRACTION_VISCOUS_X"] / q, color=P["flame"], label="wall: viscous drag, C$_D$")
+    ax_t.plot(t, r["INTEGRAL_TRACTION_PRESSURE_X"] / q, color=P["teal"], label="wall: pressure drag, C$_D$")
+    ax_t.plot(t, r["INTEGRAL_TRACTION_VISCOUS_X"] / q, color=P["flame"], label="wall: viscous drag, C$_D$")
     rc = red["circle"]
-    ax_t.plot(rc["t"], rc["integral_MASS_FLUX"] / (U_INF * D), color=P["plum"],
+    ax_t.plot(rc["t"], rc["INTEGRAL_MASS_FLUX"] / (U_INF * D), color=P["plum"],
               label=r"circle: net outflow / $\rho_\infty U_\infty D$")
     ax_t.axhline(0.0, color=P["muted"], lw=0.8, ls=":")
     ax_t.set_xlabel("time")

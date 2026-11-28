@@ -808,7 +808,7 @@ format = "restart"
 time_interval = 0.05
 {PHYSICS}""", work / f"n{n}")
     report = {}
-    for key, extra in (("quantity", ["--quantity", "density_squared"]), ("field", ["--field", "RHO", "--exact", CONVERGENCE_EXACT])):
+    for key, extra in (("quantity", ["--quantity", "DENSITY_SQUARED"]), ("field", ["--field", "RHO", "--exact", CONVERGENCE_EXACT])):
         out = subprocess.run([str(args.mallard), "post", "convergence", "n16", "n32", "n64", *extra, "--format", "json"],
                              cwd=work, capture_output=True, text=True, check=True).stdout
         report[key] = json.loads(out)
@@ -842,7 +842,7 @@ def grid_convergence(P, args):
     ax.set_ylim(phi[0] - 3e-5, 1.01 + 2.6e-4)
     ax.set_xlabel(rf"$(h/h_1)^p$, observed $p$ = {p:.2f}")
     ax.set_ylabel(r"$\int\rho^2\,\mathrm{d}V$")
-    ax.set_title("density_squared: extrapolation and GCI", fontsize=13)
+    ax.set_title("DENSITY_SQUARED: extrapolation and GCI", fontsize=13)
     inset.set_xlim(-0.15, 1.9)
     inset.set_ylim(phi[-1] - 1.5 * band, 1.01 + 1.2 * band)
     inset.set_facecolor(P["bg"])

@@ -406,8 +406,8 @@ TEST(RegionSnapshotsTest, SurfacesAndCurvesOfRegionsHaveASampleAtEachElement) {
         std::memcpy(&n, text.data() + at, sizeof(n));
         return text.substr(at + sizeof(n), n);
     };
-    const std::vector<double> measure = as<double>(array("measure")), points = as<double>(array("Points")),
-                              normal = as<double>(array("normal")), p = as<double>(array("P"));
+    const std::vector<double> measure = as<double>(array("AREA")), points = as<double>(array("Points")),
+                              normal = as<double>(array("NORMAL")), p = as<double>(array("P"));
     const std::vector<int64_t> connectivity = as<int64_t>(array("connectivity")), offsets = as<int64_t>(array("offsets"));
     ASSERT_GT(measure.size(), 8u);
     EXPECT_EQ(offsets.size(), measure.size()) << "a cell per element";
@@ -595,7 +595,7 @@ TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
         std::ostringstream name;
         name << dir << "/v_" << std::setw(6) << std::setfill('0') << 2 * k << ".vtp";
         const std::string text = read_all(name.str());
-        const std::vector<double> measure = as<double>(appended_array(text, "measure"));
+        const std::vector<double> measure = as<double>(appended_array(text, "AREA"));
         ASSERT_GT(measure.size(), 4u) << k;
         double total = 0.0;
         for (double m : measure) total += m;
@@ -613,7 +613,7 @@ TEST(RegionSnapshotsTest, IsosurfacesWriteTheElementsExtractedAtEachWrite) {
         const int64_t p0 = h5_values<int64_t>(file, "VTKHDF/Steps/PointOffsets")[k];
         const int64_t n_points = h5_values<int64_t>(file, "VTKHDF/NumberOfPoints")[k];
         ASSERT_EQ(counts[k], int64_t(measure.size())) << k;
-        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/measure"), c0, counts[k]), measure) << k;
+        EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/AREA"), c0, counts[k]), measure) << k;
         EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/CellData/P"), c0, counts[k]), as<double>(appended_array(text, "P")));
         EXPECT_EQ(slice(h5_values<double>(file, "VTKHDF/Points"), p0, n_points, 3), as<double>(appended_array(text, "Points")));
         EXPECT_EQ(slice(h5_values<int64_t>(file, group + "Connectivity"), i0, ids[k]),

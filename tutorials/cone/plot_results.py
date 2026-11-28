@@ -86,7 +86,7 @@ def main():
                         label=f"{label}, θ = {theta:.0f}°" if k == len(probes) - 1 else None)
             f = np.genfromtxt(os.path.join(args.runs[k], "forces_cone.csv"), delimiter=",", names=True)
             area = np.pi * np.tan(np.radians(CONE)) ** 2 / 4  # base area of the quarter cone
-            bx.plot(f["t"], f["Fx_pressure"] / (Q_INF * area) - P_INF / Q_INF, color=t["series"][k], label=label)
+            bx.plot(f["t"], f["F_X_PRESSURE"] / (Q_INF * area) - P_INF / Q_INF, color=t["series"][k], label=label)
         ax.set_xlabel("t (cone lengths / sound speed)")
         ax.set_ylabel("p / p∞ at two probe points, x = 0.8")
         ax.legend(fontsize=8)

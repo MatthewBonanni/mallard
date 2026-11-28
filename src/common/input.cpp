@@ -688,6 +688,24 @@ std::string suggest_value(const std::string & value, const std::vector<std::stri
     return text;
 }
 
+std::string uppercase_name(const std::string & old, const std::vector<std::string> & names) {
+    if (std::find(names.begin(), names.end(), old) != names.end()) return "";
+    const auto key = [](const std::string & name) {
+        std::string out;
+        for (const char c : name) {
+            if (c != '_') out += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        return out;
+    };
+    std::string found;
+    for (const auto & name : names) {
+        if (key(name) != key(old)) continue;
+        if (!found.empty()) return "";
+        found = name;
+    }
+    return found;
+}
+
 InputError missing_key(const Input & table, const std::string & key, const std::string & fix) {
     Diagnostic d;
     d.key = key;

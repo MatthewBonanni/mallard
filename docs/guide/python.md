@@ -199,14 +199,14 @@ import mallard
 
 forces = mallard.open("forces_cylinder.csv")
 t = forces.read_all("t")                                # every row
-lift = forces.read_all("Fy_pressure") + forces.read_all("Fy_viscous")
-forces.fields["Fy_pressure"].units                      # 'kg s-2': per unit depth, in 2D
+lift = forces.read_all("F_Y_PRESSURE") + forces.read_all("F_Y_VISCOUS")
+forces.fields["F_Y_PRESSURE"].units                      # 'kg s-2': per unit depth, in 2D
 
 wake = mallard.open("probe_wake.csv")                   # one row per time of the point probe
 v = wake.read_all("U_Y")                                # (n_times,)
 
 box = mallard.open("probe_box_reductions.csv")
-mass = box.read_all("integral_RHO")                     # the mass in the control volume
+mass = box.read_all("INTEGRAL_RHO")                     # the mass in the control volume
 
 stats = mallard.open("solut/box.vtkhdf")                # the box's cells at the end
 mean_u = stats.read("MEAN_U_X")
@@ -262,7 +262,7 @@ mallard.open(derived["written"][0]["path"]).read("MACH")
 avg = mallard.post.average("solut/flow.vtkhdf", times="40:80", fields=["U_X", "U_Y", "P"], favre=True)
 mallard.open(avg["written"][0]).read("RMS_U_X")         # avg["window"], each snapshot's weight
 
-conv = mallard.post.convergence(["coarse", "medium", "fine"], quantity="forces_cylinder:Fx_pressure")
+conv = mallard.post.convergence(["coarse", "medium", "fine"], quantity="forces_cylinder:F_X_PRESSURE")
 
 mallard.report("runs/cylinder")["report"]                # rebuilds runs/cylinder/report.html
 archive = mallard.pack("runs/cylinder", output="cylinder.tar.gz", with_outputs="all")

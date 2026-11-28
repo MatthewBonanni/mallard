@@ -314,6 +314,25 @@ TEST(TriggersTest, UnknownNameInAConditionIsAnInputErrorWithItsLine) {
     }
 }
 
+TEST(TriggersTest, LowercaseNamesOfMonitoredValuesAreInputErrorsNamingTheUppercaseOnes) {
+    const std::string dir = fresh_dir("lowercase");
+    for (const auto & [extra, renamed] : std::vector<std::pair<std::string, std::string>>{
+             {"[[triggers]]\nwhen = \"integrals_kinetic_energy > 1\"\ndo = \"stop\"\n", "integrals_KINETIC_ENERGY"},
+             {"[[triggers]]\nwhen = \"t > 1\"\ndo = \"log {integrals_enstrophy}\"\n", "integrals_ENSTROPHY"},
+             {"[statistics.convergence]\nsignals = [\"integrals_enstrophy\"]\n", "integrals_ENSTROPHY"}}) {
+        Solver solver;
+        try {
+            const std::string integrals = "[integrals]\nfile = \"" + dir + "/integrals.csv\"\n";
+            solver.init(parse_toml(case_input(dir, "n_steps = 2\ncfl = 0.25\n", integrals + extra)));
+            ADD_FAILURE() << "no error: " << extra;
+        } catch (const InputError & e) {
+            const std::string what = e.what();
+            EXPECT_NE(what.find("did you mean \"" + renamed + "\""), std::string::npos) << what;
+            EXPECT_NE(what.find("mallard input upgrade"), std::string::npos) << what;
+        }
+    }
+}
+
 TEST(TriggersTest, UnknownActionOrWriterIsAnInputError) {
     const std::string dir = fresh_dir("unknown_action");
     for (const char * action : {"halt", "write nowhere", "set cfl=0.5", "set n_steps=-1", "set n_steps", "log {nowhere}",
@@ -344,7 +363,7 @@ std::string convergence_case(const std::string & dir) {
     return "[[probes]]\nname = \"far\"\npoint = [0.95, 0.5]\nfields = [\"P\"]\ninterval = 1\nfile = \"" + dir +
            "/far.csv\"\n[statistics]\nfields = [\"P\"]\n[statistics.convergence]\nsignals = [\"far_P\"]\n"
            "min_samples = 10\nbatches = 4\ntolerance = 1e-3\nfile = \"" + dir + "/convergence.csv\"\n"
-           "[[triggers]]\nname = \"steady\"\nwhen = \"convergence_stationary\"\ndo = \"start statistics\"\n";
+           "[[triggers]]\nname = \"steady\"\nwhen = \"convergence_STATIONARY\"\ndo = \"start statistics\"\n";
 }
 
 } // namespace

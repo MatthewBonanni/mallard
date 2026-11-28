@@ -299,7 +299,7 @@ z
     <text style="font-size: 11px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: start; fill: #a99ea3" x="92.492586" y="118.093708" transform="rotate(-0 92.492586 118.093708)">exact, 1.01</text>
    </g>
    <g id="text_17">
-    <text style="font-size: 13px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #ece4e7" x="192.909879" y="12.63" transform="rotate(-0 192.909879 12.63)">density_squared: extrapolation and GCI</text>
+    <text style="font-size: 13px; font-family: 'Helvetica', 'Arial', 'DejaVu Sans'; text-anchor: middle; fill: #ece4e7" x="192.909879" y="12.63" transform="rotate(-0 192.909879 12.63)">DENSITY_SQUARED: extrapolation and GCI</text>
    </g>
    <g id="patch_5">
     <path d="M 67.023702 138.401262 

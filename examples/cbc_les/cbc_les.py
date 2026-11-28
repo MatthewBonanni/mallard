@@ -234,10 +234,10 @@ def compare(args):
         b = np.genfromtxt(args.budget, delimiter=",", names=True)
         sel = (b["t"] >= 0.0) & (b["t"] <= STATIONS[171] * 1.0001)
         t = b["t"][sel]
-        eps_sgs = -b["ke_rate_sgs"][sel]
-        eps_mol = -b["ke_rate_viscous"][sel]
-        eps_num = b["eps_numerical"][sel]
-        pi = b["pressure_dilatation"][sel]
+        eps_sgs = -b["KE_RATE_SGS"][sel]
+        eps_mol = -b["KE_RATE_VISCOUS"][sel]
+        eps_num = b["EPS_NUMERICAL"][sel]
+        pi = b["PRESSURE_DILATATION"][sel]
         mean = lambda x: np.trapezoid(x, t) / (t[-1] - t[0])  # noqa: E731
         total = mean(eps_sgs) + mean(eps_mol) + mean(eps_num)
         print(f"budget over t = 0 to station 3: eps_sgs {mean(eps_sgs) / total:.3f}, eps_mol {mean(eps_mol) / total:.3f}, "

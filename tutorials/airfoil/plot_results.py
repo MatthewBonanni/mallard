@@ -41,11 +41,11 @@ CD_REF, CL_REF = 0.055316802, 0.018273615
 
 def coefficients(run):
     d = np.genfromtxt(os.path.join(run, "forces_airfoil.csv"), delimiter=",", names=True)
-    fx = d["Fx_pressure"] + d["Fx_viscous"]
-    fy = d["Fy_pressure"] + d["Fy_viscous"]
+    fx = d["F_X_PRESSURE"] + d["F_X_VISCOUS"]
+    fy = d["F_Y_PRESSURE"] + d["F_Y_VISCOUS"]
     cd = (fx * np.cos(ALPHA) + fy * np.sin(ALPHA)) / Q
     cl = (-fx * np.sin(ALPHA) + fy * np.cos(ALPHA)) / Q
-    cdp = (d["Fx_pressure"] * np.cos(ALPHA) + d["Fy_pressure"] * np.sin(ALPHA)) / Q
+    cdp = (d["F_X_PRESSURE"] * np.cos(ALPHA) + d["F_Y_PRESSURE"] * np.sin(ALPHA)) / Q
     return d["t"] * MACH, cd, cl, cdp  # time in chords per free-stream speed
 
 

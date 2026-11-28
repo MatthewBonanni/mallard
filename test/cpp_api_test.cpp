@@ -129,10 +129,10 @@ TEST(CppApiTest, StepsMatchTheExecutablesRunBitForBit) {
     EXPECT_EQ(solver.finish(), 0);
 
     expect_same_values(monitors, reference);
-    ASSERT_TRUE(solver.monitor("box_mean_P"));
-    EXPECT_EQ(solver.monitor("box_mean_P")->step, 10u);
-    ASSERT_TRUE(solver.monitor("integrals_kinetic_energy"));
-    EXPECT_EQ(solver.monitor("integrals_kinetic_energy")->unit, Mallard_DIM == 2 ? "kg m s-2" : "kg m2 s-2");
+    ASSERT_TRUE(solver.monitor("box_MEAN_P"));
+    EXPECT_EQ(solver.monitor("box_MEAN_P")->step, 10u);
+    ASSERT_TRUE(solver.monitor("integrals_KINETIC_ENERGY"));
+    EXPECT_EQ(solver.monitor("integrals_KINETIC_ENERGY")->unit, Mallard_DIM == 2 ? "kg m s-2" : "kg m2 s-2");
     const RestartData a = last_restart("executable"), b = last_restart("api");
     EXPECT_EQ(b.step, a.step);
     EXPECT_EQ(b.t, a.t);

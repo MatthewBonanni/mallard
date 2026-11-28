@@ -64,7 +64,7 @@ do = ["checkpoint", "write flow"] # the prefix of a [[write_data]] entry
 
 [[triggers]]
 name = "settled"
-when = "t > 0.02 and abs(forces_cylinder_Fx_pressure) < 1e-3"
+when = "t > 0.02 and abs(forces_cylinder_F_X_PRESSURE) < 1e-3"
 for = 0.005                       # held this long (seconds of simulated time)
 do = "stop"
 
@@ -85,15 +85,15 @@ do = ["stop statistics", "log averages from 0 to {t} s", "set write_data.flow.ti
 **Names in `when`.** `t` (s), `step`, `dt` (the last step's, s) and `wall`
 (seconds since the solver started, rank 0's), and the latest value of every
 monitored quantity, named after its file's column with the monitor's name in
-front:
+front (columns are uppercase, like field names):
 
 | Monitor | Names |
 |---|---|
-| `[integrals]` | `integrals_<column>`, e.g. `integrals_kinetic_energy` |
-| `[[forces]]` | `forces_<zone>_<column>`, e.g. `forces_cylinder_Fx_pressure`, `forces_wall_Q` |
-| `[[probes]]` reductions | `<probe>_<reduction>_<variable>`, e.g. `combustor_max_T`, `inlet_integral_MASS_FLUX` |
+| `[integrals]` | `integrals_<column>`, e.g. `integrals_KINETIC_ENERGY` |
+| `[[forces]]` | `forces_<zone>_<column>`, e.g. `forces_cylinder_F_X_PRESSURE`, `forces_wall_Q` |
+| `[[probes]]` reductions | `<probe>_<REDUCTION>_<variable>`, e.g. `combustor_MAX_T`, `inlet_INTEGRAL_MASS_FLUX` |
 | `[[probes]]` of one point | `<probe>_<variable>`, e.g. `outlet_T` |
-| [`[statistics.convergence]`](statistics.md#convergence-statisticsconvergence) | `convergence_<column>`, e.g. `convergence_stationary`, `convergence_converged`, `convergence_integrals_kinetic_energy_ci` |
+| [`[statistics.convergence]`](statistics.md#convergence-statisticsconvergence) | `convergence_<column>`, e.g. `convergence_STATIONARY`, `convergence_CONVERGED`, `convergence_integrals_KINETIC_ENERGY_CI` |
 
 Characters other than letters, digits and `_` in these names become `_`.
 A misspelled name is an input error (also of `mallard check`) that lists
@@ -306,7 +306,7 @@ end the run with exit status 1; warnings (`W-`) do not.
 | <a id="w-set-refused"></a>`W-SET-REFUSED` | A setting of a `SET` file was refused: a key `mallard ctl set` does not change, or a value it does not accept; the others of the file are applied | Fix the line the message names and write the file again ([Run control](#running-and-controlling-jobs)) |
 | <a id="w-run-report"></a>`W-RUN-REPORT` | `report.html` cannot be written; the run goes on without it | Check the path and its permissions; `mallard info RUN_DIR --html` builds it from `mallard.jsonl` later |
 | <a id="w-extract-averaged"></a>`W-EXTRACT-AVERAGED` | `mallard post extract` leaves out probes that average over the run's steps, which a snapshot cannot give | Use the probes' own files from the run |
-| <a id="w-convergence-nonfinite"></a>`W-CONVERGENCE-NONFINITE` | A signal of `[statistics.convergence]` had a sample that is not finite (NaN or infinite, or so large its sums overflow): the run diverged. `converged` stays 0 for the rest of the run, `<signal>_nonfinite` counts such samples, and they are left out of the other values | Find why the monitored value is not finite: a diverging solution, a probe without a value at a write ([Convergence statistics](statistics.md#convergence-statisticsconvergence)) |
+| <a id="w-convergence-nonfinite"></a>`W-CONVERGENCE-NONFINITE` | A signal of `[statistics.convergence]` had a sample that is not finite (NaN or infinite, or so large its sums overflow): the run diverged. `CONVERGED` stays 0 for the rest of the run, `<signal>_NONFINITE` counts such samples, and they are left out of the other values | Find why the monitored value is not finite: a diverging solution, a probe without a value at a write ([Convergence statistics](statistics.md#convergence-statisticsconvergence)) |
 | <a id="w-pack-rerun"></a>`W-PACK-RERUN` | `mallard pack` wrote the archive, but a rerun from it may differ from the run: a file it read is outside the run directory or named by an absolute path, a setting changed while it ran, or the run did not end | Copy the files into the run directory and use relative paths; repeat `mallard ctl` changes by hand; pack a run that ended |
 
 The other commands' errors have codes too, printed the same way: `error E-USAGE: mallard check: unknown option

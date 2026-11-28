@@ -15,6 +15,7 @@
 #include "probe_fluxes.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -128,17 +129,19 @@ std::pair<const char *, const char *> measure_names(const bool revolved) {
 
 /** @brief The name of the measure of g's elements: a revolved boundary's per radian is an area. */
 const char * measure_name(const probe::Geometry & g) {
-    static const char * const NAMES[] = {"count", "length", "area", "volume"};
+    static const char * const NAMES[] = {"COUNT", "LENGTH", "AREA", "VOLUME"};
     return NAMES[g.dim + (g.revolved ? 1 : 0)];
 }
 
-/** @brief The description of a sample array: a geometry one (arc_length, normal, measure) or a variable's. */
+/** @brief The description of a sample array: a geometry one (arc_length, NORMAL, AREA) or a variable's. */
 FieldDescription geometry_field(const std::string & name, const probe::Geometry & g) {
     if (name == "arc_length") return {dim::length, "arc length", "", ""};
-    if (name == "normal") return {dim::none, "unit normal", "", ""};
-    if (name == "measure") {
+    if (name == "NORMAL") return {dim::none, "unit normal", "", ""};
+    if (name == "AREA") {
         const Dimension measure = g.revolved ? dim::of(0, g.dim + 1, 0, 0, 0, -1) : dim::none.times(dim::length, g.dim);
-        return {measure, measure_name(g), "", ""};
+        std::string words = measure_name(g);
+        for (char & c : words) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return {measure, words, "", ""};
     }
     return field_units::describe(name);
 }
@@ -156,6 +159,13 @@ std::string reduction_name(Reduction r) {
         if (value == r) return name;
     }
     return "";
+}
+
+/** @brief The prefix of a reduction's columns: MEAN_ for mean. */
+std::string column_prefix(Reduction r) {
+    std::string prefix = reduction_name(r) + "_";
+    for (char & c : prefix) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return prefix;
 }
 
 /**
@@ -326,7 +336,7 @@ struct GeometryArray {
     std::vector<double> values;
 };
 
-/** @brief The per-sample geometry a probe writes beside its variables: arc_length, normal, measure. */
+/** @brief The per-sample geometry a probe writes beside its variables: arc_length, NORMAL, AREA. */
 std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
     std::vector<GeometryArray> arrays;
     if (!g.arc_length.empty()) arrays.push_back({"arc_length", 1, g.arc_length});
@@ -335,9 +345,9 @@ std::vector<GeometryArray> geometry_arrays(const probe::Geometry & g) {
         for (size_t p = 0; p < g.normals.size(); p++) {
             for (size_t d = 0; d < N_DIM; d++) normal[3 * p + d] = g.normals[p][d];
         }
-        arrays.push_back({"normal", 3, normal});
+        arrays.push_back({"NORMAL", 3, normal});
     }
-    if (!g.node_weights.empty()) arrays.push_back({"measure", 1, g.node_weights});
+    if (!g.node_weights.empty()) arrays.push_back({"AREA", 1, g.node_weights});
     return arrays;
 }
 
@@ -2163,7 +2173,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
     if (p.average) {
         for (auto & v : p.variables) v = "MEAN_" + v;
     }
-    const Dimension measure = geometry_field("measure", p.geometry).dimension;
+    const Dimension measure = geometry_field("AREA", p.geometry).dimension;
     std::vector<std::pair<std::string, Dimension>> reduction_columns;
     for (const Reduction r : p.reductions) {
         if (r == Reduction::MOMENT) {
@@ -2171,7 +2181,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             for (const auto & vector : p.moment_vectors) {
                 const Dimension d = field_units::describe(vector.first).dimension.times(measure).times(dim::length);
                 for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) {
-                    reduction_columns.emplace_back("moment_" + vector.first + "_" + AXES[a], d);
+                    reduction_columns.emplace_back("MOMENT_" + vector.first + "_" + AXES[a], d);
                 }
             }
             continue;
@@ -2179,7 +2189,7 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
         for (const auto & v : p.variables) {
             const Dimension d = field_units::describe(v).dimension;
             // Integrals take the units of the measure (sums over points)
-            reduction_columns.emplace_back(reduction_name(r) + "_" + v, r == Reduction::INTEGRAL ? d.times(measure) : d);
+            reduction_columns.emplace_back(column_prefix(r) + v, r == Reduction::INTEGRAL ? d.times(measure) : d);
         }
     }
     const char * point_label = boundary ? "face" : cut ? "cell" : "point";
@@ -2213,9 +2223,9 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             if (!p.geometry.node_weights.empty()) {
                 if (!p.geometry.arc_length.empty()) columns.emplace_back("s", dim::length);
                 for (size_t d = 0; d < N_DIM && !p.geometry.normals.empty(); d++) {
-                    columns.emplace_back(std::string("n") + "xyz"[d], dim::none);
+                    columns.emplace_back(std::string("N_") + "XYZ"[d], dim::none);
                 }
-                columns.emplace_back("area", geometry_field("measure", p.geometry).dimension);
+                columns.emplace_back("AREA", geometry_field("AREA", p.geometry).dimension);
             }
             for (const auto & v : p.variables) columns.emplace_back(v, field_units::describe(v).dimension);
             p.out = open_csv(p.file, resume, columns);
@@ -2268,12 +2278,12 @@ void Probes::add(const Input & input, const Mesh & mesh, region::Regions & regio
             if (!p.geometry.normals.empty()) {
                 std::vector<double> normals;
                 for (const auto & x : p.geometry.normals) normals.insert(normals.end(), x.begin(), x.end());
-                h5::write_rows(file, "normals", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
-                h5::annotate(file, "normals", geometry_field("normal", p.geometry));
+                h5::write_rows(file, "NORMAL", n, N_DIM, 0, n, normals.data(), H5P_DEFAULT);
+                h5::annotate(file, "NORMAL", geometry_field("NORMAL", p.geometry));
             }
             if (!p.geometry.node_weights.empty()) {
-                h5::write_rows(file, "area", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
-                h5::annotate(file, "area", geometry_field("measure", p.geometry));
+                h5::write_rows(file, "AREA", n, 1, 0, n, p.geometry.node_weights.data(), H5P_DEFAULT);
+                h5::annotate(file, "AREA", geometry_field("AREA", p.geometry));
             }
             if (!p.geometry.polygon_offsets.empty()) {
                 const auto & g = p.geometry;
@@ -3407,7 +3417,7 @@ Probes::CellAverages Probes::cell_averages(const std::string & name) const {
         if (!p.cell_means()) throw std::runtime_error("probe " + name + " keeps no time averages per cell");
         CellAverages out;
         out.measure = measure_name(p.geometry);
-        out.measure_dimension = geometry_field("measure", p.geometry).dimension;
+        out.measure_dimension = geometry_field("AREA", p.geometry).dimension;
         out.n_columns = p.n_evaluated();
         const size_t n_cells = p.n_mean_cells(), n_products = p.products.size();
         out.weights.assign(n_cells, 0.0);
@@ -4202,11 +4212,11 @@ std::vector<std::string> Probes::Probe::reduction_names() const {
     for (const Reduction r : reductions) {
         if (r == Reduction::MOMENT) {
             for (const auto & vector : moment_vectors) {
-                for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) names.push_back("moment_" + vector.first + "_" + AXES[a]);
+                for (size_t a = N_DIM == 2 ? 2 : 0; a < 3; a++) names.push_back("MOMENT_" + vector.first + "_" + AXES[a]);
             }
             continue;
         }
-        for (const auto & v : variables) names.push_back(reduction_name(r) + "_" + v);
+        for (const auto & v : variables) names.push_back(column_prefix(r) + v);
     }
     return names;
 }

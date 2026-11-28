@@ -350,7 +350,7 @@ class Probes {
         std::string set_time_interval(const std::string & name, rtype value, rtype t, bool snapshot = false,
                                       bool apply = true);
 
-        /** @brief Names of the monitored values: <probe>_<reduction>_<variable>, and <probe>_<variable> of one-point probes. */
+        /** @brief Names of the monitored values: <probe>_<REDUCTION>_<variable> (outlet_MEAN_P), and <probe>_<variable> of one-point probes. */
         std::vector<std::string> value_names() const;
         /** @brief The latest monitored values, as value_names(); NaN before a probe's first write. Rank 0 when distributed. */
         std::vector<double> values() const;
@@ -720,7 +720,7 @@ class Probes {
             /** @brief Into last and measure: the reductions of the samples, by reduction then variable. */
             void reduce(const std::vector<double> & nodes, const std::vector<double> & quad);
             std::vector<double> reduction_terms;  // reused across writes
-            /** @brief Names of the reduced values in last: <reduction>_<variable>, moment_<vector>_<axis>. */
+            /** @brief Names of the reduced values in last: <REDUCTION>_<variable>, MOMENT_<vector>_<axis>. */
             std::vector<std::string> reduction_names() const;
             /** @brief Writes a row of the reductions in last. */
             void write_reductions(uint64_t step, rtype t) const;

@@ -164,7 +164,7 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
     const std::string key = "statistics.convergence";
     if (!table.contains("signals")) {
         throw missing_key(table, key + ".signals",
-                          "List the monitored values to follow, e.g. signals = [\"integrals_kinetic_energy\"]");
+                          "List the monitored values to follow, e.g. signals = [\"integrals_KINETIC_ENERGY\"]");
     }
     std::vector<std::string> names;
     for (const auto & [name, dimension] : monitored) names.push_back(name);
@@ -179,12 +179,16 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
     for (const auto & name : listed) {
         const auto it = std::find(names.begin(), names.end(), name);
         if (it == names.end()) {
+            const std::string renamed = uppercase_name(name, names);
             throw InputError({.key = key + ".signals",
                               .line = line_of(table, "signals"),
                               .message = "\"" + name + "\" is not a monitored value of the run",
                               .valid = names,
-                              .suggestion = suggest_value(name, names),
-                              .fix = "Use a value of [integrals], [[forces]] or [[probes]], named as in [[triggers]]",
+                              .suggestion = renamed.empty() ? suggest_value(name, names) : "\"" + renamed + "\"",
+                              .fix = renamed.empty()
+                                         ? "Use a value of [integrals], [[forces]] or [[probes]], named as in [[triggers]]"
+                                         : "Monitored values became uppercase, like field names: mallard input "
+                                           "upgrade rewrites the old names",
                               .docs = DOCS});
         }
         const size_t index = static_cast<size_t>(it - names.begin());
@@ -267,18 +271,18 @@ void Convergence::init(const Input & input, const std::vector<Monitored> & monit
 }
 
 std::vector<Convergence::Monitored> Convergence::columns() const {
-    std::vector<Monitored> all = {{"stationary", dim::none}, {"t_stationary", dim::time}};
-    if (tolerance > 0.0) all.emplace_back("converged", dim::none);
+    std::vector<Monitored> all = {{"STATIONARY", dim::none}, {"T_STATIONARY", dim::time}};
+    if (tolerance > 0.0) all.emplace_back("CONVERGED", dim::none);
     for (const auto & s : signals) {
         const Dimension squared = s.dimension.times(s.dimension);
-        all.insert(all.end(), {{s.name + "_mean", s.dimension},
-                               {s.name + "_ci", s.dimension},
-                               {s.name + "_variance", squared},
-                               {s.name + "_variance_ci", squared},
-                               {s.name + "_tau", dim::none},
-                               {s.name + "_n_eff", dim::none},
-                               {s.name + "_samples", dim::none},
-                               {s.name + "_nonfinite", dim::none}});
+        all.insert(all.end(), {{s.name + "_MEAN", s.dimension},
+                               {s.name + "_CI", s.dimension},
+                               {s.name + "_VARIANCE", squared},
+                               {s.name + "_VARIANCE_CI", squared},
+                               {s.name + "_TAU", dim::none},
+                               {s.name + "_N_EFF", dim::none},
+                               {s.name + "_SAMPLES", dim::none},
+                               {s.name + "_NONFINITE", dim::none}});
     }
     return all;
 }
@@ -309,7 +313,7 @@ void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_
         logging::warning(diagnostic_code::CONVERGENCE_NONFINITE,
                          "statistics.convergence: " + s.name + " = " + logging::format("%g", value) + " at t = " +
                              logging::real(t) + " is not finite: the run diverged, so the convergence estimate cannot converge; " +
-                             s.name + "_nonfinite in " + file + " counts such samples, left out of the statistics.");
+                             s.name + "_NONFINITE in " + file + " counts such samples, left out of the statistics.");
     }
     // A longer series can move the end of the transient later: each check's accepted start replaces the last
     bool checked = false, all = true;
@@ -348,10 +352,10 @@ void Convergence::add(uint64_t step, double t, const std::vector<std::pair<size_
 
 void Convergence::update(double window_start) {
     values.values.clear();
-    values.values.emplace_back("stationary", stationary ? 1.0 : 0.0);
-    values.values.emplace_back("t_stationary", stationary ? t_stationary : NaN);
+    values.values.emplace_back("STATIONARY", stationary ? 1.0 : 0.0);
+    values.values.emplace_back("T_STATIONARY", stationary ? t_stationary : NaN);
     const size_t converged_at = values.values.size();
-    if (tolerance > 0.0) values.values.emplace_back("converged", 0.0);
+    if (tolerance > 0.0) values.values.emplace_back("CONVERGED", 0.0);
     bool converged = stationary;
     for (auto & s : signals) {
         double mean = NaN, ci = NaN, variance = NaN, variance_ci = NaN, n_eff = NaN;
@@ -394,14 +398,14 @@ void Convergence::update(double window_start) {
                             (variance_tolerance == 0.0 || variance_ci <= variance_tolerance * variance);
             }
         }
-        values.values.emplace_back(s.name + "_mean", mean);
-        values.values.emplace_back(s.name + "_ci", ci);
-        values.values.emplace_back(s.name + "_variance", variance);
-        values.values.emplace_back(s.name + "_variance_ci", variance_ci);
-        values.values.emplace_back(s.name + "_tau", n > 0 ? s.tau : NaN);
-        values.values.emplace_back(s.name + "_n_eff", n_eff);
-        values.values.emplace_back(s.name + "_samples", static_cast<double>(n));
-        values.values.emplace_back(s.name + "_nonfinite", static_cast<double>(s.nonfinite));
+        values.values.emplace_back(s.name + "_MEAN", mean);
+        values.values.emplace_back(s.name + "_CI", ci);
+        values.values.emplace_back(s.name + "_VARIANCE", variance);
+        values.values.emplace_back(s.name + "_VARIANCE_CI", variance_ci);
+        values.values.emplace_back(s.name + "_TAU", n > 0 ? s.tau : NaN);
+        values.values.emplace_back(s.name + "_N_EFF", n_eff);
+        values.values.emplace_back(s.name + "_SAMPLES", static_cast<double>(n));
+        values.values.emplace_back(s.name + "_NONFINITE", static_cast<double>(s.nonfinite));
     }
     if (tolerance > 0.0) values.values[converged_at].second = converged ? 1.0 : 0.0;
 }
@@ -452,9 +456,23 @@ void Convergence::restore(const RestartData & restart, const std::string & resta
     stationary = get(PREFIX + "STATIONARY") != 0.0;
     t_stationary = get(PREFIX + "T_STATIONARY");
     staged_current = false;
+    // Restart files of releases before 0.11.0 name the signals in lowercase
+    std::vector<std::string> stored;
+    const std::string check = "_NEXT_CHECK";
+    for (const auto & [name, value] : restart.attributes) {
+        if (name.starts_with(PREFIX) && name.ends_with(check) && name.size() > PREFIX.size() + check.size()) {
+            stored.push_back(name.substr(PREFIX.size(), name.size() - PREFIX.size() - check.size()));
+        }
+    }
     for (auto & s : signals) {
         s.n_staged = 0;
-        const std::string p = PREFIX + s.name + "_";
+        std::string name = s.name;
+        for (const auto & old : stored) {
+            if (uppercase_name(old, {s.name}) == s.name && std::find(stored.begin(), stored.end(), s.name) == stored.end()) {
+                name = old;
+            }
+        }
+        const std::string p = PREFIX + name + "_";
         s.next_check = static_cast<uint64_t>(get(p + "NEXT_CHECK"));
         s.truncation = {static_cast<uint64_t>(get(p + "TRUNCATION")), get(p + "ACCEPTED") != 0.0};
         s.n_tau = static_cast<uint64_t>(get(p + "N_TAU"));

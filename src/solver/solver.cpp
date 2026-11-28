@@ -2221,22 +2221,22 @@ std::vector<std::pair<std::string, Dimension>> Solver::integral_columns() const 
     const Dimension V = measure_dimension(), rate2 = dim::rate.times(dim::rate);
     const Dimension energy = dim::pressure.times(V), power = energy.times(dim::time, -1);
     std::vector<std::pair<std::string, Dimension>> columns = {
-        {"kinetic_energy", energy},
-        {"enstrophy", dim::density.times(rate2).times(V)},
-        {"dilatation_squared", rate2.times(V)},
-        {"pressure_dilatation", dim::pressure.times(dim::rate).times(V)},
-        {"velocity_squared", dim::velocity_squared.times(V)},
-        {"vorticity_squared", rate2.times(V)},
-        {"density_squared", dim::density.times(dim::density).times(V)},
-        {"temperature", dim::temperature.times(V)},
-        {"temperature_squared", dim::temperature.times(dim::temperature).times(V)}};
+        {"KINETIC_ENERGY", energy},
+        {"ENSTROPHY", dim::density.times(rate2).times(V)},
+        {"DILATATION_SQUARED", rate2.times(V)},
+        {"PRESSURE_DILATATION", dim::pressure.times(dim::rate).times(V)},
+        {"VELOCITY_SQUARED", dim::velocity_squared.times(V)},
+        {"VORTICITY_SQUARED", rate2.times(V)},
+        {"DENSITY_SQUARED", dim::density.times(dim::density).times(V)},
+        {"TEMPERATURE", dim::temperature.times(V)},
+        {"TEMPERATURE_SQUARED", dim::temperature.times(dim::temperature).times(V)}};
     if (integral_monitor.budget) {
-        for (const char * name : {"ke_rate_convective", "ke_rate_viscous", "ke_rate_sgs", "eps_numerical", "pressure_work"}) {
+        for (const char * name : {"KE_RATE_CONVECTIVE", "KE_RATE_VISCOUS", "KE_RATE_SGS", "EPS_NUMERICAL", "PRESSURE_WORK"}) {
             columns.emplace_back(name, power);
         }
     }
-    if (les_on && les.dynamic) columns.emplace_back("les_C", dim::none);
-    if (dynamic_efficiency()) columns.emplace_back("tf_beta", dim::none);
+    if (les_on && les.dynamic) columns.emplace_back("LES_C", dim::none);
+    if (dynamic_efficiency()) columns.emplace_back("TF_BETA", dim::none);
     return columns;
 }
 
@@ -2244,8 +2244,8 @@ std::vector<std::pair<std::string, Dimension>> Solver::force_columns(const bool 
     // Over the zone's faces: per unit depth in 2D, per radian in axisymmetric runs
     const Dimension area = measure_dimension().times(dim::length, -1);
     std::vector<std::pair<std::string, Dimension>> columns;
-    for (const char * kind : {"pressure", "viscous"}) {
-        FOR_I_DIM columns.emplace_back(std::string("F") + "xyz"[i] + "_" + kind, dim::pressure.times(area));
+    for (const char * kind : {"PRESSURE", "VISCOUS"}) {
+        FOR_I_DIM columns.emplace_back(std::string("F_") + "XYZ"[i] + "_" + kind, dim::pressure.times(area));
     }
     if (modeled) columns.emplace_back("Q", dim::heat_flux.times(area));
     return columns;

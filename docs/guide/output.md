@@ -1035,7 +1035,7 @@ units by definition, for Mallard to read back.
 import mallard                                     # the Python package: any file Mallard writes
 f = mallard.open("solut/flow.vtkhdf")
 f.fields["U"].units, f.fields["U"].long_name       # ('m s-1', 'velocity')
-mallard.open("forces_cylinder.csv").fields["Fx_pressure"].units   # 'kg s-2' (2D: per unit depth)
+mallard.open("forces_cylinder.csv").fields["F_X_PRESSURE"].units   # 'kg s-2' (2D: per unit depth)
 
 import h5py                                        # or the attributes themselves
 f = h5py.File("solut/flow_000100.h5")
@@ -1065,20 +1065,20 @@ those of `A` per second.
 | `SCHLIEREN` | `kg m-4` | | |
 | `WALL_MODEL_U` | `m s-1` | `WALL_MODEL_T`, `WALL_MODEL_H` | `K`, `m` |
 
-CSV columns: `t` in `s`, coordinates, `s` and probe `length` in `m`, `step`,
-`point`, `face`, `cell`, `count` and the normal `nx`, `ny`, `nz` `1`; the
-`area` of a sample of a boundary, cut plane or surface, and its reductions'
-`area`, in `m2` (in 2D, where these are curves, `m`, the reductions' column
-`length`); forces in `N` (`kg m s-2`), per unit depth in 2D
+CSV columns: `t` in `s`, coordinates, `s` and probe `LENGTH` in `m`, `step`,
+`point`, `face`, `cell`, `COUNT` and the normal `N_X`, `N_Y`, `N_Z` `1`; the
+`AREA` of a sample of a boundary, cut plane or surface, and its reductions'
+`AREA`, in `m2` (in 2D, where these are curves, `m`, the reductions' column
+`LENGTH`); forces in `N` (`kg m s-2`), per unit depth in 2D
 (`kg s-2`), and the wall model's `Q` in `W`; domain integrals carry the
 volume's `m3` (per unit depth in 2D: `m2`); probe reductions have their
 variable's units, `integral` times those of the measure (`m` along a curve,
-`m2` over a 3D boundary, cut plane or surface: `integral_MASS_FLUX` in `kg s-1`; `moment` those of
+`m2` over a 3D boundary, cut plane or surface: `INTEGRAL_MASS_FLUX` in `kg s-1`; `moment` those of
 `integral` times `m`; over a region its
-`volume`, `m3`, or `area`, `m2`, per unit depth in 2D). In axisymmetric runs,
+`VOLUME`, `m3`, or `AREA`, `m2`, per unit depth in 2D). In axisymmetric runs,
 forces, integrals and region probes are per radian of the revolved domain, and their units
-say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `area`
-(`m2 rad-1`), region probes' `volume` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
+say so: `kg m s-2 rad-1`, `kg m2 s-2 rad-1`; so are boundary probes' `AREA`
+(`m2 rad-1`), region probes' `VOLUME` (`m3 rad-1`) and `integral` reductions. Spectra rows: a `mean` has its
 field's units, `spectrum`, `correlation` and `shell` (sums, not densities)
 the product of their pair's (`U_X*U_Y`: `m2 s-2`); the `abscissa` is a
 wavenumber in `m-1` (spectra, shells) or a separation in `m` (correlations).

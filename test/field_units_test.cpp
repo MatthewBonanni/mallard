@@ -372,7 +372,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     const std::string area = N_DIM == 3 ? "m2" : "m";
     for (const char * vtp : {"/vtp_000002.vtp", "/wall_vtp_000002.vtp", "/cut_vtp_000002.vtp", "/surface_vtp_000002.vtp",
                              "/wall_000002.vtp"}) {
-        expect_vtk_units(dir + vtp, {{"arc_length", "m"}, {"normal", "1"}, {"measure", area}});
+        expect_vtk_units(dir + vtp, {{"arc_length", "m"}, {"NORMAL", "1"}, {"AREA", area}});
     }
 
     // CSV: the columns' own units
@@ -382,49 +382,49 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
     EXPECT_EQ(point["x"], "m");
     for (const char * v : {"RHO", "U_X", "U_Y", "P", "T", "H"}) EXPECT_EQ(point[v], units_of(v)) << v;
     auto point_reductions = csv_units(dir + "/point_reductions.csv");
-    EXPECT_EQ(point_reductions["count"], "1");
-    EXPECT_EQ(point_reductions["integral_P"], units_of("P")) << "a sum over points";
-    EXPECT_EQ(point_reductions["mean_U_Y"], units_of("U_Y"));
+    EXPECT_EQ(point_reductions["COUNT"], "1");
+    EXPECT_EQ(point_reductions["INTEGRAL_P"], units_of("P")) << "a sum over points";
+    EXPECT_EQ(point_reductions["MEAN_U_Y"], units_of("U_Y"));
     auto line_reductions = csv_units(dir + "/line_reductions.csv");
-    EXPECT_EQ(line_reductions["length"], "m");
-    EXPECT_EQ(line_reductions["integral_RHO"], "kg m-2") << "per unit length";
-    EXPECT_EQ(line_reductions["rms_P"], units_of("P"));
+    EXPECT_EQ(line_reductions["LENGTH"], "m");
+    EXPECT_EQ(line_reductions["INTEGRAL_RHO"], "kg m-2") << "per unit length";
+    EXPECT_EQ(line_reductions["RMS_P"], units_of("P"));
     EXPECT_EQ(csv_units(dir + "/line.csv")["RHO"], "kg m-3");
     auto forces = csv_units(dir + "/forces.csv");
-    EXPECT_EQ(forces["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2") << "per unit depth in 2D";
-    EXPECT_EQ(forces["Fy_viscous"], forces["Fx_pressure"]);
+    EXPECT_EQ(forces["F_X_PRESSURE"], N_DIM == 3 ? "kg m s-2" : "kg s-2") << "per unit depth in 2D";
+    EXPECT_EQ(forces["F_Y_VISCOUS"], forces["F_X_PRESSURE"]);
     auto wall = csv_units(dir + "/wall.csv");
     EXPECT_EQ(wall["face"], "1");
     EXPECT_EQ(wall["x"], "m");
     if (N_DIM == 2) {
         EXPECT_EQ(wall["s"], "m");
     }
-    EXPECT_EQ(wall["ny"], "1");
-    EXPECT_EQ(wall["area"], area) << "a segment's length in 2D";
+    EXPECT_EQ(wall["N_Y"], "1");
+    EXPECT_EQ(wall["AREA"], area) << "a segment's length in 2D";
     for (const char * v : {"P", "CP", "MASS_FLUX", "MOMENTUM_FLUX_X", "ENTHALPY_FLUX", "TRACTION_PRESSURE_Y"}) {
         EXPECT_EQ(wall[v], units_of(v)) << v;
     }
     auto wall_reductions = csv_units(dir + "/wall_reductions.csv");
-    EXPECT_EQ(wall_reductions[N_DIM == 3 ? "area" : "length"], area);
-    EXPECT_EQ(wall_reductions["integral_MASS_FLUX"], N_DIM == 3 ? "kg s-1" : "kg m-1 s-1");
-    EXPECT_EQ(wall_reductions["integral_TRACTION_PRESSURE_Y"], forces["Fy_pressure"]) << "a force";
-    EXPECT_EQ(wall_reductions["mean_CP"], "1");
+    EXPECT_EQ(wall_reductions[N_DIM == 3 ? "AREA" : "LENGTH"], area);
+    EXPECT_EQ(wall_reductions["INTEGRAL_MASS_FLUX"], N_DIM == 3 ? "kg s-1" : "kg m-1 s-1");
+    EXPECT_EQ(wall_reductions["INTEGRAL_TRACTION_PRESSURE_Y"], forces["F_Y_PRESSURE"]) << "a force";
+    EXPECT_EQ(wall_reductions["MEAN_CP"], "1");
     for (const char * name : {"cut", "surface"}) {
         auto samples = csv_units(dir + "/" + name + ".csv");
         EXPECT_EQ(samples["x"], "m") << name;
         EXPECT_EQ(samples["MASS_FLUX"], units_of("MASS_FLUX")) << name;
         auto reductions = csv_units(dir + "/" + name + "_csv_reductions.csv");
-        EXPECT_EQ(reductions[N_DIM == 3 ? "area" : "length"], area) << name;
-        EXPECT_EQ(reductions["integral_MASS_FLUX"], wall_reductions["integral_MASS_FLUX"]) << name;
+        EXPECT_EQ(reductions[N_DIM == 3 ? "AREA" : "LENGTH"], area) << name;
+        EXPECT_EQ(reductions["INTEGRAL_MASS_FLUX"], wall_reductions["INTEGRAL_MASS_FLUX"]) << name;
     }
     auto cut = csv_units(dir + "/cut.csv");
     EXPECT_EQ(cut["cell"], "1");
-    EXPECT_EQ(cut["nx"], "1");
-    EXPECT_EQ(cut["area"], area);
+    EXPECT_EQ(cut["N_X"], "1");
+    EXPECT_EQ(cut["AREA"], area);
     auto integrals = csv_units(dir + "/integrals.csv");
-    EXPECT_EQ(integrals["kinetic_energy"], N_DIM == 3 ? "kg m2 s-2" : "kg m s-2");
-    EXPECT_EQ(integrals["temperature"], N_DIM == 3 ? "m3 K" : "m2 K");
-    EXPECT_EQ(integrals["dilatation_squared"], measure + " s-2");
+    EXPECT_EQ(integrals["KINETIC_ENERGY"], N_DIM == 3 ? "kg m2 s-2" : "kg m s-2");
+    EXPECT_EQ(integrals["TEMPERATURE"], N_DIM == 3 ? "m3 K" : "m2 K");
+    EXPECT_EQ(integrals["DILATATION_SQUARED"], measure + " s-2");
     // Spectra: each row's value has its quantity's units (sums, not densities: the product's)
     {
         std::ifstream spectra(dir + "/spectra.csv");
@@ -500,7 +500,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
             h5::Handle h5file(H5Fopen((dir + "/wall_probe.vtkhdf").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "wall");
             const std::string data = N_DIM == 3 ? "VTKHDF/CellData/" : "VTKHDF/PointData/";
             for (const auto & [name, units] : std::map<std::string, std::string>{
-                     {"P", units_of("P")}, {"MASS_FLUX", units_of("MASS_FLUX")}, {"normal", "1"}, {"measure", area}}) {
+                     {"P", units_of("P")}, {"MASS_FLUX", units_of("MASS_FLUX")}, {"NORMAL", "1"}, {"AREA", area}}) {
                 h5::Handle dset(H5Dopen2(h5file, (data + name).c_str(), H5P_DEFAULT), H5Dclose, name);
                 EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
             }
@@ -516,8 +516,8 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         for (const auto & [path, data] : std::vector<std::pair<std::string, std::string>>{
                  {"/cut_probe.vtkhdf", "VTKHDF/CellData/"}, {"/surface_probe.vtkhdf", "VTKHDF/PointData/"}}) {
             h5::Handle h5file(H5Fopen((dir + path).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, path);
-            std::map<std::string, std::string> expected = {{"MASS_FLUX", units_of("MASS_FLUX")}, {"normal", "1"}};
-            if (path == "/cut_probe.vtkhdf") expected["measure"] = area;
+            std::map<std::string, std::string> expected = {{"MASS_FLUX", units_of("MASS_FLUX")}, {"NORMAL", "1"}};
+            if (path == "/cut_probe.vtkhdf") expected["AREA"] = area;
             for (const auto & [name, units] : expected) {
                 h5::Handle dset(H5Dopen2(h5file, (data + name).c_str(), H5P_DEFAULT), H5Dclose, path + " " + name);
                 EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << path << " " << name;
@@ -533,8 +533,8 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         }
         h5::Handle wall_probe(H5Fopen((dir + "/wall_probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "wall");
         std::map<std::string, std::string> wall_units = {{"coordinates", "m"},
-                                                         {"normals", "1"},
-                                                         {"area", area},
+                                                         {"NORMAL", "1"},
+                                                         {"AREA", area},
                                                          {"fields/P", units_of("P")},
                                                          {"fields/MASS_FLUX", units_of("MASS_FLUX")}};
         if (N_DIM == 3) wall_units["vertices"] = "m";
@@ -544,7 +544,7 @@ TEST(FieldUnitsTest, EveryWrittenFieldCarriesTheTablesUnits) {
         }
         h5::Handle cut_probe(H5Fopen((dir + "/cut_probe.h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT), H5Fclose, "cut");
         for (const auto & [name, units] : std::map<std::string, std::string>{
-                 {"coordinates", "m"}, {"normals", "1"}, {"area", area}, {"fields/MASS_FLUX", units_of("MASS_FLUX")}}) {
+                 {"coordinates", "m"}, {"NORMAL", "1"}, {"AREA", area}, {"fields/MASS_FLUX", units_of("MASS_FLUX")}}) {
             h5::Handle dset(H5Dopen2(cut_probe, name.c_str(), H5P_DEFAULT), H5Dclose, name);
             EXPECT_EQ(h5::read_string_attribute(dset, "units"), units) << name;
         }
@@ -602,17 +602,17 @@ TEST(FieldUnitsTest, AxisymmetricMonitorsArePerRadian) {
     comm::barrier();
     if (!comm::is_root()) return;
     // Forces and volume integrals over a radian of the revolved domain
-    const std::string force = csv_units(dir + "/forces.csv")["Fx_pressure"];
+    const std::string force = csv_units(dir + "/forces.csv")["F_X_PRESSURE"];
     EXPECT_EQ(force, "kg m s-2 rad-1");
     // Boundary probes: faces of the revolved wall, per radian
-    EXPECT_EQ(csv_units(dir + "/top.csv")["area"], "m2 rad-1");
+    EXPECT_EQ(csv_units(dir + "/top.csv")["AREA"], "m2 rad-1");
     auto top = csv_units(dir + "/top_reductions.csv");
-    EXPECT_EQ(top["area"], "m2 rad-1");
-    EXPECT_EQ(top["integral_TRACTION_PRESSURE_Y"], force);
-    EXPECT_EQ(top["mean_P"], units_of("P"));
+    EXPECT_EQ(top["AREA"], "m2 rad-1");
+    EXPECT_EQ(top["INTEGRAL_TRACTION_PRESSURE_Y"], force);
+    EXPECT_EQ(top["MEAN_P"], units_of("P"));
     auto integrals = csv_units(dir + "/integrals.csv");
-    EXPECT_EQ(integrals["kinetic_energy"], "kg m2 s-2 rad-1");
-    EXPECT_EQ(integrals["temperature"], "m3 K rad-1");
+    EXPECT_EQ(integrals["KINETIC_ENERGY"], "kg m2 s-2 rad-1");
+    EXPECT_EQ(integrals["TEMPERATURE"], "m3 K rad-1");
     if (!::testing::Test::HasFailure()) std::filesystem::remove_all(dir);
 }
 
@@ -777,9 +777,9 @@ TEST(FieldUnitsTest, NondimensionalCasesWriteDimensionlessUnitsLines) {
                 EXPECT_EQ(files[file]["x"], "m") << file;
                 EXPECT_EQ(files[file]["P"], "kg m-1 s-2") << file;
             }
-            EXPECT_EQ(files["/line_reductions.csv"]["length"], "m");
+            EXPECT_EQ(files["/line_reductions.csv"]["LENGTH"], "m");
             EXPECT_EQ(files["/extract/line_reductions.csv"], files["/line_reductions.csv"]);
-            EXPECT_EQ(files["/forces.csv"]["Fx_pressure"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
+            EXPECT_EQ(files["/forces.csv"]["F_X_PRESSURE"], N_DIM == 3 ? "kg m s-2" : "kg s-2");
             EXPECT_EQ(spectra["mean P"], "kg m-1 s-2");
         }
     }

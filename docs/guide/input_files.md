@@ -282,7 +282,14 @@ form, and `mallard input upgrade` rewrites them with their references. In
 `RHO` and `U_X`: `name = "turns"` becomes `"TURNS"`, and so do the
 expressions of quantities and of `[[particles.probes]]` `fields` that read it.
 A name whose uppercase form is a particle variable (`"t"`, `"x"`) is listed
-for renaming by hand.
+for renaming by hand. The names of monitored values and output columns
+became uppercase too: `integrals_kinetic_energy` is `integrals_KINETIC_ENERGY`,
+`forces_cylinder_Fx_pressure` is `forces_cylinder_F_X_PRESSURE`, a probe's
+`outlet_mean_T` is `outlet_MEAN_T` (the probe's name stays as written) and
+`convergence_converged` is `convergence_CONVERGED`. `mallard input upgrade`
+rewrites them in `[[triggers]]` `when` and `do`, `[statistics.convergence]`
+`signals` and `[[probes]]` `spectra.fields` (`mean_P` becomes `MEAN_P`);
+the lowercase names are input errors that name the uppercase ones.
 
 A changed default is not a deprecated key, and `mallard input upgrade`
 leaves the file as it is: it only prints a note, which does not change the

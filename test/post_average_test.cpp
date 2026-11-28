@@ -339,8 +339,8 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSn
         if (!comm::is_root()) continue;
         const auto each = read_csv(extracted + "/probe_" + name + "_reductions.csv");
         const auto mean = read_csv(averaged + "/" + name + "_reductions.csv");
-        const std::string measure = std::string(name) == "dense" ? (N_DIM == 2 ? "area" : "volume")
-                                                                 : (N_DIM == 2 ? "length" : "area");
+        const std::string measure = std::string(name) == "dense" ? (N_DIM == 2 ? "AREA" : "VOLUME")
+                                                                 : (N_DIM == 2 ? "LENGTH" : "AREA");
         ASSERT_EQ(each.at("t").size(), 3u);
         ASSERT_EQ(mean.at("t").size(), 1u);
         EXPECT_EQ(mean.at("t")[0], each.at("t")[2]);
@@ -350,8 +350,8 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSn
             t_last = each.at("t")[k];
             total += w;
             m += w * each.at(measure)[k];
-            rho += w * each.at("integral_RHO")[k];
-            p += w * each.at("integral_P")[k];
+            rho += w * each.at("INTEGRAL_RHO")[k];
+            p += w * each.at("INTEGRAL_P")[k];
         }
         // The region changes between snapshots
         EXPECT_NE(each.at(measure)[0], each.at(measure)[2]);
@@ -377,7 +377,7 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyA
     // measure, of RHO U_X = of RHOU_X, of RHO U_X for Favre = favre times the integral of RHO
     const std::string run = fresh_dir("moments_run");
     run_case(run);
-    const std::string measure = N_DIM == 2 ? "area" : "volume";
+    const std::string measure = N_DIM == 2 ? "AREA" : "VOLUME";
     const std::string dense = "{type = \"where\", condition = \"RHO > 1.1\"}";
     const auto extracted = [&](const std::string & name, const std::string & region) {
         const std::string dir = fresh_dir("moments_extract_" + name);
@@ -421,11 +421,11 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyA
     if (comm::is_root()) {
         ASSERT_EQ(each.at("t").size(), 3u);
         const auto e = [&](const char * column) { return [&each, column](size_t k) { return each.at(column)[k]; }; };
-        const double m = in_time(each, e(measure.c_str())), rho = in_time(each, e("integral_RHO"));
-        const double u = in_time(each, e("integral_U_X")) / m;
-        const double uu = in_time(each, [&](size_t k) { return std::pow(each.at("rms_U_X")[k], 2) * each.at(measure)[k]; });
-        const double rho_u = in_time(each, e("integral_RHOU_X"));
-        const double favre = in_time(each, [&](size_t k) { return each.at("favre_U_X")[k] * each.at("integral_RHO")[k]; });
+        const double m = in_time(each, e(measure.c_str())), rho = in_time(each, e("INTEGRAL_RHO"));
+        const double u = in_time(each, e("INTEGRAL_U_X")) / m;
+        const double uu = in_time(each, [&](size_t k) { return std::pow(each.at("RMS_U_X")[k], 2) * each.at(measure)[k]; });
+        const double rho_u = in_time(each, e("INTEGRAL_RHOU_X"));
+        const double favre = in_time(each, [&](size_t k) { return each.at("FAVRE_U_X")[k] * each.at("INTEGRAL_RHO")[k]; });
         expect_near(mean.at("integral_MEAN_U_X_U_X")[0], uu, uu);
         expect_near(mean.at("COV_U_X_U_X")[0], uu / m - u * u, uu / m);
         expect_near(mean.at("RMS_U_X")[0], std::sqrt(uu / m - u * u), std::sqrt(uu / m));
@@ -453,10 +453,10 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyA
         }
         ASSERT_LT(row, profile.at("x").size());
         const auto e = [&](const char * column) { return [&cut, column](size_t k) { return cut.at(column)[k]; }; };
-        const double m = in_time(cut, e(measure.c_str())), rho = in_time(cut, e("integral_RHO"));
-        const double u = in_time(cut, e("integral_U_X")) / m;
-        const double uu = in_time(cut, [&](size_t k) { return std::pow(cut.at("rms_U_X")[k], 2) * cut.at(measure)[k]; }) / m;
-        const double favre = in_time(cut, [&](size_t k) { return cut.at("favre_U_X")[k] * cut.at("integral_RHO")[k]; });
+        const double m = in_time(cut, e(measure.c_str())), rho = in_time(cut, e("INTEGRAL_RHO"));
+        const double u = in_time(cut, e("INTEGRAL_U_X")) / m;
+        const double uu = in_time(cut, [&](size_t k) { return std::pow(cut.at("RMS_U_X")[k], 2) * cut.at(measure)[k]; }) / m;
+        const double favre = in_time(cut, [&](size_t k) { return cut.at("FAVRE_U_X")[k] * cut.at("INTEGRAL_RHO")[k]; });
         const double loose = 1e-10 / tolerance;
         expect_near(profile.at("MEAN_RHO")[row], rho / m, loose * rho / m);
         expect_near(profile.at("MEAN_U_X")[row], u, loose * std::abs(u));

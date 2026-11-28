@@ -18,7 +18,7 @@
 #
 # Numerics: hybrid KEEP / HLLC flux with MUSCL without limiter, SSPRK3, fused
 # Strang chemistry. [integrals] budget = true: the numerical dissipation of
-# kinetic energy against the molecular one (eps_numerical, from the scheme's
+# kinetic energy against the molecular one (EPS_NUMERICAL, from the scheme's
 # own pressure work; docs/design/les.md, section 4.2).
 #
 # Run (from this directory; the LES, les.toml, differs in the mesh, [les] and

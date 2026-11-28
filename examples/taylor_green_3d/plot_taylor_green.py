@@ -22,9 +22,9 @@ def load(path, mu):
     """Time, normalized kinetic energy, -dE/dt and 2 mu enstrophy."""
     d = np.genfromtxt(path, delimiter=",", names=True)
     t, i = np.unique(d["t"], return_index=True)
-    E = d["kinetic_energy"][i] / BOX_VOLUME
+    E = d["KINETIC_ENERGY"][i] / BOX_VOLUME
     eps = -np.gradient(E, t)
-    eps_omega = 2.0 * mu * d["enstrophy"][i] / BOX_VOLUME
+    eps_omega = 2.0 * mu * d["ENSTROPHY"][i] / BOX_VOLUME
     return t, E, eps, eps_omega
 
 

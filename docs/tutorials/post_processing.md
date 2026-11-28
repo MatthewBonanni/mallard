@@ -216,22 +216,22 @@ reductions of the last snapshot, in the fine run:
 == probe_wall_reductions.csv ========================================== t = 200 s, the last
   column                        value            units
   length                         3.14098214      m
-  integral_CP                   -1.02092069      m
-  integral_CF                    0.530380813     m
-  integral_TRACTION_PRESSURE_X   0.0207651252    kg s-2
-  integral_TRACTION_PRESSURE_Y  -4.20926906e-07  kg s-2
-  integral_TRACTION_VISCOUS_X    0.011134492     kg s-2
-  integral_TRACTION_VISCOUS_Y   -1.00614686e-07  kg s-2
+  INTEGRAL_CP                   -1.02092069      m
+  INTEGRAL_CF                    0.530380813     m
+  INTEGRAL_TRACTION_PRESSURE_X   0.0207651252    kg s-2
+  INTEGRAL_TRACTION_PRESSURE_Y  -4.20926906e-07  kg s-2
+  INTEGRAL_TRACTION_VISCOUS_X    0.011134492     kg s-2
+  INTEGRAL_TRACTION_VISCOUS_Y   -1.00614686e-07  kg s-2
 
 == probe_contour_reductions.csv ======================================= t = 200 s, the last
   column                    value            units
   length                    31.4159265       m
-  integral_MASS_FLUX         5.34867893e-05  kg m-1 s-1
-  integral_MOMENTUM_FLUX_X  -0.0311596759    kg s-2
-  integral_MOMENTUM_FLUX_Y   1.9290865e-06   kg s-2
+  INTEGRAL_MASS_FLUX         5.34867893e-05  kg m-1 s-1
+  INTEGRAL_MOMENTUM_FLUX_X  -0.0311596759    kg s-2
+  INTEGRAL_MOMENTUM_FLUX_Y   1.9290865e-06   kg s-2
 ```
 
-`integral_TRACTION_PRESSURE_X` plus `integral_TRACTION_VISCOUS_X` is the drag of `[[forces]]`. The circle's
+`INTEGRAL_TRACTION_PRESSURE_X` plus `INTEGRAL_TRACTION_VISCOUS_X` is the drag of `[[forces]]`. The circle's
 `MOMENTUM_FLUX` is the momentum, pressure included, flowing out through it. In a steady flow nothing
 accumulates inside, so it is minus the drag, apart from the viscous stress on the circle, which the flux
 variables leave out. The circle gives C_D = 1.558 against 1.595 on the wall in the fine run, a gap that
@@ -323,7 +323,7 @@ value extrapolated to zero cell size, and the grid convergence index (GCI), an e
 value. For the two parts of the drag:
 
 ```bash
-mallard post convergence coarse medium fine --quantity Fx_pressure,Fx_viscous
+mallard post convergence coarse medium fine --quantity F_X_PRESSURE,F_X_VISCOUS
 ```
 
 ```text
@@ -336,13 +336,13 @@ mallard post convergence coarse medium fine --quantity Fx_pressure,Fx_viscous
 
 == Grid convergence ================================================================== WARN
   status  quantity                     fine         extrapolated  units   order  GCI     behavior
-  WARN    forces_cylinder:Fx_pressure  0.020765125  0.020581499   kg s-2  1.72    1.11%  monotonic
-  WARN    forces_cylinder:Fx_viscous   0.011134492  0.0099813681  kg s-2  0.38   12.9%   monotonic
+  WARN    forces_cylinder:F_X_PRESSURE  0.020765125  0.020581499   kg s-2  1.72    1.11%  monotonic
+  WARN    forces_cylinder:F_X_VISCOUS   0.011134492  0.0099813681  kg s-2  0.38   12.9%   monotonic
 
-  forces_cylinder:Fx_pressure: converging monotonically, order 1.72 (design 3), extrapolated
+  forces_cylinder:F_X_PRESSURE: converging monotonically, order 1.72 (design 3), extrapolated
   0.020581499; fine-grid value 0.020765125 +/- 1.11% (GCI, Fs = 1.25); order 1.72 is more
   than 1 from the design order 3
-  forces_cylinder:Fx_viscous: converging monotonically, order 0.38 (design 3), extrapolated
+  forces_cylinder:F_X_VISCOUS: converging monotonically, order 0.38 (design 3), extrapolated
   0.0099813681; fine-grid value 0.011134492 +/- 12.9% (GCI, Fs = 1.25); order 0.38 is more
   than 1 from the design order 3
 
@@ -372,7 +372,7 @@ arguments:
 import mallard
 
 forces = mallard.open("fine/forces_cylinder.csv")
-cd = (forces.read_all("Fx_pressure") + forces.read_all("Fx_viscous")) / 0.02   # every row
+cd = (forces.read_all("F_X_PRESSURE") + forces.read_all("F_X_VISCOUS")) / 0.02   # every row
 
 wall = mallard.open("fine/extract/probe_wall.csv")
 x, y, cf = wall.read("x"), wall.read("y"), wall.read("CF")                   # the last snapshot's samples
@@ -384,7 +384,7 @@ rms = mallard.open("fine/average/average.vtkhdf").read("RMS_U_X")     # one valu
 mallard.post.average("solut/wake.vtkhdf", times="100:200", fields=["U_X", "U_Y", "P"],
                      cwd="fine")                                              # mallard post average
 
-study = mallard.post.convergence(["coarse", "medium", "fine"], quantity=["Fx_pressure", "Fx_viscous"])
+study = mallard.post.convergence(["coarse", "medium", "fine"], quantity=["F_X_PRESSURE", "F_X_VISCOUS"])
 [(s["name"], s["estimate"]["extrapolated"], s["estimate"]["gci"]) for s in study["quantities"]]
 ```
 
@@ -403,8 +403,8 @@ fine      14,444  1.5950     1.5580  2.270     53.52°    7.86e-02
 reference C_D: 1.5 to 1.54
 reference L / D: 2.13 to 2.35
 reference separation angle [deg]: 53.7 to 55.6
-forces_cylinder:Fx_pressure: converging monotonically, order 1.72 (design 3), extrapolated 0.020581499; fine-grid value 0.020765125 +/- 1.11% (GCI, Fs = 1.25); order 1.72 is more than 1 from the design order 3
-forces_cylinder:Fx_viscous: converging monotonically, order 0.38 (design 3), extrapolated 0.0099813681; fine-grid value 0.011134492 +/- 12.9% (GCI, Fs = 1.25); order 0.38 is more than 1 from the design order 3
+forces_cylinder:F_X_PRESSURE: converging monotonically, order 1.72 (design 3), extrapolated 0.020581499; fine-grid value 0.020765125 +/- 1.11% (GCI, Fs = 1.25); order 1.72 is more than 1 from the design order 3
+forces_cylinder:F_X_VISCOUS: converging monotonically, order 0.38 (design 3), extrapolated 0.0099813681; fine-grid value 0.011134492 +/- 12.9% (GCI, Fs = 1.25); order 0.38 is more than 1 from the design order 3
 ```
 
 **The wake.** The fine run's U_X with the recirculation outlined, the Q-criterion and the RMS of U_X from

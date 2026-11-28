@@ -79,7 +79,7 @@ and 1 more.
 | `C` | 1.35 / 0.5 / 0.07 / 0.17 | Model constant (Sigma / WALE / Vreman's `c` / Smagorinsky) |
 | `Pr_t`, `Sc_t` | 0.9, 0.9 | Turbulent Prandtl and Schmidt numbers |
 | `filter_width` | `scotti` (3D), `volume` (2D) | `scotti` corrects `V^(1/3)` for anisotropic cells; `volume` is `V^(1/d)` |
-| `dynamic` | `false` | Constant from the global dynamic procedure (Germano/Lilly), once per step; written to `integrals.csv` as `les_C` |
+| `dynamic` | `false` | Constant from the global dynamic procedure (Germano/Lilly), once per step; written to `integrals.csv` as `LES_C` |
 | `gradients` | `least_squares` | (TENO) `reconstruction`: the models' velocity gradients from TENO's central polynomials in its smooth cells; [below](#gradients-of-the-reconstruction) |
 
 Pitfalls:
@@ -155,8 +155,8 @@ shock sensor (restricted to compressions) fires:
 | `central` | `cell_averages` with TENO, else `reconstructed` | The central flux's states: the two cells' values (the kinetic energy changes by exactly the pressure work) or the reconstructed face states; TENO's states make the central flux add energy, and so do MUSCL's with no viscosity or model to remove it (Euler: set `cell_averages`) ([design](../design/les.md#44-central-flux-for-teno-689)) |
 
 `[integrals] budget = true` adds the kinetic-energy budget to
-`integrals.csv`: `-ke_rate_viscous` (molecular), `-ke_rate_sgs` (model) and
-`eps_numerical` (the scheme). With the hybrid flux the numerical share is a
+`integrals.csv`: `-KE_RATE_VISCOUS` (molecular), `-KE_RATE_SGS` (model) and
+`EPS_NUMERICAL` (the scheme). With the hybrid flux the numerical share is a
 few percent (3% on the channel at Re<sub>τ</sub> = 590); with HLLC alone it
 can rival the model's. Check it whenever you change mesh or scheme.
 
@@ -206,7 +206,7 @@ table read at zero subgrid variance: [thickened flamelets](flamelet.md#thickened
 | `subgrid_velocity` | `colin` | `charlette` only: `u'` of the efficiency, `colin` or `eddy_viscosity` (`C_u nu_t / Delta`) |
 | `C_u` | 28 | `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"` |
 
-Output: `TF_F`, `TF_E`, `TF_OMEGA`, and `tf_beta` in the integrals file. Validated on a premixed H2/air flame in
+Output: `TF_F`, `TF_E`, `TF_OMEGA`, and `TF_BETA` in the integrals file. Validated on a premixed H2/air flame in
 decaying turbulence against its DNS
 ([benchmark](https://matthewbonanni.github.io/mallard/validation/#les-flame)).
 The dynamic efficiency keeps the turbulent flame speed within 8% of two DNS
