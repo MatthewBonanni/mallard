@@ -411,6 +411,9 @@ class Particles {
         /** @brief The injectors, as mallard check reports them. */
         const std::vector<particles::InjectorInfo> & injector_info() const { return injectors.info(); }
 
+        /** @brief Parcels rate injector j emits from t0 to t1. */
+        double injector_parcels(uint32_t j, double t0, double t1) const { return injectors.emitted(j, t0, t1); }
+
         /** @brief Send the particles that moved into halo cells to their owners (collective). */
         void migrate();
 

@@ -110,7 +110,7 @@ def build(args):
                 if entry.get("set") and source not in m["set_in"]:
                     m["set_in"].append(source)
                 if "type" in entry:
-                    types = set(filter(None, m.get("type", "").split("|"))) | {entry["type"]}
+                    types = set(filter(None, m.get("type", "").split("|"))) | set(entry["type"].split("|"))
                     m["type"] = "|".join(sorted(types))
                 if entry.get("required"):
                     m["required"] = True

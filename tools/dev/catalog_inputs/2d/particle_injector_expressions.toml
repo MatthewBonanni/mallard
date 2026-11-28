@@ -1,0 +1,101 @@
+# For the key catalog only (tools/dev/input_catalog.py): solid particles with
+# injectors giving each key of [[particles.injectors]] and of the size
+# distributions that may be an expression as one.
+
+[run]
+n_steps = 1
+dt = 1e-3
+
+[mesh]
+type = "cartesian"
+Nx = 8
+Ny = 8
+Lx = 1.0
+Ly = 1.0
+
+[initialize]
+p = 1.0
+T = 1.0
+u = [0.0, 0.0]
+
+[[boundaries]]
+name = "left"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "right"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "bottom"
+type = "wall_adiabatic"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+preset = "first_order"
+
+[physics]
+type = "navier_stokes"
+units = "nondimensional"
+mu = 0.01
+gamma = 1.4
+p_ref = 1.0
+T_ref = 1.0
+rho_ref = 1.0
+
+[particles]
+type = "solid"
+density = 1000.0
+specific_heat = 1.0
+temperature = 1.0
+seed = 7
+capacity = 1000
+
+[[particles.injectors]]
+name = "pulse"
+point = [0.5, 0.5]
+rate = "100 * (1 + sin(1000 * t))"
+velocity = ["0.1", "0.01 * y"]
+diameter = "0.01 * (1 + x)"
+weight = "2 + x"
+temperature = "1 + 0.1 * y"
+
+[[particles.injectors]]
+name = "wall"
+region = "left"
+mass_flow = "1e-3 * (1 + t)"
+speed = "0.1 * (1 + y)"
+direction = ["1", "0.2 * y"]
+cone_angle = "10 * y"
+diameter = 0.01
+
+[[particles.injectors]]
+name = "rosin"
+point = [0.2, 0.5]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "rosin_rammler", size = "0.01 * (1 + y)", spread = "3", basis = "mass", min = "0.002", max = "0.05"}
+
+[[particles.injectors]]
+name = "cloud"
+region = {type = "disk", center = [0.5, 0.5], radius = 0.2}
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "log_normal", median = "0.01 * (1 + y)", sigma = "0.5", basis = "number"}
+
+[[particles.injectors]]
+name = "jet"
+point = [0.8, 0.5]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "nukiyama_tanasawa", size = "0.01", spread = "1.0", exponent = "2.0", basis = "number"}
+
+[[particles.injectors]]
+name = "even"
+point = [0.5, 0.2]
+rate = 100.0
+velocity = [0.1, 0.0]
+diameter = {distribution = "uniform", min = "0.005", max = "0.02 * (1 + y)", basis = "number"}

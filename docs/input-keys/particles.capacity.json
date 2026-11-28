@@ -5,6 +5,7 @@
  ],
  "set_in": [
   "examples/tracer_vortex/input.toml",
+  "tools/dev/catalog_inputs/2d/particle_injector_expressions.toml",
   "tools/dev/catalog_inputs/2d/particle_injectors.toml"
  ],
  "type": "integer"

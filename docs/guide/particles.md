@@ -767,6 +767,72 @@ in equilibrium with the flow (`velocity = [0.0, 0.0]` starts them at rest).
 temperature where each enters. Tracers take
 none of these: they move with the gas.
 
+**Settings that vary.** Each of `rate`, `mass_flow`, `velocity` (per
+component), `speed`, `direction` (per component), `cone_angle`, `temperature`,
+`weight` and `diameter`, and each parameter of a size distribution (`size`,
+`spread`, `median`, `sigma`, `exponent`, `min`, `max`), may be an
+[expression](expressions.md) in place of a number. `rate` and `mass_flow`
+read `t` only; the others read `x`, `y`, `z` and `t`, evaluated for each
+parcel at the point where it enters and the time it enters (the end of its
+step). `count` and `mass` stay numbers, and so do `diameter` and `weight`
+with `mass` or `mass_flow`, whose mean mass they set. A pulsed rate:
+
+```toml
+[[particles.injectors]]
+name = "pulses"
+point = [0.0, 0.05]
+# 2e5 parcels/s for the first 30% of every 1 ms, ramping up over the first 5 ms
+rate = "2e5 * min(t / 5e-3, 1) * (frac(t / 1e-3) < 0.3 ? 1 : 0)"
+speed = 30.0
+direction = [1.0, 0.0]
+```
+
+A nozzle's exit profile, parabolic across an inlet of radius 2 mm about
+`y = 0.05`:
+
+```toml
+[[particles.injectors]]
+name = "nozzle"
+region = "inlet"
+rate = 1e5
+speed = "var r := (y - 0.05) / 2e-3; 40 * (1 - r^2)"
+cone_angle = "15 * abs(y - 0.05) / 2e-3"   # wider at the edge
+```
+
+A size that varies across the injector, here a Rosin–Rammler distribution
+whose size grows from the axis to the edge:
+
+```toml
+[[particles.injectors]]
+name = "spray"
+region = "inlet"
+rate = 1e5
+speed = 20.0
+diameter = {distribution = "rosin_rammler", basis = "mass", size = "20e-6 + 1e-2 * abs(y - 0.05)", spread = 3.0, min = 2e-6, max = 200e-6}
+```
+
+How the expressions are evaluated:
+
+- A rate of `t` is integrated over the part of each step within `start` and
+  `end` by adaptive Simpson quadrature, to 1e-7 parcels per step (or 1e-10 of
+  the step's parcels), carrying fractions of a parcel over as a constant rate
+  does: the count over the run is the integral of the rate to within one
+  parcel. Each step starts from 9 samples a quarter of a step apart in pairs,
+  so a pulse shorter than about an eighth of a step may be missed: resolve
+  pulses with the time step. `mallard check` and the default `capacity`
+  integrate it the same way.
+- A distribution whose parameters are expressions is drawn for each parcel
+  from its parameters there, by the same inversion of its cumulative
+  distribution as a distribution of numbers, computed for that parcel (on
+  1024 cells in ln d), which costs about 2000 evaluations of its density per
+  parcel. `"table"` distributions take numbers only.
+- A value that is invalid where a particle enters (a negative speed, rate or
+  diameter, a weight or temperature not above 0, a `cone_angle` outside
+  [0, 90], a zero direction, NaN) keeps that particle out and stops the run
+  at its next check, naming the injector, the key and the point.
+- Numbers, or strings with units (`"30 m/s"`), are constants and give the
+  same particles, bit for bit, as without expressions.
+
 ![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-light.svg#gh-light-mode-only)
 ![Where injectors put particles: along the inward normal of a boundary zone, uniformly in a filled region, and from points with and without a cone](../images/guide/particle_injection_sites-dark.svg#gh-dark-mode-only)
 
@@ -784,7 +850,7 @@ sends every particle along `direction`.*
 |---|---|---|
 | `name` | required | Its name: letters, digits and `_` |
 | `point`, `region` | one of them | Where it injects |
-| `count`, `mass`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, their total mass (solid particles; per meter of depth in 2D), parcels per second, or mass per second (solid particles; per meter of depth in 2D) |
+| `count`, `mass`, `rate`, `mass_flow` | one of them | Parcels released at once at `start`, their total mass (solid particles; per meter of depth in 2D), parcels per second, or mass per second (solid particles; per meter of depth in 2D); `rate` and `mass_flow` may be expressions of `t` |
 | `start`, `end` | 0, never | When it injects (`count` and `mass`: `start` only) |
 | `velocity`, `speed` | the gas velocity where each enters | The particles' velocity, or their speed along `direction` (solid particles; at most one) |
 | `direction` | the inward normal of a zone | Direction of the velocity with `speed` |
@@ -792,6 +858,9 @@ sends every particle along `direction`.*
 | `diameter` | `[particles] diameter` | A diameter or a size distribution |
 | `weight` | `[particles] weight` | Particles per parcel |
 | `temperature` | `[particles] temperature`, else the gas temperature where each enters | With heat transfer |
+
+Every key but `name`, `point`, `region`, `count`, `mass`, `start` and `end`
+may be an expression ([Settings that vary](#injectors)).
 
 ![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-light.svg#gh-light-mode-only)
 ![Parcels injected against rate times time for 0.7 parcels per step with the fraction carried over, and the mass of a mass_flow injector against mass_flow times time](../images/guide/particle_injection_rate-dark.svg#gh-dark-mode-only)

@@ -1626,7 +1626,9 @@ Seeds on a lattice, after the `points` in id order (`x` varying fastest).
 Particles seeded at random, at a point, on boundary zones or in a filled
 region, at once or continuously ([Injectors](guide/particles.md#injectors)), at most 8. Give exactly one
 of `point` and `region`, and of `count`, `mass`, `rate` and `mass_flow`; solid particles
-take at most one of `velocity` and `speed`.
+take at most one of `velocity` and `speed`. Keys marked *expression* take a number or an
+[expression](guide/expressions.md) of `x`, `y`, `z`, `t`, evaluated for each parcel where and
+when it enters ([Settings that vary](guide/particles.md#injectors)).
 
 | Key | Description |
 |---|---|
@@ -1635,18 +1637,19 @@ take at most one of `velocity` and `speed`.
 | `region` | Boundary zones (a zone name, injecting uniformly over their faces by area), or a filled region of shapes or of the mesh that does not move (uniformly in its volume), inline or a name |
 | `count` | Parcels released at once, at random, at `start` (at the run's start by default, before the first step); a restarted run does not release them again |
 | `mass` | Total mass released at once at `start`, as `count` (`"solid"`; per meter of depth in 2D): `count` is `mass / (weight m)` rounded, `m` the mean particle mass of `diameter` |
-| `rate` | Parcels per second |
-| `mass_flow` | Mass per second (`"solid"`; per meter of depth in 2D): `rate` is `mass_flow / (weight m)`, `m` the mean particle mass of `diameter` |
+| `rate` | Parcels per second; an expression of `t` |
+| `mass_flow` | Mass per second (`"solid"`; per meter of depth in 2D): `rate` is `mass_flow / (weight m)`, `m` the mean particle mass of `diameter` (a number, as `weight`); an expression of `t` |
 | `start`, `end` | Times it injects between, default 0 and for ever (`count` and `mass`: `start` only) |
-| `velocity` | Velocity of the particles (`"solid"`), default the gas velocity where each enters |
-| `speed` | Their speed (`"solid"`), along `direction`, default the gas velocity where each enters |
-| `direction` | Direction of their velocity with `speed`, default the inward normal on boundary zones (required elsewhere) |
-| `cone_angle` | Half angle in degrees, in [0, 90], of the cone about the direction the velocities fill (uniformly in angle in 2D, in solid angle in 3D), default 0 |
-| `diameter` | A diameter, or a size distribution `{distribution, basis, ...}` (`"solid"`), default `[particles] diameter` |
-| `weight` | Particles per parcel (`"solid"`), default `[particles] weight` |
-| `temperature` | Temperature of the particles (`"solid"` with `specific_heat`), default `[particles] temperature`, else the gas temperature where each enters |
+| `velocity` | Velocity of the particles (`"solid"`; components are *expressions*), default the gas velocity where each enters |
+| `speed` | Their speed (`"solid"`; *expression*), along `direction`, default the gas velocity where each enters |
+| `direction` | Direction of their velocity with `speed` (components are *expressions*), default the inward normal on boundary zones (required elsewhere) |
+| `cone_angle` | Half angle in degrees, in [0, 90], of the cone about the direction the velocities fill (uniformly in angle in 2D, in solid angle in 3D; *expression*), default 0 |
+| `diameter` | A diameter (*expression*), or a size distribution `{distribution, basis, ...}` (`"solid"`), default `[particles] diameter` |
+| `weight` | Particles per parcel (`"solid"`; *expression*), default `[particles] weight` |
+| `temperature` | Temperature of the particles (`"solid"` with `specific_heat`; *expression*), default `[particles] temperature`, else the gas temperature where each enters |
 
-A size distribution is a table of:
+A size distribution is a table of (its parameters `size`, `spread`, `median`, `sigma`,
+`exponent`, `min` and `max` are *expressions*, but not those of `"table"`):
 
 | Distribution key | Description |
 |---|---|

@@ -804,7 +804,8 @@ double largest_in_column(const Kokkos::View<rtype **, Kokkos::LayoutRight> & v, 
 
 void Solver::check_particles(CheckReport & r) {
     if (!particles) return;
-    for (const particles::InjectorInfo & info : particles->injector_info()) {
+    for (uint32_t k = 0; k < particles->injector_info().size(); k++) {
+        const particles::InjectorInfo & info = particles->injector_info()[k];
         CheckInjector j;
         j.name = info.name;
         j.site = info.site;
@@ -837,7 +838,7 @@ void Solver::check_particles(CheckReport & r) {
         if (info.count > 0) {
             j.parcels = info.start <= run_end ? static_cast<double>(info.count) : 0.0;
         } else if (std::isfinite(stop)) {
-            j.parcels = stop > from ? info.rate * (stop - from) : 0.0;
+            j.parcels = stop > from ? particles->injector_parcels(k, from, stop) : 0.0;
         }
         r.injectors.push_back(j);
     }

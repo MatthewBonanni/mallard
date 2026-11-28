@@ -20,6 +20,7 @@
 #include <tuple>
 
 #include "comm.h"
+#include "expression.h"
 #include "gated.h"
 #include "log.h"
 #include "mesh.h"
@@ -202,6 +203,72 @@ SizeDistribution read_size_distribution(const Input & holder, const std::string 
 
 namespace {
 
+const std::vector<std::string> VARIABLES = {"x", "y", "z", "t"};
+
+/** @brief Whether a value is an expression: a string that is not a quantity with a unit. */
+bool is_expression(const Input & v) { return v.is_string() && !has_unit(v.as_string()); }
+
+/** @brief Whether table's key is an expression, or an array holding one (without counting it as read). */
+bool expression_at(const Input & table, const std::string & key) {
+    const auto & entries = table.as_table().entries();
+    const auto it = entries.find(key);
+    if (it == entries.end()) return false;
+    if (!it->second.is_array()) return is_expression(it->second);
+    const auto & items = it->second.as_array();
+    return std::any_of(items.begin(), items.end(), [](const Input & v) { return is_expression(v); });
+}
+
+/**
+ * @brief The size distribution of t (at path) as one of expressions, sampled per parcel, if any of its parameters
+ *        is an expression: its law and basis into p, and each parameter given to param (setting, key, dimension) to
+ *        compile. False, reading nothing, if none is.
+ */
+bool read_size_law(const Input & t, const std::string & path, InjectorSpec & p,
+                   const std::function<void(uint32_t, const std::string &, const Dimension &)> & param) {
+    const std::vector<std::string> parameters = {"size", "spread", "median", "sigma", "exponent", "min", "max"};
+    if (std::none_of(parameters.begin(), parameters.end(), [&](const std::string & k) { return expression_at(t, k); })) {
+        return false;
+    }
+    const std::vector<std::string> kinds = {"log_normal", "nukiyama_tanasawa", "rosin_rammler", "table", "uniform"};
+    record_options(path + ".distribution", kinds);
+    const std::string kind = find_value<std::string>(t, "distribution");
+    if (std::find(kinds.begin(), kinds.end(), kind) == kinds.end()) throw not_accepted(t, path + ".distribution", kind, kinds);
+    record_options(path + ".basis", {"mass", "number"});
+    const std::string basis = find_value<std::string>(t, "basis");
+    if (basis != "mass" && basis != "number") throw not_accepted(t, path + ".basis", basis, {"mass", "number"});
+    if (kind == "table") {
+        throw invalid(t, "distribution", path, "\"table\" takes numbers: its min and max cannot be expressions",
+                      "Give min and max as numbers, or use a distribution of parameters");
+    }
+    p.by_mass = basis == "mass";
+    const auto required = [&](const std::string & key, const uint32_t s, const Dimension & d) {
+        if (!t.as_table().entries().contains(key)) throw missing_key(t, key);
+        param(s, key, d);
+    };
+    if (kind == "uniform") {
+        p.law = Law::UNIFORM;
+        // Optional keys of size distributions, which the uniform one requires
+        contains_optional(t, "min");
+        contains_optional(t, "max");
+        required("min", setting::DIAMETER_MIN, dim::length);
+        required("max", setting::DIAMETER_MAX, dim::length);
+        return true;
+    }
+    if (kind == "log_normal") {
+        p.law = Law::LOG_NORMAL;
+        required("median", setting::SIZE, dim::length);
+        required("sigma", setting::SPREAD, dim::none);
+    } else {
+        p.law = kind == "rosin_rammler" ? Law::ROSIN_RAMMLER : Law::NUKIYAMA_TANASAWA;
+        required("size", setting::SIZE, dim::length);
+        required("spread", setting::SPREAD, dim::none);
+        if (p.law == Law::NUKIYAMA_TANASAWA) required("exponent", setting::EXPONENT, dim::none);
+    }
+    if (contains_optional(t, "min")) param(setting::DIAMETER_MIN, "min", dim::length);
+    if (contains_optional(t, "max")) param(setting::DIAMETER_MAX, "max", dim::length);
+    return true;
+}
+
 /** @brief An element of an injector on this rank: its sort key over every rank, weight, cell, normal and simplices. */
 struct Element {
     std::array<double, 4> key{};  // global cell, then the face centroid
@@ -270,6 +337,43 @@ bool plain_name(const std::string & name) {
     return std::all_of(name.begin(), name.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
 }
 
+/** @brief What a valid value of setting s is. */
+std::string requirement(const uint32_t s) {
+    switch (s) {
+        case setting::RATE: return "must not be negative";
+        case setting::SPEED: return "must not be negative";
+        case setting::CONE_ANGLE: return "must be in [0, 90] degrees";
+        case setting::EXPONENT: return "must be above -1";
+        case setting::DIAMETER: return "must be positive, and a size distribution must have diameters between its bounds";
+        default:
+            if (s >= setting::VELOCITY && s < setting::VELOCITY + N_DIM) return "must be finite";
+            if (s >= setting::DIRECTION && s < setting::DIRECTION + N_DIM) return "must be finite, and the direction nonzero";
+            return "must be positive";
+    }
+}
+
+/** @brief An injector's rate of time on the host, for sizing and reports: an InputError where it is invalid. */
+struct HostRate {
+    const kexpr::Program * program = nullptr;
+    double scale = 1.0;
+    const std::pair<std::string, std::size_t> * key = nullptr;
+
+    KOKKOS_INLINE_FUNCTION double operator()(const double t) const {
+        KOKKOS_IF_ON_HOST((
+            const double xt[4] = {0.0, 0.0, 0.0, t};
+            const double v = (*program)(xt);
+            if (!(v >= 0.0) || !std::isfinite(v)) {
+                throw InputError(Diagnostic{.key = key->first, .line = key->second,
+                                            .message = "is " + logging::real(v) + " at t = " + logging::real(t) +
+                                                       "; it " + requirement(setting::RATE),
+                                            .docs = DOCS});
+            }
+            return v * scale;
+        ))
+        KOKKOS_IF_ON_DEVICE(((void)t; return 0.0;))
+    }
+};
+
 /** @brief The injector j of the step's k-th particle, and its numbers, from the step's offsets and firsts. */
 KOKKOS_INLINE_FUNCTION Random numbers_of(const Kokkos::View<uint64_t *> & info, const uint32_t n, const uint64_t seed,
                                          const uint64_t k, uint32_t & j) {
@@ -297,6 +401,39 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
     std::vector<int32_t> h_local_of_entry;
     std::vector<Element> local;  // every injector's local elements, in order
     std::set<std::string> seen;
+    // A setting's value v (path records its dimension, name reports its errors) as the expression of setting s
+    const auto add = [&](InjectorSpec & p, InjectorInfo & info, const uint32_t s, const Input & v, const std::string & path,
+                         const std::string & name, const Dimension & dimension) {
+        const std::string text = quantity_or_expression(v, path, dimension);
+        programs.push_back(compile_expression(name, line_of(v), text, VARIABLES));
+        program_keys.emplace_back(name, line_of(v));
+        p.program[s] = static_cast<uint16_t>(programs.size());
+        info.expressions.emplace_back(name.substr(name.find("].") + 2), text);
+    };
+    // Records that key of holder takes a number or an expression, whichever it is
+    const auto setting_use = [](const Input & holder, const std::string & key, const Dimension & dimension,
+                                const std::string & fallback = "") {
+        if (!holder.as_table().entries().contains(key) || holder.as_table().entries().at(key).is_table()) return;
+        holder.as_table().record_use(key, input_detail::real_use("number|string", dimension, fallback, fallback.empty()));
+    };
+    // Key of holder, a number or an expression, as the expression of setting s
+    const auto compile = [&](InjectorSpec & p, InjectorInfo & info, const uint32_t s, const Input & holder,
+                             const std::string & key, const std::string & where, const Dimension & dimension,
+                             const std::string & fallback = "") {
+        setting_use(holder, key, dimension, fallback);
+        add(p, info, s, holder.as_table().entries().at(key), where + "." + key, where + "." + key, dimension);
+    };
+    // Vector key of holder, of N_DIM numbers and expressions, as the expressions of settings first, ...
+    const auto compile_vector = [&](InjectorSpec & p, InjectorInfo & info, const uint32_t first, const Input & holder,
+                                    const std::string & key, const std::string & where, const Dimension & dimension) {
+        holder.as_table().record_use(key, input_detail::real_use("array", dimension, "", false));
+        const Input & v = holder.as_table().entries().at(key);
+        if (!v.is_array() || v.as_array().size() != N_DIM) {
+            throw invalid(holder, key, where, "must be an array of " + std::to_string(N_DIM) + " numbers or expressions");
+        }
+        FOR_I_DIM add(p, info, first + i, v.as_array()[i], where + "." + key, where + "." + key + "[" + std::to_string(i) + "]",
+                      dimension);
+    };
     for (size_t k = 0; k < entries.size(); k++) {
         const Input & e = entries[k];
         const std::string where = "particles.injectors[" + std::to_string(k) + "]";
@@ -537,17 +674,40 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             if (contains_optional(e, key)) throw invalid(e, key, where, why, std::string("Remove ") + key);
         };
         SizeDistribution size;
+        bool size_varies = false;  // a diameter or size distribution of expressions
         if (defaults.solid) {
-            if (contains_optional(e, "diameter")) {
+            if (contains_optional(e, "diameter") && expression_at(e, "diameter")) {
+                compile(p, info, setting::DIAMETER, e, "diameter", where, dim::length);
+                size_varies = true;
+            } else if (contains_optional(e, "diameter") && e.as_table().entries().at("diameter").is_table() &&
+                       read_size_law(e.at("diameter"), where + ".diameter", p, [&](uint32_t s, const std::string & key,
+                                                                                   const Dimension & d) {
+                           compile(p, info, s, e.at("diameter"), key, where + ".diameter", d);
+                       })) {
+                size_varies = true;
+            } else if (contains_optional(e, "diameter")) {
                 size = read_size_distribution(e, "diameter", where);
+                setting_use(e, "diameter", dim::length);
+                const Input & t = e.at("diameter");
+                if (t.is_table() && find_value<std::string>(t, "distribution") != "table") {
+                    for (const auto & [key, d] : {std::pair{"size", dim::length}, {"median", dim::length},
+                                                  {"min", dim::length}, {"max", dim::length}, {"spread", dim::none},
+                                                  {"sigma", dim::none}, {"exponent", dim::none}}) {
+                        setting_use(t, key, d);
+                    }
+                }
             } else if (defaults.diameter) {
                 size = *defaults.diameter;
             } else {
                 throw missing_key(e, "diameter", "Give the diameter here or in [particles]");
             }
             p.weight = defaults.weight;
-            if (contains_optional(e, "weight")) {
-                p.weight = static_cast<rtype>(positive_double(e, "weight", where, N_DIM == 3 ? dim::none : dim::of(0, -1, 0)));
+            const Dimension per_parcel = N_DIM == 3 ? dim::none : dim::of(0, -1, 0);
+            if (contains_optional(e, "weight") && expression_at(e, "weight")) {
+                compile(p, info, setting::WEIGHT, e, "weight", where, per_parcel);
+            } else if (contains_optional(e, "weight")) {
+                p.weight = static_cast<rtype>(positive_double(e, "weight", where, per_parcel));
+                setting_use(e, "weight", per_parcel);
             }
             const bool vector = contains_optional(e, "velocity"), speed = contains_optional(e, "speed");
             if (vector && speed) {
@@ -563,6 +723,9 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 forbid("direction", why);
                 forbid("cone_angle", why);
                 p.gas_velocity = true;
+            } else if (vector && expression_at(e, "velocity")) {
+                forbid("direction", "is given by velocity");
+                compile_vector(p, info, setting::VELOCITY, e, "velocity", where, dim::velocity);
             } else if (vector) {
                 forbid("direction", "is given by velocity");
                 const std::vector<rtype> v = find_real_vector(e, "velocity", dim::velocity);
@@ -573,10 +736,17 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 p.speed = static_cast<rtype>(norm);
                 FOR_I_DIM dir[i] = norm > 0.0 ? static_cast<double>(v[i]) / norm : (i == 0 ? 1.0 : 0.0);
             } else {
-                const double s = find_double(e, "speed", dim::velocity);
-                if (!(s >= 0.0) || !std::isfinite(s)) throw invalid(e, "speed", where, "must not be negative");
-                p.speed = static_cast<rtype>(s);
-                if (contains_optional(e, "direction")) {
+                if (expression_at(e, "speed")) {
+                    compile(p, info, setting::SPEED, e, "speed", where, dim::velocity);
+                } else {
+                    const double s = find_double(e, "speed", dim::velocity);
+                    if (!(s >= 0.0) || !std::isfinite(s)) throw invalid(e, "speed", where, "must not be negative");
+                    p.speed = static_cast<rtype>(s);
+                    setting_use(e, "speed", dim::velocity);
+                }
+                if (contains_optional(e, "direction") && expression_at(e, "direction")) {
+                    compile_vector(p, info, setting::DIRECTION, e, "direction", where, dim::none);
+                } else if (contains_optional(e, "direction")) {
                     const std::vector<rtype> v = find_real_vector(e, "direction", dim::none);
                     double norm = 0.0;
                     if (v.size() == N_DIM) FOR_I_DIM norm += static_cast<double>(v[i] * v[i]);
@@ -591,15 +761,24 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 }
             }
             FOR_I_DIM p.direction[i] = static_cast<rtype>(dir[i]);
-            const double cone_degrees = find_double_or(e, "cone_angle", dim::angle_degrees, 0.0);
-            const double cone = cone_degrees * std::numbers::pi / 180.0;
-            if (!(cone_degrees >= 0.0 && cone_degrees <= 90.0)) {
-                throw invalid(e, "cone_angle", where, "must be in [0, 90] degrees (the cone's half angle)");
+            double cone_degrees = std::numeric_limits<double>::quiet_NaN();
+            if (expression_at(e, "cone_angle")) {
+                compile(p, info, setting::CONE_ANGLE, e, "cone_angle", where, dim::angle_degrees, "0.0");
+            } else {
+                cone_degrees = find_double_or(e, "cone_angle", dim::angle_degrees, 0.0);
+                const double cone = cone_degrees * std::numbers::pi / 180.0;
+                if (!(cone_degrees >= 0.0 && cone_degrees <= 90.0)) {
+                    throw invalid(e, "cone_angle", where, "must be in [0, 90] degrees (the cone's half angle)");
+                }
+                p.cone = static_cast<rtype>(cone);
+                e.as_table().record_use("cone_angle", input_detail::real_use("number|string", dim::angle_degrees, "0.0", false));
             }
-            p.cone = static_cast<rtype>(cone);
             if (defaults.heated) {
-                if (contains_optional(e, "temperature")) {
+                if (contains_optional(e, "temperature") && expression_at(e, "temperature")) {
+                    compile(p, info, setting::TEMPERATURE, e, "temperature", where, dim::temperature);
+                } else if (contains_optional(e, "temperature")) {
                     p.temperature = static_cast<rtype>(positive_double(e, "temperature", where, dim::temperature));
+                    setting_use(e, "temperature", dim::temperature);
                 } else if (defaults.temperature_given) {
                     p.temperature = defaults.temperature;
                 } else {
@@ -608,15 +787,18 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             } else {
                 forbid("temperature", "is the temperature of particles with heat transfer (specific_heat)");
             }
+            const double nan = std::numeric_limits<double>::quiet_NaN();
+            const bool velocity_varies = p.program[setting::VELOCITY] != 0;
+            info.solid = true;
             info.along_normal = p.along_normal;
             info.gas_velocity = p.gas_velocity;
             info.gas_temperature = p.gas_temperature;
-            FOR_I_DIM info.direction[i] = dir[i];
-            info.speed = static_cast<double>(p.speed);
+            FOR_I_DIM info.direction[i] = velocity_varies || p.program[setting::DIRECTION] ? nan : dir[i];
+            info.speed = velocity_varies || p.program[setting::SPEED] ? nan : static_cast<double>(p.speed);
             info.cone_angle = cone_degrees;
-            info.weight = static_cast<double>(p.weight);
-            info.mean_diameter = size.mean_d;
-            info.sauter_diameter = size.mean_d3 / size.mean_d2;
+            info.weight = p.program[setting::WEIGHT] ? nan : static_cast<double>(p.weight);
+            info.mean_diameter = size_varies ? nan : size.mean_d;
+            info.sauter_diameter = size_varies ? nan : size.mean_d3 / size.mean_d2;
         } else {
             const std::string why = "is for solid particles; tracers move with the gas";
             for (const char * key : {"velocity", "speed", "direction", "cone_angle", "diameter", "weight", "temperature"}) {
@@ -624,6 +806,15 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             }
             size.log_d = {0.0};
             size.cdf = {1.0};
+        }
+        if (size_varies) {
+            size.log_d = {0.0};
+            size.cdf = {1.0};
+        }
+        if ((by_total || by_mass) && (size_varies || p.program[setting::WEIGHT])) {
+            const char * key = by_total ? "mass" : "mass_flow";
+            throw invalid(e, key, where, "needs a diameter and a weight that are numbers, which give the mean particle mass",
+                          by_total ? "Give count, or numbers for diameter and weight" : "Give rate, or numbers for diameter and weight");
         }
         if (by_total) {
             if (!defaults.solid) throw invalid(e, "mass", where, "is for solid particles; tracers have no mass", "Give count");
@@ -641,14 +832,36 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             info.mass = total;
         } else if (by_count) {
             info.count = p.count;
+        } else if (by_rate && expression_at(e, "rate")) {
+            compile(p, info, setting::RATE, e, "rate", where, dim::rate);
+            p.rate = std::numeric_limits<double>::quiet_NaN();
         } else if (by_rate) {
             p.rate = positive_double(e, "rate", where, dim::rate);
+            setting_use(e, "rate", dim::rate);
         } else {
             if (!defaults.solid) throw invalid(e, "mass_flow", where, "is for solid particles", "Give rate");
-            const double mdot = positive_double(e, "mass_flow", where, N_DIM == 3 ? dim::mass_flow : dim::of(1, -1, -1));
+            const Dimension flow = N_DIM == 3 ? dim::mass_flow : dim::of(1, -1, -1);
             const double mass = static_cast<double>(defaults.density) * std::numbers::pi / 6.0 * size.mean_d3;
-            p.rate = mdot / (static_cast<double>(p.weight) * mass);
-            info.mass_flow = mdot;
+            if (expression_at(e, "mass_flow")) {
+                compile(p, info, setting::RATE, e, "mass_flow", where, flow);
+                p.rate = std::numeric_limits<double>::quiet_NaN();
+                p.rate_scale = 1.0 / (static_cast<double>(p.weight) * mass);
+                info.mass_flow = std::numeric_limits<double>::quiet_NaN();
+            } else {
+                const double mdot = positive_double(e, "mass_flow", where, flow);
+                setting_use(e, "mass_flow", flow);
+                p.rate = mdot / (static_cast<double>(p.weight) * mass);
+                info.mass_flow = mdot;
+            }
+        }
+        if (p.program[setting::RATE]) {
+            const kexpr::Program & rate = programs[p.program[setting::RATE] - 1u];
+            if (rate.uses(0) || rate.uses(1) || rate.uses(2)) {
+                const std::string key = by_rate ? "rate" : "mass_flow";
+                throw invalid(e, key, where, "may depend on t only: it is the injector's total, not a density over it",
+                              "Give " + key + " as an expression of t; to vary the particles across the injector, give "
+                              "their settings as expressions of x, y, z");
+            }
         }
         if (defaults.solid && by_rate) {
             info.mass_flow = p.rate * static_cast<double>(p.weight) * static_cast<double>(defaults.density) *
@@ -679,6 +892,13 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
     sampler.local_of_entry = device(h_local_of_entry, "particle_injector_local");
     sampler.size_log_d = device(h_size_log_d, "particle_injector_size_log_d");
     sampler.size_cdf = device(h_size_cdf, "particle_injector_size_cdf");
+    if (!programs.empty()) {
+        std::vector<const kexpr::Program *> list;
+        for (const kexpr::Program & program : programs) list.push_back(&program);
+        sampler.programs = kexpr::ProgramTable<>(list);
+    }
+    sampler.fault = Kokkos::View<uint64_t>("particle_injector_fault");
+    sampler.fault_at = Kokkos::View<double[5]>("particle_injector_fault_at");
     n_local_entries = static_cast<uint32_t>(local.size());
     std::vector<uint32_t> cells, offsets{0};
     std::vector<double> simplex_cdf;
@@ -737,9 +957,57 @@ double Injectors::parcels(const double t0, const double t1) const {
             continue;
         }
         const double a = std::max(t0, p.start), b = std::min(t1, p.end);
-        n += b > a ? std::ceil(p.rate * (b - a)) + 1.0 : 0.0;
+        const uint32_t j = static_cast<uint32_t>(&p - specs.data());
+        n += b > a ? std::ceil(emitted(j, a, b)) + 1.0 : 0.0;
     }
     return n;
+}
+
+double Injectors::emitted(const uint32_t j, const double t0, const double t1) const {
+    const InjectorSpec & p = specs[j];
+    if (!p.program[setting::RATE]) return p.rate * (t1 - t0);
+    // In windows as narrow as steps of a long run: the quadrature of a whole run could step over its pulses
+    constexpr uint32_t windows = 4096;
+    const uint32_t k = p.program[setting::RATE] - 1u;
+    const HostRate rate{&programs[k], p.rate_scale, &program_keys[k]};
+    double total = 0.0, peak = 0.0;
+    for (uint32_t w = 0; w < windows; w++) {
+        const double a = t0 + (t1 - t0) * w / windows, b = w + 1 == windows ? t1 : t0 + (t1 - t0) * (w + 1) / windows;
+        total += integrate_rate(rate, a, b, peak);
+    }
+    return total;
+}
+
+void Injectors::check_values() const {
+    if (empty()) return;
+    std::vector<double> mine(6, 0.0);
+    uint64_t key = 0;
+    Kokkos::deep_copy(key, sampler.fault);
+    if (key != 0) {
+        auto at = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), sampler.fault_at);
+        mine[0] = static_cast<double>(key);
+        for (size_t i = 0; i < 5; i++) mine[1 + i] = at(i);
+    }
+    const std::vector<double> all = distributed ? comm::allgatherv(mine) : mine;
+    for (size_t r = 0; r < all.size(); r += 6) {
+        if (all[r] == 0.0) continue;
+        const uint64_t code = static_cast<uint64_t>(all[r]) - 1u;
+        const uint32_t j = static_cast<uint32_t>(code / setting::N_SETTINGS), s = static_cast<uint32_t>(code % setting::N_SETTINGS);
+        // A distribution of expressions with no diameters between its bounds has no expression of its own
+        const auto & [name, line] = specs[j].program[s] ? program_keys[specs[j].program[s] - 1u]
+                                                        : std::pair<std::string, std::size_t>{
+                                                              "particles.injectors[" + std::to_string(j) + "].diameter", 0};
+        const double x[3] = {all[r + 1], all[r + 2], all[r + 3]};
+        const std::string where = s == setting::RATE ? "" : " at " + vector_text(x, N_DIM) + ",";
+        throw InputError(Diagnostic{.key = name, .line = line,
+                                    .message = "of injector " + names[j] + " is " + logging::real(all[r + 5]) + where +
+                                               " t = " + logging::real(all[r + 4]) + "; it " + requirement(s),
+                                    .docs = DOCS});
+    }
+    if (programs.empty()) return;
+    const uint32_t stopped = distributed ? comm::allreduce(sampler.programs.stopped(), comm::Op::MAX)
+                                         : sampler.programs.stopped();
+    if (stopped > 0) throw InputError(programs[stopped - 1].runaway_error());
 }
 
 bool Injectors::endless() const {
@@ -813,9 +1081,16 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
                 whole = t1 >= p.start && count(j) < p.count ? static_cast<double>(p.count - count(j)) : 0.0;
             } else {
                 const double a = Kokkos::fmax(t0, p.start), b = Kokkos::fmin(t1, p.end);
-                const double due = frac(j) + (b > a ? p.rate * (b - a) : 0.0);
+                double rate = p.rate, owed;
+                if (sm.given(j, setting::RATE)) {
+                    rate = 0.0;
+                    owed = b > a ? integrate_rate([&](const double t) { return sm.rate(j, t); }, a, b, rate) : 0.0;
+                } else {
+                    owed = b > a ? p.rate * (b - a) : 0.0;
+                }
+                const double due = frac(j) + owed;
                 // A parcel due but for the rounding of the step times enters now
-                const double slack = 1e-9 + 4.0 * p.rate * Kokkos::fabs(t1) * static_cast<double>(Kokkos::Experimental::epsilon_v<rtype>);
+                const double slack = 1e-9 + 4.0 * rate * Kokkos::fabs(t1) * static_cast<double>(Kokkos::Experimental::epsilon_v<rtype>);
                 whole = Kokkos::floor(Kokkos::fmin(due + slack, 0x1.0p52));
                 frac(j) = due - whole;
             }
@@ -860,6 +1135,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     const bool solid = target.solid, heated = target.heated;
     const Solid sphere = target.sphere;
     const auto settle = target.at_gas;
+    const auto t_step = t_injected;
     gated::parallel_for("particle_injection_insert", capacity, KOKKOS_LAMBDA(const uint32_t m) {
         if (m >= info(LOCAL)) return;
         if (m >= info(FREE_SLOTS)) {
@@ -873,20 +1149,34 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
         const uint32_t s = slots(m);
         double p[N_DIM];
         sm.place(j, e, r, p);
+        // A particle with an invalid setting (recorded for check_values) does not enter
+        const double xt[4] = {p[0], p[1], N_DIM == 3 ? p[N_DIM - 1] : 0.0, t_step()};
+        const InjectorSpec & spec = sm.spec[j];
+        rtype v[N_DIM] = {};
+        double d = 0.0, value = 0.0;
+        rtype weight = spec.weight, temperature = spec.temperature;
+        if (solid) {
+            if (!sm.velocity(j, e, r, xt, v) || !sm.diameter(j, r, xt, d)) return;
+            if (sm.given(j, setting::WEIGHT)) {
+                if (!sm.positive(j, setting::WEIGHT, xt, value)) return;
+                weight = static_cast<rtype>(value);
+            }
+            if (heated && sm.given(j, setting::TEMPERATURE)) {
+                if (!sm.positive(j, setting::TEMPERATURE, xt, value)) return;
+                temperature = static_cast<rtype>(value);
+            }
+        }
         rtype * values = x.data() + size_t(w) * s;
         FOR_I_DIM values[i] = static_cast<rtype>(p[i]);
         uint32_t at = N_DIM;
         if (solid) {
-            const InjectorSpec & spec = sm.spec[j];
-            rtype v[N_DIM];
-            sm.velocity(j, e, r, v);
             FOR_I_DIM values[N_DIM + i] = v[i];
             at = 2 * N_DIM;
-            if (heated) values[at++] = sphere.thermal_value(v, spec.temperature);
+            if (heated) values[at++] = sphere.thermal_value(v, temperature);
             settle(s) = static_cast<uint8_t>((spec.gas_velocity ? SETTLE_VELOCITY : 0) |
                                              (heated && spec.gas_temperature ? SETTLE_TEMPERATURE : 0));
-            props(s, 0) = static_cast<rtype>(sm.diameter(j, r));
-            props(s, 1) = sm.spec[j].weight;
+            props(s, 0) = static_cast<rtype>(d);
+            props(s, 1) = weight;
         }
         for (uint32_t q = first_q; q < w; q++) values[q] = 0.0_r;
         for (uint32_t q = 0; q < n_aux; q++) aux(s, q) = initial(q);
@@ -927,25 +1217,28 @@ RestartArrays Injectors::restart_arrays() const {
 std::vector<std::string> Injectors::summary() const {
     std::vector<std::string> lines;
     for (const InjectorInfo & info : infos) {
-        std::string text = info.name + ": " +
-                           (info.count > 0 ? std::to_string(info.count) + " parcels " : logging::real(info.rate) + " parcels/s ") +
+        const std::string rate = std::isfinite(info.rate) ? logging::real(info.rate) + " parcels/s " : "";
+        std::string text = info.name + ": " + (info.count > 0 ? std::to_string(info.count) + " parcels " : rate) +
                            (info.site == "point" ? "at " : info.site == "zone" ? "on " : "in ") + info.where;
         if (info.count > 0) {
             text += " at t = " + logging::real(info.start);
         } else if (info.start > 0.0 || std::isfinite(info.end)) {
             text += " from t = " + logging::real(info.start) + (std::isfinite(info.end) ? " to " + logging::real(info.end) : "");
         }
-        if (std::isfinite(info.mean_diameter)) {
+        if (info.solid) {
             if (info.gas_velocity) {
                 text += ", at the gas velocity";
-            } else {
+            } else if (std::isfinite(info.speed) && std::isfinite(info.direction[0])) {
                 text += ", " + logging::real(info.speed) + " m/s " +
                         (info.along_normal ? std::string("along the inward normal") : "along " + vector_text(info.direction.data(), N_DIM));
             }
             if (info.gas_temperature) text += ", at the gas temperature";
             if (info.cone_angle > 0.0) text += " in a cone of " + logging::real(info.cone_angle) + " deg";
-            text += ", D10 " + logging::real(info.mean_diameter) + ", D32 " + logging::real(info.sauter_diameter);
+            if (std::isfinite(info.mean_diameter)) {
+                text += ", D10 " + logging::real(info.mean_diameter) + ", D32 " + logging::real(info.sauter_diameter);
+            }
         }
+        for (const auto & [key, expression] : info.expressions) text += ", " + key + " = \"" + expression + "\"";
         lines.push_back(text);
     }
     return lines;
