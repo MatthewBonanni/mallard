@@ -248,6 +248,7 @@ const std::vector<ExampleCase> EXAMPLES = {
      "type = \"annulus\"\nr_inner = 0.5\nr_outer = 25.0\nNtheta = 32\nNr = 8\n"},
     {"particle_wake/input.toml", "high_order", 2, "", {{"inner", "cylinder"}, {"outer", "farfield"}},
      "type = \"annulus\"\nr_inner = 0.5\nr_outer = 25.0\nNtheta = 32\nNr = 8\n"},
+    {"shock_curtain/input.toml", "high_order", 2, "", {}, ""},
     {"source_regions/input.toml", "second_order", 2, "", {}, ""},
     {"hot_gas_regions/input.toml", "second_order", 2, "", {}, ""},
     {"sphere_axisymmetric/input.toml", "high_order", 2, "",

@@ -1,0 +1,113 @@
+# A Mach 1.66 shock hitting a curtain of glass beads (2D build), after the
+# Sandia multiphase shock tube (Wagner et al., Exp. Fluids 52, 2012): a 2 mm
+# curtain of 115 um soda-lime beads at a volume fraction of 19% spanning the
+# 76.2 mm test section, in air at 82.7 kPa and 296.4 K. The shock reflects
+# off the curtain, a weaker shock leaves it downstream, and the drag of the
+# post-shock flow carries the beads away, the upstream ones more slowly than
+# the downstream ones, so the curtain spreads.
+#
+# The particles act on the gas (two-way coupling), but as point particles
+# in a dilute suspension: the gas does not see the volume the beads take,
+# the drag is that of an isolated sphere, and the beads do not collide
+# (README.md). The flow is planar: the shock tube is quasi-one-dimensional,
+# 16 cells across its height.
+#
+# The curtain's upstream edge is at x = 0.2 m, 0.2 m from the inflow; the
+# shock starts 3 mm upstream of it and reaches it at t = 5.2 us.
+#   mallard -i input.toml                      (about 1 h on 2 threads)
+#   python animate_shock_curtain.py extract .
+#   python animate_shock_curtain.py render shock_curtain.mp4 . --poster shock_curtain.jpg
+
+[run]
+t_stop = 7.0e-4
+cfl = 0.8
+
+[mesh]
+type = "cartesian"
+Nx = 6500
+Ny = 16
+Lx = 0.65
+Ly = 0.0762
+
+[initialize]
+# Behind the shock: Mach 1.66 into the state ahead (Rankine-Hugoniot)
+type = "analytical"
+p = "x < 0.197 ? 252086.1 : 82700.0"
+T = "x < 0.197 ? 423.81 : 296.4"
+u = ["x < 0.197 ? 304.17 : 0.0", "0.0"]
+
+[[boundaries]]
+name = "left"
+type = "inlet_state"
+u = [304.17, 0.0]
+p = 252086.1
+T = 423.81
+
+[[boundaries]]
+name = "right"
+type = "outlet_extrapolation"
+
+[[boundaries]]
+name = "bottom"
+type = "symmetry"
+
+[[boundaries]]
+name = "top"
+type = "symmetry"
+
+[numerics]
+riemann_solver = "HLLC"
+time_integrator = "SSPRK3"
+
+[numerics.face_reconstruction]
+type = "TENO"
+order = 5
+
+[physics]
+type = "navier_stokes"
+gamma = 1.4
+p_ref = 82700.0
+T_ref = 296.4
+rho_ref = 0.97200782
+viscosity_model = "sutherland"
+mu = 1.716e-5
+Pr = 0.72
+
+[particles]
+type = "solid"
+coupling = "two-way"
+diameter = 115e-6
+density = 2520.0
+specific_heat = 840.0
+drag = "singh"
+forces = ["pressure_gradient", "added_mass"]
+velocity = [0.0, 0.0]
+# 304,000 parcels of 119.6 beads per meter of depth: a volume fraction of
+# 0.19 over the 2 mm x 76.2 mm curtain (95 rows of parcels in each row of
+# cells, 200 columns 10 um apart)
+weight = 119.6115
+deposition_width = 0.3e-3
+
+[particles.lattice]
+lo = [0.200005, 2.5066e-5]
+hi = [0.201995, 7.61749e-2]
+n = [200, 1520]
+
+# Peak slip Mach and Reynolds numbers along each path, for the drag law's range
+[[particles.quantities]]
+name = "M_slip_max"
+max = "abs(U_X - V_X) / sqrt(401.87 * T)"
+
+[[particles.quantities]]
+name = "Re_p_max"
+max = "RHO * abs(U_X - V_X) * 115e-6 / (1.716e-5 * (T / 273.15)^1.5 * 383.55 / (T + 110.4))"
+
+[output]
+check_interval = 500
+
+# The frames of the animation and of the edge trajectories: restart files
+# carry the particles
+[[write_data]]
+prefix = "./frames/frame"
+format = "restart"
+time_interval = 2.5e-6

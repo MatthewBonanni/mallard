@@ -66,6 +66,7 @@ mu = 1.716e-5
 
 *Used in:*
 [`isotropic_turbulence`](https://matthewbonanni.github.io/mallard/docs/examples/#isotropic-turbulence),
+[`shock_curtain`](https://matthewbonanni.github.io/mallard/docs/examples/#shock-curtain),
 [`channel_wmles`](https://matthewbonanni.github.io/mallard/docs/examples/#channel-wmles),
 [`volvo_bluff_body`](https://matthewbonanni.github.io/mallard/docs/examples/#volvo-bluff-body).
 

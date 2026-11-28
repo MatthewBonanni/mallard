@@ -45,6 +45,7 @@ import run_report
 import runs
 import scaling
 import schematics
+import shock_curtain
 import structured_blocks
 import teno
 import thickened_flames
@@ -81,6 +82,7 @@ def main():
     post_flame.figures()
     scaling.figures()
     schematics.figures()
+    shock_curtain.figures()
     structured_blocks.figures(args.mallard)
     teno.figures()
     thickened_flames.figures()

@@ -824,7 +824,7 @@ T = 300.0
 [`mallard`](https://matthewbonanni.github.io/mallard/docs/examples/#mallard),
 [`heated_duct`](https://matthewbonanni.github.io/mallard/docs/examples/#heated-duct),
 [`average_outlet`](https://matthewbonanni.github.io/mallard/docs/examples/#average-outlet)
-and 15 more.
+and 16 more.
 
 **Imposes** the full exterior state: velocity, pressure, temperature and
 composition, nothing from the interior. For **supersonic inflow** this is
@@ -1097,7 +1097,7 @@ type = "outlet_extrapolation"
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach),
 [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d)
-and 8 more.
+and 9 more.
 
 **Imposes** nothing: the exterior state is the solution translated from
 inside the domain (the reconstructed state on the image face one cell
@@ -1167,7 +1167,7 @@ type = "symmetry"
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach),
 [`wedge`](https://matthewbonanni.github.io/mallard/docs/examples/#wedge),
 [`explosion_3d`](https://matthewbonanni.github.io/mallard/docs/examples/#explosion-3d)
-and 32 more.
+and 33 more.
 
 **Imposes** zero normal velocity and zero normal gradients (the ghost mirrors
 the interior); under gravity it continues the hydrostatic pressure.
