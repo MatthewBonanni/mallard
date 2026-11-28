@@ -166,6 +166,9 @@ Field read(const Input & t, const std::string & where, const Mesh & mesh) {
     }
     const std::string name = find_value_or<std::string>(t, "spectrum", "von_karman_pao");
     record_options(where + ".spectrum", {"von_karman_pao", "passot_pouquet", "table"});
+    record_models(where + ".spectrum",
+                  {{"von_karman_pao", "docs/theory/les.md#synthetic-initial-turbulence", "Bailly & Juvé 1999"},
+                   {"passot_pouquet", "docs/theory/les.md#synthetic-initial-turbulence", "Passot & Pouquet 1987"}});
     if (name != "von_karman_pao" && name != "passot_pouquet" && name != "table") {
         throw not_accepted(t, where + ".spectrum", name, {"passot_pouquet", "table", "von_karman_pao"});
     }

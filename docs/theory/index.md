@@ -24,8 +24,8 @@ accuracy of every method, from the convergence tests; the sources are in
     the RODAS integrator, Strang and SIMPLER splitting, optically thin
     radiation.
 4. [Large-eddy simulation](les.md): the filtered equations, SGS models,
-    the dynamic procedure, thickened flames, the partially stirred reactor
-    and synthetic inflow turbulence.
+    the dynamic procedure, thickened flames, the partially stirred reactor,
+    and synthetic inflow and initial turbulence.
 5. [Wall models](wall_models.md): wall-modeled LES, the exchange point,
     the equilibrium ODE and Griffin-Fu-Moin models and their coupling to
     the wall flux.

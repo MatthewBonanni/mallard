@@ -4,6 +4,15 @@
   2,
   3
  ],
+ "models": {
+  "hybrid": {
+   "cite": "Kuya, Totani & Kawai 2018",
+   "docs": "docs/theory/fluxes.md#hybrid-central-upwind-flux"
+  },
+  "riemann": {
+   "docs": "docs/theory/fluxes.md#riemann-solvers"
+  }
+ },
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_les/input.toml",

@@ -3,6 +3,16 @@
  "dims": [
   3
  ],
+ "models": {
+  "equilibrium": {
+   "cite": "Kawai & Larsson 2012",
+   "docs": "docs/theory/wall_models.md#equilibrium-ode-model"
+  },
+  "gfm": {
+   "cite": "Griffin, Fu & Moin 2023",
+   "docs": "docs/theory/wall_models.md#griffin-fu-moin-model"
+  }
+ },
  "set_in": [
   "examples/channel_wmles/lm2000.toml",
   "examples/channel_wmles/lm5200.toml",

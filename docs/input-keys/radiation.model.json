@@ -3,6 +3,15 @@
  "dims": [
   2
  ],
+ "models": {
+  "optically_thin": {
+   "cite": "Barlow et al. 2001",
+   "docs": "docs/theory/chemistry_radiation.md#optically-thin-radiation"
+  }
+ },
  "set_in": [],
- "type": "string"
+ "type": "string",
+ "values": [
+  "optically_thin"
+ ]
 }

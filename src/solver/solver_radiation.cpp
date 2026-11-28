@@ -53,6 +53,9 @@ void Solver::init_radiation() {
     if (!is_mixture()) throw InputError("[radiation] needs physics.gas = \"mixture\".");
     const Input & table = input.at("radiation");
     const std::string model = find_value_or<std::string>(table, "model", "optically_thin");
+    record_options("radiation.model", {"optically_thin"});
+    record_models("radiation.model",
+                  {{"optically_thin", "docs/theory/chemistry_radiation.md#optically-thin-radiation", "Barlow et al. 2001"}});
     if (model != "optically_thin") {
         throw InputError("radiation.model = \"" + model + "\" is not one of: optically_thin.");
     }

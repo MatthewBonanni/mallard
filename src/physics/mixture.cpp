@@ -50,6 +50,11 @@ MixtureModel MixtureModel::from_input(const Input & input) {
         return model;
     }
     model.transport_name = find_value_or<std::string>(physics, "transport", "mixture_averaged");
+    record_options("physics.transport", {"constant_lewis", "mixture_averaged", "unity_lewis"});
+    record_models("physics.transport",
+                  {{"mixture_averaged", "docs/theory/thermodynamics_transport.md#transport", "Monchick & Mason 1961"},
+                   {"unity_lewis", "docs/theory/thermodynamics_transport.md#diffusion-coefficients", ""},
+                   {"constant_lewis", "docs/theory/thermodynamics_transport.md#diffusion-coefficients", ""}});
     const std::map<std::string, chemistry::TransportModel> models = {
         {"mixture_averaged", chemistry::TransportModel::MIXTURE_AVERAGED},
         {"unity_lewis", chemistry::TransportModel::UNITY_LEWIS},
@@ -267,6 +272,9 @@ chemistry::ReactorOptions reactor_options(const Input & input) {
     if (!input.contains("chemistry")) return options;
     const Input & table = input.at("chemistry");
     const std::string integrator = find_value_or<std::string>(table, "integrator", "rosenbrock");
+    record_options("chemistry.integrator", {"bdf", "rosenbrock"});
+    record_models("chemistry.integrator",
+                  {{"rosenbrock", "docs/theory/chemistry_radiation.md#stiff-integration-rodas", "Hairer & Wanner 1996"}});
     if (integrator != "rosenbrock" && integrator != "bdf") {
         throw not_accepted(table, "chemistry.integrator", integrator, {"bdf", "rosenbrock"});
     }

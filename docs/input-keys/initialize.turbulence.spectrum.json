@@ -3,6 +3,16 @@
  "dims": [
   2
  ],
+ "models": {
+  "passot_pouquet": {
+   "cite": "Passot & Pouquet 1987",
+   "docs": "docs/theory/les.md#synthetic-initial-turbulence"
+  },
+  "von_karman_pao": {
+   "cite": "Bailly & Juv\u00e9 1999",
+   "docs": "docs/theory/les.md#synthetic-initial-turbulence"
+  }
+ },
  "set_in": [
   "examples/turbulent_hot_spot_2d/input.toml",
   "tools/dev/catalog_inputs/2d/statistics.toml"

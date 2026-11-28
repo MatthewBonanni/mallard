@@ -327,6 +327,7 @@ struct KeyFacts {
     std::optional<PathUse> path;
     std::string references;
     std::map<std::vector<std::vector<std::string>>, bool> alternatives;  // of a table: groups -> required
+    std::vector<ModelDocs> models;
 };
 
 std::map<std::string, KeyFacts> & recorded_facts() {
@@ -499,6 +500,12 @@ void record_reference(const std::string & key, const std::string & names) {
     recorded_facts()[path].references = names;
 }
 
+void record_models(const std::string & key, std::vector<ModelDocs> models) {
+    const std::string path = catalog_path(key);
+    std::lock_guard<std::mutex> lock(options_mutex());
+    recorded_facts()[path].models = std::move(models);
+}
+
 void record_alternatives(const std::string & table, std::vector<std::vector<std::string>> groups, const bool required) {
     const std::string path = catalog_path(table);
     std::lock_guard<std::mutex> lock(options_mutex());
@@ -631,6 +638,16 @@ std::string key_catalog(const ResolvedInput & resolved) {
                 first_group = false;
             }
             out += "]";
+        }
+        if (f != facts.end() && !f->second.models.empty()) {
+            out += ", \"models\": {";
+            for (size_t i = 0; i < f->second.models.size(); i++) {
+                const ModelDocs & m = f->second.models[i];
+                out += (i ? ", " : "") + json_string(m.value) + ": {\"docs\": " + json_string(m.docs);
+                if (!m.cite.empty()) out += ", \"cite\": " + json_string(m.cite);
+                out += "}";
+            }
+            out += "}";
         }
         out += "}";
     }

@@ -7,6 +7,16 @@
  "for_types": [
   "MUSCL"
  ],
+ "models": {
+  "barth_jespersen": {
+   "cite": "Barth & Jespersen 1989",
+   "docs": "docs/theory/finite_volume.md#limiters"
+  },
+  "venkatakrishnan": {
+   "cite": "Venkatakrishnan 1995",
+   "docs": "docs/theory/finite_volume.md#limiters"
+  }
+ },
  "set_in": [
   "examples/cbc_les/input.toml",
   "examples/channel_inflow_retau180/input.toml",

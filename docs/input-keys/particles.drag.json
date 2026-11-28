@@ -6,6 +6,20 @@
  "for_types": [
   "solid"
  ],
+ "models": {
+  "schiller_naumann": {
+   "cite": "Schiller & Naumann 1933",
+   "docs": "docs/theory/particles.md#schiller-naumann-drag"
+  },
+  "singh": {
+   "cite": "Singh et al. 2022",
+   "docs": "docs/theory/particles.md#singh-drag"
+  },
+  "stokes": {
+   "cite": "Stokes 1851",
+   "docs": "docs/theory/particles.md#stokes-drag"
+  }
+ },
  "set_in": [
   "examples/particle_bounce/input.toml",
   "examples/particle_centrifuge/input.toml",

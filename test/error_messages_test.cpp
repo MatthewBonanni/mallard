@@ -515,13 +515,17 @@ TEST(ErrorMessages, EveryDocsLinkTheCodeWritesExists) {
         EXPECT_TRUE(exists(docs_of(section + ".key"))) << docs_of(section + ".key") << " (docs_of(\"" << section << ".key\"))";
     }
     const std::regex link("docs/[A-Za-z0-9_./-]+\\.md#[A-Za-z0-9_-]+");
-    for (const auto & entry : std::filesystem::recursive_directory_iterator(root / "src")) {
-        const std::string path = entry.path().generic_string();
-        if (!entry.is_regular_file() || path.find("/src/external/") != std::string::npos) continue;
-        std::ifstream file(entry.path());
-        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        for (std::sregex_iterator it(text.begin(), text.end(), link), end; it != end; ++it) {
-            EXPECT_TRUE(exists(it->str())) << it->str() << " in " << std::filesystem::relative(entry.path(), root).string();
+    // The code's links, and the theory sections of the models the key catalog lists (its "models")
+    for (const char * dir : {"src", "docs/input-keys"}) {
+        for (const auto & entry : std::filesystem::recursive_directory_iterator(root / dir)) {
+            const std::string path = entry.path().generic_string();
+            if (!entry.is_regular_file() || path.find("/src/external/") != std::string::npos) continue;
+            std::ifstream file(entry.path());
+            const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            for (std::sregex_iterator it(text.begin(), text.end(), link), end; it != end; ++it) {
+                EXPECT_TRUE(exists(it->str()))
+                    << it->str() << " in " << std::filesystem::relative(entry.path(), root).string();
+            }
         }
     }
 }

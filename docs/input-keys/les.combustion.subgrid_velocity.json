@@ -4,6 +4,16 @@
   2,
   3
  ],
+ "models": {
+  "colin": {
+   "cite": "Colin et al. 2000",
+   "docs": "docs/theory/les.md#subgrid-velocity"
+  }
+ },
  "set_in": [],
- "type": "string"
+ "type": "string",
+ "values": [
+  "colin",
+  "eddy_viscosity"
+ ]
 }

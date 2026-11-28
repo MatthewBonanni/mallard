@@ -47,6 +47,9 @@ Euler Euler::from_input(const Input & input) {
         euler.Pr = find_real_or(input, "physics", "Pr", dim::none, 0.72_r);
         const std::string model = find_value_or<std::string>(input, "physics", "viscosity_model", "constant");
         record_options("physics.viscosity_model", {"constant", "power_law", "sutherland"});
+        const char * const viscosity_docs = "docs/theory/governing_equations.md#viscous-stress-and-heat-flux";
+        record_models("physics.viscosity_model",
+                      {{"sutherland", viscosity_docs, "Sutherland 1893"}, {"power_law", viscosity_docs, ""}});
         if (model == "constant") {
             euler.viscosity_model = ViscosityModel::CONSTANT;
         } else if (model == "sutherland") {

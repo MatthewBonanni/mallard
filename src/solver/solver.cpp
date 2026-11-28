@@ -1653,6 +1653,23 @@ void Solver::init_numerics() {
         find_option(RIEMANN_SOLVER_TYPES, "numerics.riemann_solver", riemann_solver_str, numerics_line("riemann_solver"));
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
+    record_models("numerics.face_reconstruction.type",
+                  {{"FO", "docs/theory/finite_volume.md#first-order", ""},
+                   {"MUSCL", "docs/theory/finite_volume.md#muscl", "van Leer 1979"},
+                   {"TENO", "docs/theory/finite_volume.md#teno-e", ""}});
+    record_models("numerics.riemann_solver",
+                  {{"Rusanov", "docs/theory/fluxes.md#rusanov", "Rusanov 1962"},
+                   {"HLL", "docs/theory/fluxes.md#hll", "Harten, Lax & van Leer 1983"},
+                   {"HLLC", "docs/theory/fluxes.md#hllc", "Toro, Spruce & Speares 1994"},
+                   {"Roe", "docs/theory/fluxes.md#roe", "Roe 1981"},
+                   {"RHLL", "docs/theory/fluxes.md#rhll", "Nishikawa & Kitamura 2008"}});
+    record_models("numerics.time_integrator",
+                  {{"FE", "docs/theory/time_integration.md#forward-euler", ""},
+                   {"SSPRK3", "docs/theory/time_integration.md#ssprk3", "Shu & Osher 1988"},
+                   {"RK4", "docs/theory/time_integration.md#rk4", "Kutta 1901"},
+                   {"SSPRK54", "docs/theory/time_integration.md#ssprk54", "Spiteri & Ruuth 2002"},
+                   {"RDPK3Sp35", "docs/theory/time_integration.md#rdpk3sp35", "Ranocha et al. 2022"},
+                   {"CK45", "docs/theory/time_integration.md#ck45", "Carpenter & Kennedy 1994"}});
 
     // The case view's geometry needs no stencils
     switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
@@ -1744,6 +1761,9 @@ void Solver::init_numerics() {
     }
     const std::string flux = find_value_or<std::string>(input, "numerics", "convective_flux", "riemann");
     record_options("numerics.convective_flux", {"riemann", "hybrid"});
+    record_models("numerics.convective_flux",
+                  {{"riemann", "docs/theory/fluxes.md#riemann-solvers", ""},
+                   {"hybrid", "docs/theory/fluxes.md#hybrid-central-upwind-flux", "Kuya, Totani & Kawai 2018"}});
     if (flux != "riemann" && flux != "hybrid") {
         throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }

@@ -762,7 +762,8 @@ class LesCombustion : public Table {
          *        F^beta`, `beta` in [0, 1] from the dynamic procedure, no constant; turbulent flame speed within 8% of two
          *        DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor = "reaction"`): Charlette's
          *        efficiency function of a subgrid velocity `u'` (the default until #294; doubles the flame speed at `Delta
-         *        = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes, section 8.3.
+         *        = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes, section 8.3. One of charlette, dynamic,
+         *        none.
          */
         LesCombustion & efficiency(std::string_view v) { put("efficiency", v); return *this; }
         /** @brief Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none.
@@ -781,7 +782,7 @@ class LesCombustion : public Table {
         LesCombustion & fuel(const LesCombustionFuel & t) { put("fuel", t); return *this; }
         /** @brief fuel as a value (a region's name, an inline table). */
         LesCombustion & fuel(const Value & v) { put("fuel", v); return *this; }
-        /** @brief `tfles`.
+        /** @brief `tfles`. One of pasr, tfles.
          */
         LesCombustion & model(std::string_view v) { put("model", v); return *this; }
         /** @brief Cells across the thickened flame, default 5.
@@ -816,7 +817,8 @@ class LesCombustion : public Table {
         LesCombustion & sensor_species(std::string_view v) { put("sensor_species", v); return *this; }
         /** @brief `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3 abs(lap(curl u))`; or
          *        `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator overpredicts `u'` 5-8
-         *        times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L`.
+         *        times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta = 1.6 delta_L`. One of
+         *        colin, eddy_viscosity.
          */
         LesCombustion & subgrid_velocity(std::string_view v) { put("subgrid_velocity", v); return *this; }
 };
@@ -1393,7 +1395,8 @@ class Chemistry : public Table {
         Chemistry & atol(double v) { put("atol", v); return *this; }
         /** @brief `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`,
          *        `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies
-         *        non-dissipative operators such as the hybrid flux's central part; see the design notes).
+         *        non-dissipative operators such as the hybrid flux's central part; see the design notes). One of simpler,
+         *        strang.
          */
         Chemistry & coupling(std::string_view v) { put("coupling", v); return *this; }
         /** @brief `false` keeps the mixture non-reacting (default `true`).
@@ -1427,7 +1430,7 @@ class Chemistry : public Table {
          *        less at larger time steps, since every call restarts it at order 1 (1.1-1.5 times at 1e-6 s). Its error
          *        estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate than
          *        RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`, within 2e-5
-         *        at `1e-14`); see the design notes.
+         *        at `1e-14`); see the design notes. One of bdf, rosenbrock.
          */
         Chemistry & integrator(std::string_view v) { put("integrator", v); return *this; }
         /** @brief Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost), a power
@@ -1626,7 +1629,7 @@ class Les : public Table {
          *        A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular cells); `volume`
          *        (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity and the flamelet gas's subgrid variance only
          *        (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau` within 0.7% and 1.6% of
-         *        MKM with `scotti`, 2.6% and 4.1% with `volume`.
+         *        MKM with `scotti`, 2.6% and 4.1% with `volume`. One of scotti, volume.
          */
         Les & filter_width(std::string_view v) { put("filter_width", v); return *this; }
         /** @brief The models' velocity gradients: `least_squares` (the least-squares gradients on the face neighbors, as
@@ -2071,7 +2074,7 @@ class Physics : public Table {
         /** @brief (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur conductivity,
          *        mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda / (rho cp)`) or
          *        `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species' transport data in the
-         *        file.
+         *        file. One of constant_lewis, mixture_averaged, unity_lewis.
          */
         Physics & transport(std::string_view v) { put("transport", v); return *this; }
         /** @brief `euler` (default) or `navier_stokes`. One of euler, navier_stokes.
@@ -2228,7 +2231,7 @@ class Radiation : public Table {
          *        unit; 2D.
          */
         Radiation & T_ambient(Quantity v) { put("T_ambient", v); return *this; }
-        /** @brief `optically_thin` (the default and only choice). 2D.
+        /** @brief `optically_thin` (the default and only choice). One of optically_thin; 2D.
          */
         Radiation & model(std::string_view v) { put("model", v); return *this; }
         /** @brief Radiating species, any of `H2O`, `CO2`, `CO`, `CH4`; default all four that the mechanism has (listing one

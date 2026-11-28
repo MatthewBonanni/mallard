@@ -4,6 +4,28 @@
   2,
   3
  ],
+ "models": {
+  "HLL": {
+   "cite": "Harten, Lax & van Leer 1983",
+   "docs": "docs/theory/fluxes.md#hll"
+  },
+  "HLLC": {
+   "cite": "Toro, Spruce & Speares 1994",
+   "docs": "docs/theory/fluxes.md#hllc"
+  },
+  "RHLL": {
+   "cite": "Nishikawa & Kitamura 2008",
+   "docs": "docs/theory/fluxes.md#rhll"
+  },
+  "Roe": {
+   "cite": "Roe 1981",
+   "docs": "docs/theory/fluxes.md#roe"
+  },
+  "Rusanov": {
+   "cite": "Rusanov 1962",
+   "docs": "docs/theory/fluxes.md#rusanov"
+  }
+ },
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/average_outlet/input.toml",

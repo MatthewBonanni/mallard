@@ -149,6 +149,10 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
     solid.density = positive(table, "density", dim::density);
     const std::vector<std::string> drags = {"schiller_naumann", "singh", "stokes"};
     record_options("particles.drag", drags);
+    record_models("particles.drag", {{"stokes", "docs/theory/particles.md#stokes-drag", "Stokes 1851"},
+                                     {"schiller_naumann", "docs/theory/particles.md#schiller-naumann-drag",
+                                      "Schiller & Naumann 1933"},
+                                     {"singh", "docs/theory/particles.md#singh-drag", "Singh et al. 2022"}});
     const std::string drag = find_value_or<std::string>(table, "drag", "schiller_naumann");
     if (std::find(drags.begin(), drags.end(), drag) == drags.end()) throw not_accepted(table, "particles.drag", drag, drags);
     solid.drag = drag == "stokes" ? particles::Drag::STOKES
@@ -165,6 +169,10 @@ particles::Solid read_solid(const Input & input, const Input & table, const Eule
     }
     const std::vector<std::string> forces = {"added_mass", "pressure_gradient", "saffman_lift"};
     record_options("particles.forces", forces);
+    record_models("particles.forces",
+                  {{"added_mass", "docs/theory/particles.md#added-mass-force", "Maxey & Riley 1983"},
+                   {"pressure_gradient", "docs/theory/particles.md#pressure-gradient-force", "Maxey & Riley 1983"},
+                   {"saffman_lift", "docs/theory/particles.md#saffman-lift", "Saffman 1965"}});
     for (const std::string & force : find_value_or<std::vector<std::string>>(table, "forces", {})) {
         if (std::find(forces.begin(), forces.end(), force) == forces.end()) throw not_accepted(table, "particles.forces", force, forces);
         solid.added_mass = solid.added_mass || force == "added_mass";

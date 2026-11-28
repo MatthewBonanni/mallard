@@ -241,6 +241,16 @@ void record_path(const std::string & key, PathUse use);
  */
 void record_reference(const std::string & key, const std::string & names);
 
+/** @brief A value of a key that names a model from the literature, and the theory section giving its formulation. */
+struct ModelDocs {
+    std::string value;  // "singh"
+    std::string docs;   // "docs/theory/particles.md#singh-drag"
+    std::string cite;   // "Singh et al. 2022"; empty for a model of no one source
+};
+
+/** @brief Record the values of a key that name models from the literature, by its path ("particles.drag"). */
+void record_models(const std::string & key, std::vector<ModelDocs> models);
+
 /**
  * @brief Record that the keys of a table are names, of what ("species", defined elsewhere) or,
  *        for "name", names the input gives ([regions]): the catalog lists them as table.<what>.

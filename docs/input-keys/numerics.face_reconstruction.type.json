@@ -4,6 +4,18 @@
   2,
   3
  ],
+ "models": {
+  "FO": {
+   "docs": "docs/theory/finite_volume.md#first-order"
+  },
+  "MUSCL": {
+   "cite": "van Leer 1979",
+   "docs": "docs/theory/finite_volume.md#muscl"
+  },
+  "TENO": {
+   "docs": "docs/theory/finite_volume.md#teno-e"
+  }
+ },
  "set_in": [
   "examples/autoignition_2d/input.toml",
   "examples/average_outlet/input.toml",

@@ -1110,6 +1110,10 @@ void Solver::init_les() {
                          "[chemistry]) or gas = \"flamelet\" with navier_stokes.");
     }
     const Input & combustion = input.at("les").at("combustion");
+    record_options("les.combustion.model", {"pasr", "tfles"});
+    record_models("les.combustion.model",
+                  {{"tfles", "docs/theory/les.md#thickened-flame-model", "Colin et al. 2000"},
+                   {"pasr", "docs/theory/les.md#partially-stirred-reactor", "Sabelnikov & Fureby 2013"}});
     if (find_value_or<std::string>(combustion, "model", "") == "pasr") {
         pasr = PartiallyStirredReactor::from_input(combustion);
         pasr_on = true;

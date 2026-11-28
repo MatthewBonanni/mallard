@@ -7,6 +7,15 @@
  "for_types": [
   "navier_stokes"
  ],
+ "models": {
+  "power_law": {
+   "docs": "docs/theory/governing_equations.md#viscous-stress-and-heat-flux"
+  },
+  "sutherland": {
+   "cite": "Sutherland 1893",
+   "docs": "docs/theory/governing_equations.md#viscous-stress-and-heat-flux"
+  }
+ },
  "set_in": [
   "examples/channel_wmles/tl_m1.7.toml",
   "examples/channel_wmles/tl_m3.0.toml",

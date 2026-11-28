@@ -4,6 +4,20 @@
   2,
   3
  ],
+ "models": {
+  "simpler": {
+   "cite": "Wu, Ma & Ihme 2019",
+   "docs": "docs/theory/chemistry_radiation.md#simpler-balanced-splitting"
+  },
+  "strang": {
+   "cite": "Strang 1968",
+   "docs": "docs/theory/chemistry_radiation.md#strang-splitting"
+  }
+ },
  "set_in": [],
- "type": "string"
+ "type": "string",
+ "values": [
+  "simpler",
+  "strang"
+ ]
 }

@@ -705,6 +705,7 @@ optional. Beside these, setup records:
 | `for_types` | a key of a table with a `type` | the values of that `type` under which the setup read it (a `line` probe reads no `radius`); absent if read whatever the type |
 | `required_for` | a required key of such a table | the types it is required for (`initialize.file`: `restart`, `remap`) |
 | `alternatives` | a table | groups of its keys of which the input gives one at most, `required` if exactly one (`run`: `dt` or `cfl`; a composition: `X` or `Y`) |
+| `models` | a key whose values name models from the literature | for each such value, `docs`: the [theory](../theory/index.md) section that gives its formulation (`particles.drag`: `singh` at `docs/theory/particles.md#singh-drag`), and `cite`: its source (`Singh et al. 2022`), absent for a model of no one source |
 
 Keys whose names the input chooses are listed by a placeholder: `regions.<name>`
 for named regions and `X.<species>`, `Y.<species>` for the species of a
@@ -713,8 +714,8 @@ composition (never required; `references = "species"`).
 tutorial, and of the inputs of `tools/dev/catalog_inputs/` for the keys none of
 them sets, in 2D and 3D, into [`docs/input-keys/`](../input-keys/), one file per
 key named by its path (percent-encoded outside lowercase letters, digits, `_`, `.`
-and `-`), which the website's input builder reads; `for_types`, `required_for`
-and `alternatives` merge over the inputs, so the catalog states the types the
+and `-`), which the website's input builder reads; `for_types`, `required_for`,
+`alternatives` and `models` merge over the inputs, so the catalog states the types the
 inputs cover. CI checks that it is up to
 date, and `tools/dev/input_catalog.py docs`
 that every key this reference documents is in it and that the defaults it states

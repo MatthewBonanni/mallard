@@ -142,13 +142,13 @@ $$
 which is the drag term of eq. $\eqref{eq:momentum}$ times $V_p$. `[particles] drag`
 chooses $C_D$:
 
-- **`stokes`**: $f = 1$, $C_D = 24 / Re_p$, the drag of a sphere in creeping
+- <a id="stokes-drag"></a>**`stokes`**: $f = 1$, $C_D = 24 / Re_p$, the drag of a sphere in creeping
     flow ([Stokes 1851](../references.md#stokes-1851)). It neglects the
     inertia of the gas around the sphere, compressibility and slip at the
     surface: valid for $Re_p \lesssim 0.1$, $M \ll 1$ and $Kn \lesssim 0.01$
     (definitions below). Against Schiller-Naumann its drag is 3% low at
     $Re_p = 0.1$, 5% at 0.2 and 13% at 1.
-- **`schiller_naumann`** (default): the correlation of
+- <a id="schiller-naumann-drag"></a>**`schiller_naumann`** (default): the correlation of
     [Schiller & Naumann 1933](../references.md#schiller-naumann-1933),
 
     $$
@@ -166,7 +166,7 @@ chooses $C_D$:
     function of $Re_p$ alone, it has no Mach or Knudsen number correction:
     valid for $M \lesssim 0.3$ and $Kn \lesssim 0.01$.
 
-- **`singh`**: the correlation of
+- <a id="singh-drag"></a>**`singh`**: the correlation of
     [Singh et al. 2022](../references.md#singh-2022) (their Appendix C),
     for flow from continuum to free-molecular and from subsonic to
     hypersonic slip, in full below.
@@ -293,7 +293,7 @@ turbulence and the drag crisis. The code evaluates $C_D Re_p / 24$ directly
 Knudsen number grows as $M / Re_p$, so at low $Re_p$ rarefaction lowers the
 drag below Stokes', and above Mach 1 the shock raises it.*
 
-### Gravity, buoyancy and the pressure-gradient force
+### <a id="pressure-gradient-force"></a>Gravity, buoyancy and the pressure-gradient force
 
 Gravity acts on the particle's mass, $\rho_p\,\mathbf{g}$ per volume. The gas
 pushes on its surface with the pressure of the undisturbed flow, a force
@@ -313,7 +313,7 @@ which in gas at rest under gravity is the buoyancy $-\rho\,\mathbf{g}$:
 $\nabla p$ is the least-squares gradient of the particle's cell
 ([numerics](../numerics/particles.md#gradients-for-the-forces)).
 
-### Added mass
+### <a id="added-mass-force"></a>Added mass
 
 A particle that accelerates relative to the gas also accelerates the gas
 around it. For a sphere in inviscid flow the reaction is the added mass,

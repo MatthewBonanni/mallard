@@ -43,6 +43,10 @@ void Solver::init_chemistry() {
     const Input & table = input.at("chemistry");
     if (!find_value_or<bool>(table, "enabled", true)) return;
     const std::string coupling = find_value_or<std::string>(table, "coupling", "strang");
+    record_options("chemistry.coupling", {"simpler", "strang"});
+    record_models("chemistry.coupling",
+                  {{"strang", "docs/theory/chemistry_radiation.md#strang-splitting", "Strang 1968"},
+                   {"simpler", "docs/theory/chemistry_radiation.md#simpler-balanced-splitting", "Wu, Ma & Ihme 2019"}});
     if (coupling != "strang" && coupling != "simpler") {
         throw InputError("chemistry.coupling = \"" + coupling + "\" is not one of: strang, simpler.");
     }

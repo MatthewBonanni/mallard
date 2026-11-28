@@ -635,7 +635,7 @@ class LesCombustion(Table):
         'subgrid_velocity': ('subgrid_velocity', 'value', None),
     }
 
-    def __init__(self, *, C_u: float | None = None, T_burnt: float | str | tuple | None = None, T_unburnt: float | str | tuple | None = None, beta: float | None = None, delta_L: float | str | tuple | None = None, efficiency: str | None = None, efficiency_max: object = None, flame_table: str | None = None, fuel: LesCombustionFuel | dict | Inline | str | None = None, model: str | None = None, n_res: float | None = None, oxidizer: LesCombustionOxidizer | dict | Inline | str | None = None, s_L: float | str | tuple | None = None, sensor: str | None = None, sensor_species: str | None = None, subgrid_velocity: str | None = None):
+    def __init__(self, *, C_u: float | None = None, T_burnt: float | str | tuple | None = None, T_unburnt: float | str | tuple | None = None, beta: float | None = None, delta_L: float | str | tuple | None = None, efficiency: Literal['charlette', 'dynamic', 'none'] | str | None = None, efficiency_max: object = None, flame_table: str | None = None, fuel: LesCombustionFuel | dict | Inline | str | None = None, model: Literal['pasr', 'tfles'] | str | None = None, n_res: float | None = None, oxidizer: LesCombustionOxidizer | dict | Inline | str | None = None, s_L: float | str | tuple | None = None, sensor: str | None = None, sensor_species: str | None = None, subgrid_velocity: Literal['colin', 'eddy_viscosity'] | str | None = None):
         r"""
         C_u: `charlette` only: constant of `subgrid_velocity = "eddy_viscosity"`, default 28 (a priori from a
             DNS at `Delta = 0.8 delta_L`; 22-39 over `Delta = 0.4-1.6 delta_L`).
@@ -651,7 +651,7 @@ class LesCombustion(Table):
             speed within 8% of two DNS at `Delta = 0.4-1.6 delta_L`. `charlette` (default with `sensor =
             "reaction"`): Charlette's efficiency function of a subgrid velocity `u'` (the default until #294;
             doubles the flame speed at `Delta = 1.6 delta_L`). `none`: `E = 1`. Comparison in the design notes,
-            section 8.3.
+            section 8.3. One of charlette, dynamic, none.
         efficiency_max: Cap of the efficiency: $E \le$ `efficiency_max` (at least 1); default none.
         flame_table: `reaction` only, required: CSV file of premixed flames against the mixture fraction,
             columns `Z` (increasing), `s_L` (m/s), `delta_L` (m), `omega_max` (kg/m^3/s, the largest consumption
@@ -660,7 +660,7 @@ class LesCombustion(Table):
         fuel: `reaction` only, required: the streams of the mixture fraction, as in
             [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform
             composition; those the table was built with. 2D.
-        model: `tfles`.
+        model: `tfles`. One of pasr, tfles.
         n_res: Cells across the thickened flame, default 5.
         oxidizer: `reaction` only, required: the streams of the mixture fraction, as in
             [`[output.mixture]`](#outputmixture): a composition or the name of a `[[boundaries]]` entry of uniform
@@ -683,7 +683,7 @@ class LesCombustion(Table):
         subgrid_velocity: `charlette` only: the `u'` of the efficiency: `colin` (default), `u' = 2 Delta^3
             abs(lap(curl u))`; or `eddy_viscosity`, `u' = C_u nu_t / Delta` from the SGS model. Colin's operator
             overpredicts `u'` 5-8 times on meshes with `Delta >= 0.4 delta_L` and the flame speed by 2x at `Delta =
-            1.6 delta_L`.
+            1.6 delta_L`. One of colin, eddy_viscosity.
         """
         super().__init__('les.combustion', {'C_u': C_u, 'T_burnt': T_burnt, 'T_unburnt': T_unburnt, 'beta': beta, 'delta_L': delta_L, 'efficiency': efficiency, 'efficiency_max': efficiency_max, 'flame_table': flame_table, 'fuel': fuel, 'model': model, 'n_res': n_res, 'oxidizer': oxidizer, 's_L': s_L, 'sensor': sensor, 'sensor_species': sensor_species, 'subgrid_velocity': subgrid_velocity})
 
@@ -1177,7 +1177,7 @@ class Chemistry(Table):
         'sparse': ('sparse', 'value', None),
     }
 
-    def __init__(self, *, C_reg: float | str | tuple | None = None, T_frozen: float | str | tuple | None = None, atol: float | None = None, coupling: str | None = None, enabled: bool | None = None, explicit_step: bool | None = None, fuse_half_steps: bool | None = None, integrator: str | None = None, lanes: object = None, load_balance: bool | None = None, max_steps: object = None, rtol: float | None = None, sparse: object = None):
+    def __init__(self, *, C_reg: float | str | tuple | None = None, T_frozen: float | str | tuple | None = None, atol: float | None = None, coupling: Literal['simpler', 'strang'] | str | None = None, enabled: bool | None = None, explicit_step: bool | None = None, fuse_half_steps: bool | None = None, integrator: Literal['bdf', 'rosenbrock'] | str | None = None, lanes: object = None, load_balance: bool | None = None, max_steps: object = None, rtol: float | None = None, sparse: object = None):
         r"""
         C_reg: concentration [kmol/m³] below which reaction orders 0 < n < 1 follow a regularized law (default
             `1e-12`). Larger values (e.g. `1e-10`) make trace fuel burning out in hot gas much cheaper to integrate
@@ -1189,7 +1189,8 @@ class Chemistry(Table):
         atol: Absolute tolerance on the mass fractions (default `1e-10`).
         coupling: `strang` (default) or `simpler`; `simpler` does not combine with `fuse_half_steps`,
             `numerics.double_flux` or `numerics.convective_flux = "hybrid"` (SIMPLER's flow integrator amplifies
-            non-dissipative operators such as the hybrid flux's central part; see the design notes).
+            non-dissipative operators such as the hybrid flux's central part; see the design notes). One of simpler,
+            strang.
         enabled: `false` keeps the mixture non-reacting (default `true`).
         explicit_step: `true` first advances each active cell whose last RODAS sub-step covered the whole call
             by one explicit Bogacki–Shampine 3(2) step, with no Jacobian and no factorization, and keeps it if its
@@ -1216,7 +1217,7 @@ class Chemistry(Table):
             gains less at larger time steps, since every call restarts it at order 1 (1.1-1.5 times at 1e-6 s). Its
             error estimate is that of the solution it keeps, so at the same `rtol` and `atol` it is less accurate
             than RODAS where species below `atol` matter (H2/air ignition delays 2.3% early at `atol = 1e-10`,
-            within 2e-5 at `1e-14`); see the design notes.
+            within 2e-5 at `1e-14`); see the design notes. One of bdf, rosenbrock.
         lanes: Vector lanes integrating one cell: 1 for one thread per cell (cells ordered by their last cost),
             a power of 2 up to 32 for a team per cell on GPUs; default 0, automatic: a warp per cell on GPUs from 16
             species (8 warps, 16 from 512 species, for cells whose last call took 16 or more sub-steps), else one
@@ -1365,7 +1366,7 @@ class Les(Table):
         'model': ('model', 'value', None),
     }
 
-    def __init__(self, *, C: float | None = None, Pr_t: float | None = None, Sc_t: float | None = None, combustion: LesCombustion | dict | Inline | str | None = None, dynamic: bool | None = None, filter_width: str | None = None, gradients: str | None = None, model: Literal['sigma', 'smagorinsky', 'vreman', 'wale'] | str | None = None):
+    def __init__(self, *, C: float | None = None, Pr_t: float | None = None, Sc_t: float | None = None, combustion: LesCombustion | dict | Inline | str | None = None, dynamic: bool | None = None, filter_width: Literal['scotti', 'volume'] | str | None = None, gradients: str | None = None, model: Literal['sigma', 'smagorinsky', 'vreman', 'wale'] | str | None = None):
         r"""
         C: Model constant; defaults 1.35 (Sigma), 0.5 (WALE), 0.07 (Vreman's `c`), 0.17 (Smagorinsky).
         Pr_t: Turbulent Prandtl number, default 0.9.
@@ -1385,7 +1386,7 @@ class Les(Table):
             tensor `1/2 sum_f A_f A_f^T / |A_f|`; 1.2 for an aspect ratio of 5, 1.4 for 10; 1 on cubes and regular
             cells); `volume` (the 2D default): `Delta = V^(1/d)`. For the eddy viscosity and the flamelet gas's
             subgrid variance only (`[les.combustion]` keeps `V^(1/3)`). Channel at `Re_tau = 395` and 590: `Re_tau`
-            within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume`.
+            within 0.7% and 1.6% of MKM with `scotti`, 2.6% and 4.1% with `volume`. One of scotti, volume.
         gradients: The models' velocity gradients: `least_squares` (the least-squares gradients on the face
             neighbors, as the viscous fluxes'), or `reconstruction` (`TENO` only): in the cells TENO finds smooth
             (`TENO_SIGMA` below `troubled_threshold`), the gradient at the centroid of the central polynomial, which
@@ -1726,7 +1727,7 @@ class Physics(Table):
         'viscosity_model': ('viscosity_model', 'value', None),
     }
 
-    def __init__(self, *, C_Z: float | None = None, C_chi: float | None = None, Pr: float | None = None, T_mu_ref: float | str | tuple | None = None, T_ref: float | str | tuple | None = None, axisymmetric: bool | None = None, gamma: float | None = None, gas: Literal['flamelet', 'mixture', 'perfect'] | str | None = None, lewis: object = None, mechanism: str | None = None, mu: float | str | tuple | None = None, p_ref: float | str | tuple | None = None, phase: str | None = None, rho_ref: float | str | tuple | None = None, soret: bool | None = None, sutherland_S: float | str | tuple | None = None, table: str | None = None, transport: str | None = None, type: Literal['euler', 'navier_stokes'] | str | None = None, units: Literal['SI', 'nondimensional'] | str | None = None, variance: str | None = None, viscosity_exponent: float | None = None, viscosity_model: Literal['constant', 'power_law', 'sutherland'] | str | None = None):
+    def __init__(self, *, C_Z: float | None = None, C_chi: float | None = None, Pr: float | None = None, T_mu_ref: float | str | tuple | None = None, T_ref: float | str | tuple | None = None, axisymmetric: bool | None = None, gamma: float | None = None, gas: Literal['flamelet', 'mixture', 'perfect'] | str | None = None, lewis: object = None, mechanism: str | None = None, mu: float | str | tuple | None = None, p_ref: float | str | tuple | None = None, phase: str | None = None, rho_ref: float | str | tuple | None = None, soret: bool | None = None, sutherland_S: float | str | tuple | None = None, table: str | None = None, transport: Literal['constant_lewis', 'mixture_averaged', 'unity_lewis'] | str | None = None, type: Literal['euler', 'navier_stokes'] | str | None = None, units: Literal['SI', 'nondimensional'] | str | None = None, variance: str | None = None, viscosity_exponent: float | None = None, viscosity_model: Literal['constant', 'power_law', 'sutherland'] | str | None = None):
         r"""
         C_Z: (`flamelet`, `variance = "algebraic"`) The constant of the algebraic variance, non-negative,
             default 0.1.
@@ -1765,7 +1766,7 @@ class Physics(Table):
         transport: (`mixture`, `navier_stokes`) `mixture_averaged` (default: Wilke viscosity, Mathur
             conductivity, mixture-averaged diffusion coefficients), `unity_lewis` (diffusion coefficients `lambda /
             (rho cp)`) or `constant_lewis` (`lambda / (rho cp Le_k)`), as Cantera's models, from the species'
-            transport data in the file.
+            transport data in the file. One of constant_lewis, mixture_averaged, unity_lewis.
         type: `euler` (default) or `navier_stokes`. One of euler, navier_stokes.
         units: `SI` (default) or `nondimensional`: the units the case's numbers are in, which the terminal
             output states and labels its numbers with (nondimensional: none, `-` in a units row). A gas mixture is
@@ -1884,11 +1885,11 @@ class Radiation(Table):
         'species': ('species', 'value', None),
     }
 
-    def __init__(self, *, T_ambient: float | str | tuple | None = None, model: str | None = None, species: object = None):
+    def __init__(self, *, T_ambient: float | str | tuple | None = None, model: Literal['optically_thin'] | str | None = None, species: object = None):
         r"""
         T_ambient: Background temperature [K] (default 300). Temperature (K), a number in SI units or a quantity
             with its unit; 2D.
-        model: `optically_thin` (the default and only choice). 2D.
+        model: `optically_thin` (the default and only choice). One of optically_thin; 2D.
         species: Radiating species, any of `H2O`, `CO2`, `CO`, `CH4`; default all four that the mechanism has
             (listing one it lacks is an error). 2D.
         """
