@@ -10,6 +10,7 @@
   "examples/isotropic_turbulence/input.toml",
   "examples/noh_axisymmetric/input.toml",
   "examples/particle_centrifuge/input.toml",
+  "examples/particle_cloud/input.toml",
   "examples/particle_vortex/input.toml",
   "examples/pulsed_jet/input.toml",
   "examples/riemann_2d/input.toml",

@@ -1,0 +1,10 @@
+{
+ "dimension": "m^-1",
+ "dims": [
+  2
+ ],
+ "set_in": [
+  "examples/particle_cloud/input.toml"
+ ],
+ "type": "number"
+}

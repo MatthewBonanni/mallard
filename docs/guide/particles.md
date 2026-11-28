@@ -8,9 +8,11 @@ the gas accelerate them, convection heats them, and walls rebound or catch
 them. Each particle can carry
 [quantities](#per-particle-quantities) along its path (time integrals, extrema,
 first times, turns about an axis), and [probes](#particle-probes) give
-statistics of the particles in a region. Particles do not act on the gas yet;
-two-way coupling, sprays, injection during the run and particle output beyond
-the final positions follow in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
+statistics of the particles in a region. With
+[two-way coupling](#two-way-coupling) solid particles act on the gas, and
+[dispersed-phase fields](#dispersed-phase-fields) put them on the mesh. Sprays,
+injection during the run and particle output beyond the final positions follow
+in later releases ([#291](https://github.com/MatthewBonanni/mallard/issues/291)).
 
 - [Which particles?](#which-particles)
 - [Tracers](#tracers-particles), [seeding](#seeding), [restarts](#restarts) and [boundaries](#boundaries)
@@ -28,8 +30,8 @@ measured orders of accuracy in the
 
 The particles are *point particles*: each is much smaller than the cells and
 the smallest eddies around it, sees the gas as undisturbed at its center, and
-moves on its own, without collisions with other particles and without acting
-on the gas (one-way coupling). That describes dilute suspensions, with a
+moves on its own, without collisions with other particles and, unless coupled
+[two-way](#two-way-coupling), without acting on the gas (one-way coupling). That describes dilute suspensions, with a
 volume fraction of particles below about 10⁻⁶ (a mass loading of 0.2% for
 glass beads in air), and every tracer study.
 
@@ -88,8 +90,8 @@ n = [9, 9]
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
-and 2 more.
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
+and 3 more.
 
 A tracer is a zero-Stokes particle: massless, its velocity the gas velocity
 where it is, with no effect on the flow. Mallard evaluates that velocity from
@@ -183,9 +185,9 @@ interaction = "stick"
 [`particle_settling`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-settling),
 [`particle_bounce`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-bounce),
 [`particle_centrifuge`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-centrifuge),
-[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
-[`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step)
-and 1 more.
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
+[`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex)
+and 2 more.
 
 A solid particle is a small rigid sphere with a velocity of its own, which
 drag pulls toward the gas velocity and gravity (less the buoyancy of the gas it
@@ -198,7 +200,8 @@ The gas state at the particle (`u`, `rho`, `mu` at its temperature) comes from
 the reconstruction polynomial, as for tracers, and position and velocity are
 part of the time integrator's state: trajectories converge at the
 integrator's order. `f` is the drag correction of the [drag law](#drag-laws)
-(`drag`), `f = 1` for creeping flow. The particles do not act on the gas.
+(`drag`), `f = 1` for creeping flow. By default the particles do not act on the gas;
+`coupling = "two-way"` makes them ([Two-way coupling](#two-way-coupling)).
 
 **Forces.** Drag, gravity and buoyancy are the forces that matter for
 particles much denser than the gas (droplets, dust, ash, sand, soot in air).
@@ -224,7 +227,7 @@ $$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2
 \qquad Nu = 2 + 0.6 Re_p^{1/2} Pr^{1/3},$$
 
 with `k` the gas conductivity. The particle is isothermal (its Biot number is
-small) and does not heat the gas. Particle expressions read it as `T_P`, the
+small) and, unless coupled two-way, does not heat the gas. Particle expressions read it as `T_P`, the
 `file` has it as a column `T_p`, and restart files carry it.
 
 | Key | Default | Meaning |
@@ -398,6 +401,109 @@ example: Mallard's particles (dots) against their exact trajectories
   particles of a few cells' size are not point particles: the gas at their
   center is not the flow around them.
 
+## Two-way coupling
+
+```toml
+[particles]
+type = "solid"
+coupling = "two-way"
+weight = 1e4              # particles per parcel
+deposition_width = 2e-3   # m
+diameter = 50e-6
+density = 2500.0
+specific_heat = 840.0
+```
+
+*Used in:*
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud).
+
+With `coupling = "two-way"` the gas feels the particles: each stage, every
+particle gives the gas the opposite of its own change of momentum and energy,
+less what gravity on the particle did, times `weight`:
+
+$$\mathbf{S}_{\rho \mathbf{u}} = -w\, m_p \left(\frac{d\mathbf{v}}{dt} - \mathbf{g}\right),
+\qquad S_{\rho E} = -w\, m_p \left(\frac{d e_p}{dt} - \mathbf{g} \cdot \mathbf{v}\right),
+\qquad e_p = c_p T_p + \tfrac{1}{2} |\mathbf{v}|^2,$$
+
+summed into the cells and spread over a Gaussian of standard deviation
+`deposition_width`. Drag, the pressure-gradient, added-mass and lift forces and
+heat transfer all act back on the gas; gravity on the particles (`gravity` of
+`[particles]`) does not, since the earth exerts it, not the gas. The sources use
+the same stage rates the particles are integrated with, so the gas and the
+particles together conserve momentum and energy to round-off (with heat
+transfer; without it, the particles' kinetic energy is conserved to the
+integrator's order), however stiff the particles are.
+
+A parcel stands for `weight` identical particles, so that a computational
+particle can represent many physical ones; in 2D a parcel stands for `weight`
+particles per meter of depth. The mass loading of a cell, `w m_p / (rho V)`,
+decides how strongly the particles act: near 1 and above, they drag the gas
+along.
+
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-light.svg#gh-light-mode-only)
+![A cloud of heavy particles falling through gas at rest: coupled one way it falls at a single particle's terminal velocity, coupled two ways it drags the gas down and falls more than twice as fast](../images/guide/particle_cloud_coupling-dark.svg#gh-dark-mode-only)
+
+*The [`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud)
+example, coupled one way and two ways (Mallard runs). Left: the cloud's mean
+fall velocity from its probe. Coupled one way, each particle reaches the
+terminal velocity `tau g` = 0.1 of a single particle; coupled two ways, the
+cloud, as heavy as the gas within it, drags that gas along and falls at up
+to 0.27. Right: the gas velocity at `t` = 2 and the parcels, whose wake
+sheds a vortex pair and bends the cloud into an arc.*
+
+**Deposition.** With `deposition_width = 0` (the default) each particle's
+source goes to the cell holding it. On a fine mesh that puts a point source in
+one small cell, so the result depends on the mesh. A `deposition_width` in
+meters spreads it over a Gaussian of that width whatever the cells, so coupled
+results converge as the mesh is refined: second order in the cell size at a
+fixed width (the deposit keeps each particle's position within its cell, not
+only its cell). Choose a width of the order of the cell size of the coarsest
+mesh you would trust, or of the physical size of the region a particle
+disturbs. The spreading never moves sources across walls or out of the domain,
+and conserves them exactly.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `coupling` | `"one-way"` | `"one-way"`: the particles feel the gas only; `"two-way"`: the gas feels them too |
+| `weight` | 1 | Particles per parcel (per meter of depth in 2D) |
+| `deposition_width` | 0 | Standard deviation of the Gaussian the sources spread over; 0: each particle's own cell |
+
+The results are bitwise the same on any number of ranks and with or without
+CUDA graphs.
+
+**Pitfalls.**
+
+- The point-particle model assumes particles much smaller than the cells and a
+  dilute suspension. `mallard check` warns where particles are larger than a
+  tenth of their cell (`W-PARTICLE-SIZE`) and where the particle volume
+  fraction exceeds 1% (`W-PARTICLE-VOLUME-FRACTION`): collisions (four-way
+  coupling) and the volume the particles take from the gas are left out.
+- Two-way coupling needs solid particles; tracers are massless. Axisymmetric
+  runs are refused.
+- A wide `deposition_width` costs spreading passes per stage, about
+  `4 width^2 / h^2` in 2D and `6 width^2 / h^2` in 3D for cells of size `h`,
+  each with a halo exchange on several ranks.
+
+## Dispersed-phase fields
+
+```toml
+[[write_data]]
+prefix = "spray"
+fields = ["PARTICLE_VOLUME_FRACTION", "PARTICLE_U_X", "PARTICLE_SOURCE_RHOU_X"]
+```
+
+Runs with solid particles can write the particles as mesh fields, deposited as
+the coupling deposits them (over `deposition_width`):
+
+| Field | Meaning |
+|---|---|
+| `PARTICLE_VOLUME_FRACTION` | Particle volume per cell volume |
+| `PARTICLE_NUMBER_DENSITY` | Particles per volume (counting `weight`) |
+| `PARTICLE_U_X`, `_Y`, `_Z` | Mass-weighted mean particle velocity, 0 where there are none |
+| `PARTICLE_SOURCE_<A>` | What the particles give the gas per volume and time at the written state, for `<A>` each conservative variable (`RHO`, `RHOU_X`, ..., `RHOE`); with `coupling = "two-way"` |
+
+They are written by `[[write_data]]` and listed by `mallard list fields`.
+
 ## Per-particle quantities
 
 ```toml
@@ -494,6 +600,7 @@ interval = 100
 
 *Used in:*
 [`tracer_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#tracer-vortex),
+[`particle_cloud`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-cloud),
 [`particle_vortex`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-vortex),
 [`particle_step`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-step),
 [`particle_wake`](https://matthewbonanni.github.io/mallard/docs/examples/#particle-wake).

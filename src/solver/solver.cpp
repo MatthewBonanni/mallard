@@ -1732,6 +1732,7 @@ void Solver::init_numerics() {
             particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient(),
                                 viscous_gradients, c == 0.0_r, stage_time, dt,
                                 recording_step ? step_dt_device() : nullptr);
+            if (particles->two_way()) couple_particles(solution, rhs);
         }
     };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
@@ -2436,6 +2437,14 @@ void Solver::init_particles(region::Regions & regions) {
     particles = std::make_unique<Particles>();
     particles->init(input, mesh, boundary_data, is_distributed() ? &distribution : nullptr,
                     restart ? &*restart : nullptr, regions, is_mixture() ? nullptr : &physics);
+    if (particles->two_way() && axisymmetric) {
+        throw InputError(Diagnostic{.key = "particles.coupling",
+                                    .line = line_of(input.at("particles"), "coupling"),
+                                    .message = "\"two-way\" is not available in axisymmetric runs: the sources would "
+                                               "need the particles' ring volumes",
+                                    .fix = "Use coupling = \"one-way\", or a 2D or 3D run",
+                                    .docs = "docs/guide/particles.md#two-way-coupling"});
+    }
     if (particles->reads_time() && !stage_time.is_allocated()) stage_time = Kokkos::View<rtype>("stage_time");
     allocate_viscous_gradients();
     for (auto & setting : particles->settings()) mesh_setup.settings.push_back(setting);
@@ -2507,6 +2516,10 @@ void Solver::output_arrays_to_host() {
         source_terms->evaluate(state(), output_time(), source_values);
         copy(h_source_values, source_values);
     }
+    if (particle_fields.is_allocated()) {
+        update_particle_fields();
+        copy(h_particle_fields, particle_fields);
+    }
     // What restart files carry besides the cells; step graphs stage outputs at flushed steps only
     if (recording_step ? defer_chemistry : chemistry_flushed) {
         copy(h_unflushed, unflushed.flow);
@@ -2518,6 +2531,13 @@ void Solver::output_arrays_to_host() {
     if (particles) particles->stage_output();
     if (step_controller.enabled()) copy(h_step_control, step_controller.slots());
     if (characteristic_state_set) copy(h_char_state, boundary_data.char_state);
+}
+
+void Solver::update_particle_fields() {
+    if (!particles || !particle_fields.is_allocated()) return;
+    update_cell_fields(state());
+    particles->fields(W_cells, *face_reconstruction, viscous_gradient(), viscous_gradients,
+                      [this](const State & s) { halo.exchange(s); }, particle_fields);
 }
 
 void Solver::allocate_restart_mirrors() {
@@ -2653,6 +2673,16 @@ void Solver::register_data() {
         for (size_t i = 0; i < h_source_values.extent(1); i++) {
             const std::string name = i < N_CONSERVATIVE ? CONSERVATIVE_NAMES[i] : "RHOY_" + species_names[i - N_CONSERVATIVE];
             data.push_back(Data("SOURCE_" + name, Kokkos::subview(h_source_values, Kokkos::ALL(), i)));
+        }
+    }
+    if (particles) {
+        const std::vector<std::string> names = Particles::field_names(input);
+        if (!names.empty() && !particle_fields.is_allocated()) {
+            particle_fields = Kokkos::View<rtype **, Kokkos::LayoutRight>("particle_fields", mesh->n_cells, names.size());
+            h_particle_fields = pinned_mirrors(particle_fields);
+        }
+        for (size_t i = 0; i < names.size(); i++) {
+            data.push_back(Data(names[i], Kokkos::subview(h_particle_fields, Kokkos::ALL(), i)));
         }
     }
     if (les_on) data.push_back(Data("MU_T", Kokkos::subview(h_les_coefficients, Kokkos::ALL(), 0)));
@@ -2818,6 +2848,7 @@ std::vector<std::string> Solver::init_fields(const Input & input_in) {
         for (const auto & name : CONSERVATIVE_NAMES) names.push_back("SOURCE_" + std::string(name));
         for (const auto & s : species_names) names.push_back("SOURCE_RHOY_" + s);
     }
+    for (const auto & name : Particles::field_names(input)) names.push_back(name);
     if (LES::in_input(input)) {
         names.emplace_back("MU_T");
         if (mixture_model && mixture_model->tabulated() &&

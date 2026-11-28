@@ -1,0 +1,5 @@
+- `[particles] coupling = "two-way"`: solid particles act on the gas, which receives the opposite of their momentum and energy change (drag, the other forces and heat transfer, not gravity on the particles), so gas and particles together conserve momentum and energy to round-off; `weight` sets the particles per parcel (#758).
+- `[particles] deposition_width`: coupling sources and dispersed-phase fields spread over a Gaussian of a width in meters, conservatively and keeping each particle's position within its cell, so coupled results converge at second order under mesh refinement (#758).
+- Dispersed-phase output fields of solid particles: `PARTICLE_VOLUME_FRACTION`, `PARTICLE_NUMBER_DENSITY`, `PARTICLE_U_<axis>` and, with two-way coupling, `PARTICLE_SOURCE_<variable>` (#758).
+- `mallard check` warns where particles are larger than a tenth of their cell (`W-PARTICLE-SIZE`) and where the particle volume fraction exceeds 1% (`W-PARTICLE-VOLUME-FRACTION`) (#758).
+- Example `particle_cloud`: a cloud of heavy particles falls through quiescent gas, dragging it along (#758).

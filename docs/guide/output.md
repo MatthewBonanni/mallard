@@ -50,7 +50,7 @@ fields = ["P", "T"]
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 56 more.
+and 57 more.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -132,6 +132,10 @@ other fields.
 |  | `TF_OMEGA` | `1` | flame sensor | [les.combustion] (TFLES) | write_data |
 |  | `PASR_KAPPA` | `1` | PaSR reacting fraction | [les.combustion] model = "pasr" | write_data |
 | sources | `SOURCE_<A>` | `A's s-1` | source of A, per second | [[sources]] or [source] | write_data |
+| particles | `PARTICLE_VOLUME_FRACTION` | `1` | particle volume fraction | [particles] type = "solid" | write_data |
+|  | `PARTICLE_NUMBER_DENSITY` | `m-3` | particles per volume | [particles] type = "solid" | write_data |
+|  | `PARTICLE_U` | `m s-1` | mass-weighted mean particle velocity (vector) | [particles] type = "solid" | write_data |
+|  | `PARTICLE_SOURCE_<A>` | `A's s-1` | particle coupling source of A, per second | [particles] coupling = "two-way" | write_data |
 | statistics | `MEAN_<A>` | `A's` | time average of A | [statistics] fields with A, or [[probes]] averaging A | write_data, probes |
 |  | `COV_<A>_<B>` | `A's times B's` | covariance of A and B | [statistics] products with A*B | write_data, probes |
 |  | `PHASE_<bin>_<A>` | `A's` | phase average of A in a bin | [statistics.phase] | write_data, probes |
@@ -589,7 +593,7 @@ check_interval = 100   # a progress row every 100 steps
 [`riemann_2d`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d),
 [`riemann_2d_quads`](https://matthewbonanni.github.io/mallard/docs/examples/#riemann-2d-quads),
 [`double_mach`](https://matthewbonanni.github.io/mallard/docs/examples/#double-mach)
-and 61 more.
+and 62 more.
 
 Rank 0 prints a header (version, build, device), the setup time of each
 stage, then the Mesh, Physics (with the case's units, `physics.units`),

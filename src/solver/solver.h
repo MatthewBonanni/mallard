@@ -364,6 +364,15 @@ class Solver {
         // Public because nvcc rejects device lambdas in non-public member functions
         /** @brief Gravity and the source terms, added to the volume-integrated rhs. */
         void add_sources(const State & solution, const State & rhs, rtype t_stage, rtype c);
+        /** @brief Add the two-way coupled particles' sources of the stage to rhs, and to the conservation ledger. */
+        void couple_particles(const State & solution, const State & rhs);
+        /**
+         * @brief The dispersed-phase fields of the current state (Particles::fields) into particle_fields on the
+         *        device, if the run has them (collective).
+         */
+        void update_particle_fields();
+        /** @brief The dispersed-phase fields (cell, Particles::field_names()), as of the last output or update. */
+        const Kokkos::View<rtype **, Kokkos::LayoutRight> & get_particle_fields() const { return particle_fields; }
         /** @brief W_cells (and for mixtures the cell scalars) of the given state, as the RHS computes them. */
         void update_cell_fields(const State & solution);
         /** @brief At a row on the device: stops it where check_timed_boundaries would throw on any rank. */
@@ -991,6 +1000,8 @@ class Solver {
         /** @brief The largest part of the whole mesh on n ranks, as the run's partitioner would make it (serial). */
         PartSize check_part(const DistributedMesh & whole, int n_ranks, int ranks_per_node = 0) const;
         void check_settings(CheckReport & report) const;
+        /** @brief W-PARTICLE-SIZE and W-PARTICLE-VOLUME-FRACTION where the point-particle model is invalid. */
+        void check_particles(CheckReport & report);
         void check_regions(CheckReport & report, const CheckOptions & options) const;
         /** @brief The initial state's primitive fields as a snapshot (check --initial). */
         void check_initial(CheckReport & report, const CheckOptions & options);
@@ -1567,6 +1578,8 @@ class Solver {
         Kokkos::View<rtype *, Kokkos::HostSpace> h_qrad;  // output: radiative loss [W/m^3]
         Kokkos::View<rtype **, Kokkos::LayoutRight> source_values;  // output: (cell, SOURCE_*)
         Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_source_values;
+        Kokkos::View<rtype **, Kokkos::LayoutRight> particle_fields;  // output: (cell, PARTICLE_*)
+        Kokkos::View<rtype **, Kokkos::LayoutRight>::host_mirror_type h_particle_fields;
         Kokkos::View<rtype> host_output_time;  // output_time() outside step graphs
         // Output: the mesh and stencil fields [[write_data]] asks for, constant over the run
         std::vector<std::string> mesh_field_names;

@@ -61,6 +61,7 @@ Mallard is a high-order unstructured finite volume solver for compressible Euler
 - Exponential integration of stiff particles; time step independent of particles
 - Wall bounces with restitution, located within the step; deposition on sticking walls
 - Path quantities: time integrals, extrema, first times, turns about an axis; particle probes over regions
+- Two-way coupling: momentum and energy conserved to round-off; sources spread over a physical width; dispersed-phase fields ([guide](https://matthewbonanni.github.io/mallard/docs/guide/particles/#two-way-coupling))
 - GPUs and MPI; bitwise identical on any rank count and across restarts
 
 **Boundary conditions** ([guide](https://matthewbonanni.github.io/mallard/docs/guide/boundary_conditions/))
