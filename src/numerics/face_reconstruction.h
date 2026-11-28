@@ -25,6 +25,7 @@
 #include "common_typedef.h"
 #include "index_set.h"
 #include "mesh.h"
+#include "face_point_gradients.h"
 #include "face_weights.h"
 #include "quadrature.h"
 #include "boundary.h"
@@ -613,11 +614,10 @@ class TENO : public FaceReconstruction {
         // When allocated (cell, var, d), the reconstruction also writes there the gradients of W that
         // cell_gradients gives, for the cells it finds smooth (sigma < sigma_threshold)
         Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> smooth_gradients;
-        // When allocated (cell / 2, l, cell % 2, var), the reconstruction also writes there the central
-        // coefficients of the conservative variables of the cells it finds smooth, in the unscaled frame
-        // (coefficient l of (x - x_c)^a), and NaN at (l, var) = (0, 0) for the troubled ones and for those
-        // whose face values fall back to the cell mean (inadmissible at a face point)
-        Kokkos::View<rtype **[2][N_CONSERVATIVE]> polynomials;
+        // When allocated, the reconstruction also writes there the gradients of u and T of the central
+        // polynomials of the cells it finds smooth at their face points, and marks the sides of the troubled
+        // cells and of those whose face values fall back to the cell mean (inadmissible at a face point)
+        FacePointGradients point_gradients;
 
         // Per-cell precomputed data, by table row (n_rows(); cell_of_row)
         Kokkos::View<rtype *> scale;                       // h = sqrt(V)

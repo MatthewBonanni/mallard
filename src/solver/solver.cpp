@@ -18,7 +18,6 @@
 #include "input.h"
 
 #include <algorithm>
-#include <unordered_set>
 #include <cmath>
 #include <cstddef>
 #include <iomanip>
@@ -758,10 +757,12 @@ void Solver::init_rhs_split() {
         partition_faces = IndexSet::of(remote, "partition_faces");
         const FacePlan plan = plan_face_exchange(distribution, *mesh, needed);
         face_exchange = FaceExchange(plan, static_cast<uint8_t>(face_solution.extent(1)), halo.uses_nccl());
-        if (polynomial_viscous) init_polynomial_exchange(plan, needed);
-    } else if (polynomial_viscous) {
-        allocate_polynomials(mesh->n_reconstructed());
+        if (polynomial_viscous) {
+            point_gradient_exchange = FaceExchange(
+                plan, FacePointGradients::n_slots(face_reconstruction->n_face_quadrature_points()), halo.uses_nccl(), 2);
+        }
     }
+    if (polynomial_viscous) allocate_point_gradients();
 
     // Early: the cells independent of the halo among [0, n_interior()), where the numbering puts them
     std::vector<uint32_t> early, late;
@@ -786,52 +787,13 @@ void Solver::init_rhs_split() {
     }
 }
 
-void Solver::allocate_polynomials(const uint32_t n_cells) {
+void Solver::allocate_point_gradients() {
     auto & teno = dynamic_cast<TENO &>(*face_reconstruction);
-    teno.polynomials = Kokkos::View<rtype **[2][N_CONSERVATIVE]>("viscous_polynomials", (n_cells + 1) / 2,
-                                                                 teno.n_dof_large);
-}
-
-void Solver::init_polynomial_exchange(const FacePlan & faces, const std::vector<RemoteFaceSide> & needed) {
-    // Rows of cell c are (c / 2, side c % 2) of the polynomials: a FaceExchange of NK points per side sends them
-    uint32_t n = mesh->n_reconstructed();
-    for (const RemoteFaceSide & r : needed) n = std::max(n, r.cell + 1);
-    allocate_polynomials(n);
-    auto rows = [&](const std::vector<std::vector<uint32_t>> & face_lists,
-                    const std::vector<std::vector<uint8_t>> & side_lists, std::vector<std::vector<uint32_t>> & row_lists,
-                    std::vector<std::vector<uint8_t>> & lane_lists, std::vector<std::vector<uint64_t>> & global) {
-        row_lists.assign(face_lists.size(), {});
-        lane_lists.assign(face_lists.size(), {});
-        global.assign(face_lists.size(), {});
-        // Both ends list a neighbor's cells in the same order, so each keeps the first of repeated cells
-        for (size_t k = 0; k < face_lists.size(); k++) {
-            std::unordered_set<uint32_t> seen;
-            for (size_t j = 0; j < face_lists[k].size(); j++) {
-                const uint32_t c = static_cast<uint32_t>(mesh->h_cells_of_face(face_lists[k][j], side_lists[k][j]));
-                if (!seen.insert(c).second) continue;
-                row_lists[k].push_back(c >> 1);
-                lane_lists[k].push_back(static_cast<uint8_t>(c & 1u));
-                global[k].push_back(mesh->h_global_cell(c));
-            }
-        }
-    };
-    FacePlan plan;
-    plan.neighbors = faces.neighbors;
-    std::vector<std::vector<uint64_t>> send_cells, recv_cells;
-    rows(faces.send_faces, faces.send_sides, plan.send_faces, plan.send_sides, send_cells);
-    rows(faces.recv_faces, faces.recv_sides, plan.recv_faces, plan.recv_sides, recv_cells);
-    // That order is the plan's: check once that each neighbor sends the cells, in the order, this rank expects
-    std::vector<std::vector<uint64_t>> to_rank(static_cast<size_t>(comm::size()));
-    for (size_t k = 0; k < plan.neighbors.size(); k++) to_rank[static_cast<size_t>(plan.neighbors[k])] = send_cells[k];
-    const auto from_rank = comm::alltoallv(to_rank);
-    for (size_t k = 0; k < plan.neighbors.size(); k++) {
-        if (from_rank[static_cast<size_t>(plan.neighbors[k])] != recv_cells[k]) {
-            throw std::logic_error("init_polynomial_exchange: rank " + std::to_string(plan.neighbors[k]) +
-                                   " sends other cells than rank " + std::to_string(comm::rank()) + " expects");
-        }
-    }
-    const auto & teno = dynamic_cast<const TENO &>(*face_reconstruction);
-    polynomial_exchange = FaceExchange(plan, teno.n_dof_large, halo.uses_nccl(), 2);
+    const uint8_t n_slots = FacePointGradients::n_slots(teno.n_face_quadrature_points());
+    teno.point_gradients.values =
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]>("point_gradients", mesh->n_state_faces(), n_slots);
+    teno.point_gradients.R = physics.R;
+    teno.point_gradients.gamma = physics.gamma;
 }
 
 void Solver::init_physics() {

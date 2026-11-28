@@ -422,7 +422,7 @@ std::array<double, N_CONSERVATIVE> flux_of_face_0(const ViscousFluxFunctor & f) 
 } // namespace
 
 TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAtNishikawasCoefficient) {
-    // Two cells with flat polynomials and different face values: the face gradient is the jump term alone,
+    // Two cells with flat polynomials (zero gradients at the face point) and different face values: the face gradient is the jump term alone,
     // 4/3 (q_1 - q_0) n / |d . n| (Nishikawa 2010)
     const double mu = 0.01, alpha = 4.0 / 3.0, area = 0.5;
     const double n[3] = {0.6, 0.8, 0.0}, d[3] = {0.9, 0.1, 0.2};
@@ -442,9 +442,7 @@ TEST(ViscousReconstructionGradients, FluxBetweenConstantStatesIsTheJumpDampingAt
     f.face_solution = decltype(f.face_solution)("face_solution", 1, 1);
     f.quad_weights = decltype(f.quad_weights)("quad_weights", 1);
     f.face_weights = share_face_weights("face_weights", 1, 1, [](uint32_t, rtype * w) { w[0] = 2.0_r; });
-    f.points.face_quad_points = decltype(f.points.face_quad_points)("face_quad_points", 1, 1, N_DIM);
-    f.polynomials = CellPolynomials{decltype(f.polynomials.coefficients)("coefficients", 1, teno::n_dof(3)),
-                                    f.cell_coords, 3};
+    f.point_gradients.values = decltype(f.point_gradients.values)("point_gradients", 1, FacePointGradients::n_slots(1));
     auto h_normals = Kokkos::create_mirror_view(f.normals);
     auto h_area = Kokkos::create_mirror_view(f.face_area);
     auto h_coords = Kokkos::create_mirror_view(f.cell_coords);
