@@ -78,7 +78,7 @@ def compute(mallard, runs=None):
     profile = dict(x=x[order].tolist(), T=cells["T"][order].tolist(),
                    OMEGA_H2=cells["OMEGA_H2"][order].tolist(),
                    **{f"Y_{k}": cells[f"Y_{k}"][order].tolist() for k in SPECIES})
-    rows = [dict(t=r["snapshot"]["t"], **{k: r[k] for k in ("x_f", "delta_T", "dTdx_max", "S_c", "S_d", "T_u", "T_b")})
+    rows = [dict(t=r["snapshot"]["t"], **{k: r[k] for k in ("X_F", "DELTA_T", "DTDX_MAX", "S_C", "S_D", "T_U", "T_B")})
             for r in report["snapshots"]]
     DATA.write_text(json.dumps(dict(profile=profile, rows=rows, summary=report["summary"], species=report["species"],
                                     t_profile=float(cells["TIME"]))) + "\n")
@@ -96,7 +96,7 @@ def load():
 def profile_figure(P, d):
     p, r = d["profile"], d["rows"]
     x, T = p["x"], p["T"]
-    T_u, T_b, x_f = r["T_u"][-1], r["T_b"][-1], r["x_f"][-1]
+    T_u, T_b, x_f = r["T_U"][-1], r["T_B"][-1], r["X_F"][-1]
     xi = (x - x_f) * 1e3
     g = np.diff(T) / np.diff(x)
     i = int(np.argmax(np.abs(g)))
@@ -155,8 +155,8 @@ def speeds_figure(P, d):
                                   gridspec_kw=dict(height_ratios=[1, 2.2], hspace=0.08))
     zoom = (2.15, 2.48)
     for a in (top, ax):
-        a.plot(t, r["S_c"], "o-", color=P["flame"], ms=4, lw=1.6, label="S_c, consumption speed")
-        a.plot(t, r["S_d"], "s-", color=P["teal"], ms=4, lw=1.4, label="S_d, displacement speed")
+        a.plot(t, r["S_C"], "o-", color=P["flame"], ms=4, lw=1.6, label="S_c, consumption speed")
+        a.plot(t, r["S_D"], "s-", color=P["teal"], ms=4, lw=1.4, label="S_d, displacement speed")
         a.axhline(S_L, color=P["muted"], lw=1.0, ls="--")
     top.axhspan(*zoom, color=P["muted"], alpha=0.12, lw=0)
     top.set_ylim(-1.2, 4.3)
@@ -164,12 +164,12 @@ def speeds_figure(P, d):
     label(top, t[-1], 3.2, "the start from a tanh profile (below: the shaded band)", P, color=P["muted"], size=11,
           ha="right")
     top.legend(loc="lower right", ncol=2)
-    t_c, t_d = s["S_c_from"] * 1e3, s["S_d_from"] * 1e3
+    t_c, t_d = s["S_C_FROM"] * 1e3, s["S_D_FROM"] * 1e3
     ax.axvspan(t_c, t[-1], color=P["flame"], alpha=0.10, lw=0)
     ax.set_ylim(*zoom)
     label(ax, 0.01, S_L + 0.01, f"Cantera, S_L = {S_L} m/s", P, color=P["muted"], size=11, ha="left", va="bottom")
-    for y, t0, color, text in ((2.395, t_c, P["flame"], f"S_c = {s['S_c']:.3f} m/s: the mean over the last third"),
-                               (2.44, t_d, P["teal"], f"S_d = {s['S_d']:.3f} m/s: x_f fitted over the last half")):
+    for y, t0, color, text in ((2.395, t_c, P["flame"], f"S_c = {s['S_C']:.3f} m/s: the mean over the last third"),
+                               (2.44, t_d, P["teal"], f"S_d = {s['S_D']:.3f} m/s: x_f fitted over the last half")):
         ax.plot((t0, t[-1]), (y, y), color=color, lw=2.4, solid_capstyle="butt")
         label(ax, t[-1], y + 0.008, text, P, color=color, size=11, ha="right", va="bottom")
     ax.set_xlim(0, t[-1] * 1.02)

@@ -123,7 +123,7 @@ class FixedPoint {
 std::string Profile::csv() const {
     std::string out;
     for (const auto & a : axes) out += a + ",";
-    out += "n_cells";
+    out += "N_CELLS";
     for (const auto & n : names) out += "," + n;
     out += "\n";
     char buffer[32];

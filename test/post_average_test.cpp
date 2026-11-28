@@ -251,7 +251,7 @@ TEST(PostAverageTest, HomogeneousAveragesOfStatesAndOfTheRunsStatisticsAgree) {
     if (!comm::is_root()) return;
     const auto a = read_csv(states + "/average.csv"), b = read_csv(stored + "/average.csv");
     ASSERT_EQ(a.at("y").size(), 8u);
-    for (const double n : a.at("n_cells")) EXPECT_EQ(n, N_DIM == 3 ? 32.0 : 8.0);
+    for (const double n : a.at("N_CELLS")) EXPECT_EQ(n, N_DIM == 3 ? 32.0 : 8.0);
     for (const char * name : {"y", "MEAN_U_X", "COV_U_X_U_X", "COV_U_X_U_Y", "COV_P_MACH", "RMS_U_X"}) {
         ASSERT_EQ(b.at(name).size(), a.at(name).size()) << name;
         for (size_t r = 0; r < a.at(name).size(); r++) EXPECT_EQ(a.at(name)[r], b.at(name)[r]) << name << " row " << r;
@@ -357,9 +357,9 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageTheirIntegralsAsTheyAreInEachSn
         EXPECT_NE(each.at(measure)[0], each.at(measure)[2]);
         const double tolerance = roundoff(1e-13);
         EXPECT_NEAR(mean.at(measure)[0], m / total, tolerance * m / total);
-        EXPECT_NEAR(mean.at("integral_MEAN_RHO")[0], rho / total, tolerance * rho / total);
-        EXPECT_NEAR(mean.at("integral_MEAN_P")[0], p / total, tolerance * p / total);
-        EXPECT_NEAR(mean.at("mean_MEAN_RHO")[0], rho / m, tolerance * rho / m);
+        EXPECT_NEAR(mean.at("INTEGRAL_MEAN_RHO")[0], rho / total, tolerance * rho / total);
+        EXPECT_NEAR(mean.at("INTEGRAL_MEAN_P")[0], p / total, tolerance * p / total);
+        EXPECT_NEAR(mean.at("MEAN_MEAN_RHO")[0], rho / m, tolerance * rho / m);
     }
     // Their averages are integrals over the region, not fields on cells
     std::string errors;
@@ -426,10 +426,10 @@ TEST(PostAverageTest, RegionsOfTheSolutionAverageProductsFavreAndProfilesAsTheyA
         const double uu = in_time(each, [&](size_t k) { return std::pow(each.at("RMS_U_X")[k], 2) * each.at(measure)[k]; });
         const double rho_u = in_time(each, e("INTEGRAL_RHOU_X"));
         const double favre = in_time(each, [&](size_t k) { return each.at("FAVRE_U_X")[k] * each.at("INTEGRAL_RHO")[k]; });
-        expect_near(mean.at("integral_MEAN_U_X_U_X")[0], uu, uu);
+        expect_near(mean.at("INTEGRAL_MEAN_U_X_U_X")[0], uu, uu);
         expect_near(mean.at("COV_U_X_U_X")[0], uu / m - u * u, uu / m);
         expect_near(mean.at("RMS_U_X")[0], std::sqrt(uu / m - u * u), std::sqrt(uu / m));
-        expect_near(mean.at("integral_MEAN_RHO_U_X")[0], rho_u, std::abs(rho_u));
+        expect_near(mean.at("INTEGRAL_MEAN_RHO_U_X")[0], rho_u, std::abs(rho_u));
         expect_near(mean.at("COV_RHO_U_X")[0], rho_u / m - rho / m * u, std::abs(rho_u / m));
         expect_near(mean.at("FAVRE_MEAN_U_X")[0], favre / rho, std::abs(favre / rho));
         EXPECT_TRUE(mean.contains("FAVRE_COV_U_X_U_X"));

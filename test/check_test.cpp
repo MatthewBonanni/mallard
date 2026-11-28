@@ -1258,7 +1258,7 @@ TEST(CheckRegions, TheCaseViewHoldsEveryRegionZoneAndProbeAndLabelsThem) {
     EXPECT_EQ(r.view_file, (dir / "case.vtkhdf").string());
     const auto datasets = h5_all_datasets(r.view_file);
     for (const std::string & block : blocks) EXPECT_TRUE(datasets.count("VTKHDF/" + block + "/Connectivity")) << block;
-    EXPECT_TRUE(datasets.count("VTKHDF/probes[name = \"s\"].region/CellData/normal"));
+    EXPECT_TRUE(datasets.count("VTKHDF/probes[name = \"s\"].region/CellData/NORMAL"));
 #else
     EXPECT_EQ(r.view_file, (dir / "case.vtm").string());
     const std::string vtm = read_file(r.view_file);

@@ -581,8 +581,8 @@ holds it as placed:
 [case view](input_files.md#the-case-view): `view/case-light.svg` and
 `view/case-dark.svg`, an image of the mesh, its zones and every region, each
 labeled, and `view/case.vtkhdf`, with one block per region (filled regions as
-their cells with `fraction`; surfaces, curves and points with `normal` or, for
-3D curves, `tangent`, and their `area`, `length` or `count`), per boundary
+their cells with `FRACTION`; surfaces, curves and points with `NORMAL` or, for
+3D curves, `TANGENT`, and their `AREA`, `LENGTH` or `COUNT`), per boundary
 zone and for the mesh's cells. Open it in ParaView (5.12 or later) and pick
 blocks in the Multiblock Inspector; builds without HDF5 write `view/case.vtm`.
 

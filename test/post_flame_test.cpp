@@ -171,7 +171,7 @@ TEST(PostFlameTest, ConsumptionSpeedBurnsTheFuelTheStripLoses) {
         // The cartesian mesh numbers its cells along x: the last is at the outlet
         outflow.push_back(rho_u.back() * rho_y.back() / rho.back());
         const json::Value & row = rows[k];
-        burnt.push_back(number(row, "S_c") * number(row, "rho_u") * (number(row, "Y_u") - number(row, "Y_b")));
+        burnt.push_back(number(row, "S_C") * number(row, "RHO_U") * (number(row, "Y_U") - number(row, "Y_B")));
     }
     double burnt_total = 0.0, outflow_total = 0.0;
     for (size_t k = 1; k < t.size(); k++) {
@@ -181,7 +181,10 @@ TEST(PostFlameTest, ConsumptionSpeedBurnsTheFuelTheStripLoses) {
     const double lost = inventory.front() - inventory.back();
     // Within 1e-4 here; the outflow is 7% of it
     EXPECT_NEAR(burnt_total + outflow_total, lost, 2e-3 * lost);
-    EXPECT_TRUE(fs::exists(dir + "/out/flame.csv"));
+    std::ifstream table(dir + "/out/flame.csv");
+    std::string header;
+    std::getline(table, header);
+    EXPECT_EQ(header, "step,t,X_F,DELTA_T,DTDX_MAX,S_C,S_D,U_U,T_U,T_B,RHO_U,Y_H2_U,Y_H2_B");
     if (!have_hdf5()) return;
     // Snapshots of the run's own OMEGA_* are read as they are, without the case's chemistry: the same speeds,
     // but for the chemistry half step that restart files hold pending and snapshots applied (fuse_half_steps)
@@ -194,8 +197,8 @@ TEST(PostFlameTest, ConsumptionSpeedBurnsTheFuelTheStripLoses) {
     for (const json::Value & a : rows) {
         for (const json::Value & b : stored) {
             if (number(*b.find("snapshot"), "step") != number(*a.find("snapshot"), "step")) continue;
-            EXPECT_NEAR(number(b, "S_c"), number(a, "S_c"), 3e-3 * number(a, "S_c"));
-            EXPECT_NEAR(number(b, "x_f"), number(a, "x_f"), 0.1 * h_cell);
+            EXPECT_NEAR(number(b, "S_C"), number(a, "S_C"), 3e-3 * number(a, "S_C"));
+            EXPECT_NEAR(number(b, "X_F"), number(a, "X_F"), 0.1 * h_cell);
             compared++;
         }
     }
@@ -208,13 +211,13 @@ TEST(PostFlameTest, PositionAndThicknessOfAResolvedTanhProfileAreItsCenterAndTwi
     run(dir, {.cells = 600, .stop = "n_steps = 1"});
     const json::Value r = measure({dir + "/restart_000000.restart", "-o", dir + "/out"});
     const json::Value & row = r.find("snapshots")->array.front();
-    EXPECT_NEAR(number(row, "T_u"), T_U, 1e-6 * T_U);
-    EXPECT_NEAR(number(row, "T_b"), T_B, 1e-6 * T_B);
-    EXPECT_NEAR(number(row, "x_f"), X_0, 1e-3 * W);
+    EXPECT_NEAR(number(row, "T_U"), T_U, 1e-6 * T_U);
+    EXPECT_NEAR(number(row, "T_B"), T_B, 1e-6 * T_B);
+    EXPECT_NEAR(number(row, "X_F"), X_0, 1e-3 * W);
     // The largest slope between cell centers h apart underestimates the tangent's by about (h / W)^2 / 12
-    EXPECT_NEAR(number(row, "delta_T"), 2 * W, 1e-2 * W);
-    EXPECT_NEAR(number(row, "dTdx_max"), (T_B - T_U) / (2 * W), 1e-2 * (T_B - T_U) / (2 * W));
-    EXPECT_GT(number(row, "S_c"), 0.0);
+    EXPECT_NEAR(number(row, "DELTA_T"), 2 * W, 1e-2 * W);
+    EXPECT_NEAR(number(row, "DTDX_MAX"), (T_B - T_U) / (2 * W), 1e-2 * (T_B - T_U) / (2 * W));
+    EXPECT_GT(number(row, "S_C"), 0.0);
     // A burnt temperature given, as where the burnt gas has not reached equilibrium: the same slope, a thicker
     // flame, and x_f where T crosses midway to it
     const double T_given = T_B + 200.0;
@@ -222,11 +225,11 @@ TEST(PostFlameTest, PositionAndThicknessOfAResolvedTanhProfileAreItsCenterAndTwi
                                    "-o", dir + "/given"});
     const json::Value & given = g.find("snapshots")->array.front();
     EXPECT_EQ(g.find("burnt_temperature")->string, "given");
-    EXPECT_DOUBLE_EQ(number(given, "T_b"), T_given);
-    EXPECT_DOUBLE_EQ(number(given, "dTdx_max"), number(row, "dTdx_max"));
-    EXPECT_NEAR(number(given, "delta_T"), (T_given - T_U) / number(row, "dTdx_max"), 1e-12 * W);
+    EXPECT_DOUBLE_EQ(number(given, "T_B"), T_given);
+    EXPECT_DOUBLE_EQ(number(given, "DTDX_MAX"), number(row, "DTDX_MAX"));
+    EXPECT_NEAR(number(given, "DELTA_T"), (T_given - T_U) / number(row, "DTDX_MAX"), 1e-12 * W);
     const double x_mid = X_0 + W * std::atanh(2.0 * (0.5 * (T_U + T_given) - T_U) / (T_B - T_U) - 1.0);
-    EXPECT_NEAR(number(given, "x_f"), x_mid, 1e-2 * W);
+    EXPECT_NEAR(number(given, "X_F"), x_mid, 1e-2 * W);
 }
 
 TEST(PostFlameTest, ARichFlameBurnsItsOxidizer) {
@@ -251,15 +254,15 @@ TEST(PostFlameTest, AMirroredFlameAlongAnotherDirectionMeasuresTheSame) {
     EXPECT_EQ(y.find("species")->string, x.find("species")->string);
     const json::Value & a = x.find("snapshots")->array.front();
     const json::Value & b = y.find("snapshots")->array.front();
-    EXPECT_NEAR(number(b, "S_c"), number(a, "S_c"), roundoff(1e-11) * std::abs(number(a, "S_c")));
-    EXPECT_NEAR(number(b, "delta_T"), number(a, "delta_T"), roundoff(1e-11) * DELTA);
-    EXPECT_NEAR(number(b, "x_f"), LENGTH - number(a, "x_f"), roundoff(1e-11) * LENGTH);
+    EXPECT_NEAR(number(b, "S_C"), number(a, "S_C"), roundoff(1e-11) * std::abs(number(a, "S_C")));
+    EXPECT_NEAR(number(b, "DELTA_T"), number(a, "DELTA_T"), roundoff(1e-11) * DELTA);
+    EXPECT_NEAR(number(b, "X_F"), LENGTH - number(a, "X_F"), roundoff(1e-11) * LENGTH);
     // The flame burns toward the closed end, into the fresh gas: a positive displacement speed from each end
     std::vector<std::string> x_series = restart_files(x_dir), y_series = restart_files(y_dir);
     x_series.insert(x_series.end(), {"-o", x_dir + "/out"});
     y_series.insert(y_series.end(), {"--direction", "y", "-o", y_dir + "/out"});
-    const double s_x = number(*measure(x_series).find("summary"), "S_d");
-    const double s_y = number(*measure(y_series).find("summary"), "S_d");
+    const double s_x = number(*measure(x_series).find("summary"), "S_D");
+    const double s_y = number(*measure(y_series).find("summary"), "S_D");
     EXPECT_GT(s_x, 0.0);
     EXPECT_NEAR(s_y, s_x, roundoff(1e-11) * std::abs(s_x));
 }

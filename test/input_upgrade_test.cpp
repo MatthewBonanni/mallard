@@ -635,3 +635,10 @@ TEST(InputUpgradeTest, LowercaseMonitoredValuesAndReductionColumnsBecomeUppercas
     EXPECT_EQ(upgrade(expected, reformatted, findings), expected);
     EXPECT_TRUE(findings.empty());
 }
+
+TEST(InputUpgradeTest, AReactorInputGetsANoticeOfTheUppercasePressureColumn) {
+    const std::vector<std::string> notes = input_upgrade::notices("[reactor]\nT = 1000.0\n");
+    ASSERT_EQ(notes.size(), 1u);
+    EXPECT_NE(notes[0].find("column as P"), std::string::npos) << notes[0];
+    EXPECT_TRUE(input_upgrade::notices("[run]\n[numerics]\npreset = \"high_order\"\n").empty());
+}

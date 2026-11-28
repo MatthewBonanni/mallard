@@ -812,8 +812,8 @@ struct OnMesh {
 
 /** @brief The elements of a surface, curve or points as cells of the block, with their direction and measure. */
 void add_elements(case_view::Block & block, const region::Elements & e) {
-    block.field(N_DIM == 3 && e.dimension == 1 ? "tangent" : "normal", 3);
-    block.field(e.dimension == 2 ? "area" : e.dimension == 1 ? "length" : "count", 1);
+    block.field(N_DIM == 3 && e.dimension == 1 ? "TANGENT" : "NORMAL", 3);
+    block.field(e.dimension == 2 ? "AREA" : e.dimension == 1 ? "LENGTH" : "COUNT", 1);
     for (size_t k = 0; k < e.size(); k++) {
         const std::vector<std::array<double, 3>> v(e.vertices.begin() + e.offsets[k], e.vertices.begin() + e.offsets[k + 1]);
         block.add_cell(v.size() == 1 ? case_view::VERTEX : v.size() == 2 ? case_view::LINE : case_view::POLYGON, v);
@@ -855,7 +855,7 @@ OnMesh on_mesh(const Mesh & mesh, const region::Region & region, const std::stri
             m.own = region::measures(region, mesh.axisymmetric);
             m.in = region::measures_in_domain(mesh, region, f);
         }
-        auto & fraction = m.block.field("fraction", 1);
+        auto & fraction = m.block.field("FRACTION", 1);
         for (uint32_t c = 0; c < mesh.n_owned(); c++) {
             if (f[c] == 0.0) continue;
             m.measure += f[c] * double(mesh.h_cell_measure(c));
@@ -941,7 +941,7 @@ std::vector<case_view::Block> periodic_blocks(const Mesh & mesh) {
             map += ") m";
         }
         b.label = "periodic" + (named ? " " + a + " / " + z : "") + ": " + map;
-        b.field("side", 1);
+        b.field("SIDE", 1);
     }
     if (n_directions == 0) return blocks;
     for (uint32_t f = 0; f < mesh.n_faces; f++) {
@@ -1064,7 +1064,7 @@ void add_wall_y_plus(const Mesh & mesh, const std::vector<double> & face_y_plus,
         comm::allreduce(uint64_t(values.size()), comm::Op::SUM) == 0) {
         return;
     }
-    block.field("y_plus", 1).values = std::move(values);
+    block.field("Y_PLUS", 1).values = std::move(values);
 }
 
 /** @brief Boundary entry i as the view labels it: its type and the keys the input sets, "inlet_mass_flow, mdot = 0.2 kg/s". */

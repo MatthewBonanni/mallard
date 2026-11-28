@@ -756,8 +756,8 @@ at a glance. It writes, without running the case:
   (`domain`), every boundary zone and cell zone, every region the case uses
   (as [Checking regions](geometry.md#checking-regions) describes), every probe
   on points, lines or surfaces of its own, and every periodic pair (each face
-  with `side` 0, its image on the partner zone with `side` 1). Boundary zones
-  carry each face's `normal` and `area`; walls also carry `y_plus`, the first
+  with `SIDE` 0, its image on the partner zone with `SIDE` 1). Boundary zones
+  carry each face's `NORMAL` and `AREA`; walls also carry `Y_PLUS`, the first
   cell's y+ of each face as the [resolution](#resolution) report estimates it,
   once it estimates one (a viscous case with a friction velocity).
 

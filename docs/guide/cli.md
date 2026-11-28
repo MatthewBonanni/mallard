@@ -1160,7 +1160,7 @@ written as CSV.
 The averages are a snapshot of the last step, OUTPUT/NAME.vtkhdf, as a run
 writes its [statistics]. --homogeneous averages them further over directions in
 which the flow is statistically uniform and writes a CSV profile (the kept
-coordinates, n_cells, then the columns), which synthetic inflow profile reads;
+coordinates, N_CELLS, then the columns), which synthetic inflow profile reads;
 --statistics does that to the [statistics] fields one snapshot already holds.
 The states are read one at a time, so memory does not grow with the number of
 snapshots.
@@ -1279,11 +1279,11 @@ Sets up the case of a series of restart files or snapshots of a premixed flame,
 planar on average, and measures the flame in each: its profile along --direction
 (each row the mean over the other directions, weighted by cell volume), with the
 fresh gas at its colder end and the burnt gas at the other, gives its position
-x_f, where T is midway between the fresh temperature T_u and the burnt T_b (the
-peak, or --burnt-temperature); its thermal thickness delta_T = (T_b - T_u) / max
-|dT/dx|, and max |dT/dx| itself; its consumption speed S_c = -int omega_k dx /
+X_F, where T is midway between the fresh temperature T_u and the burnt T_b (the
+peak, or --burnt-temperature); its thermal thickness DELTA_T = (T_b - T_u) / max
+|dT/dx|, and max |dT/dx| itself; its consumption speed S_C = -int omega_k dx /
 (rho_u (Y_k,u - Y_k,b)) of the deficient reactant k, which in a steady flame is
-the flame speed, in any frame; and its displacement speed S_d, the speed of x_f
+the flame speed, in any frame; and its displacement speed S_D, the speed of X_F
 relative to the fresh gas.
 
 The production rates are the run's own: the OMEGA_* fields of snapshots that
@@ -1291,7 +1291,7 @@ hold them with T, RHO, the velocity and Y_* (read on the mesh alone), else
 computed from each stored state by the case's chemistry (restart files,
 snapshots of the state). The report gives the consumption speed and the
 thickness averaged over the last third of the series and the displacement speed
-from x_f fitted over its last half, which settle once the flame is steady,
+from X_F fitted over its last half, which settle once the flame is steady,
 against --reference-speed if given; OUTPUT/NAME.csv has a row per snapshot.
 
 FILE, the case and the choice of snapshots are as for mallard post extract: the

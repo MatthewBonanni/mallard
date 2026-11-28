@@ -94,7 +94,7 @@ void run(const Input & input, const std::string & input_file) {
 
     std::ofstream out(output);
     if (!out) throw InputError("cannot write reactor.output = \"" + output + "\".");
-    out << "step,t,T,p";
+    out << "step,t,T,P";
     for (const auto & name : mech.species_names()) out << ",Y_" << name;
     out << "\n# units: 1,s,K,kg m-1 s-2";
     for (size_t k = 0; k < mech.species_names().size(); k++) out << ",1";

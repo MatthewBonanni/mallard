@@ -134,7 +134,7 @@ def main():
         spectra = read_csv(path("probe_tone_spectra.csv"))[1]
         assert (spectra["f"], spectra["St"], spectra["PSD_U_X"], spectra["PSD_P"]) == \
             ("s-1", "1", "m2 s-1", "kg2 m-2 s-3"), spectra
-        assert read_csv(path("probe_tone_reductions_spectra.csv"))[1]["PSD_mean_P"] == "kg2 m-2 s-3"
+        assert read_csv(path("probe_tone_reductions_spectra.csv"))[1]["PSD_MEAN_P"] == "kg2 m-2 s-3"
 
         def info(name):
             out = subprocess.run([mallard, "info", "--format", "json", name], cwd=work, check=True, capture_output=True,
