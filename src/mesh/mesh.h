@@ -28,6 +28,8 @@
 #include "periodic_maps.h"
 #include "zone.h"
 
+class BoxTree;
+
 enum class MeshType {
     FROM_FILE,
     CARTESIAN,
@@ -369,6 +371,12 @@ class Mesh {
         const VertexNeighbors & vertex_neighbors() const;
 
         /**
+         * @brief Tree of every cell's node box (cell_boxes), built on first
+         *        use and dropped by release_setup_data, as vertex_neighbors.
+         */
+        const BoxTree & cell_tree() const;
+
+        /**
          * @brief Copy mesh data from host to device.
          */
         void copy_host_to_device();
@@ -690,6 +698,7 @@ class Mesh {
         std::vector<CellZone> m_cell_zones;
         std::vector<FaceZone> m_face_zones;
         mutable std::optional<VertexNeighbors> m_vertex_neighbors;
+        mutable std::shared_ptr<const BoxTree> m_cell_tree;
 };
 
 #endif // MESH_H
