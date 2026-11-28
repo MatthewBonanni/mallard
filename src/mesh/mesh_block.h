@@ -156,6 +156,33 @@ std::vector<CellGeometry> block_cell_geometry(const MeshBlock & block, bool axis
 MeshBlock read_file_block(const std::string & filename);
 
 /**
+ * @brief While one is alive, mesh files read whole by Mesh::init_file are kept, untransformed, by path, size and
+ *        modification time, so a setup reads a file again only when it changed: mallard session's setups after an
+ *        edit outside [mesh]. One at a time.
+ */
+class MeshFileCache {
+    public:
+        MeshFileCache();
+        ~MeshFileCache();
+        MeshFileCache(const MeshFileCache &) = delete;
+        MeshFileCache & operator=(const MeshFileCache &) = delete;
+        /** @brief Mesh files read from disk since it was made. */
+        uint64_t files_read() const { return reads; }
+        /** @brief The file's block, read only if absent or changed. */
+        MeshBlock block(const std::string & filename, MeshBlock (*read)(const std::string &));
+
+    private:
+        struct Entry {
+            std::string path;
+            uintmax_t bytes = 0;
+            int64_t modified = 0;
+            MeshBlock block;
+        };
+        std::vector<Entry> entries;
+        uint64_t reads = 0;
+};
+
+/**
  * @brief mesh.filename (default mesh.msh), or an error naming the key, its line
  *        and the directory relative paths start from if no such file exists.
  */

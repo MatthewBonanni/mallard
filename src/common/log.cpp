@@ -253,7 +253,18 @@ void table(const std::vector<std::string> & header, const std::vector<std::vecto
     for (const auto & row : rows) line(text(row));
 }
 
+namespace {
+PhaseObserver * phase_observer = nullptr;
+}
+
+PhaseObserver::PhaseObserver(std::function<void(std::string_view)> on_phase)
+    : function(std::move(on_phase)), outer(phase_observer) {
+    phase_observer = this;
+}
+PhaseObserver::~PhaseObserver() { phase_observer = outer; }
+
 void begin_phase(std::string_view name) {
+    if (phase_observer) phase_observer->function(name);
     if (!comm::is_root()) return;
     close_phase();
     std::string padded(name);

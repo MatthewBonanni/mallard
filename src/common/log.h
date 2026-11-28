@@ -10,6 +10,7 @@
 #define LOG_H
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -90,6 +91,23 @@ void table(const std::vector<std::string> & header, const std::vector<std::vecto
  */
 void begin_phase(std::string_view name);
 void end_phase(double seconds);
+
+/**
+ * @brief While one is alive, begin_phase first calls its function with the phase's name, which may throw to end
+ *        the setup there (mallard session's progress notifications and cancellation). The innermost is called.
+ */
+class PhaseObserver {
+    public:
+        explicit PhaseObserver(std::function<void(std::string_view)> on_phase);
+        ~PhaseObserver();
+        PhaseObserver(const PhaseObserver &) = delete;
+        PhaseObserver & operator=(const PhaseObserver &) = delete;
+
+    private:
+        std::function<void(std::string_view)> function;
+        PhaseObserver * outer;
+        friend void begin_phase(std::string_view name);
+};
 
 /**
  * @brief An event during the run that is not a file written (a checkpoint or stop requested, a setting
