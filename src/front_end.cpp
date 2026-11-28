@@ -294,7 +294,14 @@ Dimension mesh_file_dimension(const std::string & path) {
 
 Dimension input_dimension(const std::string & input_file) {
     try {
-        Input input = parse_input(input_file);
+        return parsed_input_dimension(parse_input(input_file));
+    } catch (const std::exception & e) {
+        return unreadable(e.what());
+    }
+}
+
+Dimension parsed_input_dimension(Input input) {
+    try {
         // As its own release read it, removed keys too: `mallard input upgrade` needs the case's mesh
         input_upgrade::apply(input, "0.0.0");
         const std::string type = find_value_or<std::string>(input, "mesh", "type", "file");

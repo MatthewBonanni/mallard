@@ -3,12 +3,24 @@
 mallard.open reads every file Mallard writes or reads through the solver's own reader (libmallard2d/3d, a build
 with -DMallard_ENABLE_PYTHON=ON); mallard.info, mallard.diff, mallard.report, mallard.pack and mallard.post run
 the mallard executable. The modules vtkhdf, vtu, h5, tables, stencils and restart are the h5py and numpy readers
-the example, documentation and setup scripts in tools/ still use.
+the example, documentation and setup scripts in tools/ still use. mallard.Case, mallard.Session and mallard.Solver
+run cases in this process through the solver bindings (a build with -DMallard_ENABLE_PYTHON_BINDINGS=ON), loaded
+only when used.
 """
 from . import post
 from ._version import __version__
 from .commands import CommandError, command, diff, info, pack, report
 from .reader import Field, File, Geometry, Snapshot, open, run_files, run_record, series
 
-__all__ = ["CommandError", "Field", "File", "Geometry", "Snapshot", "__version__", "command", "diff", "info",
-           "open", "pack", "post", "report", "run_files", "run_record", "series"]
+__all__ = ["Case", "CommandError", "DeviceArray", "Error", "Field", "File", "Geometry", "Session", "Snapshot", "Solver",
+           "__version__", "command", "diff", "info", "open", "pack", "post", "report", "run_files", "run_record",
+           "series"]
+
+_SOLVER_NAMES = ("Case", "DeviceArray", "Error", "Session", "Solver")
+
+
+def __getattr__(name):
+    if name in _SOLVER_NAMES:
+        from . import _solver
+        return getattr(_solver, name)
+    raise AttributeError(f"module 'mallard' has no attribute {name!r}")

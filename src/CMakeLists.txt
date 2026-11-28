@@ -415,18 +415,44 @@ mallard_target_warnings(mallard)
 add_library(MallardApi OBJECT api/mallard_api.cpp)
 target_include_directories(MallardApi PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 target_include_directories(MallardApi PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(MallardApi PUBLIC MallardCore)
+target_link_libraries(MallardApi PUBLIC MallardCommands)
 mallard_target_warnings(MallardApi)
 # libmallard2d/3d: the C++ library API, and the C interface of the reader that the Python package loads
 if(Mallard_ENABLE_LIBRARY)
     add_library(MallardLibrary SHARED io/reader_c_api.cpp)
-    target_link_libraries(MallardLibrary PRIVATE MallardApi MallardCore)
+    target_link_libraries(MallardLibrary PRIVATE MallardApi MallardCommands MallardCore)
     target_include_directories(MallardLibrary INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                                                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     target_compile_features(MallardLibrary INTERFACE cxx_std_17)
     set_target_properties(MallardLibrary PROPERTIES OUTPUT_NAME mallard${Mallard_DIM}d EXPORT_NAME mallard${Mallard_DIM}d)
     add_library(Mallard::mallard${Mallard_DIM}d ALIAS MallardLibrary)
     mallard_target_warnings(MallardLibrary)
+endif()
+# mallard._core2d/3d: the Python package's extension module, over libmallard2d/3d (nanobind), next to the library
+if(Mallard_ENABLE_PYTHON_BINDINGS)
+    find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+    execute_process(COMMAND ${Python_EXECUTABLE} -m nanobind --cmake_dir OUTPUT_VARIABLE nanobind_cmake_dir
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    find_package(nanobind CONFIG QUIET HINTS ${nanobind_cmake_dir})
+    if(NOT nanobind_FOUND)
+        message(STATUS "Mallard: nanobind not found in ${Python_EXECUTABLE}'s environment, fetching it")
+        include(FetchContent)
+        FetchContent_Declare(nanobind GIT_REPOSITORY https://github.com/wjakob/nanobind.git GIT_TAG v3.1.0
+                             GIT_SHALLOW TRUE GIT_SUBMODULES ext/robin_map)
+        FetchContent_MakeAvailable(nanobind)
+    endif()
+    nanobind_add_module(MallardPython NB_STATIC api/python_module.cpp)
+    target_link_libraries(MallardPython PRIVATE MallardLibrary)
+    set_target_properties(MallardPython PROPERTIES OUTPUT_NAME _core${Mallard_DIM}d
+                          LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    if(APPLE)
+        set(origin @loader_path)
+    else()
+        set(origin $ORIGIN)
+    endif()
+    # share/mallard/tools/mallard/ -> lib/, and the install's lib/ for copies in site-packages
+    set_target_properties(MallardPython PROPERTIES BUILD_RPATH ${origin}
+                          INSTALL_RPATH "${origin}/../../../../${CMAKE_INSTALL_LIBDIR};${CMAKE_INSTALL_FULL_LIBDIR}")
 endif()
 # Run as mallard, either solver runs the one of the case's dimension (front_end.h)
 add_custom_command(TARGET mallard POST_BUILD

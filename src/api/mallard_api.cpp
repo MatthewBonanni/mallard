@@ -24,6 +24,7 @@
 
 #include "diagnostic_code.h"
 #include "field_units.h"
+#include "front_end.h"
 #include "input.h"
 #include "parallel/binding.h"
 #include "parallel/comm.h"
@@ -144,6 +145,8 @@ Field column(Field block, const std::string & name, int64_t j) {
 
 } // namespace
 
+Error::~Error() = default;
+
 int api_version() { return MALLARD_API_VERSION; }
 
 std::string version() { return MALLARD_VERSION; }
@@ -204,6 +207,14 @@ Case Case::from_toml(const std::string & text, const std::string & name) { retur
 const std::string & Case::toml() const { return text_; }
 
 const std::string & Case::path() const { return path_; }
+
+int Case::dimension() const {
+    const front_end::Dimension d = translating(name_, diagnostic_code::INPUT, [&] {
+        return front_end::parsed_input_dimension(parse_input_string(text_, name_));
+    });
+    if (d.dim == 0) throw Error(diagnostic_code::INPUT, name_ + ": cannot tell the case's dimension: " + d.why);
+    return d.dim;
+}
 
 struct Solver::Impl {
     Case input;
@@ -336,7 +347,14 @@ struct Solver::Impl {
     }
 };
 
-Solver::Solver(Case c) : impl(std::make_unique<Impl>(std::move(c))) { impl->owner = this; }
+Solver::Solver(Case c) {
+    if (const int dim = c.dimension(); dim != N_DIM) {
+        throw Error(diagnostic_code::INPUT, c.name_ + " is a " + std::to_string(dim) + "D case, which libmallard" +
+                                                std::to_string(dim) + "d runs; this is libmallard" + std::to_string(N_DIM) + "d.");
+    }
+    impl = std::make_unique<Impl>(std::move(c));
+    impl->owner = this;
+}
 
 Solver::~Solver() = default;
 

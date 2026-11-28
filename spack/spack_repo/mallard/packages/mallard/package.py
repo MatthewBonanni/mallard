@@ -75,7 +75,8 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     variant("hdf5", default=True, description="HDF5 meshes and output, mallard mesh convert")
     variant("cgns", default=True, description="Read CGNS mesh files")
     variant("zlib", default=True, description="zlib compression of VTU and restart files")
-    variant("python", default=True, description="The Python package mallard and the reader library it loads")
+    variant("python", default=True,
+            description="The Python package mallard, the reader library it loads and its solver bindings")
 
     depends_on("c", type="build")
     depends_on("cxx", type="build")
@@ -108,6 +109,7 @@ class Mallard(CMakePackage, CudaPackage, ROCmPackage):
     extends("python", when="+python")
     depends_on("python@3.10:", when="+python", type=("build", "run"))
     depends_on("py-numpy", when="+python", type="run")
+    depends_on("py-nanobind", when="+python", type="build")
 
     conflicts("+openmp", when="+threads", msg="Kokkos builds one parallel host backend")
     conflicts("+cuda", when="+rocm", msg="Kokkos builds one device backend")
@@ -202,6 +204,8 @@ class CMakeBuilder(cmake.CMakeBuilder):
         if spec.satisfies("+python"):
             site = join_path(self.pkg.prefix, spec["python-venv"].package.purelib)
             args.append(self.define("Mallard_PYTHON_INSTALL_DIR", site))
+            args.append(self.define("Mallard_ENABLE_PYTHON_BINDINGS", True))
+            args.append(self.define("Python_EXECUTABLE", spec["python"].command.path))
         if spec.satisfies("+mpi"):
             args.append(self.define_from_variant("Mallard_GPU_AWARE_MPI", "gpu_aware_mpi"))
             args.append(self.define_from_variant("Mallard_ENABLE_KAMINPAR", "kaminpar"))

@@ -20,5 +20,9 @@ dev = ["pytest"]
 [tool.setuptools]
 packages = ["mallard"]
 
+[tool.setuptools.package-data]
+# The solver bindings a build with -DMallard_ENABLE_PYTHON_BINDINGS=ON installs into share/mallard/tools/mallard
+mallard = ["_core*.so", "_core*.pyd"]
+
 [tool.setuptools.dynamic]
 version = { attr = "mallard._version.__version__" }

@@ -34,6 +34,21 @@ and imported only by the code that uses it. The post-processing layer does not
 import it, so a build or environment without it still reads files and runs
 commands.
 
+The extension is `mallard._core2d` or `mallard._core3d` (nanobind, built with
+`-DMallard_ENABLE_PYTHON_BINDINGS=ON` from `src/api/python_module.cpp`),
+linked against `libmallard<dim>d` through the C++ API only, and installed into
+the package's copies (`share/mallard/tools/mallard`, `Mallard_PYTHON_INSTALL_DIR`),
+or found next to the library in a build tree. `tools/mallard/_solver.py` is the
+Python side: `Case` (the TOML text, checked by the extension), `Session` (one
+per process; the dimension of its extension), `Solver` (one per case, closed
+before Kokkos is finalized at exit), callbacks held in Python (so that a
+callback holding its solver is a cycle the garbage collector sees, not one
+through C++) and called with the GIL from the C++ hooks, and `DeviceArray`,
+which adds `__cuda_array_interface__` to nanobind's DLPack tensor. Host fields
+are NumPy arrays of the solver's memory whose base keeps the solver alive.
+`mallard/__init__.py` exports these names lazily (PEP 562), so `import mallard`
+never loads the extension.
+
 Once the extension exists, the reader moves into it: `mallard.open` and `File`
 call the extension instead of ctypes, and the C interface goes away. Their
 Python API (functions, arguments, returned types) stays the same, which the

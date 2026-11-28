@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "cli.h"
+#include "input.h"
 
 namespace front_end {
 
@@ -41,6 +42,9 @@ Dimension mesh_file_dimension(const std::string & path);
  *        generated mesh ([mesh] type, Nz, Lz, [[periodic]] back and front) or its mesh file.
  */
 Dimension input_dimension(const std::string & input_file);
+
+/** @brief input_dimension of a parsed input. */
+Dimension parsed_input_dimension(Input input);
 
 /** @brief The dimension of the case an output file is of: its own, else its provenance's build. */
 Dimension output_dimension(const std::string & path);

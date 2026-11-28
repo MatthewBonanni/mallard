@@ -247,4 +247,133 @@ Options: `quantity`, `time`, `average`, `order`, `safety_factor`, `sizes`, `fiel
 (`mallard post convergence --help`). A quantity that diverges is a result, not an error (exit status 1
 with a report): each quantity's verdict says so.
 
+## Running cases
+
+### `mallard.Case`
+
+A case: the TOML input of a run, which the run records, so that mallard -i on it reruns it bit for bit.
+
+#### `case.from_toml_file(path)`
+
+The case of an input file, read now; paths inside it are relative to the working directory.
+
+#### `case.from_toml(text, name='input.toml')`
+
+The case of a TOML text; name is what error messages call it.
+
+#### `case.toml()`
+
+The TOML text, exactly as read: write it to a file to rerun the case with mallard -i.
+
+#### `case.path()`
+
+The input file of from_toml_file, else "".
+
+#### `case.dimension()`
+
+2 or 3, as mallard tells which solver runs the case.
+
+### `mallard.Session`
+
+MPI and Kokkos for the process, as mallard.Session in C++: Solver starts one with Kokkos' defaults if none
+is started. args are mallard's options (["--kokkos-num-threads=2"]). Kokkos starts once per process, so a
+session lasts until the interpreter exits or end() is called, after which no other can start.
+
+#### `session.end()`
+
+Closes every solver, then finalizes Kokkos (and MPI, if the session started it).
+
+### `mallard.Solver`
+
+Runs a case, as mallard::Solver in C++: setup(), then step() or advance_to(t), then finish(); run() is the
+run of mallard -i, with the same output and results bit for bit. Under MPI every call is collective.
+
+#### `solver.close()`
+
+Frees the solver; arrays of its fields are invalid after it.
+
+#### `solver.setup()`
+
+The setup of mallard -i, then the start of the run (its first output and progress row).
+
+#### `solver.step()`
+
+One step; False once the case's stop condition is reached.
+
+#### `solver.advance_to(t)`
+
+Steps until the time is t, landing on it; False once the case's stop condition is reached.
+
+#### `solver.finish()`
+
+Ends the run (final output, summary, the run log's end record); the exit status mallard -i would give.
+
+#### `solver.run()`
+
+setup(), steps to the stop condition, finish(): the run of mallard -i.
+
+#### `solver.finished()`
+
+Whether the case's stop condition is reached.
+
+#### `solver.time()`
+
+The solution time (s).
+
+#### `solver.step_count()`
+
+Steps taken since the initial state (a restart continues its count).
+
+#### `solver.monitors()`
+
+The latest value of every [integrals] column, [[forces]] component and [[probes]] value.
+
+#### `solver.monitor(name)`
+
+The monitored quantity of this name (name, unit, value, step), or None.
+
+#### `solver.field_names()`
+
+The names field() takes for this case (after setup).
+
+#### `solver.field(name, memory='solver')`
+
+A read-only view of a field on this rank's owned cells: a NumPy array of the solver's memory on the host,
+a DeviceArray on a GPU (memory="host" copies it to a NumPy array). Views of the state stay the state's.
+
+#### `solver.writable_field(name, memory='solver')`
+
+A writable view of a conservative variable, partial density or block, to set the state between steps:
+write it, then commit_state(), or let the next step commit it.
+
+#### `solver.commit_state()`
+
+Takes what was written through writable fields as the state; the run log records it.
+
+#### `solver.statistics()`
+
+The [statistics] means' averaging so far: samples, start, end and batches.
+
+#### `solver.on_step(f)`
+
+Calls f(solver) after every step; returns an id for remove_callback.
+
+#### `solver.on_stage(f)`
+
+Calls f(solver, stage) at each stage of the time integrator; field() views the stage's state there.
+Steps run kernel by kernel on the host while one is registered.
+
+#### `solver.remove_callback(callback_id)`
+
+Removes a callback; unknown ids are ignored.
+
+### `mallard.DeviceArray`
+
+A field in a GPU's memory, without a copy: cupy.asarray(a), torch.from_dlpack(a) and numba take it through
+__cuda_array_interface__ or DLPack; Solver.field(name, memory="host") gives a NumPy copy.
+
+### `mallard.Error`
+
+A failure of the solver: str(e) is the message mallard prints, e.code its diagnostic code ("E-INPUT", ...).
+
 <!-- END GENERATED reference -->

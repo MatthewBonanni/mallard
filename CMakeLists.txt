@@ -103,6 +103,11 @@ option(${PROJECT_NAME}_ENABLE_LIBRARY "Build and install libmallard${${PROJECT_N
 option(${PROJECT_NAME}_ENABLE_PYTHON "Check and install the Python package, which loads libmallard${${PROJECT_NAME}_DIM}d" ON)
 set(${PROJECT_NAME}_PYTHON_INSTALL_DIR "" CACHE PATH
     "A site-packages directory to install the Python package into, besides share/mallard/tools")
+option(${PROJECT_NAME}_ENABLE_PYTHON_BINDINGS
+       "Build mallard._core${${PROJECT_NAME}_DIM}d, the extension module that runs cases from Python (nanobind)" OFF)
+if(${PROJECT_NAME}_ENABLE_PYTHON_BINDINGS AND NOT ${PROJECT_NAME}_ENABLE_PYTHON)
+    message(FATAL_ERROR "Mallard_ENABLE_PYTHON_BINDINGS needs Mallard_ENABLE_PYTHON, the package it extends.")
+endif()
 if(${PROJECT_NAME}_ENABLE_PYTHON AND NOT ${PROJECT_NAME}_ENABLE_LIBRARY)
     message(FATAL_ERROR "Mallard_ENABLE_PYTHON needs Mallard_ENABLE_LIBRARY, the library the Python package loads: "
                         "turn both off, or Mallard_ENABLE_LIBRARY on.")
@@ -398,6 +403,13 @@ endif()
 if(${PROJECT_NAME}_ENABLE_PYTHON)
     if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
         install(DIRECTORY tools/mallard DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR} PATTERN __pycache__ EXCLUDE)
+    endif()
+endif()
+if(${PROJECT_NAME}_ENABLE_PYTHON_BINDINGS)
+    # Into the package's copies: share/mallard/tools/mallard, which finds lib/ relative to itself, and site-packages
+    install(TARGETS MallardPython LIBRARY DESTINATION ${CMAKE_INSTALL_DATADIR}/mallard/tools/mallard)
+    if(${PROJECT_NAME}_PYTHON_INSTALL_DIR)
+        install(TARGETS MallardPython LIBRARY DESTINATION ${${PROJECT_NAME}_PYTHON_INSTALL_DIR}/mallard)
     endif()
 endif()
 # mallard links to either solver; installs of both dimensions share it

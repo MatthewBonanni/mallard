@@ -5,11 +5,11 @@
 # from a checkout with the Kokkos and toml11 submodules.
 FROM ubuntu:26.04 AS build
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential cmake git ca-certificates libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev libtbb-dev \
+        build-essential cmake git ca-certificates libopenmpi-dev openmpi-bin libhdf5-openmpi-dev zlib1g-dev libtbb-dev python3-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY . /src
 ARG JOBS
-RUN JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_PYTHON_INSTALL_DIR=/usr/lib/python3/dist-packages
+RUN JOBS=${JOBS} /src/docker/build.sh /src /opt/mallard -DKokkos_ENABLE_OPENMP=ON -DMallard_ENABLE_KAMINPAR=ON -DMallard_PYTHON_INSTALL_DIR=/usr/lib/python3/dist-packages -DMallard_ENABLE_PYTHON_BINDINGS=ON
 
 FROM ubuntu:26.04
 LABEL org.opencontainers.image.title="Mallard" \
