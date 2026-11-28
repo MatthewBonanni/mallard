@@ -180,7 +180,6 @@ OTHER_GUARDS = [
     ("src/common/region_input.cpp", "only filled regions move"),
     ("src/solver/solver.cpp", "is not available yet with chemistry.coupling"),
     ("src/solver/solver.cpp", "is not available for flamelet gases yet"),
-    ("src/solver/solver.cpp", "is not available for axisymmetric runs yet"),
     ("src/solver/solver.cpp", "is not available with LES yet"),
     ("src/solver/solver.cpp", "is not available with the hybrid convective flux yet"),
     ("src/solver/solver.cpp", "is not available on curved meshes yet"),

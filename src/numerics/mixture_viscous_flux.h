@@ -273,6 +273,7 @@ struct MixtureViscousFluxFunctor {
     FacePointGradients point_gradients = {};
     Kokkos::View<rtype *> quad_weights = {};
     FaceWeights<> face_weights = {};
+    Kokkos::View<rtype *> planar_area = {};  // axisymmetric: the faces' planar lengths, as face_weights carry r
     rtype jump_damping = 4.0_r / 3.0_r;
 
     static constexpr uint8_t NQ = N_DIM + 1;  // [u, T]
@@ -596,19 +597,26 @@ struct MixtureViscousFluxFunctor {
         } else {
             n_quad = static_cast<uint8_t>(face_weights.extent(1));
         }
-        // Each point's weight in the mean over the face (the weights sum to 2), its T and d ln T / dn, and
-        // sum_k c_k dX_k/dn and sum_k X_k W_k of the species fluxes
+        // Each point's weight in the mean over the face (the weights sum to 2; axisymmetric, they carry r and
+        // the mean is over the revolved face), its T and d ln T / dn, and sum_k c_k dX_k/dn and sum_k X_k W_k
+        // of the species fluxes
         double w[MAX_Q] = {}, T[MAX_Q] = {}, dlnT_dn[MAX_Q] = {}, correction[MAX_Q] = {}, molar_mass[MAX_Q] = {};
         rtype traction[N_DIM] = {}, energy = 0.0_r;
+        const double scale = axisymmetric ? 0.5 * static_cast<double>(planar_area(i_face) / face_area(i_face)) : 0.5;
         for (uint8_t q = 0; q < n_quad; q++) {
-            rtype w_q;
+            rtype w_q, r = 0.0_r;
             if constexpr (N_DIM == 2) {
                 w_q = face_weights.extent(0) ? face_weights(i_face, q) : quad_weights(q);
+                if (axisymmetric) {
+                    // Weights r_q w_q (Solver::init_axisymmetric_weights), zero on the axis
+                    if (w_q == 0.0_r) continue;
+                    r = w_q / quad_weights(q);
+                }
             } else {
                 w_q = face_weights(i_face, q);
                 if (w_q == 0.0_r) continue;
             }
-            w[q] = 0.5 * static_cast<double>(w_q);
+            w[q] = scale * static_cast<double>(w_q);
             rtype qa[NQ], ga[NQ][N_DIM], qb[NQ], gb[NQ][N_DIM], q_f[NQ], g_f[NQ][N_DIM];
             point_gradients.load(i_face, q, 0, qa, ga);
             point_gradients.load(i_face, q, 1, qb, gb);
@@ -618,7 +626,7 @@ struct MixtureViscousFluxFunctor {
                 FOR_I_DIM g_f[k][i] = 0.5_r * (ga[k][i] + gb[k][i]) + jump * G.n[i];
             }
             rtype tau_n[N_DIM];
-            viscous_traction(mu, g_f, G.n, tau_n, 0.0_r);
+            viscous_traction(mu, g_f, G.n, tau_n, axisymmetric ? hoop_divergence(r, q_f, g_f) : 0.0_r);
             const rtype dT_dn = dot<N_DIM>(g_f[N_DIM], G.n);
             const rtype w_r = static_cast<rtype>(w[q]);
             FOR_I_DIM traction[i] += w_r * tau_n[i];

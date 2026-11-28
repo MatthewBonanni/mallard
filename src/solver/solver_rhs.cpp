@@ -325,6 +325,7 @@ void Solver::set_polynomial_flux(ViscousFluxFunctor & functor) const {
     functor.quad_weights = teno.quadrature_face.weights;
     functor.face_weights = flux_weights;
     functor.quad_normals = teno.face_quad_normals;
+    if (axisymmetric) functor.planar_area = mesh->face_area;
 }
 
 void Solver::start_reconstruction(StateView solution) {
