@@ -3146,6 +3146,7 @@ struct MomentsTask {
     Geometry<Space> g;
     int n_moments = 0;
     uint32_t n_cells = 0;
+    Kokkos::View<const uint32_t *, Space> list;  // if set, cells list(t) one by one instead
 
     /** @brief Local node k of local face j of a cell with n_nodes nodes (Gmsh/VTK order, outward). */
     KOKKOS_INLINE_FUNCTION
@@ -3285,6 +3286,10 @@ struct MomentsTask {
     /** @brief Cells [W t, W t + W): side by side if they are all there and of one cell type, else one by one. */
     KOKKOS_INLINE_FUNCTION
     void operator()(const uint32_t t) const {
+        if (list.extent(0) > 0) {
+            lanes<1>(list(t), n_nodes(list(t)));
+            return;
+        }
         const uint32_t c0 = uint32_t(W) * t;
         const uint32_t n = n_nodes(c0);
         bool same = c0 + uint32_t(W) <= n_cells;
@@ -3303,15 +3308,17 @@ struct MomentsTask {
  */
 template <int NM>
 void launch_moments(const Geometry<Kokkos::DefaultExecutionSpace::memory_space> & g, const uint32_t n_cells,
-                    const int n_moments, const bool smoothness) {
+                    const int n_moments, const bool smoothness,
+                    const Kokkos::View<const uint32_t *, Kokkos::DefaultExecutionSpace::memory_space> & list = {}) {
     using Space = Kokkos::DefaultExecutionSpace::memory_space;
     // Host cores take MOMENT_LANES cells side by side in their vector registers
     constexpr size_t W = DEVICE_IS_HOST ? MOMENT_LANES : 1;
-    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, (n_cells + uint32_t(W) - 1) / uint32_t(W));
+    const uint32_t n_tasks = list.extent(0) > 0 ? uint32_t(list.extent(0)) : (n_cells + uint32_t(W) - 1) / uint32_t(W);
+    const Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> range(0, n_tasks);
     if (smoothness) {
-        gated::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, W, Space>{g, n_moments, n_cells});
+        gated::parallel_for("teno_moments", range, MomentsTask<NM, NM - 1, W, Space>{g, n_moments, n_cells, list});
     } else {
-        gated::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, W, Space>{g, n_moments, n_cells});
+        gated::parallel_for("teno_moments", range, MomentsTask<NM, (NM + 1) / 2, W, Space>{g, n_moments, n_cells, list});
     }
 }
 
@@ -3722,13 +3729,7 @@ class Setup3D {
             d.boxes = Geometry<DefaultMem>::R<double *[6]>(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_boxes"),
                                                            n_cells);
             using Range = Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace>;
-            switch (tables.nm) {
-                case 3: launch_moments<3>(d, n_cells, tables.n_moments, options.sector_stencils); break;
-                case 5: launch_moments<5>(d, n_cells, tables.n_moments, options.sector_stencils); break;
-                case 7: launch_moments<7>(d, n_cells, tables.n_moments, options.sector_stencils); break;
-                case 9: launch_moments<9>(d, n_cells, tables.n_moments, options.sector_stencils); break;
-                default: throw std::logic_error("TENO setup: unsupported degree.");
-            }
+            if (!options.defer_moments) launch(d, {});
             gated::parallel_for("teno_boxes", Range(0, n_cells), BoxesTask<DefaultMem>{d});
             Kokkos::fence();
             if (mesh.curved_geometry) curved_moments(*mesh.curved_geometry, n_cells);
@@ -3899,6 +3900,27 @@ class Setup3D {
 
         const Timings & timings() const { return timing; }
 
+        void compute_moments(const std::vector<uint32_t> & cells) {
+            if (cells.empty()) return;
+            Kokkos::Timer timer;
+            Kokkos::View<uint32_t *, DefaultMem> list(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_moment_cells"),
+                                                      cells.size());
+            Kokkos::deep_copy(list, Kokkos::View<const uint32_t *, HostMem, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(
+                                        cells.data(), cells.size()));
+            launch(device, list);
+            Kokkos::fence();
+            host_ready = DEVICE_IS_HOST;
+            timing.geometry += timer.seconds();
+        }
+
+        void compute_all_moments() {
+            Kokkos::Timer timer;
+            launch(device, {});
+            Kokkos::fence();
+            host_ready = DEVICE_IS_HOST;
+            timing.geometry += timer.seconds();
+        }
+
         teno::Moments moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
             const uint32_t n_extra = static_cast<uint32_t>(extra.extent(0));
             if (n_extra == 0 && n_direct == device.moments.extent(0)) return device.moments;
@@ -3914,6 +3936,17 @@ class Setup3D {
         }
 
     private:
+        /** @brief Moments of every cell, or of the cells list. */
+        void launch(const Geometry<DefaultMem> & d, const Kokkos::View<const uint32_t *, DefaultMem> & list) {
+            const uint32_t n_cells = static_cast<uint32_t>(d.moments.extent(0));
+            switch (tables.nm) {
+                case 3: launch_moments<3>(d, n_cells, tables.n_moments, options.sector_stencils, list); break;
+                case 5: launch_moments<5>(d, n_cells, tables.n_moments, options.sector_stencils, list); break;
+                case 7: launch_moments<7>(d, n_cells, tables.n_moments, options.sector_stencils, list); break;
+                case 9: launch_moments<9>(d, n_cells, tables.n_moments, options.sector_stencils, list); break;
+                default: throw std::logic_error("TENO setup: unsupported degree.");
+            }
+        }
 
         /** @brief The host copies of what the device computed, made on first use. */
         void ensure_host() {
@@ -5396,6 +5429,14 @@ const Timings & SetupHandle::timings() const { return impl->timings(); }
 teno::Moments SetupHandle::moments(const uint32_t n_direct, const Kokkos::View<uint32_t *> & extra) const {
     return impl->moments(n_direct, extra);
 }
+
+#if N_DIM == 3
+void SetupHandle::compute_moments(const std::vector<uint32_t> & cells) { impl->compute_moments(cells); }
+void SetupHandle::compute_all_moments() { impl->compute_all_moments(); }
+#else
+void SetupHandle::compute_moments(const std::vector<uint32_t> &) {}
+void SetupHandle::compute_all_moments() {}
+#endif
 
 teno::SmoothnessTerms smoothness_terms(const uint8_t degree) {
     const Tables t(degree);

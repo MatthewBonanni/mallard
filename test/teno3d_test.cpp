@@ -1130,6 +1130,37 @@ TEST(TENO3DSetup, CellsOfAStencilShapeShareOneTableThatChangesFaceValuesOnlyByRo
     }
 }
 
+TEST(TENO3DSetup, AKeyedSetupComputesTheMomentsOfTheCellsItsFitsReadAndTheirFaceValuesAreTheirOwn) {
+    // On a large lattice the 27 fitted cells' stencils cover few cells, so the
+    // setup computes only their moments: every cell's face values still match
+    // those of its own tables up to round-off
+    auto mesh = std::make_shared<Mesh>();
+    mesh->init(parse_toml("[mesh]\ntype = \"cartesian\"\nNx = 32\nNy = 32\nNz = 32\nLx = 1.0\nLy = 1.0\nLz = 1.0\n"
+                          "[[periodic]]\nzones = [\"left\", \"right\"]\ntranslation = [1.0, 0.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"bottom\", \"top\"]\ntranslation = [0.0, 1.0, 0.0]\n"
+                          "[[periodic]]\nzones = [\"back\", \"front\"]\ntranslation = [0.0, 0.0, 1.0]\n"));
+    mesh->copy_host_to_device();
+    BoundaryData bd = make_uniform_boundaries(*mesh, BoundaryType::SYMMETRY, GAMMA);
+    auto avg = cell_averages_3d(*mesh, periodic_conservatives);
+    Kokkos::View<rtype *[N_CONSERVATIVE]> W("W", mesh->n_cells);
+    Kokkos::deep_copy(W, avg);
+    auto face_values = [&](const bool share) {
+        auto teno = make_teno_with(mesh, bd, 3, [&](TENO & t) { t.share_tables = share; });
+        EXPECT_EQ(teno->n_cells_fitted, share ? 27u : mesh->n_cells);
+        Kokkos::View<rtype **[2][N_CONSERVATIVE]> face_W("face_W", mesh->n_faces, teno->n_face_quadrature_points());
+        teno->calc_face_values(W, face_W);
+        auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), face_W);
+        return std::vector<rtype>(h.data(), h.data() + h.span());
+    };
+    const auto own = face_values(false), shared = face_values(true);
+    double largest = 0.0, difference = 0.0;
+    for (size_t k = 0; k < own.size(); k++) {
+        largest = std::max(largest, std::abs(double(own[k])));
+        difference = std::max(difference, std::abs(double(shared[k]) - double(own[k])));
+    }
+    EXPECT_LT(difference, 1e3 * double(std::numeric_limits<rtype>::epsilon()) * largest);
+}
+
 TEST(TENO3DSetup, APeriodicLatticeIsFittedOncePerFaceClassAndItsCellsTakeThoseTables) {
     // Cells differ only in which of their faces are periodic (low, high or neither
     // along each axis): the setup fits 27 cells, and every cell's face values are

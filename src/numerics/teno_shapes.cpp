@@ -167,6 +167,7 @@ KOKKOS_FUNCTION ShapeSearch::Result ShapeSearch::search(const uint32_t c, const 
     reach(8 * n_small, 6);
     r.layers = n_end - 1;
     if (full || !unique) return r;
+    r.walked = true;
     double x0[N_DIM];
     for (int d = 0; d < N_DIM; d++) x0[d] = double(cell_coords(c, d));
     const double h0 = h(c);
@@ -497,6 +498,29 @@ std::vector<ShapeKey> ShapeKeys::keys(const uint32_t n) const {
     std::vector<ShapeKey> keys(n);
     for (uint32_t c = 0; c < n; c++) keys[c] = ShapeKey{h_out(c, 0), h_out(c, 1)};
     return keys;
+}
+
+std::vector<uint8_t> ShapeKeys::reach(const std::vector<uint32_t> & cells, bool & complete) const {
+    const uint32_t n = static_cast<uint32_t>(cells.size());
+    Kokkos::View<uint32_t *> list(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_reach_cells"), n);
+    Kokkos::deep_copy(list, Kokkos::View<const uint32_t *, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>(cells.data(), n));
+    Kokkos::View<uint32_t *> seen("teno_shape_reach", mesh.n_cells);
+    Kokkos::View<uint32_t> partial("teno_shape_reach_partial");
+    const ShapeSearch g = s;
+    each_search(g, slots, n, KOKKOS_LAMBDA(const uint32_t t, const ShapeLanes & w) {
+        uint32_t end[MAX_END];
+        const ShapeSearch::Result r = g.search(list(t), w, end, ~0u, false);
+        if (!r.walked) Kokkos::atomic_store(&partial(), 1u);
+        for (uint32_t k = 0; k < r.n; k++) Kokkos::atomic_store(&seen(w.cell[k]), 1u);
+        g.clear(w, r.n);
+    });
+    uint32_t h_partial = 0;
+    Kokkos::deep_copy(h_partial, partial);
+    complete = h_partial == 0;
+    auto h_seen = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), seen);
+    std::vector<uint8_t> out(mesh.n_cells);
+    for (uint32_t c = 0; c < mesh.n_cells; c++) out[c] = h_seen(c) != 0;
+    return out;
 }
 
 void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n, const teno_setup::TableBatch & batch,
