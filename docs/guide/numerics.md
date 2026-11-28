@@ -392,9 +392,18 @@ Walls and symmetry planes take polynomial gradients too:
   exact for a symmetric flow, and keep the normal stress only.
 - Inflow, outflow and transmissive faces keep least squares.
 
+Gas mixtures take the species' gradients from the same polynomials: TENO
+reconstructs `W = [rho, u, p]` and the mass fractions with the same central
+stencils, and at each face point the temperature `T = p / (rho R)` and the
+mole fractions `X_k = Y_k W / W_k` follow from them with their gradients, so
+the species diffusion, Soret and enthalpy fluxes and the heat flux converge at
+the same order as the viscous stress. The transport coefficients stay the
+means of the two cells'. Walls of mixtures keep least squares (the wall fits
+above are for a single gas), as do flamelet gases, which Mallard rejects.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous face gradients from the TENO polynomials, and at walls from one-sided fits (TENO4 or higher, single gas, planar runs) |
+| `viscous_gradients` | `"least_squares"` | `reconstruction`: viscous and species diffusion face gradients from the TENO polynomials, and at single-gas walls from one-sided fits (TENO4 or higher, planar runs, no flamelet gases) |
 
 Two convergence studies on periodic boxes of every cell type
 (`tools/docs/viscous_gradients.py`) compare the two paths against their design
@@ -433,8 +442,10 @@ Cost: TENO's smooth pass evaluates each smooth cell's polynomial gradients
 at its face points while it holds the coefficients, and keeps those of u and
 T for the stage, per face side, with their values (for the wall fits): 7.0 KB
 per cell for TENO5 on hexahedra (9 points per face), 3.7 KB on tetrahedra (7),
-0.9 KB on quadrilaterals. The
-halo sides of partition faces come from their owners with the face states.
+0.9 KB on quadrilaterals. Gas mixtures also keep, per point, the density
+and its gradient and each species' mole fraction and its normal derivative.
+The halo sides of partition faces come from their owners with the face states
+(mixtures reconstruct halo cells themselves).
 A step of the 3D Taylor-Green vortex on an A100 (96^3 hexahedra, 48^3 x 6
 tetrahedra) takes, against least squares:
 
@@ -459,8 +470,8 @@ Pitfalls:
   whose polynomial is negative in density or pressure at a face point, keep
   the least-squares gradients, as do the walls and boundaries listed above.
   Near shocks the flux is then second order, as before.
-- **Not yet available** for gas mixtures (species diffusion), axisymmetric
-  runs, LES, the hybrid convective flux, curved meshes and rotational
+- **Not yet available** for flamelet gases, axisymmetric runs, LES, the
+  hybrid convective flux, curved meshes and rotational
   periodicity, where Mallard reports an error. Probes of the diffusive fluxes
   on faces (`[[probes]]` surfaces) still report the least-squares fluxes.
 

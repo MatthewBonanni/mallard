@@ -2147,12 +2147,15 @@ struct TENOFunctor {
     KOKKOS_INLINE_FUNCTION
     void store_point_gradient(const uint32_t i_cell, const uint32_t f, const uint8_t q, const uint8_t side,
                               const rtype * p, const rtype * W_q, A && a, const rtype (&factor)[DEG + 1]) const {
-        // Gas mixtures reconstruct W, and take least-squares viscous gradients
-        if constexpr (!PRIM) {
-            rtype r[N_DIM], dU[N_CONSERVATIVE][N_DIM], v[FacePointGradients::NQ], g[FacePointGradients::NQ][N_DIM];
-            FOR_I_DIM r[i] = p[i] - cell_coords(i_cell, i);
-            FacePointGradients::conservative_gradient<DEG>(
-                r, [&](const uint32_t l, const uint8_t d, const uint8_t k) { return a(l, k) * factor[d]; }, dU);
+        rtype r[N_DIM], dU[N_CONSERVATIVE][N_DIM];
+        FOR_I_DIM r[i] = p[i] - cell_coords(i_cell, i);
+        FacePointGradients::conservative_gradient<DEG>(
+            r, [&](const uint32_t l, const uint8_t d, const uint8_t k) { return a(l, k) * factor[d]; }, dU);
+        if constexpr (PRIM) {
+            // Gas mixtures reconstruct W; MixturePointGradientsFunctor adds the composition
+            point_gradients.store_primitive(f, q, side, W_q, dU);
+        } else {
+            rtype v[FacePointGradients::NQ], g[FacePointGradients::NQ][N_DIM];
             point_gradients.primitive_value(W_q, v);
             point_gradients.primitive_gradient(W_q, dU, g);
             point_gradients.store(f, q, side, v, g);
@@ -3728,19 +3731,17 @@ void TENO::launch_reconstruction(const Kokkos::DefaultExecutionSpace & exec,
                                       .set_scratch_size(0, Kokkos::PerTeam(Functor::SMOOTH_SCRATCH));
             gated::parallel_for("teno_smooth", policy, functor);
         };
-        if constexpr (!PRIM) {
-            if (point_gradients.on()) {
-                // In 3D the team's threads share out the face points' gradients, whatever DEG
-                if constexpr (!host && N_DIM == 3) {
-                    launch_team(typename Functor::SmoothTeamGradientPass{});
-                } else {
-                    gated::parallel_for(
-                        "teno_smooth",
-                        Kokkos::RangePolicy<Space, typename Functor::SmoothGradientPass, Dynamic, HeavyBounds>(exec, 0, n),
-                        functor);
-                }
-                return;
+        if (point_gradients.on()) {
+            // In 3D the team's threads share out the face points' gradients, whatever DEG
+            if constexpr (!host && N_DIM == 3) {
+                launch_team(typename Functor::SmoothTeamGradientPass{});
+            } else {
+                gated::parallel_for(
+                    "teno_smooth",
+                    Kokkos::RangePolicy<Space, typename Functor::SmoothGradientPass, Dynamic, HeavyBounds>(exec, 0, n),
+                    functor);
             }
+            return;
         }
         if constexpr (!Functor::USE_TEAM || host) {
             gated::parallel_for("teno_smooth",

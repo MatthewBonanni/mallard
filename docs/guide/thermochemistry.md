@@ -66,7 +66,10 @@ balance = "N2"
 **Transport.** With `navier_stokes`, species diffuse along mole-fraction
 gradients with a correction velocity (the diffusive mass fluxes sum to zero)
 and carry their enthalpy; viscosity and conductivity follow the mixture rules
-(Wilke, Mathur), as Cantera's mixture-averaged model.
+(Wilke, Mathur), as Cantera's mixture-averaged model. The face gradients
+are least-squares ones, second order; with TENO of order 4 or more,
+`viscous_gradients = "reconstruction"` takes them from the TENO polynomials
+instead (see [Numerics: viscous gradients](numerics.md#viscous-gradients)).
 
 | `transport` | Diffusion coefficients | When |
 |---|---|---|
