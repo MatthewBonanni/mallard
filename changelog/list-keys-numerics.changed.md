@@ -1,0 +1,1 @@
+- The setup reads `[numerics]` before the mesh too, so a mistake in it is reported before a large mesh file is read. Part of `mallard list keys input.toml` without the mesh ([#886](https://github.com/MatthewBonanni/mallard/issues/886)).

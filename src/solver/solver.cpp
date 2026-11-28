@@ -288,6 +288,7 @@ void Solver::read_input() {
     init_physics();
     read_mesh_keys();
     read_boundaries();
+    read_numerics();
 }
 
 void Solver::read_mesh_keys() {
@@ -1671,9 +1672,31 @@ void Solver::update_boundary_states(const rtype t_eval, const rtype c) {
     update_inflow(t_eval, c);
 }
 
-void Solver::init_numerics() {
-    const Input face_reconstruction_input =
-        toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+namespace {
+std::unique_ptr<FaceReconstruction> make_face_reconstruction(const FaceReconstructionType type) {
+    switch (type) {
+        case FaceReconstructionType::MUSCL: return std::make_unique<MUSCL>();
+        case FaceReconstructionType::TENO: return std::make_unique<TENO>();
+        case FaceReconstructionType::FIRST_ORDER: break;
+    }
+    return std::make_unique<FirstOrder>();
+}
+
+Input face_reconstruction_table(const Input & input) {
+    return toml::find_or(input, "numerics", "face_reconstruction", Input(Input::table_type{}));
+}
+
+InputError viscous_gradients_unavailable(const Input & input, const std::string & why, const std::string & fix) {
+    return InputError({.key = "numerics.viscous_gradients",
+                       .line = line_of(input.at("numerics"), "viscous_gradients"),
+                       .message = "\"reconstruction\" " + why,
+                       .fix = fix + ", or remove viscous_gradients",
+                       .docs = "docs/guide/numerics.md#viscous-gradients"});
+}
+} // namespace
+
+void Solver::read_numerics() {
+    const Input face_reconstruction_input = face_reconstruction_table(input);
     const std::string face_reconstruction_str = find_value_or<std::string>(face_reconstruction_input, "type", "FO");
     const std::string riemann_solver_str = find_value_or<std::string>(input, "numerics", "riemann_solver", "HLLC");
     const std::string time_integrator_str = find_value_or<std::string>(input, "numerics", "time_integrator", "SSPRK3");
@@ -1688,18 +1711,10 @@ void Solver::init_numerics() {
     auto it_time = find_option(TIME_INTEGRATOR_TYPES, "numerics.time_integrator", time_integrator_str,
                                numerics_line("time_integrator"));
 
-    // The case view's geometry needs no stencils
-    switch (geometry_only ? FaceReconstructionType::FIRST_ORDER : it_face->second) {
-        case FaceReconstructionType::FIRST_ORDER:
-            face_reconstruction = std::make_unique<FirstOrder>();
-            break;
-        case FaceReconstructionType::MUSCL:
-            face_reconstruction = std::make_unique<MUSCL>();
-            break;
-        case FaceReconstructionType::TENO:
-            face_reconstruction = std::make_unique<TENO>();
-            break;
-    }
+    face_reconstruction_type = it_face->second;
+    const std::unique_ptr<FaceReconstruction> reconstruction = make_face_reconstruction(face_reconstruction_type);
+    reconstruction->read(face_reconstruction_input);
+    const auto * teno = dynamic_cast<const TENO *>(reconstruction.get());
 
     riemann_solver_type = it_riemann->second;
 
@@ -1723,26 +1738,6 @@ void Solver::init_numerics() {
             time_integrator = std::make_unique<RDPK3Sp35>();
             break;
     }
-
-    face_reconstruction->set_mesh(mesh);
-    face_reconstruction->set_boundaries(boundary_data);
-    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
-        teno->partition_faces_exchanged = exchanges_partition_faces();
-        teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
-        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
-        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
-    }
-    face_reconstruction->init(face_reconstruction_input);
-    describe_block_path();
-    flux_weights = face_reconstruction->face_quad_weights;
-    flux_normals = face_reconstruction->face_quad_normals;
-    if (axisymmetric) init_axisymmetric_weights();
-    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
-    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
-    if (is_mixture() && !state_reader) {
-        scalar_reconstruction.own_scratch = false;
-        scalar_reconstruction.init(mesh, boundary_data, mixture, *face_reconstruction);
-    }
     double_flux = find_value_or<bool>(input, "numerics", "double_flux", false);
     if (double_flux && !is_mixture()) {
         throw InputError({.key = "numerics.double_flux",
@@ -1758,16 +1753,6 @@ void Solver::init_numerics() {
                           .fix = "Set coupling = \"strang\" in [chemistry], or remove double_flux"});
     }
 
-    rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) {
-        calc_rhs(solution, rhs, t_stage, c);
-        if (particles) {
-            if (particles->reads_time()) set_stage_time(t_stage, c);
-            // The first stage of every integrator is the step's start, c = 0
-            particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient(),
-                                viscous_gradients, c == 0.0_r, stage_time, dt,
-                                recording_step ? step_dt_device() : nullptr);
-        }
-    };
     check_nan = find_value_or<bool>(input, "numerics", "check_nan", false);
     low_mach_cutoff = find_real_or(input, "numerics", "low_mach_cutoff", dim::none, 0.1_r);
     if (!(low_mach_cutoff > 0.0_r)) {
@@ -1782,7 +1767,7 @@ void Solver::init_numerics() {
         throw not_accepted(input.at("numerics"), "numerics.convective_flux", flux, {"hybrid", "riemann"});
     }
     hybrid_flux = flux == "hybrid";
-    init_viscous_gradients(teno);
+    read_viscous_gradients(teno);
     if (hybrid_flux && simpler) {
         throw InputError({.key = "numerics.convective_flux",
                           .line = line_of(input.at("numerics"), "convective_flux"),
@@ -1823,10 +1808,49 @@ void Solver::init_numerics() {
                           .message = "must be finite and at least 0",
                           .fix = "The default is 1e-5; 0 drops epsilon"});
     }
-    init_error_control();
+    read_error_control();
 }
 
-void Solver::init_viscous_gradients(const TENO * teno) {
+void Solver::init_numerics() {
+    // The case view's geometry needs no stencils
+    face_reconstruction =
+        make_face_reconstruction(geometry_only ? FaceReconstructionType::FIRST_ORDER : face_reconstruction_type);
+    face_reconstruction->set_mesh(mesh);
+    face_reconstruction->set_boundaries(boundary_data);
+    if (auto * teno = dynamic_cast<TENO *>(face_reconstruction.get())) {
+        teno->partition_faces_exchanged = exchanges_partition_faces();
+        teno->own_scratch = static_cast<bool>(state_reader);  // allocate_stage_scratch places it in runs that step
+        // Output of states read from files reconstructs no faces; the stencil fields and file show the sectors
+        if (state_reader && !writes_stencils()) teno->sector_stencils = false;
+    }
+    face_reconstruction->init(face_reconstruction_table(input));
+    describe_block_path();
+    flux_weights = face_reconstruction->face_quad_weights;
+    flux_normals = face_reconstruction->face_quad_normals;
+    if (axisymmetric) init_axisymmetric_weights();
+    const auto * teno = dynamic_cast<const TENO *>(face_reconstruction.get());
+    positivity_limiter = teno && teno->bound_preserving && !axisymmetric && !is_mixture();
+    if (is_mixture() && !state_reader) {
+        scalar_reconstruction.own_scratch = false;
+        scalar_reconstruction.init(mesh, boundary_data, mixture, *face_reconstruction);
+    }
+    init_viscous_gradients();
+    rhs_func = [this](State solution, State rhs, rtype t_stage, rtype c) {
+        calc_rhs(solution, rhs, t_stage, c);
+        if (particles) {
+            if (particles->reads_time()) set_stage_time(t_stage, c);
+            // The first stage of every integrator is the step's start, c = 0
+            particles->velocity(solution.particles, rhs.particles, W_cells, *face_reconstruction, viscous_gradient(),
+                                viscous_gradients, c == 0.0_r, stage_time, dt,
+                                recording_step ? step_dt_device() : nullptr);
+        }
+    };
+    if (step_controller.enabled()) {
+        characteristic_start = Kokkos::View<rtype *[2]>("char_state_start", boundary_data.char_faces.extent(0));
+    }
+}
+
+void Solver::read_viscous_gradients(const TENO * teno) {
     const std::string gradients = find_value_or<std::string>(input, "numerics", "viscous_gradients", "least_squares");
     record_options("numerics.viscous_gradients", {"least_squares", "reconstruction"});
     if (gradients != "least_squares" && gradients != "reconstruction") {
@@ -1836,11 +1860,7 @@ void Solver::init_viscous_gradients(const TENO * teno) {
     polynomial_viscous = gradients == "reconstruction";
     if (!polynomial_viscous) return;
     auto unavailable = [&](const std::string & why, const std::string & fix) {
-        return InputError({.key = "numerics.viscous_gradients",
-                           .line = line_of(input.at("numerics"), "viscous_gradients"),
-                           .message = "\"reconstruction\" " + why,
-                           .fix = fix + ", or remove viscous_gradients",
-                           .docs = "docs/guide/numerics.md#viscous-gradients"});
+        return viscous_gradients_unavailable(input, why, fix);
     };
     if (is_mixture()) throw unavailable("is not available for gas mixtures yet", "Use gas = \"perfect\"");
     if (!physics.is_viscous()) {
@@ -1860,11 +1880,17 @@ void Solver::init_viscous_gradients(const TENO * teno) {
     if (hybrid_flux) {
         throw unavailable("is not available with the hybrid convective flux yet", "Set convective_flux = \"riemann\"");
     }
+}
+
+void Solver::init_viscous_gradients() const {
+    if (!polynomial_viscous) return;
     if (mesh->curved_geometry) {
-        throw unavailable("is not available on curved meshes yet", "Use a mesh with straight faces");
+        throw viscous_gradients_unavailable(input, "is not available on curved meshes yet",
+                                            "Use a mesh with straight faces");
     }
     if (mesh->is_rotational()) {
-        throw unavailable("is not available with rotational periodicity yet", "Use translational periodicity");
+        throw viscous_gradients_unavailable(input, "is not available with rotational periodicity yet",
+                                            "Use translational periodicity");
     }
 }
 

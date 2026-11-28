@@ -458,7 +458,7 @@ class Solver {
          *        step just taken (else the solution is back at U^n).
          */
         bool accept_controlled_step();
-        void init_error_control();
+        void read_error_control();
         /** @brief Throws once the same step has been rejected too many times. */
         void check_rejections(int tries) const;
         /** @brief The time the next step must not pass: t_stop or the next time-based output (unstaged: of the host's). */
@@ -983,7 +983,8 @@ class Solver {
     protected:
         /**
          * @brief The input phase of the setup, before the mesh is read: reads [run], [physics] (and the
-         *        mechanism), [mesh], [parallel], [[periodic]] and [[boundaries]], and decides from them.
+         *        mechanism), [mesh], [parallel], [[periodic]], [[boundaries]] and [numerics], and decides
+         *        from them.
          *        The mesh phase that follows applies the decisions.
          */
         void read_input();
@@ -1003,9 +1004,12 @@ class Solver {
         void init_radiation();
         void add_radiation(StateView rhs, SpeciesView rhoY);
         void init_physics();
+        void read_numerics();
         void init_numerics();
         /** @brief [numerics] viscous_gradients, checked against the reconstruction (teno: null unless TENO). */
-        void init_viscous_gradients(const TENO * teno);
+        void read_viscous_gradients(const TENO * teno);
+        /** @brief viscous_gradients = "reconstruction" checked against the mesh. */
+        void init_viscous_gradients() const;
         /** @brief The functor's polynomial face gradients (viscous_gradients = "reconstruction"). */
         void set_polynomial_flux(ViscousFluxFunctor & functor) const;
         /** @brief TENO::polynomials for cells [0, n_cells). */
@@ -1454,6 +1458,7 @@ class Solver {
         /** @brief Face f's point for boundary expressions: its center and, where computed, its local coordinates. */
         FacePoint boundary_point(uint32_t f) const;
         TimedBoundaryFields timed_fields;
+        FaceReconstructionType face_reconstruction_type = FaceReconstructionType::FIRST_ORDER;
         std::unique_ptr<FaceReconstruction> face_reconstruction;
         RiemannSolverType riemann_solver_type;
         rtype low_mach_cutoff = 0.1_r;
