@@ -290,6 +290,15 @@ void Solver::read_input() {
     read_boundaries();
     read_numerics();
     read_les();
+    std::vector<std::string> zones;
+    for (const BoundaryEntry & entry : boundary_entries) zones.push_back(entry.name);
+    for (const Mesh::PeriodicPair & pair : Mesh::periodic_pairs(input)) {
+        zones.push_back(pair.zone_a);
+        zones.push_back(pair.zone_b);
+    }
+    region::Regions regions(input, region::MeshRegions::without_mesh(zones));
+    read_sources(regions);
+    read_sponges(regions);
 }
 
 void Solver::read_mesh_keys() {
@@ -1444,17 +1453,9 @@ region::CellFields Solver::cell_fields() const {
     return fields;
 }
 
-void Solver::init_sources(region::Regions & regions) {
-    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, cell_fields(), regions,
-                                                         is_distributed() && halo.uses_nccl());
-    if (!terms->empty()) {
-        source_summary.add(terms->summary());
-        source_terms = std::move(terms);
-        stage_time = Kokkos::View<rtype>("stage_time");
-    }
-    if (!input.contains("source")) {
-        return;
-    }
+void Solver::read_sources(region::Regions & regions) {
+    sources::SourceTerms::read(input, species_names, regions);
+    if (!input.contains("source")) return;
     const Input & source = input.at("source");
     if (contains_optional(source, "gravity")) {
         std::vector<rtype> g = find_real_vector(input, "source", "gravity", dim::acceleration);
@@ -1467,10 +1468,6 @@ void Solver::init_sources(region::Regions & regions) {
         }
         has_gravity = true;
         FOR_I_DIM gravity[i] = g[i];
-        FOR_I_DIM boundary_data.gravity[i] = g[i];
-        face_reconstruction->set_boundaries(boundary_data);
-        FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
-                                          units::column("m/s^2"), "");
     }
     if (contains_optional(source, "mass_flow")) {
         const std::vector<rtype> m = find_real_vector(input, "source", "mass_flow", dim::mass_flux);
@@ -1493,6 +1490,24 @@ void Solver::init_sources(region::Regions & regions) {
         hold_mass_flow = true;
         mass_flow_target = double(norm);
         FOR_I_DIM mass_flow_direction[i] = m[i] / norm;
+    }
+}
+
+void Solver::init_sources(region::Regions & regions) {
+    auto terms = std::make_unique<sources::SourceTerms>(input, mesh, species_names, cell_fields(), regions,
+                                                         is_distributed() && halo.uses_nccl());
+    if (!terms->empty()) {
+        source_summary.add(terms->summary());
+        source_terms = std::move(terms);
+        stage_time = Kokkos::View<rtype>("stage_time");
+    }
+    if (has_gravity) {
+        FOR_I_DIM boundary_data.gravity[i] = gravity[i];
+        face_reconstruction->set_boundaries(boundary_data);
+        FOR_I_DIM source_summary.quantity(std::string("gravity ") + "xyz"[i], logging::real(double(gravity[i])),
+                                          units::column("m/s^2"), "");
+    }
+    if (hold_mass_flow) {
         const uint64_t n_global = is_distributed() ? n_cells_global : mesh->n_owned();
         const int bits = 62 - static_cast<int>(std::ceil(std::log2(static_cast<double>(n_global) + 1.0)));
         mass_flow_unit = std::ldexp(1.0, bits);
@@ -1502,7 +1517,8 @@ void Solver::init_sources(region::Regions & regions) {
         mass_flow_totals = Kokkos::View<double *>("mass_flow_totals", 3);
         init_mass_flow_volume();
         source_summary.setting("Mass flow", "volume average of rho u, held by a uniform body force");
-        FOR_I_DIM source_summary.quantity(std::string("mass flow ") + "xyz"[i], logging::real(double(m[i])),
+        FOR_I_DIM source_summary.quantity(std::string("mass flow ") + "xyz"[i],
+                                          logging::real(mass_flow_target * double(mass_flow_direction[i])),
                                           units::column("kg/(m^2 s)"), "volume average of rho u");
     }
 }

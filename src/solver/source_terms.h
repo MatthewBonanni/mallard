@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -111,6 +112,22 @@ class SourceTerms {
         SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh,
                     const std::vector<std::string> & species, const CellFields & fields, region::Regions & regions,
                     bool use_nccl);
+
+        /** @brief A source entry as read from the input, without the mesh. */
+        struct Entry {
+            std::string where, label;  // its place in the input ("source", "sources[0]"), its name in the run log
+            bool total = false, per_copy = false;
+            // (column, expression, name, line)
+            std::vector<std::tuple<uint32_t, std::string, std::string, std::size_t>> values;
+            std::vector<kexpr::Program> programs;                              // of values
+            const Input * region = nullptr;
+        };
+        struct Read {
+            std::vector<std::string> variables;  // of the expressions
+            std::vector<Entry> entries;
+        };
+        /** @brief The source terms of input, read and checked without the mesh; regions gives their regions. */
+        static Read read(const Input & input, const std::vector<std::string> & species, region::Regions & regions);
 
         bool empty() const { return m_empty; }
         /** @brief Whether an input has source terms (not empty()), from the input alone (no mesh). */

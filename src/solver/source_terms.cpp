@@ -159,11 +159,11 @@ std::vector<std::pair<const Input *, std::string>> SourceTerms::tables_of(const 
     return out;
 }
 
-SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
-                         const std::vector<std::string> & species, const CellFields & fields_,
-                         region::Regions & regions, const bool use_nccl) :
-    mesh(mesh_), fields(fields_), n_species(static_cast<uint32_t>(species.size())) {
-    std::vector<std::string> names(FIXED_NAMES.begin(), FIXED_NAMES.end());
+SourceTerms::Read SourceTerms::read(const Input & input, const std::vector<std::string> & species,
+                                    region::Regions & regions) {
+    Read out;
+    std::vector<std::string> & names = out.variables;
+    names.assign(FIXED_NAMES.begin(), FIXED_NAMES.end());
     if constexpr (N_DIM == 2) names[U_Z] = names[MEAN_RHOU_Z] = "";
     for (const auto & s : species) names.push_back("Y_" + identifier(s));
     for (const auto & s : species) names.push_back("X_" + identifier(s));
@@ -173,33 +173,21 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         }
     }
     const uint16_t n_variables = static_cast<uint16_t>(names.size());
-    const bool mixture = n_species > 0;
-    const uint32_t n_owned = mesh->n_owned();
-
-    const std::vector<std::pair<const Input *, std::string>> entries = tables_of(input);
-    m_empty = entries.empty();
-    if (m_empty) return;
-
-    std::vector<double> measure(n_owned);
-    for (uint32_t c = 0; c < n_owned; c++) measure[c] = double(mesh->h_cell_measure(c));
-    const double volume = ordered_sum(*mesh, measure);
-
-    std::vector<Term> static_terms, dyn_terms;
-    std::vector<std::vector<double>> weight_rows;
-    int32_t n_totals = 0;
-    for (const auto & [entry, where] : entries) {
+    const bool mixture = !species.empty();
+    for (const auto & [entry, where] : tables_of(input)) {
+        Entry & e = out.entries.emplace_back();
+        e.where = where;
         const bool legacy = where == "source";
         if (!entry->is_table()) throw InputError(where + " must be a table.");
-        if (legacy && entry->contains("time_dependent")) {
-            if (!entry->at("time_dependent").is_boolean()) throw InputError("source.time_dependent must be true or false.");
-            logging::warning(diagnostic_code::KEY_IGNORED, "source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
+        if (legacy && entry->contains("time_dependent") && !entry->at("time_dependent").is_boolean()) {
+            throw InputError("source.time_dependent must be true or false.");
         }
-        const std::string label = !legacy && contains_optional(*entry, "name") ? find_value<std::string>(*entry, "name") : where;
-        const bool total = !legacy && find_value_or<bool>(*entry, "total", false);
+        e.label = !legacy && contains_optional(*entry, "name") ? find_value<std::string>(*entry, "name") : where;
+        e.total = !legacy && find_value_or<bool>(*entry, "total", false);
+        const bool total = e.total;
         // A total is integrated over the region: per unit volume times a volume
         const auto per = [total](const Dimension & d) { return total ? d.times(dim::length, 3) : d; };
-        // (column, expression, name, line)
-        std::vector<std::tuple<uint32_t, std::string, std::string, std::size_t>> values;
+        auto & values = e.values;
         if (entry->contains("rho")) {
             if (mixture) {
                 throw InputError(where + ".rho: in gas mixtures mass enters through rhoY (rho gains their sum).");
@@ -235,8 +223,6 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         }
         if (values.empty()) throw InputError(where + " sets none of rho, rhou, rhoE, rhoY.");
 
-        std::vector<kexpr::Program> compiled;
-        bool per_copy = false;
         for (const auto & [column, text, name, line] : values) {
             kexpr::Program p = compile_expression(where + "." + name, line, text, names);
             if (total) {
@@ -247,9 +233,48 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
                     }
                 }
             }
-            per_copy = per_copy || p.uses(COPY);
-            compiled.push_back(std::move(p));
+            e.per_copy = e.per_copy || p.uses(COPY);
+            e.programs.push_back(std::move(p));
         }
+
+        if (!legacy && entry->contains("region")) {
+            const Input & value = entry->at("region");
+            region::require_full_dimension(regions.get(value, where + ".region"), value, where + ".region");
+            e.region = &value;
+        } else if (e.per_copy) {
+            throw InputError(where + ": copy is the index of a region's copy, but there is no region.");
+        }
+    }
+    return out;
+}
+
+SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh_,
+                         const std::vector<std::string> & species, const CellFields & fields_,
+                         region::Regions & regions, const bool use_nccl) :
+    mesh(mesh_), fields(fields_), n_species(static_cast<uint32_t>(species.size())) {
+    Read read_terms = read(input, species, regions);
+    const uint16_t n_variables = static_cast<uint16_t>(read_terms.variables.size());
+    const uint32_t n_owned = mesh->n_owned();
+    m_empty = read_terms.entries.empty();
+    if (m_empty) return;
+    if (read_terms.entries.front().where == "source" && input.at("source").contains("time_dependent")) {
+        logging::warning(diagnostic_code::KEY_IGNORED,
+                         "source.time_dependent is ignored: expressions of t are re-evaluated at every stage.");
+    }
+
+    std::vector<double> measure(n_owned);
+    for (uint32_t c = 0; c < n_owned; c++) measure[c] = double(mesh->h_cell_measure(c));
+    const double volume = ordered_sum(*mesh, measure);
+
+    std::vector<Term> static_terms, dyn_terms;
+    std::vector<std::vector<double>> weight_rows;
+    int32_t n_totals = 0;
+    for (Entry & e : read_terms.entries) {
+        const std::string & where = e.where;
+        const std::string & label = e.label;
+        const bool total = e.total, per_copy = e.per_copy;
+        const auto & values = e.values;
+        std::vector<kexpr::Program> & compiled = e.programs;
 
         // The parts the terms apply to: the region, or each of its copies if they read copy
         struct Part {
@@ -259,8 +284,8 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
         std::vector<Part> parts(1);
         std::string region_text = "everywhere";
         bool moves = false;
-        if (!legacy && entry->contains("region")) {
-            const Input & value = entry->at("region");
+        if (e.region) {
+            const Input & value = *e.region;
             const region::Region & r = regions.get(value, where + ".region");
             region::require_full_dimension(r, value, where + ".region");
             moves = r.moving() || r.solution();
@@ -305,8 +330,6 @@ SourceTerms::SourceTerms(const Input & input, const std::shared_ptr<Mesh> & mesh
             }
             if (n_parts > 1) text << ", each of " << n_parts << " copies";
             region_text = text.str();
-        } else if (per_copy) {
-            throw InputError(where + ": copy is the index of a region's copy, but there is no region.");
         }
 
         std::string kinds;
