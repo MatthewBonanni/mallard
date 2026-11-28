@@ -1559,7 +1559,8 @@ class KeyedSetup {
             Kokkos::Timer timer;
             const uint32_t n = scheme.n_direct_rows;
             const uint32_t n_rows = scheme.n_rows();
-            const teno::ShapeGroups groups = teno::ShapeGroups::build(keys.keys(n), scheme.global_cell_ids());
+            teno::ShapeGroups groups = teno::ShapeGroups::build(keys.keys(n), scheme.global_cell_ids());
+            keys.check(groups);
             std::vector<std::vector<uint64_t>> records(groups.groups.size());
             std::vector<uint32_t> reps, rep_group;
             for (size_t k = 0; k < groups.groups.size(); k++) {
@@ -4366,7 +4367,10 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
     }
     std::sort(sorted.begin(), sorted.end());
     sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
-    if (share_tables) {
+    // In single precision, a shared table is the fit of its shape's representative, wherever that is
+    // (teno::ShapeKeys::check), which no fit of the cells within reach reproduces
+    const bool every_table = share_tables && teno::ShapeKeys::CHECKED;
+    if (share_tables && !every_table) {
         const uint32_t n_rec = static_cast<uint32_t>(scale.extent(0));
         std::vector<uint32_t> more = owners_of_rebuilt_tables(stencil_large, sorted, global_cell_ids(), n_rec);
         const auto small = owners_of_rebuilt_tables(stencil_small, sorted, global_cell_ids(), n_rec);
@@ -4379,13 +4383,13 @@ void TENO::rebuild_cells(const std::vector<uint32_t> & cells) {
         sorted.insert(sorted.end(), more.begin(), more.end());
         std::sort(sorted.begin(), sorted.end());
         sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
-    } else if (sorted.empty()) {
+    } else if (!share_tables && sorted.empty()) {
         return;
     }
     // The face quadrature follows the mesh's geometry
     if constexpr (N_DIM == 3) init_face_quadrature_3d(degree + 1);
     expand_cell_rows(*this);
-    compute_stencils_and_matrices(&sorted);
+    compute_stencils_and_matrices(every_table ? nullptr : &sorted);
     release_planar_face_points();
     if (single_tables || (cache_single && !cache_file.empty())) round_to_single();
     uint16_t largest = 0;
@@ -4550,6 +4554,8 @@ uint64_t TENO::options_key() const {
     // A cache of shared tables holds each shape's table in canonical order; one of per-cell tables, which
     // sharing turns into the same, loads either way
     if (!share_tables) hash.add(uint8_t(1));
+    // Single precision shapes come from checked keys since #1172, which share tables earlier versions did not
+    if (share_tables && teno::ShapeKeys::CHECKED) hash.add(uint8_t(2));
     hash.add(comm::size());
     hash.add(comm::rank());
     return hash.h;

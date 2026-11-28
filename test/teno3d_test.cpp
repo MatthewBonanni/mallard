@@ -616,9 +616,10 @@ TEST_P(TENO3DIncremental, RebuildingTheCellsWithinReachOfMovedNodesGivesTheTable
     incremental->rebuild_cells(cells);
     auto full = make_teno(mesh, bd, order);
     expect_same_tables(*incremental, *full, "rebuilt within reach");
-    // The move changed tables beyond the moved cells: rebuilding only those is not enough
+    // The move changed tables beyond the moved cells: rebuilding only those is not enough (in single
+    // precision every shared table is rebuilt)
     changed_only->rebuild_cells(changed);
-    EXPECT_FALSE(teno_tables(*changed_only) == teno_tables(*full));
+    if (!teno::ShapeKeys::CHECKED) EXPECT_FALSE(teno_tables(*changed_only) == teno_tables(*full));
     // but a cell's scale, basis means and moments depend on its own geometry only
     const auto rows = [](const TENO & teno) {
         const auto all = teno_tables(teno);
@@ -1425,14 +1426,12 @@ TEST(TENO3DSetup, StencilShapeKeysAreTheSameOnEveryBackend) {
         if (k) distinct.insert({k.hash, k.check});
     }
     const auto n_keyed = std::count_if(keys.begin(), keys.end(), [](const teno::ShapeKey & k) { return bool(k); });
-    // Single precision coordinates are not exact on the keys' grid, so cells of one shape get keys of their own (#1172)
-#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(n_keyed, 1728);
     EXPECT_EQ(distinct.size(), 147u);
+    // Single precision keys are on a coarser grid (#1172)
+#ifdef Mallard_USE_DOUBLE
     EXPECT_EQ(digest, 16533836760420377906ULL);
 #else
-    EXPECT_EQ(n_keyed, 1557);
-    EXPECT_EQ(distinct.size(), 1557u);
-    EXPECT_EQ(digest, 176108027913348827ULL);
+    EXPECT_EQ(digest, 8925152527771295078ULL);
 #endif
 }

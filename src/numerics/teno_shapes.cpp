@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
+#include <limits>
 #include <unordered_map>
 
 #include <Kokkos_BitManipulation.hpp>
@@ -292,51 +294,115 @@ KOKKOS_FUNCTION int64_t ShapeSearch::boundary_face(const uint32_t c, const int r
 
 namespace {
 
+/**
+ * @brief Cell c's nodes and boundary faces: items[i] their positions relative
+ *        to c on the grid, in its units, and the face's condition (-1: a
+ *        node), sorted; source[i] the node, or -1 minus the face.
+ * @return Their number, or -1 if there are more than MAX_SHAPE_ITEMS.
+ */
+KOKKOS_INLINE_FUNCTION int shape_items(const ShapeSearch & g, const uint32_t c, int64_t (*items)[N_DIM + 1],
+                                       int64_t * source) {
+    const uint32_t n0 = g.offsets_nodes_of_cell(c), n1 = g.offsets_nodes_of_cell(c + 1);
+    const uint32_t f0 = g.offsets_faces_of_cell(c), f1 = g.offsets_faces_of_cell(c + 1);
+    double xc[N_DIM];
+    for (int d = 0; d < N_DIM; d++) xc[d] = double(g.cell_coords(c, d));
+    const double hc = g.h(c);
+    int n = 0;
+    for (uint32_t k = n0; k < n1; k++) {
+        if (n == MAX_SHAPE_ITEMS) return -1;
+        const uint32_t node = g.nodes_of_cell(k);
+        for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.node_coords(node, d)) - xc[d]) / hc);
+        items[n][N_DIM] = -1;
+        source[n++] = int64_t(node);
+    }
+    for (uint32_t k = f0; k < f1; k++) {
+        const uint32_t f = g.faces_of_cell(k);
+        if (g.cells_of_face(f, 1) >= 0) continue;
+        if (n == MAX_SHAPE_ITEMS) return -1;
+        for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.face_coords(f, d)) - xc[d]) / hc);
+        items[n][N_DIM] = g.face_bc(f);
+        source[n++] = -1 - int64_t(f);
+    }
+    for (int i = 1; i < n; i++) {
+        for (int j = i; j > 0 && less<N_DIM + 1>(items[j], items[j - 1]); j--) {
+            for (int d = 0; d <= N_DIM; d++) {
+                const int64_t t = items[j][d];
+                items[j][d] = items[j - 1][d];
+                items[j - 1][d] = t;
+            }
+            const int64_t t = source[j];
+            source[j] = source[j - 1];
+            source[j - 1] = t;
+        }
+    }
+    return n;
+}
+
 /** @brief Each cell's hash of its nodes and boundary faces with their conditions, sorted, in its own units. */
 void compute_shapes(const ShapeSearch & g, const uint32_t n_cells) {
     gated::parallel_for("teno_shape_shapes", Kokkos::RangePolicy<>(0, n_cells), KOKKOS_LAMBDA(const uint32_t c) {
         int64_t items[MAX_SHAPE_ITEMS][N_DIM + 1];
-        const uint32_t n0 = g.offsets_nodes_of_cell(c), n1 = g.offsets_nodes_of_cell(c + 1);
-        const uint32_t f0 = g.offsets_faces_of_cell(c), f1 = g.offsets_faces_of_cell(c + 1);
-        double xc[N_DIM];
-        for (int d = 0; d < N_DIM; d++) xc[d] = double(g.cell_coords(c, d));
-        const double hc = g.h(c);
-        int n = 0;
-        bool fits = true;
-        for (uint32_t k = n0; k < n1 && fits; k++) {
-            fits = n < MAX_SHAPE_ITEMS;
-            if (!fits) break;
-            for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.node_coords(g.nodes_of_cell(k), d)) - xc[d]) / hc);
-            items[n++][N_DIM] = -1;
-        }
-        for (uint32_t k = f0; k < f1 && fits; k++) {
-            const uint32_t f = g.faces_of_cell(k);
-            if (g.cells_of_face(f, 1) >= 0) continue;
-            fits = n < MAX_SHAPE_ITEMS;
-            if (!fits) break;
-            for (int d = 0; d < N_DIM; d++) items[n][d] = ShapeSearch::on_grid((double(g.face_coords(f, d)) - xc[d]) / hc);
-            items[n++][N_DIM] = g.face_bc(f);
-        }
-        if (!fits) {
+        int64_t source[MAX_SHAPE_ITEMS];
+        const int n = shape_items(g, c, items, source);
+        if (n < 0) {
             g.shape(c) = 0;
             return;
         }
-        for (int i = 1; i < n; i++) {
-            for (int j = i; j > 0 && less<N_DIM + 1>(items[j], items[j - 1]); j--) {
-                for (int d = 0; d <= N_DIM; d++) {
-                    const int64_t t = items[j][d];
-                    items[j][d] = items[j - 1][d];
-                    items[j - 1][d] = t;
-                }
-            }
-        }
         Hasher hs;
-        hs.add(f1 - f0);
+        hs.add(g.offsets_faces_of_cell(c + 1) - g.offsets_faces_of_cell(c));
         for (int i = 0; i < n; i++) {
             for (int d = 0; d <= N_DIM; d++) hs.add_signed(items[i][d]);
         }
         g.shape(c) = hs.a == 0 ? 1 : hs.a;
     });
+}
+
+/**
+ * @brief emit(value) for every value cell c's key reads, unrounded, relative
+ *        to the cell and in units of its size, in the key's order, after a
+ *        search of c that visited n cells.
+ * @return False if a visited cell has more than MAX_SHAPE_ITEMS nodes and boundary faces.
+ */
+template <class Emit>
+KOKKOS_INLINE_FUNCTION bool each_value(const ShapeSearch & g, const uint32_t c, const ShapeLanes & w, const uint32_t n,
+                                       Emit && emit) {
+    double x0[N_DIM];
+    for (int d = 0; d < N_DIM; d++) x0[d] = double(g.cell_coords(c, d));
+    const double hc = g.h(c);
+    for (uint32_t k = g.offsets_faces_of_cell(c); k < g.offsets_faces_of_cell(c + 1); k++) {
+        const uint32_t f = g.faces_of_cell(k);
+        const bool second = g.cells_of_face(f, 1) == int32_t(c);
+        for (int d = 0; d < N_DIM; d++) {
+            const double shift = second ? double(g.shifts(g.face_shift(f), d)) : 0.0;
+            emit((double(g.face_coords(f, d)) - shift - x0[d]) / hc);
+        }
+    }
+    int64_t items[MAX_SHAPE_ITEMS][N_DIM + 1];
+    int64_t source[MAX_SHAPE_ITEMS];
+    for (uint32_t p = 0; p < n; p++) {
+        const uint32_t k = w.order[p];
+        const uint32_t v = w.cell[k];
+        double origin[N_DIM];  // of v's image, in c's frame
+        for (int d = 0; d < N_DIM; d++) {
+            double x = -x0[d];
+            for (uint32_t j = 0; j < g.n_translations; j++) {
+                x = Kokkos::fma(double(lattice_component(w.lattice[k], int(j))), g.translations(j, d), x);
+            }
+            origin[d] = x;
+            emit((double(g.cell_coords(v, d)) + x) / hc);
+        }
+        emit(g.h(v) / hc);
+        const int m = shape_items(g, v, items, source);
+        if (m < 0) return false;
+        for (int i = 0; i < m; i++) {
+            for (int d = 0; d < N_DIM; d++) {
+                const double x = source[i] >= 0 ? double(g.node_coords(uint32_t(source[i]), d))
+                                                : double(g.face_coords(uint32_t(-1 - source[i]), d));
+                emit((x + origin[d]) / hc);
+            }
+        }
+    }
+    return true;
 }
 
 /** @brief f(t, scratch) for t < n, slots searches at a time. */
@@ -629,6 +695,115 @@ std::vector<uint8_t> ShapeKeys::reach(const std::vector<uint32_t> & cells, bool 
     return out;
 }
 
+void ShapeKeys::check(ShapeGroups & groups) const {
+    if constexpr (!CHECKED) {
+        (void)groups;
+    } else {
+        double largest = 0.0;
+        for (size_t i = 0; i < mesh.h_node_coords.extent(0); i++) {
+            for (int d = 0; d < N_DIM; d++) largest = std::max(largest, std::abs(double(mesh.h_node_coords(i, d))));
+        }
+        for (const auto & t : mesh.periodic_translations) {
+            for (int d = 0; d < N_DIM; d++) largest += std::abs(double(t[size_t(d)]));
+        }
+        largest = comm::allreduce(largest, comm::Op::MAX);
+        const double tolerance = CHECK_ROUND_OFFS * double(std::numeric_limits<rtype>::epsilon()) * largest;
+        const ShapeSearch g = s;
+        // The representatives' values
+        std::vector<uint32_t> reps, rep_group;
+        for (size_t k = 0; k < groups.groups.size(); k++) {
+            const ShapeGroups::Group & group = groups.groups[k];
+            if (group.single || group.rep_cell == ShapeGroups::NONE) continue;
+            reps.push_back(group.rep_cell);
+            rep_group.push_back(uint32_t(k));
+        }
+        const uint32_t n_reps = static_cast<uint32_t>(reps.size());
+        Kokkos::View<uint32_t *> rep_cells("teno_shape_check_reps", n_reps);
+        Kokkos::deep_copy(rep_cells, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(reps.data(), n_reps));
+        Kokkos::View<uint64_t *> count("teno_shape_check_counts", n_reps);
+        each_search(g, slots, n_reps, KOKKOS_LAMBDA(const uint32_t t, const ShapeLanes & w) {
+            uint32_t end[MAX_END];
+            const uint32_t c = rep_cells(t);
+            const ShapeSearch::Result r = g.search(c, w, end);
+            uint64_t m = 0;
+            const bool ok = r.ok && each_value(g, c, w, r.n, [&](double) { m++; });
+            count(t) = ok ? m : 0;
+            g.clear(w, r.n);
+        });
+        auto h_count = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), count);
+        std::vector<uint64_t> first(n_reps + 1, 0);
+        for (uint32_t t = 0; t < n_reps; t++) first[t + 1] = first[t] + h_count(t);
+        Kokkos::View<uint64_t *> rep_first("teno_shape_check_first", n_reps + 1);
+        Kokkos::deep_copy(rep_first, Kokkos::View<const uint64_t *, Kokkos::HostSpace>(first.data(), n_reps + 1));
+        Kokkos::View<double *> values(Kokkos::view_alloc(Kokkos::WithoutInitializing, "teno_shape_check_values"),
+                                      first[n_reps]);
+        each_search(g, slots, n_reps, KOKKOS_LAMBDA(const uint32_t t, const ShapeLanes & w) {
+            if (rep_first(t + 1) == rep_first(t)) return;
+            uint32_t end[MAX_END];
+            const uint32_t c = rep_cells(t);
+            const ShapeSearch::Result r = g.search(c, w, end);
+            uint64_t at = rep_first(t);
+            each_value(g, c, w, r.n, [&](const double v) { values(at++) = v; });
+            g.clear(w, r.n);
+        });
+        auto h_values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), values);
+        std::vector<std::vector<uint64_t>> records(groups.groups.size());
+        for (uint32_t t = 0; t < n_reps; t++) {
+            auto & r = records[rep_group[t]];
+            for (uint64_t i = first[t]; i < first[t + 1]; i++) r.push_back(std::bit_cast<uint64_t>(h_values(i)));
+        }
+        groups.exchange(records);
+        // Each cell's values against its representative's
+        const uint32_t n = static_cast<uint32_t>(groups.group.size());
+        std::vector<uint32_t> host_group(n, ShapeGroups::NONE);
+        std::vector<uint64_t> offset(groups.groups.size() + 1, 0);
+        for (size_t k = 0; k < groups.groups.size(); k++) offset[k + 1] = offset[k] + records[k].size();
+        std::vector<double> data(offset.back());
+        for (size_t k = 0; k < groups.groups.size(); k++) {
+            for (size_t i = 0; i < records[k].size(); i++) data[offset[k] + i] = std::bit_cast<double>(records[k][i]);
+        }
+        for (uint32_t c = 0; c < n; c++) {
+            const uint32_t k = groups.group[c];
+            if (k != ShapeGroups::NONE && !groups.groups[k].single) host_group[c] = k;
+        }
+        Kokkos::View<uint32_t *> cell_group("teno_shape_check_groups", n);
+        Kokkos::deep_copy(cell_group, Kokkos::View<const uint32_t *, Kokkos::HostSpace>(host_group.data(), n));
+        Kokkos::View<uint64_t *> group_first("teno_shape_check_group_first", offset.size());
+        Kokkos::deep_copy(group_first, Kokkos::View<const uint64_t *, Kokkos::HostSpace>(offset.data(), offset.size()));
+        Kokkos::View<double *> group_values("teno_shape_check_group_values", data.size());
+        Kokkos::deep_copy(group_values, Kokkos::View<const double *, Kokkos::HostSpace>(data.data(), data.size()));
+        Kokkos::View<uint8_t *> differs("teno_shape_check_differs", n);
+        each_search(g, slots, n, KOKKOS_LAMBDA(const uint32_t c, const ShapeLanes & w) {
+            const uint32_t k = cell_group(c);
+            if (k == ShapeGroups::NONE) return;
+            uint32_t end[MAX_END];
+            const ShapeSearch::Result r = g.search(c, w, end);
+            const uint64_t first_value = group_first(k), n_values = group_first(k + 1) - first_value;
+            const double tol = tolerance / g.h(c);
+            bool same = r.ok && n_values > 0;
+            uint64_t at = 0;
+            if (same) {
+                const bool read = each_value(g, c, w, r.n, [&](const double v) {
+                    if (same && at < n_values) {
+                        const double ref = group_values(first_value + at);
+                        same = Kokkos::fabs(v - ref) <= tol * Kokkos::fmax(1.0, Kokkos::fabs(ref));
+                    } else {
+                        same = false;
+                    }
+                    at++;
+                });
+                same = same && read && at == n_values;
+            }
+            differs(c) = !same;
+            g.clear(w, r.n);
+        });
+        auto h_differs = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), differs);
+        for (uint32_t c = 0; c < n; c++) {
+            if (h_differs(c)) groups.group[c] = ShapeGroups::NONE;
+        }
+    }
+}
+
 void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n, const teno_setup::TableBatch & batch,
                        const Kokkos::View<uint32_t *[2]> & size) const {
     const ShapeSearch g = s;
@@ -636,8 +811,9 @@ void ShapeKeys::encode(const Kokkos::View<uint32_t *> & cells, const uint32_t n,
         uint32_t end[MAX_END];
         const uint32_t c = cells(j);
         const ShapeSearch::Result r = g.search(c, w, end);
+        // Central stencils alone (no sector stencils) gather fewer layers than the key reads
         bool ok = r.ok && batch.status(j) == teno_setup::OK && batch.failed_large(j) == 0 &&
-                  batch.gather_depth(j) == r.layers;
+                  batch.gather_depth(j) <= r.layers;
         int64_t last = 0;  // the last position the stencils reach
         auto stencil = [&](const teno_setup::Lane<int32_t> & entries, const teno_setup::Lane<int32_t> & faces,
                            const uint32_t count) {

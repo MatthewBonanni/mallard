@@ -14,6 +14,7 @@
 #define TENO_SHAPES_H
 
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include <Kokkos_Core.hpp>
@@ -36,6 +37,8 @@ struct ShapeKey {
 struct ShapeKeyHash {
     size_t operator()(const ShapeKey & k) const { return static_cast<size_t>(k.hash ^ (k.check * 0x9e3779b97f4a7c15ULL)); }
 };
+
+struct ShapeGroups;
 
 /** @brief One cell's scratch of a neighborhood search. */
 struct ShapeLanes {
@@ -123,12 +126,23 @@ struct ShapeSearch {
  *        number of layers is that of the search, a function of the layers'
  *        cell counts. Cells of one key agree to within 2^-SHAPE_GRID_BITS of
  *        their size in every coordinate the key reads.
+ *        In double precision that grid, 2^-30, is far above the round-off of
+ *        the coordinates and far below anything the tables resolve. Single
+ *        precision coordinates carry round-off of about 1e-7 of their
+ *        magnitude, which is more than 2^-30 of a cell's size and can be far
+ *        more than any grid fine enough to stand for the shape: its keys are
+ *        on a grid of a 16th of a cell, which only groups cells, and check()
+ *        keeps in a group only the cells whose geometry is its
+ *        representative's to within a few times that round-off.
  *        Everything runs on the device, so that every backend has the same
  *        keys.
  */
 class ShapeKeys {
     public:
-        static constexpr int SHAPE_GRID_BITS = 30;
+        static constexpr bool CHECKED = std::numeric_limits<rtype>::digits < std::numeric_limits<double>::digits;
+        static constexpr int SHAPE_GRID_BITS = CHECKED ? 4 : 30;
+        /** @brief check()'s tolerance, in round-offs of the largest coordinate (with periodic translations). */
+        static constexpr double CHECK_ROUND_OFFS = 16.0;
 
         /** @brief Whether keys describe the mesh's setups: no curved geometry, rotational periodicity or axisymmetry. */
         static bool supported(const Mesh & mesh);
@@ -155,6 +169,17 @@ class ShapeKeys {
          *        search does not fit its scratch or meets a cell twice.
          */
         std::vector<uint8_t> reach(const std::vector<uint32_t> & cells, bool & complete) const;
+
+        /**
+         * @brief With CHECKED, takes out of their groups (to be fitted) the
+         *        cells of groups.group whose geometry differs from their
+         *        representative's by more than CHECK_ROUND_OFFS round-offs of
+         *        the mesh's largest coordinate: every value the key reads,
+         *        relative to the cell and in units of its size, to within that
+         *        tolerance over the cell's size, relative to the larger of 1
+         *        and the value (collective).
+         */
+        void check(ShapeGroups & groups) const;
 
         /**
          * @brief Rewrites the stencils of slots [0, n) of batch, the tables of
