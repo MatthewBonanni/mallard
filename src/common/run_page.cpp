@@ -778,8 +778,8 @@ std::string Page::text(const bool color) const {
         const double wall = number_of(end.find("wall"));
         quantity("wall time", format("%.4g", wall), "s", "the whole run");
         for (const auto & [key, name] : {std::pair{"wall_setup", "setup"}, {"wall_stepping", "time stepping"},
-                                         {"wall_chemistry", "chemistry"}, {"wall_diagnostics", "diagnostics"},
-                                         {"wall_output", "output"}}) {
+                                         {"wall_chemistry", "chemistry"}, {"wall_capture", "step graph capture"},
+                                         {"wall_diagnostics", "diagnostics"}, {"wall_output", "output"}}) {
             if (const json::Value * v = end.find(key)) {
                 quantity(name, format("%.4g", number_of(v)), "s",
                          wall > 0.0 ? format("%.1f%% of the wall time", 100.0 * number_of(v) / wall) : "");
@@ -1195,6 +1195,7 @@ std::string Page::html() const {
             {"Setup", share("wall_setup")},
             {"Time stepping", share("wall_stepping")},
             {"Chemistry", end.find("wall_chemistry") ? share("wall_chemistry") : ""},
+            {"Step graph capture", end.find("wall_capture") ? share("wall_capture") : ""},
             {"Diagnostics", share("wall_diagnostics")},
             {"Output", share("wall_output")},
             {"Steps", text_of(end.find("steps"))},

@@ -118,7 +118,7 @@ struct RunSummary {
     uint64_t step = 0, steps = 0;  // the last step, and those taken in this run
     double t = 0.0;
     uint64_t n_cells = 0;
-    double total = 0.0, setup = 0.0, stepping = 0.0, diagnostics = 0.0, output = 0.0;  // wall seconds
+    double total = 0.0, setup = 0.0, stepping = 0.0, capture = 0.0, diagnostics = 0.0, output = 0.0;  // wall seconds
     bool reacting = false;
     double chemistry = 0.0;
     double chemistry_slowest = 0.0, chemistry_mean = 0.0;  // per rank, 0 if not measured

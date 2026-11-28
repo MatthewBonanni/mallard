@@ -608,7 +608,7 @@ class Solver {
          * @brief Statistics, probes, outputs, triggers and checks after a step (the run loop's body after the step):
          *        the host's own, or a device step it stopped after (record), whose statistics the device sampled.
          */
-        void after_step(Kokkos::Timer & step_timer, const step_queue::Record * record);
+        void after_step(const Kokkos::Timer & step_timer, double capture_before, const step_queue::Record * record);
         void calc_rhs_mixture(State solution, State rhs, rtype t, rtype c);
         /**
          * @brief Axisymmetric runs: add geometric_source, made high order by the
@@ -840,9 +840,11 @@ class Solver {
         /** @brief What breaks a step graph's capture inside the step's conditional body (tests). */
         enum class CaptureFault {
             NONE,
-            FENCE,             // fails while the stream captures
-            LEGACY_STREAM,     // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
-            CONDITIONAL_NODES  // conditional nodes fail, as NCCL across a network makes them: step graphs gate their bodies
+            FENCE,               // fails while the stream captures
+            LEGACY_STREAM,       // an unchecked copy on the legacy stream: only cudaStreamEndCapture reports it
+            LEGACY_STREAM_ONCE,  // that copy in the first capture alone, as a unit's first kernel launch makes it
+            SLOW,                // the capture takes a second longer, as loading device code can make it
+            CONDITIONAL_NODES    // conditional nodes fail, as NCCL across a network makes them: step graphs gate their bodies
         };
         void set_capture_fault(CaptureFault fault) { capture_fault = fault; }
         /**
@@ -1357,6 +1359,7 @@ class Solver {
         double t_wall_stepping = 0.0;
         double t_wall_checks = 0.0;
         double t_wall_output = 0.0;
+        double t_wall_capture = 0.0;  // step graphs' captures, out of t_wall_stepping
         double t_wall_run_start = 0.0;
         double t_stepping_last_check = 0.0;
         double progress_run_start = 0.0;

@@ -26,7 +26,10 @@
  * inside a stream capture, that copy fails and invalidates the capture without
  * an error until cudaStreamEndCapture, and the unit's pointers are never set.
  * Each unit that includes this header registers its own copy, which
- * copy_all() makes, checked, before a capture, after Kokkos's own.
+ * copy_all() makes, checked, after Kokkos's own. Copying to a unit's symbols
+ * loads its device code, all of it under CUDA's lazy loading, so copy_all()
+ * is for a capture that failed, not ahead of every capture: most units whose
+ * kernels a step graph captures have launched them before.
  */
 namespace lock_arrays {
 
