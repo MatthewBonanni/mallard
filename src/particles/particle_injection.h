@@ -122,7 +122,10 @@ struct InjectorSpec {
     uint8_t dimension = 0;     // of its simplices: 0 a point, N_DIM - 1 faces, N_DIM cells
     bool reject = false;       // points outside its region's shapes are drawn again
     bool along_normal = false; // the direction is the zone's inward normal at each face
+    bool gas_velocity = false;     // solid particles start at the gas velocity where they enter
+    bool gas_temperature = false;  // and at the gas temperature (with heat transfer)
     double rate = 0.0;         // parcels per second
+    uint64_t count = 0;        // parcels released at once at start, in place of a rate
     double start = 0.0, end = 0.0;
     uint32_t entry_first = 0, entry_count = 0;
     uint32_t size_first = 0, size_count = 0;
@@ -286,7 +289,11 @@ struct InjectionTarget {
     bool heated = false;
     Solid sphere;
     uint32_t first_quantity = N_DIM;
+    Kokkos::View<uint8_t *> at_gas;  // (slot): SETTLE_VELOCITY | SETTLE_TEMPERATURE of the particles to take the gas's
 };
+
+/** @brief Bits of InjectionTarget::at_gas: the particle takes the gas velocity, temperature where it entered. */
+inline constexpr uint8_t SETTLE_VELOCITY = 1, SETTLE_TEMPERATURE = 2;
 
 /** @brief An injector as `mallard check` reports it, for drawing it and estimating its particles. */
 struct InjectorInfo {
@@ -297,9 +304,13 @@ struct InjectorInfo {
     std::array<std::array<double, 3>, 2> box{};
     double measure = 0.0;            // area (2D: length) of its faces, volume (2D: area) of its region
     bool along_normal = false;       // direction: the zones' inward normal
+    bool gas_velocity = false;       // the gas velocity where each particle enters
+    bool gas_temperature = false;    // the gas temperature there (with heat transfer)
     std::array<double, 3> direction{};
     double speed = 0.0, cone_angle = 0.0;  // m/s, degrees (half angle)
     double rate = 0.0;                     // parcels per second
+    uint64_t count = 0;                    // parcels released at once at start, in place of a rate
+    double mass = std::numeric_limits<double>::quiet_NaN();  // kg released at once (solid particles), if given
     double mass_flow = std::numeric_limits<double>::quiet_NaN();  // kg/s (solid particles)
     double start = 0.0, end = 0.0;
     double weight = 1.0;
@@ -312,7 +323,8 @@ struct InjectorInfo {
  * @brief The injectors of [[particles.injectors]]. After each accepted step,
  *        inject() adds to the particles the parcels each injector emitted over
  *        the step: its rate times the part of the step within [start, end),
- *        carrying the fraction of a parcel to the next step. Particle i of
+ *        carrying the fraction of a parcel to the next step, or its count at
+ *        once at the first step that reaches its start. Particle i of
  *        injector j draws everything from Random(seed, j, i), so the same
  *        particles enter on any rank count, with ids in order of injection.
  *        On the device, capturable in a step graph.
@@ -339,6 +351,14 @@ class Injectors {
                   const std::vector<uint64_t> & global_cell, bool distributed, const Defaults & defaults);
 
         bool empty() const { return specs.empty(); }
+
+        /** @brief Whether some injector's particles take the gas velocity or temperature where they enter. */
+        bool at_gas() const {
+            for (const InjectorSpec & p : specs) {
+                if (p.gas_velocity || p.gas_temperature) return true;
+            }
+            return false;
+        }
         uint32_t size() const { return static_cast<uint32_t>(specs.size()); }
 
         /** @brief Parcels the injectors emit from t0 to t1 together, an upper bound (each rounded up). */
@@ -357,8 +377,11 @@ class Injectors {
         /** @brief Scratch for slots of a rank of this capacity. */
         void reserve(uint32_t capacity);
 
-        /** @brief Inject from time t on, at the first call (the run's start). */
-        void start(double t);
+        /**
+         * @brief Inject from time t on, at the first call (the run's start), releasing there the count of each
+         *        injector whose start it has reached.
+         */
+        void start(double t, const InjectionTarget & target);
 
         /** @brief Add the particles emitted up to the device time t_now (capturable). */
         void inject(const rtype * t_now, const InjectionTarget & target);

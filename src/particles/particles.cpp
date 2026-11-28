@@ -690,6 +690,7 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         Kokkos::deep_copy(initial_aux, h);
     }
     injectors.reserve(capacity);
+    if (is_solid && injects()) at_gas = Kokkos::View<uint8_t *>("particle_at_gas", capacity);
     if (distributed) slots = Kokkos::View<uint32_t *>("particle_slots", capacity);
     if (is_solid) {
         const uint32_t n_start = is_droplet ? particles::Droplet::n_start() : solid.n_start();
@@ -1029,6 +1030,31 @@ void Particles::start_from_gas(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReco
         const rtype Tp = heat ? sphere.temperature(y) : 0.0_r;
         if (velocity) FOR_I_DIM y[i] = Wp(s, 1 + i);
         if (heat) y[N_DIM] = sphere.thermal_value(y, temperature ? Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R) : Tp);
+    });
+}
+
+void Particles::settle_injected(Kokkos::View<rtype *[N_CONSERVATIVE]> W, FaceReconstruction & reconstruction,
+                                const LSQVertexGradientFunctor & gradient,
+                                Kokkos::View<rtype *[N_CONSERVATIVE][N_DIM]> gradients) {
+    if (!injects_at_gas() || capacity == 0) return;
+    sample(W, reconstruction, gradient, gradients);
+    const auto settle = at_gas;
+    const auto values = x;
+    const auto Wp = W_point;
+    const uint32_t w = width;
+    const rtype gas_R = static_cast<rtype>(R);
+    const bool heat = heated;
+    const particles::Solid sphere = solid;
+    gated::parallel_for("particle_settle_injected", capacity, KOKKOS_LAMBDA(const uint32_t s) {
+        const uint8_t f = settle(s);
+        if (f == 0) return;
+        settle(s) = 0;
+        rtype * y = values.data() + size_t(w) * s + N_DIM;
+        const rtype Tp = heat ? sphere.temperature(y) : 0.0_r;
+        if (f & particles::SETTLE_VELOCITY) FOR_I_DIM y[i] = Wp(s, 1 + i);
+        if (heat) {
+            y[N_DIM] = sphere.thermal_value(y, (f & particles::SETTLE_TEMPERATURE) ? Wp(s, N_DIM + 1) / (Wp(s, 0) * gas_R) : Tp);
+        }
     });
 }
 
@@ -1608,6 +1634,7 @@ particles::InjectionTarget Particles::injection_target() const {
     target.heated = heated;
     target.sphere = solid;
     target.first_quantity = width - quantities.n_integrated();
+    target.at_gas = at_gas;
     return target;
 }
 

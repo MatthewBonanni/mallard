@@ -129,10 +129,13 @@ struct CheckInjector {
     std::array<std::array<double, 3>, 2> box{};
     double measure = 0.0;      // area of the faces (2D: length), volume of the region (2D: area); 0 for a point
     bool along_normal = false;  // directed along the zones' inward normal, else along direction
+    bool gas_velocity = false;  // at the gas velocity where each particle enters
     std::array<double, 3> direction{};
     double speed = 0.0;
     double cone_angle = 0.0;   // half angle, degrees
     double rate = 0.0;         // parcels per second
+    uint64_t count = 0;        // parcels released at once at start, in place of a rate
+    double mass = std::numeric_limits<double>::quiet_NaN();  // their total mass, if given (solid particles)
     double mass_flow = std::numeric_limits<double>::quiet_NaN();  // solid particles
     double start = 0.0, end = std::numeric_limits<double>::infinity();
     double weight = 1.0;

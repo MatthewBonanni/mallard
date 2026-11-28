@@ -47,7 +47,8 @@ in this layer, and output sorts by id.
 
 The default capacity is the global particle count, so that every rank can hold
 every particle and migration never runs out of slots: the seeds plus, for each
-injector, `ceil(rate * duration) + 1` parcels up to the end of the run.
+injector, `ceil(rate * duration) + 1` parcels up to the end of the run (its
+`count` if it releases at once).
 Load balancing (#763) bounds it. Solid particles carry `props` (diameter and
 weight, per slot), which injectors set per particle.
 
@@ -199,6 +200,22 @@ the time step control rejects advances no time, so it injects nothing); a
 prefix sum lists the parcels whose element this rank owns; another lists the
 free slots; the *k*-th local parcel takes the *k*-th free slot. Overflow
 counts on the device and the host checks it at check intervals and the end.
+
+An injector with `count` owes its count less what it has injected once the
+step reaches its `start`, and nothing otherwise: the same counting kernel, so
+a burst is drawn from the same keys as a rate's parcels and needs no other
+state. The run's start calls the injection once at its own time, after the
+particles that start at the gas velocity take it, so a burst at `start = 0`
+is there before the first step without its velocities being overwritten; a
+rate owes nothing over that empty interval. Restart files carry the injected
+count, so the burst is not repeated. Particles given neither a velocity nor (with heat transfer) a temperature
+take the gas's: injection flags their slots, and right after it the
+solver brings the cell states up to date (halo, not the boundary states,
+which would advance the incoming waves) and samples the gas at every
+particle as `start_from_gas` does, for the flagged ones; on the step path,
+capturable. A `mass` sets the count at setup,
+rounded to the nearest parcel of the distribution's mean mass, as `mass_flow`
+sets a rate.
 
 Each parcel draws everything (its element, the point in it, the cone, the
 diameter) from a counter-based generator: SplitMix64 of (seed, injector,

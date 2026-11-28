@@ -813,10 +813,13 @@ void Solver::check_particles(CheckReport & r) {
         j.box = info.box;
         j.measure = info.measure;
         j.along_normal = info.along_normal;
+        j.gas_velocity = info.gas_velocity;
         j.direction = info.direction;
         j.speed = info.speed;
         j.cone_angle = info.cone_angle;
         j.rate = info.rate;
+        j.count = info.count;
+        j.mass = info.mass;
         j.mass_flow = info.mass_flow;
         j.start = info.start;
         j.end = info.end;
@@ -831,7 +834,11 @@ void Solver::check_particles(CheckReport & r) {
         }
         const double stop = std::fmin(info.end, run_end);
         const double from = std::fmax(info.start, static_cast<double>(t));
-        if (std::isfinite(stop)) j.parcels = stop > from ? info.rate * (stop - from) : 0.0;
+        if (info.count > 0) {
+            j.parcels = info.start <= run_end ? static_cast<double>(info.count) : 0.0;
+        } else if (std::isfinite(stop)) {
+            j.parcels = stop > from ? info.rate * (stop - from) : 0.0;
+        }
         r.injectors.push_back(j);
     }
     if (!particles->inertial()) return;

@@ -101,3 +101,19 @@ point = [0.5, 0.2]
 rate = 100.0
 velocity = [0.1, 0.0]
 diameter = {distribution = "table", diameters = [0.005, 0.01, 0.02], pdf = [0.0, 1.0, 0.0], basis = "number"}
+
+[[particles.injectors]]
+name = "puff"
+region = {type = "disk", center = [0.3, 0.3], radius = 0.1}
+count = 50
+start = 0.0
+velocity = [0.0, 0.1]
+diameter = 0.01
+
+[[particles.injectors]]
+name = "heap"
+point = [0.7, 0.7]
+mass = 1e-3
+start = 0.0
+velocity = [0.0, 0.1]
+diameter = 0.01

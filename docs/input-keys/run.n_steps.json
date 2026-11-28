@@ -5,6 +5,7 @@
   3
  ],
  "set_in": [
+  "examples/taylor_green_3d/scaling.toml",
   "tools/dev/catalog_inputs/2d/boundary_data.toml",
   "tools/dev/catalog_inputs/2d/check.toml",
   "tools/dev/catalog_inputs/2d/droplets.toml",

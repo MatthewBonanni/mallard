@@ -506,14 +506,31 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
 
         // When and how many
         const bool by_rate = contains_optional(e, "rate"), by_mass = contains_optional(e, "mass_flow");
-        if (by_rate == by_mass) {
+        const bool by_count = contains_optional(e, "count"), by_total = contains_optional(e, "mass");
+        if (int(by_rate) + int(by_mass) + int(by_count) + int(by_total) != 1) {
             throw InputError(Diagnostic{.key = where, .line = line_of(e),
-                                        .message = "needs exactly one of rate (parcels per second) and mass_flow",
+                                        .message = "needs exactly one of rate (parcels per second), mass_flow, count "
+                                                   "(parcels released at once at start) and mass (their total mass)",
                                         .docs = DOCS});
         }
         p.start = find_double_or(e, "start", dim::time, 0.0);
-        p.end = contains_optional(e, "end") ? find_double(e, "end", dim::time) : INF;
-        if (!(p.end > p.start)) throw invalid(e, "end", where, "must be after start");
+        const uint64_t most = uint64_t(std::numeric_limits<int32_t>::max());
+        if (by_count || by_total) {
+            if (contains_optional(e, "end")) {
+                throw invalid(e, "end", where, "is for rate and mass_flow; count and mass release at once at start",
+                              "Remove end");
+            }
+            if (by_count) {
+                p.count = find_value<uint64_t>(e, "count");
+                if (p.count == 0 || p.count > most) {
+                    throw invalid(e, "count", where, "must be a positive number of parcels, at most 2^31 - 1");
+                }
+            }
+            p.end = p.start;
+        } else {
+            p.end = contains_optional(e, "end") ? find_double(e, "end", dim::time) : INF;
+            if (!(p.end > p.start)) throw invalid(e, "end", where, "must be after start");
+        }
 
         // What
         const auto forbid = [&](const char * key, const std::string & why) {
@@ -533,15 +550,20 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 p.weight = static_cast<rtype>(positive_double(e, "weight", where, N_DIM == 3 ? dim::none : dim::of(0, -1, 0)));
             }
             const bool vector = contains_optional(e, "velocity"), speed = contains_optional(e, "speed");
-            if (vector == speed) {
+            if (vector && speed) {
                 throw InputError(Diagnostic{.key = where, .line = line_of(e),
-                                            .message = "needs exactly one of velocity and speed",
+                                            .message = "takes one of velocity and speed",
                                             .fix = "Give velocity = [u, v, ...], or speed (with direction, which "
                                                    "defaults to the inward normal on boundary zones)",
                                             .docs = DOCS});
             }
             double dir[N_DIM] = {};
-            if (vector) {
+            if (!vector && !speed) {
+                const std::string why = "sets the direction of speed; without velocity or speed particles take the gas velocity";
+                forbid("direction", why);
+                forbid("cone_angle", why);
+                p.gas_velocity = true;
+            } else if (vector) {
                 forbid("direction", "is given by velocity");
                 const std::vector<rtype> v = find_real_vector(e, "velocity", dim::velocity);
                 if (v.size() != N_DIM) throw invalid(e, "velocity", where, "must have " + std::to_string(N_DIM) + " components");
@@ -581,12 +603,14 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
                 } else if (defaults.temperature_given) {
                     p.temperature = defaults.temperature;
                 } else {
-                    throw missing_key(e, "temperature", "Give the temperature here or in [particles]");
+                    p.gas_temperature = true;
                 }
             } else {
                 forbid("temperature", "is the temperature of particles with heat transfer (specific_heat)");
             }
             info.along_normal = p.along_normal;
+            info.gas_velocity = p.gas_velocity;
+            info.gas_temperature = p.gas_temperature;
             FOR_I_DIM info.direction[i] = dir[i];
             info.speed = static_cast<double>(p.speed);
             info.cone_angle = cone_degrees;
@@ -601,7 +625,23 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
             size.log_d = {0.0};
             size.cdf = {1.0};
         }
-        if (by_rate) {
+        if (by_total) {
+            if (!defaults.solid) throw invalid(e, "mass", where, "is for solid particles; tracers have no mass", "Give count");
+            const double total = positive_double(e, "mass", where, N_DIM == 3 ? dim::of(1, 0, 0) : dim::of(1, -1, 0));
+            const double mass = static_cast<double>(defaults.density) * std::numbers::pi / 6.0 * size.mean_d3;
+            const double parcels = std::round(total / (static_cast<double>(p.weight) * mass));
+            if (!(parcels >= 1.0) || parcels > static_cast<double>(most)) {
+                throw invalid(e, "mass", where,
+                              "makes " + logging::real(parcels) + " parcels of the mean mass " +
+                                  logging::real(static_cast<double>(p.weight) * mass) + "; between 1 and 2^31 - 1 are available",
+                              "Change mass, or weight (particles per parcel)");
+            }
+            p.count = static_cast<uint64_t>(parcels);
+            info.count = p.count;
+            info.mass = total;
+        } else if (by_count) {
+            info.count = p.count;
+        } else if (by_rate) {
             p.rate = positive_double(e, "rate", where, dim::rate);
         } else {
             if (!defaults.solid) throw invalid(e, "mass_flow", where, "is for solid particles", "Give rate");
@@ -692,6 +732,10 @@ void Injectors::init(const Input & table, const Mesh & mesh, region::Regions & r
 double Injectors::parcels(const double t0, const double t1) const {
     double n = 0.0;
     for (const InjectorSpec & p : specs) {
+        if (p.count > 0) {
+            n += p.start <= t1 ? static_cast<double>(p.count) : 0.0;
+            continue;
+        }
         const double a = std::max(t0, p.start), b = std::min(t1, p.end);
         n += b > a ? std::ceil(p.rate * (b - a)) + 1.0 : 0.0;
     }
@@ -724,10 +768,11 @@ void Injectors::restore(const RestartArrays * restart, const uint64_t first_id) 
     Kokkos::deep_copy(next_id, id && id->size() == 1 ? static_cast<uint64_t>((*id)[0]) : first_id);
 }
 
-void Injectors::start(const double t) {
+void Injectors::start(const double t, const InjectionTarget & target) {
     if (empty() || started) return;
     started = true;
     Kokkos::deep_copy(t_injected, t);
+    inject(static_cast<rtype>(t), target);
 }
 
 void Injectors::reserve(const uint32_t capacity) {
@@ -763,12 +808,17 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
         uint64_t total = 0;
         for (uint32_t j = 0; j < n; j++) {
             const InjectorSpec & p = sm.spec[j];
-            const double a = Kokkos::fmax(t0, p.start), b = Kokkos::fmin(t1, p.end);
-            const double due = frac(j) + (b > a ? p.rate * (b - a) : 0.0);
-            // A parcel due but for the rounding of the step times enters now
-            const double slack = 1e-9 + 4.0 * p.rate * Kokkos::fabs(t1) * static_cast<double>(Kokkos::Experimental::epsilon_v<rtype>);
-            const double whole = Kokkos::floor(Kokkos::fmin(due + slack, 0x1.0p52));
-            frac(j) = due - whole;
+            double whole;
+            if (p.count > 0) {
+                whole = t1 >= p.start && count(j) < p.count ? static_cast<double>(p.count - count(j)) : 0.0;
+            } else {
+                const double a = Kokkos::fmax(t0, p.start), b = Kokkos::fmin(t1, p.end);
+                const double due = frac(j) + (b > a ? p.rate * (b - a) : 0.0);
+                // A parcel due but for the rounding of the step times enters now
+                const double slack = 1e-9 + 4.0 * p.rate * Kokkos::fabs(t1) * static_cast<double>(Kokkos::Experimental::epsilon_v<rtype>);
+                whole = Kokkos::floor(Kokkos::fmin(due + slack, 0x1.0p52));
+                frac(j) = due - whole;
+            }
             info(j) = total;
             info(n + j) = count(j);
             count(j) += static_cast<uint64_t>(whole);
@@ -809,6 +859,7 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
     const uint32_t w = target.width, n_aux = static_cast<uint32_t>(target.aux.extent(1)), first_q = target.first_quantity;
     const bool solid = target.solid, heated = target.heated;
     const Solid sphere = target.sphere;
+    const auto settle = target.at_gas;
     gated::parallel_for("particle_injection_insert", capacity, KOKKOS_LAMBDA(const uint32_t m) {
         if (m >= info(LOCAL)) return;
         if (m >= info(FREE_SLOTS)) {
@@ -826,11 +877,14 @@ void Injectors::inject(const rtype * t_now, const InjectionTarget & target) {
         FOR_I_DIM values[i] = static_cast<rtype>(p[i]);
         uint32_t at = N_DIM;
         if (solid) {
+            const InjectorSpec & spec = sm.spec[j];
             rtype v[N_DIM];
             sm.velocity(j, e, r, v);
             FOR_I_DIM values[N_DIM + i] = v[i];
             at = 2 * N_DIM;
-            if (heated) values[at++] = sphere.thermal_value(v, sm.spec[j].temperature);
+            if (heated) values[at++] = sphere.thermal_value(v, spec.temperature);
+            settle(s) = static_cast<uint8_t>((spec.gas_velocity ? SETTLE_VELOCITY : 0) |
+                                             (heated && spec.gas_temperature ? SETTLE_TEMPERATURE : 0));
             props(s, 0) = static_cast<rtype>(sm.diameter(j, r));
             props(s, 1) = sm.spec[j].weight;
         }
@@ -873,14 +927,22 @@ RestartArrays Injectors::restart_arrays() const {
 std::vector<std::string> Injectors::summary() const {
     std::vector<std::string> lines;
     for (const InjectorInfo & info : infos) {
-        std::string text = info.name + ": " + logging::real(info.rate) + " parcels/s " +
+        std::string text = info.name + ": " +
+                           (info.count > 0 ? std::to_string(info.count) + " parcels " : logging::real(info.rate) + " parcels/s ") +
                            (info.site == "point" ? "at " : info.site == "zone" ? "on " : "in ") + info.where;
-        if (info.start > 0.0 || std::isfinite(info.end)) {
+        if (info.count > 0) {
+            text += " at t = " + logging::real(info.start);
+        } else if (info.start > 0.0 || std::isfinite(info.end)) {
             text += " from t = " + logging::real(info.start) + (std::isfinite(info.end) ? " to " + logging::real(info.end) : "");
         }
         if (std::isfinite(info.mean_diameter)) {
-            text += ", " + logging::real(info.speed) + " m/s " +
-                    (info.along_normal ? std::string("along the inward normal") : "along " + vector_text(info.direction.data(), N_DIM));
+            if (info.gas_velocity) {
+                text += ", at the gas velocity";
+            } else {
+                text += ", " + logging::real(info.speed) + " m/s " +
+                        (info.along_normal ? std::string("along the inward normal") : "along " + vector_text(info.direction.data(), N_DIM));
+            }
+            if (info.gas_temperature) text += ", at the gas temperature";
             if (info.cone_angle > 0.0) text += " in a cone of " + logging::real(info.cone_angle) + " deg";
             text += ", D10 " + logging::real(info.mean_diameter) + ", D32 " + logging::real(info.sauter_diameter);
         }
