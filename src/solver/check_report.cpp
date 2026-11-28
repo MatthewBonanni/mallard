@@ -26,12 +26,19 @@ using report::Row;
 using report::Status;
 using Kind = report::Column::Kind;
 
-void CheckReport::error(const std::string & code, const std::string & message) {
-    diagnostics.push_back({Status::ERROR, code, message});
+void CheckReport::error(const std::string & code, const std::string & message, const Diagnostic & about) {
+    diagnostics.push_back({Status::ERROR, code, message, about.key, about.line, about.column, about.missing});
 }
 
-void CheckReport::warning(const std::string & code, const std::string & message) {
-    diagnostics.push_back({Status::WARNING, code, message});
+void CheckReport::warning(const std::string & code, const std::string & message, const Diagnostic & about) {
+    diagnostics.push_back({Status::WARNING, code, message, about.key, about.line, about.column, about.missing});
+}
+
+bool CheckReport::only_missing() const {
+    // Keys an incomplete setup did not read may be read once it completes
+    return std::all_of(diagnostics.begin(), diagnostics.end(), [&](const CheckDiagnostic & d) {
+        return d.severity != Status::ERROR || d.missing || (!setup_done && d.code == diagnostic_code::KEY_UNUSED);
+    });
 }
 
 std::vector<std::string> CheckReport::errors() const {
@@ -727,16 +734,7 @@ std::string scaling_json(const CheckReport & r) {
         .str();
 }
 
-std::string diagnostics_json(const CheckReport & r) {
-    return array_json(r.diagnostics, [](const CheckDiagnostic & d) {
-        return json::Object()
-            .add("severity", std::string(report::status_name(d.severity)))
-            .add("code", d.code)
-            .add("message", d.message)
-            .add("docs", d.docs())
-            .str();
-    });
-}
+std::string diagnostics_json(const CheckReport & r) { return ::diagnostics_json(r.diagnostics); }
 
 std::string quality_json(const CheckReport & r) {
     json::Object q;
@@ -801,6 +799,28 @@ std::string check_text(const CheckReport & r, const bool color) {
     text.blank();
     text.line(result_line(r));
     return text.str();
+}
+
+std::string CheckDiagnostic::element() const {
+    const size_t open = key.find('['), close = key.find(']');
+    return open == std::string::npos || close == std::string::npos ? "" : key.substr(0, close + 1);
+}
+
+std::string diagnostics_json(const std::vector<CheckDiagnostic> & diagnostics) {
+    const auto number_or_null = [](const size_t n) { return n > 0 ? std::to_string(n) : std::string("null"); };
+    return array_json(diagnostics, [&](const CheckDiagnostic & d) {
+        return json::Object()
+            .add("severity", std::string(report::status_name(d.severity)))
+            .add("code", d.code)
+            .add("message", d.message)
+            .add("docs", d.docs())
+            .raw("key", d.key.empty() ? "null" : json::quote(d.key))
+            .raw("element", d.element().empty() ? "null" : json::quote(d.element()))
+            .raw("line", number_or_null(d.line))
+            .raw("column", number_or_null(d.column))
+            .add("missing", d.missing)
+            .str();
+    });
 }
 
 std::string check_json(const CheckReport & r) {

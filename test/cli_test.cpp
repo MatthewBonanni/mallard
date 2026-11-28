@@ -1230,6 +1230,58 @@ TEST(CliTest, ListKeysGivesTheCatalogOrOneCasesKeys) {
     EXPECT_FALSE(keys["run.cfl"]["set"].boolean);
 }
 
+TEST(CliTest, ListKeysAndCheckAnswerForAnInputStillBeingWritten) {
+    SKIP_UNDER_MPI();
+    const std::string mesh = "[mesh]\ntype = \"cartesian\"\nNx = 4\nNy = 3\nLx = 1.0\nLy = 1.0\n" +
+                             std::string(Mallard_DIM == 3 ? "Nz = 3\nLz = 1.0\n" : "");
+    std::ofstream("only_mesh.toml") << mesh;
+    const Result listed = run({"list", "keys", "only_mesh.toml", "--format", "json"}, true);
+    ASSERT_EQ(listed.status, 0) << listed.err;
+    const json::Value out = json::parse(listed.out);
+    EXPECT_TRUE(out["keys"]["mesh.Nx"]["set"].boolean);
+    EXPECT_FALSE(out["complete"].boolean);
+    std::vector<std::string> missing;
+    for (const json::Value & d : out["diagnostics"].array) {
+        if (d["severity"].string == "error" && d["missing"].boolean) missing.push_back(d["key"].string);
+    }
+    EXPECT_EQ(missing, (std::vector<std::string>{"run", "physics"})) << listed.out;
+    EXPECT_EQ(run({"check", "only_mesh.toml", "--partial"}, true).status, 0);
+    EXPECT_EQ(run({"check", "only_mesh.toml"}, true).status, 1);
+
+    // A mesh file not there yet: the keys of the parts that do not need it
+    ASSERT_EQ(small_run().status, 0);
+    std::string text = read_file("small.toml");
+    const size_t begin = text.find("type = \"cartesian\""), end = text.find("[initialize]");
+    text.replace(begin, end - begin, "type = \"file\"\nfilename = \"not_yet.msh\"\n");
+    std::ofstream("no_mesh_yet.toml") << text;
+    const Result no_mesh = run({"list", "keys", "no_mesh_yet.toml", "--format", "json"}, true);
+    ASSERT_EQ(no_mesh.status, 0) << no_mesh.err;
+    const json::Value keys = json::parse(no_mesh.out);
+    EXPECT_TRUE(keys["keys"].has("physics.gamma")) << no_mesh.out;
+    EXPECT_TRUE(keys["keys"].has("run.dt")) << no_mesh.out;
+    std::vector<json::Value> errors;
+    for (const json::Value & d : keys["diagnostics"].array) {
+        if (d["severity"].string == "error") errors.push_back(d);
+    }
+    ASSERT_EQ(errors.size(), 1u) << no_mesh.out;
+    EXPECT_EQ(errors[0]["key"].string, "mesh.filename");
+    EXPECT_TRUE(errors[0]["missing"].boolean);
+    EXPECT_EQ(errors[0]["line"].number, 6.0);
+    EXPECT_EQ(errors[0]["column"].number, 12.0);
+
+    // A wrong value is an error, and the keys read so far are still listed
+    std::string wrong_input = mesh;
+    wrong_input.replace(wrong_input.find("Nx = 4"), 6, "Nx = 4.0");
+    std::ofstream("wrong.toml") << wrong_input;
+    const Result wrong = run({"list", "keys", "wrong.toml", "--format", "json"}, true);
+    EXPECT_EQ(wrong.status, 1) << wrong.out;
+    EXPECT_TRUE(json::parse(wrong.out)["keys"].has("mesh.type")) << wrong.out;
+    const Result text_list = run({"list", "keys", "only_mesh.toml"}, true);
+    EXPECT_EQ(text_list.status, 0) << text_list.err;
+    EXPECT_TRUE(contains(text_list.out, "before it stopped at the errors below")) << text_list.out;
+    EXPECT_TRUE(contains(text_list.err, "the [physics] table is missing")) << text_list.err;
+}
+
 TEST(CliTest, ListTemplatesIsWhatNewListShowedWhichStillWorks) {
     SKIP_UNDER_MPI();
     const Result listed = run({"list", "templates"});

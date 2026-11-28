@@ -106,6 +106,10 @@ constexpr Option CHECK_OPTIONS[] = {
      "Write the initial state, as the run would start from it (initialize, its regions and data, or a restart), "
      "to PREFIX_000000.vtkhdf (PREFIX_000000.vtu in builds without HDF5), the default snapshot format: RHO, U, P, "
      "T and, for mixtures, Y_*. Default: none."},
+    {"--partial", "", "",
+     "The input is still being written: exit with 0 when the only errors are missing pieces (a required key "
+     "or table, or a mesh file, not there yet), which the JSON marks \"missing\": true. Default: every error "
+     "fails."},
     {"--view", "", "DIR",
      "Write the case view, without running the case: DIR/case.vtkhdf for ParaView (builds without HDF5: "
      "DIR/case.vtm), one block each for the mesh, every boundary zone (walls with their first cells' y+ as the field y_plus once it is estimated), region the case uses (filled regions as "
@@ -769,6 +773,11 @@ constexpr Command COMMANDS[] = {
             "and whether a surface or curve is exact or extracted; a region that covers no cell is an error. Under "
             "mpirun -n N it checks the run on N ranks.\n"
             "\n"
+            "Errors in parts of the setup that do not depend on each other ([run], the mesh, [physics], each "
+            "[[boundaries]] and [[write_data]] entry) are reported together; warnings of the setup are part of the "
+            "report. With --format json every diagnostic names its key (boundaries[1].T), line and column where "
+            "known, and whether it is a missing piece.\n"
+            "\n"
             "Without an input, checks the environment only; with one, the report ends with the same Environment "
             "section: the build (dimension, precision, the solvers installed), Kokkos and its execution spaces, "
             "every rank's host, device and memory, CPUs and threads, MPI (library, ranks per host), GPU-aware MPI "
@@ -785,7 +794,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard check input.toml --mesh-fields mesh --cells 120,4031   # their stencils\n"
                     "$ mallard check input.toml --view view   # view/case-light.svg; view/case.vtkhdf in ParaView\n"
                     "$ mallard check input.toml --view view --geometry-only   # the same view, set up in a fraction of the time",
-        .exit_status = "0  no errors (there may be warnings)\n"
+        .exit_status = "0  no errors (there may be warnings); with --partial, none but missing pieces\n"
                        "1  errors: in the input, the mesh, the setup or the environment\n"
                        "2  usage error",
         .dim = Case::input,
@@ -897,7 +906,9 @@ constexpr Command COMMANDS[] = {
             "\n"
             "With an input file, sets the case up as mallard check does (reading its mesh, writing nothing) and "
             "lists the keys its setup reads, the same columns and whether the input sets each: what mallard check "
-            "--catalog writes, as tables.\n"
+            "--catalog writes, as tables. An input still being written (a required key or table, or its mesh file, "
+            "not there yet) lists the keys the setup read before it stopped, the required ones not set and the "
+            "errors; --format json adds complete, missing and diagnostics.\n"
             "\n"
             "SECTION keeps the keys of one table (numerics, [numerics], write_data) or of one key path "
             "(numerics.face_reconstruction). An argument that ends in .toml or names a file is the input.",
@@ -907,7 +918,7 @@ constexpr Command COMMANDS[] = {
                     "$ mallard list keys numerics\n"
                     "$ mallard list keys write_data input.toml\n"
                     "$ mallard list keys input.toml --format json",
-        .exit_status = "0  listed\n"
+        .exit_status = "0  listed, also of an input whose only errors are missing pieces\n"
                        "1  the case cannot be set up (the errors are printed), or the catalog is not found\n"
                        "2  usage error, or a section with no key",
         .dim = Case::input_file,
