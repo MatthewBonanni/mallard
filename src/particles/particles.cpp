@@ -13,6 +13,7 @@
 #include "particles.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -311,7 +312,14 @@ void Particles::init(const Input & input, std::shared_ptr<const Mesh> mesh_in, c
         // Quantities the file has continue; others start afresh
         std::vector<const std::vector<double> *> restored_q(quantities.size(), nullptr);
         for (uint32_t q = 0; q < quantities.size(); q++) {
-            restored_q[q] = find_array(("PARTICLE_Q_" + quantities.names()[q]).c_str());
+            const std::string key = "PARTICLE_Q_" + quantities.names()[q];
+            restored_q[q] = find_array(key.c_str());
+            // Restart files from before quantity names were uppercase hold them as given
+            for (const auto & [name, values] : *restart) {
+                if (restored_q[q]) break;
+                const auto same_upper = [](char a, char b) { return std::toupper(static_cast<unsigned char>(a)) == b; };
+                if (std::equal(name.begin(), name.end(), key.begin(), key.end(), same_upper)) restored_q[q] = &values;
+            }
             if (restored_q[q] && restored_q[q]->size() != n_restored) {
                 throw std::runtime_error("particles: the restart file's quantity " + quantities.names()[q] +
                                          " is inconsistent.");
@@ -867,9 +875,9 @@ void Particles::write(const uint64_t step, const double t) const {
     out << "id";
     for (size_t d = 0; d < N_DIM; d++) out << "," << names[d];
     if (is_solid) {
-        for (size_t d = 0; d < N_DIM; d++) out << ",v_" << names[d];
+        for (size_t d = 0; d < N_DIM; d++) out << ",V_" << "XYZ"[d];
     }
-    if (heated) out << ",T_p";
+    if (heated) out << ",T_P";
     for (const auto & name : quantities.names()) out << "," << name;
     out << "\n";
     for (const auto & r : records) {

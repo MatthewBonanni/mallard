@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <regex>
@@ -58,6 +59,42 @@ std::array<double, 3> read_vector(const Input & table, const std::string & key, 
     std::array<double, 3> out{0.0, 0.0, 0.0};
     for (size_t d = 0; d < N_DIM; d++) out[d] = static_cast<double>(v[d]);
     return out;
+}
+
+std::string upper(std::string s) {
+    for (char & c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/** @brief A quantity's name is a field name: an uppercase identifier, none of the variables (in any case) or the quantities before it. */
+void check_name(const Input & e, const std::string & where, const std::string & name, const std::vector<std::string> & base,
+                const std::vector<std::string> & before) {
+    const auto error = [&](const std::string & message, const std::string & suggestion, const std::string & fix) {
+        return InputError(Diagnostic{.key = where + ".name",
+                                     .line = line_of(e, "name"),
+                                     .message = message,
+                                     .suggestion = suggestion,
+                                     .fix = fix,
+                                     .docs = DOCS});
+    };
+    const std::string upgrade = "; `mallard input upgrade old.toml > new.toml` rewrites a lowercase name and its references";
+    if (!std::regex_match(name, std::regex("[A-Z][A-Z0-9_]*"))) {
+        const std::string up = upper(name);
+        const bool fixable = std::regex_match(up, std::regex("[A-Z][A-Z0-9_]*"));
+        throw error("\"" + name + "\" is not an uppercase name: quantities are fields, named like RHO and U_X",
+                    fixable ? "\"" + up + "\"" : "",
+                    fixable ? "Name it \"" + up + "\"" + upgrade
+                            : "Use uppercase letters, digits and _, starting with a letter");
+    }
+    for (const auto & b : base) {
+        if (upper(b) == name) {
+            throw error("\"" + name + "\" is the particle variable " + b, "",
+                        "Choose another name: " + b + " is already a variable of particle expressions");
+        }
+    }
+    if (std::find(before.begin(), before.end(), name) != before.end()) {
+        throw error("\"" + name + "\" names two quantities", "", "Give each quantity its own name");
+    }
 }
 
 } // namespace
@@ -134,18 +171,7 @@ void Quantities::init(const Input & table, region::Regions & regions, const uint
         const Input & e = entries[k];
         const std::string where = "particles.quantities[" + std::to_string(k) + "]";
         const std::string name = find_value<std::string>(e, "name");
-        const bool valid_name = std::regex_match(name, std::regex("[A-Za-z_][A-Za-z0-9_]*"));
-        const bool taken = std::find(base.begin(), base.end(), name) != base.end() ||
-                           std::find(m_names.begin(), m_names.end(), name) != m_names.end() ||
-                           name.rfind("in_", 0) == 0;
-        if (!valid_name || taken) {
-            throw InputError(Diagnostic{.key = where + ".name",
-                                        .line = line_of(e, "name"),
-                                        .message = "\"" + name + "\" " +
-                                                   (valid_name ? "is already a variable of particle expressions"
-                                                               : "is not a name (letters, digits and _)"),
-                                        .docs = DOCS});
-        }
+        check_name(e, where, name, base, m_names);
         std::vector<std::string> given;
         for (const char * kind : KINDS) {
             if (contains_optional(e, kind)) given.push_back(kind);

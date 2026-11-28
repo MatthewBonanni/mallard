@@ -105,7 +105,7 @@ bitwise the same on any number of ranks.
 | `type` | required | `"tracer"` |
 | `points` | none | Seed points, `[[x, y], ...]` (`[[x, y, z], ...]` in 3D) |
 | `lattice` | none | A table `lo`, `hi`, `n`: a lattice of `n[d]` points per direction from `lo` to `hi` (one point along a direction: its middle) |
-| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `v_x`, `v_y` (`v_z`) of solid particles, their temperature `T_p` with heat transfer, then the quantities, by id |
+| `file` | none | CSV file of the particles at the end of the run: `id`, `x`, `y` (`z`), the velocity `V_X`, `V_Y` (`V_Z`) of solid particles, their temperature `T_P` with heat transfer, then the quantities, by id |
 | `capacity` | the number of particles | Particles a rank can hold |
 
 ### Seeding
@@ -217,7 +217,7 @@ The gradients come from the cell's least-squares gradient. The Basset history
 force is not included.
 
 **Heat transfer.** With `specific_heat`, each particle carries a temperature
-`T_p`, which convection relaxes toward the gas temperature at the rate of the
+$T_p$, which convection relaxes toward the gas temperature at the rate of the
 [Ranz & Marshall (1952)](../references.md#ranz-marshall-1952) Nusselt number:
 
 $$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2}{6 k Nu},
@@ -225,7 +225,7 @@ $$\frac{dT_p}{dt} = \frac{T - T_p}{\tau_T}, \qquad \tau_T = \frac{\rho_p c_p d^2
 
 with `k` the gas conductivity. The particle is isothermal (its Biot number is
 small) and does not heat the gas. Particle expressions read it as `T_P`, the
-`file` has it as a column `T_p`, and restart files carry it.
+`file` has it as a column `T_P`, and restart files carry it.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -402,19 +402,19 @@ example: Mallard's particles (dots) against their exact trajectories
 
 ```toml
 [[particles.quantities]]
-name = "t_cavity"
+name = "T_CAVITY"
 integral = "in(cavity)"          # time spent in the region cavity of [regions]
 
 [[particles.quantities]]
-name = "T_max"
+name = "T_MAX"
 max = "T"
 
 [[particles.quantities]]
-name = "t_hot"
+name = "T_HOT"
 first_time = "T > 1500"
 
 [[particles.quantities]]
-name = "turns"
+name = "TURNS"
 winding = {point = [0.052, -0.063, 0.0], axis = [0.0, 0.0, 1.0]}
 ```
 
@@ -440,7 +440,7 @@ and each takes:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | required | The quantity's name: letters, digits and `_`, not one of the variables below |
+| `name` | required | The quantity's name, a field name: uppercase letters, digits and `_`, starting with a letter (`TURNS`, `T_MAX`), and none of the variables below in any case |
 | `while` | none | A condition: the quantity integrates, or samples, only where it holds |
 
 Expressions follow the [expression syntax](expressions.md) and read, at the
@@ -488,7 +488,7 @@ particles between ranks, and are bitwise the same on any number of ranks.
 [[particles.probes]]
 name = "core"
 region = {type = "disk", center = [0.25, 0.25], radius = 0.12}
-fields = ["turns", "hypot(U_X, U_Y)"]
+fields = ["TURNS", "hypot(U_X, U_Y)"]
 interval = 100
 ```
 
@@ -500,8 +500,8 @@ interval = 100
 
 A particle probe writes, every `interval` steps, the number of particles in
 its region and the mean, standard deviation, minimum and maximum of each field
-over them: one row per sample of its CSV file (`step`, `t`, `count`, then
-`<field> mean`, `<field> std`, `<field> min`, `<field> max`).
+over them: one row per sample of its CSV file (`step`, `t`, `COUNT`, then
+`MEAN_<field>`, `STD_<field>`, `MIN_<field>`, `MAX_<field>`).
 
 | Key | Default | Meaning |
 |---|---|---|

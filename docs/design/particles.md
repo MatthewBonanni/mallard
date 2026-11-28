@@ -221,6 +221,9 @@ a case needs residence times to better than a step.
 Quantities travel with their particle in migration (as raw bits, like the
 position) and restart files carry each as `PARTICLE_Q_<name>`, so a restarted
 run continues them bit for bit; a quantity added on restart starts afresh.
+Names are uppercase field names, like the Eulerian fields; a restart file
+from before that holds `PARTICLE_Q_<name>` as given, which is matched
+without regard to case.
 
 ## Solid particles (#757)
 

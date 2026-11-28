@@ -174,9 +174,9 @@ void ParticleProbes::write(const uint64_t step, const double t, const std::vecto
         if (!out) throw std::runtime_error("particles: cannot write " + p.file);
         if (!p.started) {
             out << provenance::csv_comment() << "\n";
-            out << "step,t,count";
+            out << "step,t,COUNT";
             for (size_t j = 1; j < p.fields.size(); j++) {
-                for (const char * s : {"mean", "std", "min", "max"}) out << ",\"" << p.fields[j] << " " << s << "\"";
+                for (const char * s : {"MEAN_", "STD_", "MIN_", "MAX_"}) out << ",\"" << s << p.fields[j] << "\"";
             }
             out << "\n";
             p.started = true;

@@ -11,7 +11,9 @@
 
 #include "input_upgrade.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -739,6 +741,163 @@ bool rewrite_one_array(std::vector<std::string> & lines, const ArrayRule & rule,
     return true;
 }
 
+// ---------------------------------------------------------------- uppercase particle quantity names
+
+const std::regex UPPER_NAME("[A-Z][A-Z0-9_]*");
+
+std::string upper(std::string s) {
+    for (char & c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/** @brief The particle variables, uppercased: a quantity cannot take their names. */
+const std::vector<std::string> & particle_variables() {
+    static const std::vector<std::string> v = {"X", "Y", "Z", "T", "RHO", "U_X", "U_Y", "U_Z",
+                                               "P", "V_X", "V_Y", "V_Z", "T_P"};
+    return v;
+}
+
+/**
+ * @brief text with the identifiers of `renames` renamed, but not those that
+ *        call a function (`name(`) or name a region (`in(name)`).
+ */
+std::string rename_identifiers(const std::string & text, const std::map<std::string, std::string> & renames) {
+    static const std::regex region_call(R"(\bin\s*\(\s*$)");
+    std::string out;
+    size_t i = 0;
+    while (i < text.size()) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        const bool starts = (std::isalpha(c) || c == '_') &&
+                            (i == 0 || !(std::isalnum(static_cast<unsigned char>(text[i - 1])) || text[i - 1] == '_' ||
+                                         text[i - 1] == '.'));
+        if (!starts) {
+            out += text[i++];
+            continue;
+        }
+        size_t j = i;
+        while (j < text.size() && (std::isalnum(static_cast<unsigned char>(text[j])) || text[j] == '_')) j++;
+        const std::string word = text.substr(i, j - i);
+        size_t k = j;
+        while (k < text.size() && std::isspace(static_cast<unsigned char>(text[k]))) k++;
+        const bool call = k < text.size() && text[k] == '(';
+        const auto it = renames.find(word);
+        out += it == renames.end() || call || std::regex_search(text.substr(0, i), region_call) ? word : it->second;
+        i = j;
+    }
+    return out;
+}
+
+constexpr const char * QUANTITY_EXPRESSIONS[] = {"integral", "max", "min", "first_time", "while"};
+
+/** @brief The renames of the lowercase quantity names of root, and the findings, also for names it cannot rename. */
+std::map<std::string, std::string> quantity_renames(OrderedValue & root, std::vector<Finding> & findings) {
+    std::map<std::string, std::string> renames;
+    const std::vector<Concrete> keys = matches(root, "particles.quantities[].name");
+    std::vector<std::string> taken;
+    for (const Concrete & key : keys) {
+        const OrderedValue & v = *at(root, key);
+        if (v.is_string()) taken.push_back(v.as_string());
+    }
+    for (const Concrete & key : keys) {
+        const OrderedValue & v = *at(root, key);
+        if (!v.is_string() || std::regex_match(v.as_string(), UPPER_NAME)) continue;
+        const std::string from = v.as_string(), to = upper(from);
+        const auto & vars = particle_variables();
+        const bool clash = std::find(vars.begin(), vars.end(), to) != vars.end() ||
+                           std::count_if(taken.begin(), taken.end(), [&](const std::string & t) { return upper(t) == to; }) > 1;
+        Finding f{.key = to_string(key), .line = line_of(v), .message = "", .suggestion = "", .removed = true};
+        if (!std::regex_match(to, UPPER_NAME) || clash) {
+            f.message = to_string(key) + " \"" + from + "\": particle quantity names are uppercase, like field names, " +
+                        "and \"" + to + "\" " + (clash ? "is taken" : "is not one") + "; rename it and its references by hand";
+        } else {
+            f.message = to_string(key) + " \"" + from + "\" is now \"" + to + "\" with its references: particle " +
+                        "quantity names are uppercase, like field names";
+            f.suggestion = to;
+            renames[from] = to;
+        }
+        findings.push_back(f);
+    }
+    return renames;
+}
+
+/** @brief Renames the quantities and their references in the expressions of quantities and particle probes. */
+void rename_quantities(OrderedValue & root, const std::map<std::string, std::string> & renames) {
+    const auto rename = [&](OrderedValue & v) {
+        if (v.is_string()) v.as_string() = rename_identifiers(v.as_string(), renames);
+    };
+    for (const char * key : {"name", "integral", "max", "min", "first_time", "while"}) {
+        for (const Concrete & c : matches(root, std::string("particles.quantities[].") + key)) rename(*at(root, c));
+    }
+    for (const Concrete & c : matches(root, "particles.probes[].fields")) {
+        OrderedValue & fields = *at(root, c);
+        if (!fields.is_array()) continue;
+        for (size_t i = 0; i < fields.size(); i++) rename(fields.at(i));
+    }
+}
+
+/** @brief The strings of a line of TOML with rename applied to their contents. */
+std::string rename_in_strings(const std::string & line, const std::map<std::string, std::string> & renames) {
+    std::string out;
+    size_t i = 0;
+    while (i < line.size()) {
+        if (line[i] == '#') return out + line.substr(i);
+        if (line[i] != '"' && line[i] != '\'') {
+            out += line[i++];
+            continue;
+        }
+        const char quote = line[i];
+        size_t j = i + 1;
+        while (j < line.size() && line[j] != quote) j += quote == '"' && line[j] == '\\' ? size_t(2) : size_t(1);
+        if (j >= line.size()) return out + line.substr(i);
+        out += quote + rename_identifiers(line.substr(i + 1, j - i - 1), renames) + quote;
+        i = j + 1;
+    }
+    return out;
+}
+
+/**
+ * @brief The lines of the tables [[particles.quantities]] and
+ *        [[particles.probes]] (and of [particles], for inline arrays) with
+ *        rename applied to the strings of the keys that name or read quantities.
+ */
+std::vector<std::string> rename_quantity_lines(std::vector<std::string> lines,
+                                               const std::map<std::string, std::string> & renames) {
+    static const std::regex header(R"(^\s*\[\[?\s*([^\[\]#]+?)\s*\]\]?\s*(#.*)?$)");
+    static const std::regex assignment(R"(^\s*([A-Za-z0-9_]+)\s*=)");
+    std::string table, key;
+    for (std::string & line : lines) {
+        std::smatch m;
+        if (std::regex_match(line, m, header)) {
+            table = m[1].str();
+            key.clear();
+            continue;
+        }
+        if (std::regex_search(line, m, assignment)) key = m[1].str();
+        const bool quantity = table == "particles.quantities" &&
+                              (key == "name" || std::find(std::begin(QUANTITY_EXPRESSIONS), std::end(QUANTITY_EXPRESSIONS),
+                                                          key) != std::end(QUANTITY_EXPRESSIONS));
+        const bool probe = table == "particles.probes" && key == "fields";
+        const bool inline_array = table == "particles" && (key == "quantities" || key == "probes");
+        if (quantity || probe || inline_array) line = rename_in_strings(line, renames);
+    }
+    return lines;
+}
+
+/** @brief upgrade_text's step for quantity names: text with them uppercase, or reformatted if that cannot be kept in place. */
+std::string uppercase_quantities(const std::string & text, std::vector<Finding> & findings, bool & reformatted) {
+    OrderedValue expected = parse_toml<toml::ordered_type_config>(text);
+    const std::map<std::string, std::string> renames = quantity_renames(expected, findings);
+    if (renames.empty()) return text;
+    rename_quantities(expected, renames);
+    const std::string rewritten = join_lines(rename_quantity_lines(split_lines(text), renames));
+    try {
+        if (same(parse_toml<toml::ordered_type_config>(rewritten), expected)) return rewritten;
+    } catch (const std::exception &) {
+    }
+    reformatted = true;
+    return toml::format(expected);
+}
+
 } // namespace
 
 std::vector<std::string> notices(const std::string & text) {
@@ -813,9 +972,10 @@ std::vector<Finding> apply(Input & input, const std::string & version, const Rul
     return findings;
 }
 
-std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
-                         bool & reformatted, const Rules & table, const int dim,
-                         const std::string & unknown_dimension) {
+namespace {
+
+std::string upgrade_rules(const std::string & text, std::vector<Finding> & findings, bool & reformatted,
+                          const Rules & table, const int dim, const std::string & unknown_dimension) {
     reformatted = false;
     Input expected = parse_input_string(text);
     findings = transform(expected, table, this_release(), dim, false, unknown_dimension);
@@ -843,6 +1003,15 @@ std::string upgrade_text(const std::string & text, std::vector<Finding> & findin
     OrderedValue ordered = parse_toml<toml::ordered_type_config>(text);
     transform(ordered, table, this_release(), dim);
     return toml::format(ordered);
+}
+
+} // namespace
+
+std::string upgrade_text(const std::string & text, std::vector<Finding> & findings,
+                         bool & reformatted, const Rules & table, const int dim,
+                         const std::string & unknown_dimension) {
+    const std::string upgraded = upgrade_rules(text, findings, reformatted, table, dim, unknown_dimension);
+    return uppercase_quantities(upgraded, findings, reformatted);
 }
 
 int upgrade_file(const std::string & file, bool check, int dim, const std::string & unknown_dimension) {
